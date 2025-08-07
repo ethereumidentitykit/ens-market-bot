@@ -9,6 +9,7 @@ import { IDatabaseService } from './types';
 import { SalesProcessingService } from './services/salesProcessingService';
 import { SchedulerService } from './services/schedulerService';
 import { TwitterService } from './services/twitterService';
+import { TweetFormatter } from './services/tweetFormatter';
 
 async function startApplication(): Promise<void> {
   try {
@@ -27,6 +28,7 @@ async function startApplication(): Promise<void> {
     const salesProcessingService = new SalesProcessingService(alchemyService, databaseService);
     const schedulerService = new SchedulerService(salesProcessingService);
     const twitterService = new TwitterService();
+    const tweetFormatter = new TweetFormatter();
 
     // Initialize database
     await databaseService.initialize();
@@ -273,6 +275,133 @@ async function startApplication(): Promise<void> {
             hasAccessTokenSecret: !!config.twitter.accessTokenSecret
           }
         });
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.get('/api/twitter/preview-tweet/:saleId', async (req, res) => {
+      try {
+        const saleId = parseInt(req.params.saleId);
+        if (isNaN(saleId)) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid sale ID'
+          });
+        }
+
+        // Get the sale from database
+        const unpostedSales = await databaseService.getUnpostedSales(100);
+        const sale = unpostedSales.find(s => s.id === saleId);
+        
+        if (!sale) {
+          return res.status(404).json({
+            success: false,
+            error: 'Sale not found'
+          });
+        }
+
+        // Generate tweet previews
+        const previews = tweetFormatter.previewFormats(sale);
+        
+        res.json({
+          success: true,
+          data: {
+            sale: {
+              id: sale.id,
+              transactionHash: sale.transactionHash,
+              contractAddress: sale.contractAddress,
+              tokenId: sale.tokenId,
+              priceEth: sale.priceEth,
+              priceUsd: sale.priceUsd,
+              marketplace: sale.marketplace
+            },
+            previews
+          }
+        });
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.post('/api/twitter/post-sale/:saleId', async (req, res) => {
+      try {
+        const configValidation = twitterService.validateConfig();
+        if (!configValidation.valid) {
+          return res.status(400).json({
+            success: false,
+            error: 'Twitter API configuration incomplete',
+            missingFields: configValidation.missingFields
+          });
+        }
+
+        const saleId = parseInt(req.params.saleId);
+        if (isNaN(saleId)) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid sale ID'
+          });
+        }
+
+        // Get the sale from database
+        const unpostedSales = await databaseService.getUnpostedSales(100);
+        const sale = unpostedSales.find(s => s.id === saleId);
+        
+        if (!sale) {
+          return res.status(404).json({
+            success: false,
+            error: 'Sale not found'
+          });
+        }
+
+        if (sale.posted) {
+          return res.status(400).json({
+            success: false,
+            error: 'Sale has already been posted to Twitter'
+          });
+        }
+
+        // Format the tweet
+        const formattedTweet = tweetFormatter.formatSale(sale);
+        
+        if (!formattedTweet.isValid) {
+          return res.status(400).json({
+            success: false,
+            error: 'Unable to format tweet properly',
+            details: formattedTweet
+          });
+        }
+
+        // Post to Twitter
+        const tweetResult = await twitterService.postTweet(formattedTweet.content);
+        
+        if (tweetResult.success && tweetResult.tweetId) {
+          // Mark as posted in database
+          await databaseService.markAsPosted(saleId, tweetResult.tweetId);
+          
+          res.json({
+            success: true,
+            data: {
+              tweetId: tweetResult.tweetId,
+              tweetContent: formattedTweet.content,
+              characterCount: formattedTweet.characterCount,
+              saleId: saleId
+            }
+          });
+        } else {
+          res.status(500).json({
+            success: false,
+            error: 'Failed to post tweet',
+            twitterError: tweetResult.error,
+            tweetContent: formattedTweet.content
+          });
+        }
       } catch (error: any) {
         res.status(500).json({
           success: false,
