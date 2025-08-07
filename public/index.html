@@ -53,7 +53,7 @@
         <!-- Main Content -->
         <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
             <!-- Stats Cards -->
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
                 <!-- Total Sales -->
                 <div class="bg-white overflow-hidden shadow rounded-lg">
                     <div class="p-5">
@@ -117,6 +117,138 @@
                                     <dt class="text-sm font-medium text-gray-500 truncate">Last Block</dt>
                                     <dd class="text-lg font-medium text-gray-900" x-text="stats.database?.lastProcessedBlock || 'N/A'"></dd>
                                 </dl>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Twitter Rate Limit -->
+                <div class="bg-white overflow-hidden shadow rounded-lg">
+                    <div class="p-5">
+                        <div class="flex items-center">
+                            <div class="flex-shrink-0">
+                                <i class="fas fa-tachometer-alt text-red-600 text-2xl"></i>
+                            </div>
+                            <div class="ml-5 w-0 flex-1">
+                                <dl>
+                                    <dt class="text-sm font-medium text-gray-500 truncate">Twitter Rate Limit</dt>
+                                    <dd class="text-lg font-medium text-gray-900">
+                                        <span x-text="twitterRateLimit?.status?.postsInLast24Hours || 0"></span>/<span x-text="twitterRateLimit?.dailyLimit || 15"></span>
+                                    </dd>
+                                </dl>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Twitter Controls -->
+            <div class="mb-8">
+                <div class="bg-white shadow rounded-lg p-6">
+                    <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4 flex items-center">
+                        <i class="fab fa-twitter text-blue-400 mr-2"></i>
+                        Twitter Integration
+                    </h3>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                        <!-- Twitter Status -->
+                        <div class="flex items-center">
+                            <span class="text-sm font-medium text-gray-500 mr-2">API Status:</span>
+                            <span x-show="twitterConfig?.configured" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                <i class="fas fa-check mr-1"></i>
+                                Connected
+                            </span>
+                            <span x-show="!twitterConfig?.configured" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                <i class="fas fa-times mr-1"></i>
+                                Not Configured
+                            </span>
+                        </div>
+                        
+                        <!-- Rate Limit Status -->
+                        <div class="flex items-center">
+                            <span class="text-sm font-medium text-gray-500 mr-2">Rate Limit:</span>
+                            <span x-show="!twitterRateLimit?.status?.limitReached" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                <i class="fas fa-check-circle mr-1"></i>
+                                OK
+                            </span>
+                            <span x-show="twitterRateLimit?.status?.limitReached" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                <i class="fas fa-exclamation-triangle mr-1"></i>
+                                Limit Reached
+                            </span>
+                        </div>
+
+                        <!-- Remaining Posts -->
+                        <div class="flex items-center">
+                            <span class="text-sm font-medium text-gray-500 mr-2">Remaining Posts:</span>
+                            <span class="text-sm font-bold" 
+                                  :class="twitterRateLimit?.status?.remainingPosts > 5 ? 'text-green-600' : twitterRateLimit?.status?.remainingPosts > 0 ? 'text-yellow-600' : 'text-red-600'"
+                                  x-text="twitterRateLimit?.status?.remainingPosts || 0">
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="flex flex-wrap gap-3 mb-4">
+                        <button 
+                            @click="sendTestTweet()" 
+                            :disabled="loading || !twitterConfig?.configured || twitterRateLimit?.status?.limitReached"
+                            class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <i class="fab fa-twitter mr-2"></i>
+                            Send Test Tweet
+                        </button>
+                        
+                        <button 
+                            @click="testTwitterConnection()" 
+                            :disabled="loading || !twitterConfig?.configured"
+                            class="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                        >
+                            <i class="fas fa-plug mr-2"></i>
+                            Test Connection
+                        </button>
+
+                        <button 
+                            @click="refreshTwitterData()" 
+                            :disabled="loading"
+                            class="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                        >
+                            <i class="fas fa-sync-alt mr-2" :class="{'loading': loading}"></i>
+                            Refresh Status
+                        </button>
+                    </div>
+
+                    <!-- Recent Tweet Posts -->
+                    <div x-show="twitterRateLimit?.recentPosts?.length > 0" class="mt-4">
+                        <h4 class="text-sm font-medium text-gray-900 mb-2">Recent Posts (Last 24h)</h4>
+                        <div class="space-y-2 max-h-40 overflow-y-auto">
+                            <template x-for="post in twitterRateLimit?.recentPosts?.slice(0, 5)" :key="post.id">
+                                <div class="flex items-center justify-between p-2 bg-gray-50 rounded text-xs">
+                                    <div class="flex items-center">
+                                        <i x-show="post.success" class="fas fa-check-circle text-green-500 mr-2"></i>
+                                        <i x-show="!post.success" class="fas fa-times-circle text-red-500 mr-2"></i>
+                                        <span class="font-mono" x-text="post.tweetContent.substring(0, 50) + '...'"></span>
+                                    </div>
+                                    <span class="text-gray-500" x-text="new Date(post.postedAt).toLocaleTimeString()"></span>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Alert Messages -->
+                    <div x-show="twitterMessage" x-transition class="mt-4">
+                        <div class="rounded-md p-4" 
+                             :class="twitterMessageType === 'success' ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'">
+                            <div class="flex">
+                                <div class="flex-shrink-0">
+                                    <i x-show="twitterMessageType === 'success'" class="fas fa-check-circle text-green-400"></i>
+                                    <i x-show="twitterMessageType === 'error'" class="fas fa-exclamation-circle text-red-400"></i>
+                                </div>
+                                <div class="ml-3">
+                                    <p class="text-sm" 
+                                       :class="twitterMessageType === 'success' ? 'text-green-800' : 'text-red-800'"
+                                       x-text="twitterMessage">
+                                    </p>
+                                </div>
                             </div>
                         </div>
                     </div>

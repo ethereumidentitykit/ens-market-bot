@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
-import { ProcessedSale, IDatabaseService } from '../types';
+import { ProcessedSale, IDatabaseService, TwitterPost } from '../types';
 
 /**
  * PostgreSQL database service for Vercel deployment
@@ -78,6 +78,24 @@ export class VercelDatabaseService implements IDatabaseService {
           value TEXT NOT NULL,
           updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
+      `);
+
+      // Create twitter_posts table for rate limiting
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS twitter_posts (
+          id SERIAL PRIMARY KEY,
+          sale_id INTEGER REFERENCES processed_sales(id),
+          tweet_id VARCHAR(255) NOT NULL,
+          tweet_content TEXT NOT NULL,
+          posted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          success BOOLEAN NOT NULL DEFAULT TRUE,
+          error_message TEXT
+        )
+      `);
+
+      // Create index for rate limiting queries
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_twitter_posts_posted_at ON twitter_posts(posted_at);
       `);
 
       logger.info('PostgreSQL tables created successfully');
@@ -291,6 +309,90 @@ export class VercelDatabaseService implements IDatabaseService {
       };
     } catch (error: any) {
       logger.error('Failed to get database stats:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Record a tweet post for rate limiting
+   */
+  async recordTweetPost(post: Omit<TwitterPost, 'id'>): Promise<number> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        INSERT INTO twitter_posts (sale_id, tweet_id, tweet_content, posted_at, success, error_message)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id
+      `, [
+        post.saleId || null,
+        post.tweetId,
+        post.tweetContent,
+        post.postedAt,
+        post.success,
+        post.errorMessage || null
+      ]);
+
+      const id = result.rows[0].id;
+      logger.info(`Recorded tweet post with ID: ${id}`);
+      return id;
+    } catch (error: any) {
+      logger.error('Failed to record tweet post:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get recent tweet posts
+   */
+  async getRecentTweetPosts(hoursBack: number = 24): Promise<TwitterPost[]> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const cutoffTime = new Date(Date.now() - hoursBack * 60 * 60 * 1000);
+      
+      const result = await this.pool.query(`
+        SELECT 
+          id,
+          sale_id as "saleId",
+          tweet_id as "tweetId",
+          tweet_content as "tweetContent",
+          posted_at as "postedAt",
+          success,
+          error_message as "errorMessage"
+        FROM twitter_posts 
+        WHERE posted_at >= $1
+        ORDER BY posted_at DESC
+      `, [cutoffTime]);
+
+      return result.rows.map(post => ({
+        ...post,
+        postedAt: post.postedAt.toISOString()
+      }));
+    } catch (error: any) {
+      logger.error('Failed to get recent tweet posts:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get count of tweet posts in last 24 hours
+   */
+  async getTweetPostsInLast24Hours(): Promise<number> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const cutoffTime = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      
+      const result = await this.pool.query(`
+        SELECT COUNT(*) as count 
+        FROM twitter_posts 
+        WHERE posted_at >= $1 AND success = TRUE
+      `, [cutoffTime]);
+
+      return parseInt(result.rows[0].count) || 0;
+    } catch (error: any) {
+      logger.error('Failed to count tweet posts in last 24 hours:', error.message);
       throw error;
     }
   }

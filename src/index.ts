@@ -10,6 +10,7 @@ import { SalesProcessingService } from './services/salesProcessingService';
 import { SchedulerService } from './services/schedulerService';
 import { TwitterService } from './services/twitterService';
 import { TweetFormatter } from './services/tweetFormatter';
+import { RateLimitService } from './services/rateLimitService';
 
 async function startApplication(): Promise<void> {
   try {
@@ -29,6 +30,7 @@ async function startApplication(): Promise<void> {
     const schedulerService = new SchedulerService(salesProcessingService);
     const twitterService = new TwitterService();
     const tweetFormatter = new TweetFormatter();
+    const rateLimitService = new RateLimitService(databaseService);
 
     // Initialize database
     await databaseService.initialize();
@@ -283,6 +285,103 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    app.get('/api/twitter/rate-limit-status', async (req, res) => {
+      try {
+        const rateLimitInfo = await rateLimitService.getDetailedRateLimitInfo();
+        res.json({
+          success: true,
+          data: rateLimitInfo
+        });
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.post('/api/twitter/send-test-tweet', async (req, res) => {
+      try {
+        const configValidation = twitterService.validateConfig();
+        if (!configValidation.valid) {
+          return res.status(400).json({
+            success: false,
+            error: 'Twitter API configuration incomplete',
+            missingFields: configValidation.missingFields
+          });
+        }
+
+        // Check rate limit first
+        await rateLimitService.validateTweetPost();
+
+        // Get the latest unposted sale
+        const unpostedSales = await databaseService.getUnpostedSales(1);
+        if (unpostedSales.length === 0) {
+          return res.status(404).json({
+            success: false,
+            error: 'No unposted sales available to tweet'
+          });
+        }
+
+        const sale = unpostedSales[0];
+
+        // Format the tweet
+        const formattedTweet = tweetFormatter.formatSale(sale);
+        
+        if (!formattedTweet.isValid) {
+          return res.status(400).json({
+            success: false,
+            error: 'Unable to format tweet properly',
+            details: formattedTweet
+          });
+        }
+
+        // Post to Twitter
+        const tweetResult = await twitterService.postTweet(formattedTweet.content);
+        
+        if (tweetResult.success && tweetResult.tweetId) {
+          // Record successful post in rate limiter
+          await rateLimitService.recordTweetPost(tweetResult.tweetId, formattedTweet.content, sale.id);
+          
+          // Mark sale as posted in database
+          await databaseService.markAsPosted(sale.id!, tweetResult.tweetId);
+          
+          // Get updated rate limit status
+          const rateLimitStatus = await rateLimitService.canPostTweet();
+          
+          res.json({
+            success: true,
+            data: {
+              tweetId: tweetResult.tweetId,
+              tweetContent: formattedTweet.content,
+              characterCount: formattedTweet.characterCount,
+              saleId: sale.id,
+              rateLimitStatus
+            }
+          });
+        } else {
+          // Record failed post
+          await rateLimitService.recordFailedTweetPost(
+            formattedTweet.content, 
+            tweetResult.error || 'Unknown error',
+            sale.id
+          );
+          
+          res.status(500).json({
+            success: false,
+            error: 'Failed to post tweet',
+            twitterError: tweetResult.error,
+            tweetContent: formattedTweet.content
+          });
+        }
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     app.get('/api/twitter/preview-tweet/:saleId', async (req, res) => {
       try {
         const saleId = parseInt(req.params.saleId);
@@ -367,6 +466,9 @@ async function startApplication(): Promise<void> {
           });
         }
 
+        // Check rate limit first
+        await rateLimitService.validateTweetPost();
+
         // Format the tweet
         const formattedTweet = tweetFormatter.formatSale(sale);
         
@@ -382,8 +484,14 @@ async function startApplication(): Promise<void> {
         const tweetResult = await twitterService.postTweet(formattedTweet.content);
         
         if (tweetResult.success && tweetResult.tweetId) {
+          // Record successful post in rate limiter
+          await rateLimitService.recordTweetPost(tweetResult.tweetId, formattedTweet.content, saleId);
+          
           // Mark as posted in database
           await databaseService.markAsPosted(saleId, tweetResult.tweetId);
+          
+          // Get updated rate limit status
+          const rateLimitStatus = await rateLimitService.canPostTweet();
           
           res.json({
             success: true,
@@ -391,10 +499,18 @@ async function startApplication(): Promise<void> {
               tweetId: tweetResult.tweetId,
               tweetContent: formattedTweet.content,
               characterCount: formattedTweet.characterCount,
-              saleId: saleId
+              saleId: saleId,
+              rateLimitStatus
             }
           });
         } else {
+          // Record failed post
+          await rateLimitService.recordFailedTweetPost(
+            formattedTweet.content, 
+            tweetResult.error || 'Unknown error',
+            saleId
+          );
+          
           res.status(500).json({
             success: false,
             error: 'Failed to post tweet',

@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
-import { ProcessedSale, IDatabaseService } from '../types';
+import { ProcessedSale, IDatabaseService, TwitterPost } from '../types';
 
 export class DatabaseService implements IDatabaseService {
   private db: Database<sqlite3.Database, sqlite3.Statement> | null = null;
@@ -82,6 +82,20 @@ export class DatabaseService implements IDatabaseService {
         key TEXT NOT NULL UNIQUE,
         value TEXT NOT NULL,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Create twitter_posts table for rate limiting
+    await this.db.exec(`
+      CREATE TABLE IF NOT EXISTS twitter_posts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sale_id INTEGER,
+        tweet_id TEXT NOT NULL,
+        tweet_content TEXT NOT NULL,
+        posted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        success BOOLEAN NOT NULL DEFAULT TRUE,
+        error_message TEXT,
+        FOREIGN KEY (sale_id) REFERENCES processed_sales (id)
       )
     `);
 
@@ -282,6 +296,89 @@ export class DatabaseService implements IDatabaseService {
       };
     } catch (error: any) {
       logger.error('Failed to get database stats:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Record a tweet post for rate limiting
+   */
+  async recordTweetPost(post: Omit<TwitterPost, 'id'>): Promise<number> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.db.run(`
+        INSERT INTO twitter_posts (sale_id, tweet_id, tweet_content, posted_at, success, error_message)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `, [
+        post.saleId || null,
+        post.tweetId,
+        post.tweetContent,
+        post.postedAt,
+        post.success ? 1 : 0,
+        post.errorMessage || null
+      ]);
+
+      const id = result.lastID as number;
+      logger.info(`Recorded tweet post with ID: ${id}`);
+      return id;
+    } catch (error: any) {
+      logger.error('Failed to record tweet post:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get recent tweet posts
+   */
+  async getRecentTweetPosts(hoursBack: number = 24): Promise<TwitterPost[]> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    try {
+      const cutoffTime = new Date(Date.now() - hoursBack * 60 * 60 * 1000).toISOString();
+      
+      const posts = await this.db.all(`
+        SELECT 
+          id,
+          sale_id as saleId,
+          tweet_id as tweetId,
+          tweet_content as tweetContent,
+          posted_at as postedAt,
+          success,
+          error_message as errorMessage
+        FROM twitter_posts 
+        WHERE posted_at >= ?
+        ORDER BY posted_at DESC
+      `, [cutoffTime]);
+
+      return posts.map(post => ({
+        ...post,
+        success: Boolean(post.success)
+      }));
+    } catch (error: any) {
+      logger.error('Failed to get recent tweet posts:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get count of tweet posts in last 24 hours
+   */
+  async getTweetPostsInLast24Hours(): Promise<number> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    try {
+      const cutoffTime = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      
+      const result = await this.db.get(`
+        SELECT COUNT(*) as count 
+        FROM twitter_posts 
+        WHERE posted_at >= ? AND success = 1
+      `, [cutoffTime]);
+
+      return result?.count || 0;
+    } catch (error: any) {
+      logger.error('Failed to count tweet posts in last 24 hours:', error.message);
       throw error;
     }
   }

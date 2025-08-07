@@ -11,6 +11,12 @@ function dashboard() {
         testing: false,
         schedulerLoading: false,
         lastProcessResult: null,
+        
+        // Twitter state
+        twitterConfig: null,
+        twitterRateLimit: null,
+        twitterMessage: '',
+        twitterMessageType: 'info',
 
         // Initialize
         async init() {
@@ -30,7 +36,9 @@ function dashboard() {
                 await Promise.all([
                     this.loadStats(),
                     this.loadSchedulerStatus(),
-                    this.checkSystemHealth()
+                    this.checkSystemHealth(),
+                    this.loadTwitterConfig(),
+                    this.loadTwitterRateLimit()
                 ]);
             } catch (error) {
                 console.error('Failed to refresh data:', error);
@@ -241,6 +249,124 @@ function dashboard() {
             } finally {
                 this.schedulerLoading = false;
             }
+        },
+
+        // Twitter Methods
+        async loadTwitterConfig() {
+            try {
+                const response = await fetch('/api/twitter/config-status');
+                const data = await response.json();
+                if (data.success) {
+                    this.twitterConfig = data.data;
+                }
+            } catch (error) {
+                console.error('Failed to load Twitter config:', error);
+            }
+        },
+
+        async loadTwitterRateLimit() {
+            try {
+                const response = await fetch('/api/twitter/rate-limit-status');
+                const data = await response.json();
+                if (data.success) {
+                    this.twitterRateLimit = data.data;
+                }
+            } catch (error) {
+                console.error('Failed to load Twitter rate limit:', error);
+            }
+        },
+
+        async sendTestTweet() {
+            if (!confirm('Send a test tweet with the latest unposted sale?')) {
+                return;
+            }
+
+            this.processing = true;
+            this.clearTwitterMessage();
+
+            try {
+                const response = await fetch('/api/twitter/send-test-tweet', {
+                    method: 'POST'
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    this.showTwitterMessage(
+                        `✅ Tweet posted successfully! Tweet ID: ${data.data.tweetId}`, 
+                        'success'
+                    );
+                    // Refresh data to update counts
+                    await this.refreshData();
+                } else {
+                    this.showTwitterMessage(
+                        `❌ Failed to post tweet: ${data.error}`, 
+                        'error'
+                    );
+                }
+            } catch (error) {
+                console.error('Failed to send test tweet:', error);
+                this.showTwitterMessage('Network error while sending tweet', 'error');
+            } finally {
+                this.processing = false;
+            }
+        },
+
+        async testTwitterConnection() {
+            this.testing = true;
+            this.clearTwitterMessage();
+
+            try {
+                const response = await fetch('/api/twitter/test');
+                const data = await response.json();
+
+                if (data.success) {
+                    this.showTwitterMessage(
+                        `✅ Twitter API connected! Authenticated as @${data.data.username}`, 
+                        'success'
+                    );
+                } else {
+                    this.showTwitterMessage(
+                        `❌ Twitter API connection failed: ${data.error}`, 
+                        'error'
+                    );
+                }
+            } catch (error) {
+                console.error('Failed to test Twitter connection:', error);
+                this.showTwitterMessage('Network error while testing connection', 'error');
+            } finally {
+                this.testing = false;
+            }
+        },
+
+        async refreshTwitterData() {
+            this.loading = true;
+            try {
+                await Promise.all([
+                    this.loadTwitterConfig(),
+                    this.loadTwitterRateLimit()
+                ]);
+                this.showTwitterMessage('Twitter data refreshed', 'success');
+            } catch (error) {
+                console.error('Failed to refresh Twitter data:', error);
+                this.showTwitterMessage('Failed to refresh Twitter data', 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        showTwitterMessage(message, type = 'info') {
+            this.twitterMessage = message;
+            this.twitterMessageType = type;
+            
+            // Auto-clear after 5 seconds
+            setTimeout(() => {
+                this.clearTwitterMessage();
+            }, 5000);
+        },
+
+        clearTwitterMessage() {
+            this.twitterMessage = '';
+            this.twitterMessageType = 'info';
         }
     };
 }

@@ -77,6 +77,17 @@ export interface Config {
   logLevel: string;
 }
 
+// Twitter Post Record
+export interface TwitterPost {
+  id?: number;
+  saleId?: number;
+  tweetId: string;
+  tweetContent: string;
+  postedAt: string;
+  success: boolean;
+  errorMessage?: string;
+}
+
 // Database Interface
 export interface IDatabaseService {
   initialize(): Promise<void>;
@@ -93,6 +104,10 @@ export interface IDatabaseService {
     unpostedSales: number;
     lastProcessedBlock: string | null;
   }>;
+  // Twitter rate limiting methods
+  recordTweetPost(post: Omit<TwitterPost, 'id'>): Promise<number>;
+  getRecentTweetPosts(hoursBack?: number): Promise<TwitterPost[]>;
+  getTweetPostsInLast24Hours(): Promise<number>;
   close(): Promise<void>;
 }
 
