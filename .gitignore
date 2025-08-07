@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment variables
+.env
+.env.local
+.env.production
+
+# Database
+data/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+
+# Coverage directory used by tools like istanbul
+coverage/
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Vercel
+.vercel

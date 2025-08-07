@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NFT Sales Bot - Admin Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        [x-cloak] { display: none !important; }
+        .loading { animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .fade-in { animation: fadeIn 0.5s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div x-data="dashboard()" x-init="init()" class="min-h-screen">
+        <!-- Header -->
+        <header class="bg-white shadow-sm border-b border-gray-200">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between items-center py-4">
+                    <div class="flex items-center">
+                        <i class="fas fa-robot text-blue-600 text-2xl mr-3"></i>
+                        <div>
+                            <h1 class="text-2xl font-bold text-gray-900">NFT Sales Bot</h1>
+                            <p class="text-sm text-gray-500">Admin Dashboard</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <div class="flex items-center">
+                            <span class="relative flex h-3 w-3 mr-2">
+                                <span x-show="systemStatus === 'healthy'" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                <span x-show="systemStatus === 'healthy'" class="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                                <span x-show="systemStatus !== 'healthy'" class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                            </span>
+                            <span class="text-sm font-medium" x-text="systemStatus === 'healthy' ? 'System Healthy' : 'System Issues'"></span>
+                        </div>
+                        <button 
+                            @click="refreshData()" 
+                            :disabled="loading"
+                            class="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                        >
+                            <i class="fas fa-sync-alt mr-2" :class="{'loading': loading}"></i>
+                            Refresh
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <!-- Stats Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                <!-- Total Sales -->
+                <div class="bg-white overflow-hidden shadow rounded-lg">
+                    <div class="p-5">
+                        <div class="flex items-center">
+                            <div class="flex-shrink-0">
+                                <i class="fas fa-chart-line text-blue-600 text-2xl"></i>
+                            </div>
+                            <div class="ml-5 w-0 flex-1">
+                                <dl>
+                                    <dt class="text-sm font-medium text-gray-500 truncate">Total Sales</dt>
+                                    <dd class="text-lg font-medium text-gray-900" x-text="stats.database?.totalSales || 0"></dd>
+                                </dl>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Posted Sales -->
+                <div class="bg-white overflow-hidden shadow rounded-lg">
+                    <div class="p-5">
+                        <div class="flex items-center">
+                            <div class="flex-shrink-0">
+                                <i class="fab fa-twitter text-blue-400 text-2xl"></i>
+                            </div>
+                            <div class="ml-5 w-0 flex-1">
+                                <dl>
+                                    <dt class="text-sm font-medium text-gray-500 truncate">Posted to Twitter</dt>
+                                    <dd class="text-lg font-medium text-gray-900" x-text="stats.database?.postedSales || 0"></dd>
+                                </dl>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Pending Sales -->
+                <div class="bg-white overflow-hidden shadow rounded-lg">
+                    <div class="p-5">
+                        <div class="flex items-center">
+                            <div class="flex-shrink-0">
+                                <i class="fas fa-clock text-orange-600 text-2xl"></i>
+                            </div>
+                            <div class="ml-5 w-0 flex-1">
+                                <dl>
+                                    <dt class="text-sm font-medium text-gray-500 truncate">Pending Posts</dt>
+                                    <dd class="text-lg font-medium text-gray-900" x-text="stats.database?.unpostedSales || 0"></dd>
+                                </dl>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Last Block -->
+                <div class="bg-white overflow-hidden shadow rounded-lg">
+                    <div class="p-5">
+                        <div class="flex items-center">
+                            <div class="flex-shrink-0">
+                                <i class="fas fa-cube text-purple-600 text-2xl"></i>
+                            </div>
+                            <div class="ml-5 w-0 flex-1">
+                                <dl>
+                                    <dt class="text-sm font-medium text-gray-500 truncate">Last Block</dt>
+                                    <dd class="text-lg font-medium text-gray-900" x-text="stats.database?.lastProcessedBlock || 'N/A'"></dd>
+                                </dl>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Scheduler Status -->
+            <div class="mb-8">
+                <div class="bg-white shadow rounded-lg p-6">
+                    <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">Scheduler Status</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                        <div class="flex items-center">
+                            <span class="text-sm font-medium text-gray-500 mr-2">Status:</span>
+                            <span x-show="schedulerStatus?.isRunning" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                <i class="fas fa-play mr-1"></i>
+                                Running
+                            </span>
+                            <span x-show="!schedulerStatus?.isRunning" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                <i class="fas fa-stop mr-1"></i>
+                                Stopped
+                            </span>
+                        </div>
+                        <div class="flex items-center">
+                            <span class="text-sm font-medium text-gray-500 mr-2">Next Run:</span>
+                            <span class="text-sm text-gray-900" x-text="schedulerStatus?.nextRunTime ? formatTimestamp(schedulerStatus.nextRunTime) : 'N/A'"></span>
+                        </div>
+                        <div class="flex items-center">
+                            <span class="text-sm font-medium text-gray-500 mr-2">Errors:</span>
+                            <span class="text-sm" :class="schedulerStatus?.consecutiveErrors > 0 ? 'text-red-600 font-medium' : 'text-gray-900'" x-text="schedulerStatus?.consecutiveErrors || 0"></span>
+                        </div>
+                    </div>
+                    <div x-show="schedulerStatus?.lastRunTime" class="text-sm text-gray-600 mb-4">
+                        Last run: <span x-text="schedulerStatus?.lastRunTime ? formatTimestamp(schedulerStatus.lastRunTime) : 'Never'"></span>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button 
+                            @click="toggleScheduler()" 
+                            :disabled="schedulerLoading"
+                            class="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                        >
+                            <i class="fas" :class="schedulerStatus?.isRunning ? 'fa-stop' : 'fa-play'" :class="{'loading': schedulerLoading}"></i>
+                            <span class="ml-2" x-text="schedulerStatus?.isRunning ? 'Stop Scheduler' : 'Start Scheduler'"></span>
+                        </button>
+                        <button 
+                            @click="resetSchedulerErrors()" 
+                            :disabled="schedulerLoading || !schedulerStatus?.consecutiveErrors"
+                            class="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                        >
+                            <i class="fas fa-redo mr-2" :class="{'loading': schedulerLoading}"></i>
+                            Reset Errors
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="mb-8">
+                <div class="bg-white shadow rounded-lg p-6">
+                    <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">Manual Actions</h3>
+                    <div class="flex flex-wrap gap-4">
+                        <button 
+                            @click="processSales()" 
+                            :disabled="processing"
+                            class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                        >
+                            <i class="fas fa-sync mr-2" :class="{'loading': processing}"></i>
+                            Process New Sales
+                        </button>
+                        <button 
+                            @click="testAlchemy()" 
+                            :disabled="testing"
+                            class="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                        >
+                            <i class="fas fa-flask mr-2" :class="{'loading': testing}"></i>
+                            Test Alchemy API
+                        </button>
+                    </div>
+                    
+                    <!-- Processing Results -->
+                    <div x-show="lastProcessResult" x-cloak class="mt-4 p-4 rounded-md" :class="lastProcessResult?.success ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'">
+                        <div class="flex">
+                            <div class="flex-shrink-0">
+                                <i :class="lastProcessResult?.success ? 'fas fa-check-circle text-green-400' : 'fas fa-exclamation-circle text-red-400'"></i>
+                            </div>
+                            <div class="ml-3">
+                                <p class="text-sm font-medium" :class="lastProcessResult?.success ? 'text-green-800' : 'text-red-800'">
+                                    <span x-show="lastProcessResult?.success">Processing completed successfully!</span>
+                                    <span x-show="!lastProcessResult?.success">Processing failed</span>
+                                </p>
+                                <div x-show="lastProcessResult?.stats" class="mt-2 text-sm" :class="lastProcessResult?.success ? 'text-green-700' : 'text-red-700'">
+                                    <p>Fetched: <span x-text="lastProcessResult?.stats?.fetched || 0"></span></p>
+                                    <p>New Sales: <span x-text="lastProcessResult?.stats?.newSales || 0"></span></p>
+                                    <p>Duplicates: <span x-text="lastProcessResult?.stats?.duplicates || 0"></span></p>
+                                    <p>Errors: <span x-text="lastProcessResult?.stats?.errors || 0"></span></p>
+                                </div>
+                                <p x-show="lastProcessResult?.error" class="mt-2 text-sm text-red-700" x-text="lastProcessResult?.error"></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Sales Table -->
+            <div class="bg-white shadow rounded-lg">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h3 class="text-lg leading-6 font-medium text-gray-900">Recent Sales</h3>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contract</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Token ID</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price (ETH)</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Marketplace</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Block</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">TX Hash</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            <template x-for="sale in recentSales" :key="sale.id">
+                                <tr class="hover:bg-gray-50">
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900">
+                                        <span x-text="sale.contractAddress.slice(0, 10) + '...'"></span>
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900" x-text="sale.tokenId"></td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900" x-text="parseFloat(sale.priceEth).toFixed(4)"></td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800" x-text="sale.marketplace"></span>
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" x-text="sale.blockNumber"></td>
+                                    <td class="px-6 py-4 whitespace-nowrap">
+                                        <span x-show="sale.posted" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                            <i class="fas fa-check mr-1"></i>
+                                            Posted
+                                        </span>
+                                        <span x-show="!sale.posted" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                            <i class="fas fa-clock mr-1"></i>
+                                            Pending
+                                        </span>
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-500">
+                                        <a :href="'https://etherscan.io/tx/' + sale.transactionHash" target="_blank" class="text-blue-600 hover:text-blue-900">
+                                            <span x-text="sale.transactionHash.slice(0, 10) + '...'"></span>
+                                            <i class="fas fa-external-link-alt ml-1 text-xs"></i>
+                                        </a>
+                                    </td>
+                                </tr>
+                            </template>
+                            <tr x-show="recentSales.length === 0">
+                                <td colspan="7" class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
+                                    No sales data available. Try processing some sales first.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/js/dashboard.js"></script>
+</body>
+</html>
