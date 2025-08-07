@@ -77,6 +77,25 @@ export interface Config {
   logLevel: string;
 }
 
+// Database Interface
+export interface IDatabaseService {
+  initialize(): Promise<void>;
+  insertSale(sale: Omit<ProcessedSale, 'id'>): Promise<number>;
+  isSaleProcessed(transactionHash: string): Promise<boolean>;
+  getRecentSales(limit?: number): Promise<ProcessedSale[]>;
+  getUnpostedSales(limit?: number): Promise<ProcessedSale[]>;
+  markAsPosted(id: number, tweetId: string): Promise<void>;
+  getSystemState(key: string): Promise<string | null>;
+  setSystemState(key: string, value: string): Promise<void>;
+  getStats(): Promise<{
+    totalSales: number;
+    postedSales: number;
+    unpostedSales: number;
+    lastProcessedBlock: string | null;
+  }>;
+  close(): Promise<void>;
+}
+
 // API Response Types
 export interface ApiResponse<T = any> {
   success: boolean;

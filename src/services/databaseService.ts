@@ -4,9 +4,9 @@ import path from 'path';
 import fs from 'fs';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
-import { ProcessedSale } from '../types';
+import { ProcessedSale, IDatabaseService } from '../types';
 
-export class DatabaseService {
+export class DatabaseService implements IDatabaseService {
   private db: Database<sqlite3.Database, sqlite3.Statement> | null = null;
 
   /**

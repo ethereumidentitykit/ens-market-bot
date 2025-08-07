@@ -1,13 +1,13 @@
 import { AlchemyService } from './alchemyService';
-import { DatabaseService } from './databaseService';
+import { IDatabaseService } from '../types';
 import { logger } from '../utils/logger';
 import { NFTSale, ProcessedSale } from '../types';
 
 export class SalesProcessingService {
   private alchemyService: AlchemyService;
-  private databaseService: DatabaseService;
+  private databaseService: IDatabaseService;
 
-  constructor(alchemyService: AlchemyService, databaseService: DatabaseService) {
+  constructor(alchemyService: AlchemyService, databaseService: IDatabaseService) {
     this.alchemyService = alchemyService;
     this.databaseService = databaseService;
   }

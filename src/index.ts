@@ -4,6 +4,8 @@ import { config, validateConfig } from './utils/config';
 import { logger } from './utils/logger';
 import { AlchemyService } from './services/alchemyService';
 import { DatabaseService } from './services/databaseService';
+import { VercelDatabaseService } from './services/vercelDatabaseService';
+import { IDatabaseService } from './types';
 import { SalesProcessingService } from './services/salesProcessingService';
 import { SchedulerService } from './services/schedulerService';
 
@@ -15,7 +17,12 @@ async function startApplication(): Promise<void> {
 
     // Initialize services
     const alchemyService = new AlchemyService();
-    const databaseService = new DatabaseService();
+    
+    // Use Vercel-compatible database in production, SQLite locally
+    const databaseService: IDatabaseService = config.nodeEnv === 'production' 
+      ? new VercelDatabaseService()
+      : new DatabaseService();
+    
     const salesProcessingService = new SalesProcessingService(alchemyService, databaseService);
     const schedulerService = new SchedulerService(salesProcessingService);
 
