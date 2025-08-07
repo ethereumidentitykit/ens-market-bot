@@ -8,6 +8,7 @@ import { VercelDatabaseService } from './services/vercelDatabaseService';
 import { IDatabaseService } from './types';
 import { SalesProcessingService } from './services/salesProcessingService';
 import { SchedulerService } from './services/schedulerService';
+import { TwitterService } from './services/twitterService';
 
 async function startApplication(): Promise<void> {
   try {
@@ -25,6 +26,7 @@ async function startApplication(): Promise<void> {
     
     const salesProcessingService = new SalesProcessingService(alchemyService, databaseService);
     const schedulerService = new SchedulerService(salesProcessingService);
+    const twitterService = new TwitterService();
 
     // Initialize database
     await databaseService.initialize();
@@ -194,6 +196,82 @@ async function startApplication(): Promise<void> {
         res.json({
           success: true,
           message: 'Error counter reset'
+        });
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    // Twitter API endpoints
+    app.get('/api/twitter/test', async (req, res) => {
+      try {
+        const configValidation = twitterService.validateConfig();
+        if (!configValidation.valid) {
+          return res.status(400).json({
+            success: false,
+            error: 'Twitter API configuration incomplete',
+            missingFields: configValidation.missingFields
+          });
+        }
+
+        const result = await twitterService.testConnection();
+        res.json({
+          success: result.success,
+          data: result.user,
+          error: result.error
+        });
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.post('/api/twitter/test-post', async (req, res) => {
+      try {
+        const configValidation = twitterService.validateConfig();
+        if (!configValidation.valid) {
+          return res.status(400).json({
+            success: false,
+            error: 'Twitter API configuration incomplete',
+            missingFields: configValidation.missingFields
+          });
+        }
+
+        const testMessage = `🤖 NFT Sales Bot Test Tweet - ${new Date().toISOString()}`;
+        const result = await twitterService.postTweet(testMessage);
+        
+        res.json({
+          success: result.success,
+          tweetId: result.tweetId,
+          error: result.error,
+          message: testMessage
+        });
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.get('/api/twitter/config-status', (req, res) => {
+      try {
+        const configValidation = twitterService.validateConfig();
+        res.json({
+          success: true,
+          data: {
+            configured: configValidation.valid,
+            missingFields: configValidation.missingFields,
+            hasApiKey: !!config.twitter.apiKey,
+            hasApiSecret: !!config.twitter.apiSecret,
+            hasAccessToken: !!config.twitter.accessToken,
+            hasAccessTokenSecret: !!config.twitter.accessTokenSecret
+          }
         });
       } catch (error: any) {
         res.status(500).json({
