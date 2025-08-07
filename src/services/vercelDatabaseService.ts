@@ -1,29 +1,88 @@
+import { Pool } from 'pg';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
 import { ProcessedSale, IDatabaseService } from '../types';
 
 /**
- * Vercel-compatible database service using Vercel KV (Redis) or PostgreSQL
- * For now, we'll use a simple in-memory store with persistence to Vercel KV
+ * PostgreSQL database service for Vercel deployment
+ * Uses Vercel Postgres or any PostgreSQL connection string
  */
 export class VercelDatabaseService implements IDatabaseService {
-  private sales: ProcessedSale[] = [];
-  private systemState: Map<string, string> = new Map();
+  private pool: Pool | null = null;
 
   /**
-   * Initialize the database connection
-   * In production, this would connect to Vercel KV or PostgreSQL
+   * Initialize the PostgreSQL connection
    */
   async initialize(): Promise<void> {
     try {
-      logger.info('Vercel database service initialized (in-memory for now)');
+      // Create PostgreSQL connection pool
+      this.pool = new Pool({
+        connectionString: process.env.POSTGRES_URL || process.env.DATABASE_URL,
+        ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+      });
+
+      logger.info('PostgreSQL connection pool created');
+
+      // Create tables if they don't exist
+      await this.createTables();
       
-      // TODO: In production, connect to Vercel KV or PostgreSQL
-      // For now, we'll use in-memory storage which will reset on each deployment
-      // This is temporary until we set up a proper database
-      
+      logger.info('PostgreSQL database initialized successfully');
     } catch (error: any) {
-      logger.error('Failed to initialize Vercel database:', error.message);
+      logger.error('Failed to initialize PostgreSQL database:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Create database tables if they don't exist
+   */
+  private async createTables(): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      // Create processed_sales table
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS processed_sales (
+          id SERIAL PRIMARY KEY,
+          transaction_hash VARCHAR(66) NOT NULL UNIQUE,
+          contract_address VARCHAR(42) NOT NULL,
+          token_id VARCHAR(255) NOT NULL,
+          marketplace VARCHAR(50) NOT NULL,
+          buyer_address VARCHAR(42) NOT NULL,
+          seller_address VARCHAR(42) NOT NULL,
+          price_eth DECIMAL(18,8) NOT NULL,
+          price_usd DECIMAL(12,2),
+          block_number INTEGER NOT NULL,
+          block_timestamp TIMESTAMP NOT NULL,
+          processed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          tweet_id VARCHAR(255),
+          posted BOOLEAN DEFAULT FALSE,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // Create indexes for faster lookups
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_transaction_hash ON processed_sales(transaction_hash);
+        CREATE INDEX IF NOT EXISTS idx_contract_address ON processed_sales(contract_address);
+        CREATE INDEX IF NOT EXISTS idx_block_number ON processed_sales(block_number);
+        CREATE INDEX IF NOT EXISTS idx_posted ON processed_sales(posted);
+      `);
+
+      // Create system_state table
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS system_state (
+          id SERIAL PRIMARY KEY,
+          key VARCHAR(255) NOT NULL UNIQUE,
+          value TEXT NOT NULL,
+          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      logger.info('PostgreSQL tables created successfully');
+    } catch (error: any) {
+      logger.error('Failed to create PostgreSQL tables:', error.message);
       throw error;
     }
   }
@@ -32,16 +91,34 @@ export class VercelDatabaseService implements IDatabaseService {
    * Insert a new processed sale record
    */
   async insertSale(sale: Omit<ProcessedSale, 'id'>): Promise<number> {
+    if (!this.pool) throw new Error('Database not initialized');
+
     try {
-      const newSale: ProcessedSale = {
-        ...sale,
-        id: this.sales.length + 1
-      };
-      
-      this.sales.push(newSale);
-      logger.debug(`Inserted sale record with ID: ${newSale.id}`);
-      
-      return newSale.id!;
+      const result = await this.pool.query(`
+        INSERT INTO processed_sales (
+          transaction_hash, contract_address, token_id, marketplace,
+          buyer_address, seller_address, price_eth, price_usd,
+          block_number, block_timestamp, processed_at, posted
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        RETURNING id
+      `, [
+        sale.transactionHash,
+        sale.contractAddress,
+        sale.tokenId,
+        sale.marketplace,
+        sale.buyerAddress,
+        sale.sellerAddress,
+        parseFloat(sale.priceEth),
+        sale.priceUsd ? parseFloat(sale.priceUsd) : null,
+        sale.blockNumber,
+        new Date(sale.blockTimestamp),
+        new Date(sale.processedAt),
+        sale.posted
+      ]);
+
+      const insertedId = result.rows[0].id;
+      logger.debug(`Inserted sale record with ID: ${insertedId}`);
+      return insertedId;
     } catch (error: any) {
       logger.error('Failed to insert sale:', error.message);
       throw error;
@@ -52,9 +129,15 @@ export class VercelDatabaseService implements IDatabaseService {
    * Check if a sale has already been processed
    */
   async isSaleProcessed(transactionHash: string): Promise<boolean> {
+    if (!this.pool) throw new Error('Database not initialized');
+
     try {
-      const exists = this.sales.some(sale => sale.transactionHash === transactionHash);
-      return exists;
+      const result = await this.pool.query(
+        'SELECT id FROM processed_sales WHERE transaction_hash = $1',
+        [transactionHash]
+      );
+
+      return result.rows.length > 0;
     } catch (error: any) {
       logger.error('Failed to check if sale is processed:', error.message);
       throw error;
@@ -65,10 +148,28 @@ export class VercelDatabaseService implements IDatabaseService {
    * Get recent sales for display/monitoring
    */
   async getRecentSales(limit: number = 50): Promise<ProcessedSale[]> {
+    if (!this.pool) throw new Error('Database not initialized');
+
     try {
-      return this.sales
-        .sort((a, b) => b.blockNumber - a.blockNumber)
-        .slice(0, limit);
+      const result = await this.pool.query(`
+        SELECT 
+          id, transaction_hash as "transactionHash", contract_address as "contractAddress",
+          token_id as "tokenId", marketplace, buyer_address as "buyerAddress",
+          seller_address as "sellerAddress", price_eth as "priceEth", price_usd as "priceUsd",
+          block_number as "blockNumber", block_timestamp as "blockTimestamp",
+          processed_at as "processedAt", tweet_id as "tweetId", posted
+        FROM processed_sales 
+        ORDER BY block_number DESC 
+        LIMIT $1
+      `, [limit]);
+
+      return result.rows.map(row => ({
+        ...row,
+        priceEth: row.priceEth.toString(),
+        priceUsd: row.priceUsd ? row.priceUsd.toString() : undefined,
+        blockTimestamp: row.blockTimestamp.toISOString(),
+        processedAt: row.processedAt.toISOString()
+      }));
     } catch (error: any) {
       logger.error('Failed to get recent sales:', error.message);
       throw error;
@@ -79,11 +180,29 @@ export class VercelDatabaseService implements IDatabaseService {
    * Get sales that haven't been posted to Twitter yet
    */
   async getUnpostedSales(limit: number = 10): Promise<ProcessedSale[]> {
+    if (!this.pool) throw new Error('Database not initialized');
+
     try {
-      return this.sales
-        .filter(sale => !sale.posted)
-        .sort((a, b) => a.blockNumber - b.blockNumber)
-        .slice(0, limit);
+      const result = await this.pool.query(`
+        SELECT 
+          id, transaction_hash as "transactionHash", contract_address as "contractAddress",
+          token_id as "tokenId", marketplace, buyer_address as "buyerAddress",
+          seller_address as "sellerAddress", price_eth as "priceEth", price_usd as "priceUsd",
+          block_number as "blockNumber", block_timestamp as "blockTimestamp",
+          processed_at as "processedAt", tweet_id as "tweetId", posted
+        FROM processed_sales 
+        WHERE posted = FALSE 
+        ORDER BY block_number ASC 
+        LIMIT $1
+      `, [limit]);
+
+      return result.rows.map(row => ({
+        ...row,
+        priceEth: row.priceEth.toString(),
+        priceUsd: row.priceUsd ? row.priceUsd.toString() : undefined,
+        blockTimestamp: row.blockTimestamp.toISOString(),
+        processedAt: row.processedAt.toISOString()
+      }));
     } catch (error: any) {
       logger.error('Failed to get unposted sales:', error.message);
       throw error;
@@ -94,13 +213,16 @@ export class VercelDatabaseService implements IDatabaseService {
    * Mark a sale as posted with tweet ID
    */
   async markAsPosted(id: number, tweetId: string): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
     try {
-      const sale = this.sales.find(s => s.id === id);
-      if (sale) {
-        sale.posted = true;
-        sale.tweetId = tweetId;
-        logger.debug(`Marked sale ${id} as posted with tweet ID: ${tweetId}`);
-      }
+      await this.pool.query(`
+        UPDATE processed_sales 
+        SET posted = TRUE, tweet_id = $1, updated_at = CURRENT_TIMESTAMP 
+        WHERE id = $2
+      `, [tweetId, id]);
+
+      logger.debug(`Marked sale ${id} as posted with tweet ID: ${tweetId}`);
     } catch (error: any) {
       logger.error('Failed to mark sale as posted:', error.message);
       throw error;
@@ -111,8 +233,15 @@ export class VercelDatabaseService implements IDatabaseService {
    * Get/set system state values
    */
   async getSystemState(key: string): Promise<string | null> {
+    if (!this.pool) throw new Error('Database not initialized');
+
     try {
-      return this.systemState.get(key) || null;
+      const result = await this.pool.query(
+        'SELECT value FROM system_state WHERE key = $1',
+        [key]
+      );
+
+      return result.rows.length > 0 ? result.rows[0].value : null;
     } catch (error: any) {
       logger.error(`Failed to get system state for key ${key}:`, error.message);
       throw error;
@@ -120,8 +249,16 @@ export class VercelDatabaseService implements IDatabaseService {
   }
 
   async setSystemState(key: string, value: string): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
     try {
-      this.systemState.set(key, value);
+      await this.pool.query(`
+        INSERT INTO system_state (key, value, updated_at)
+        VALUES ($1, $2, CURRENT_TIMESTAMP)
+        ON CONFLICT (key) 
+        DO UPDATE SET value = $2, updated_at = CURRENT_TIMESTAMP
+      `, [key, value]);
+
       logger.debug(`Set system state ${key} = ${value}`);
     } catch (error: any) {
       logger.error(`Failed to set system state for key ${key}:`, error.message);
@@ -138,16 +275,18 @@ export class VercelDatabaseService implements IDatabaseService {
     unpostedSales: number;
     lastProcessedBlock: string | null;
   }> {
+    if (!this.pool) throw new Error('Database not initialized');
+
     try {
-      const totalSales = this.sales.length;
-      const postedSales = this.sales.filter(s => s.posted).length;
-      const unpostedSales = this.sales.filter(s => !s.posted).length;
+      const totalResult = await this.pool.query('SELECT COUNT(*) as count FROM processed_sales');
+      const postedResult = await this.pool.query('SELECT COUNT(*) as count FROM processed_sales WHERE posted = TRUE');
+      const unpostedResult = await this.pool.query('SELECT COUNT(*) as count FROM processed_sales WHERE posted = FALSE');
       const lastBlock = await this.getSystemState('last_processed_block');
 
       return {
-        totalSales,
-        postedSales,
-        unpostedSales,
+        totalSales: parseInt(totalResult.rows[0].count),
+        postedSales: parseInt(postedResult.rows[0].count),
+        unpostedSales: parseInt(unpostedResult.rows[0].count),
         lastProcessedBlock: lastBlock
       };
     } catch (error: any) {
@@ -157,9 +296,13 @@ export class VercelDatabaseService implements IDatabaseService {
   }
 
   /**
-   * Close database connection (no-op for in-memory)
+   * Close database connection
    */
   async close(): Promise<void> {
-    logger.info('Vercel database service closed');
+    if (this.pool) {
+      await this.pool.end();
+      this.pool = null;
+      logger.info('PostgreSQL connection pool closed');
+    }
   }
 }

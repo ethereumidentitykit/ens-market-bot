@@ -30,10 +30,12 @@
     "typescript": "^5.9.2"
   },
   "dependencies": {
+    "@types/pg": "^8.15.5",
     "axios": "^1.11.0",
     "cron": "^4.3.3",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
+    "pg": "^8.16.3",
     "sqlite": "^5.1.1",
     "sqlite3": "^5.1.7"
   }
