@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import { Config } from '../types';
+import { CONTRACT_ADDRESSES } from '../config/contracts';
 
 // Load environment variables
 dotenv.config();
@@ -18,10 +19,7 @@ export const config: Config = {
   database: {
     path: process.env.DATABASE_PATH || './data/sales.db',
   },
-  contracts: [
-    process.env.CONTRACT_ADDRESS_1 || '0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401',
-    process.env.CONTRACT_ADDRESS_2 || '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85',
-  ],
+  contracts: CONTRACT_ADDRESSES,
   port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
   logLevel: process.env.LOG_LEVEL || 'info',

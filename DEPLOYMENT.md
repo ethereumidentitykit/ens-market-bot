@@ -34,26 +34,15 @@
 - **Install Command**: `npm install`
 - **Node.js Version**: 18.x (default)
 
-### Step 3: Environment Variables
+### Step 3: Environment Variables (Minimal Required)
 Add these environment variables in Vercel project settings:
 
 ```
-# Required - Alchemy API
+# REQUIRED - Alchemy API
 ALCHEMY_API_KEY=your_actual_alchemy_api_key_here
-ALCHEMY_BASE_URL=https://eth-mainnet.g.alchemy.com
 
-# Required - Database
+# REQUIRED - Database  
 POSTGRES_URL=your_postgres_connection_string
-DATABASE_URL=your_postgres_connection_string
-
-# Required - Application
-NODE_ENV=production
-LOG_LEVEL=info
-PORT=3000
-
-# Required - Contract Monitoring
-CONTRACT_ADDRESS_1=0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401
-CONTRACT_ADDRESS_2=0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85
 
 # Twitter API (add after OAuth setup)
 TWITTER_API_KEY=your_twitter_api_key
@@ -64,6 +53,8 @@ TWITTER_ACCESS_TOKEN_SECRET=your_twitter_access_token_secret
 # OAuth Callback
 TWITTER_CALLBACK_URL=https://your-vercel-app.vercel.app/auth/twitter/callback
 ```
+
+**Note**: Contract addresses are now in code (`src/config/contracts.ts`), not environment variables.
 
 ### Step 4: Deploy
 1. Click **"Deploy"**
