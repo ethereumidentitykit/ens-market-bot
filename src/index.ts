@@ -366,8 +366,8 @@ async function startApplication(): Promise<void> {
 
         const sale = unpostedSales[0];
 
-        // Format the tweet
-        const formattedTweet = tweetFormatter.formatSale(sale);
+        // Format the tweet with name resolution
+        const formattedTweet = await tweetFormatter.formatSaleWithNames(sale);
         
         if (!formattedTweet.isValid) {
           return res.status(400).json({
@@ -444,8 +444,8 @@ async function startApplication(): Promise<void> {
           });
         }
 
-        // Generate tweet previews
-        const previews = tweetFormatter.previewFormats(sale);
+        // Generate tweet previews with name resolution
+        const previews = await tweetFormatter.previewFormatsWithNames(sale);
         
         res.json({
           success: true,
@@ -510,8 +510,8 @@ async function startApplication(): Promise<void> {
         // Check rate limit first
         await rateLimitService.validateTweetPost();
 
-        // Format the tweet
-        const formattedTweet = tweetFormatter.formatSale(sale);
+        // Format the tweet with name resolution
+        const formattedTweet = await tweetFormatter.formatSaleWithNames(sale);
         
         if (!formattedTweet.isValid) {
           return res.status(400).json({

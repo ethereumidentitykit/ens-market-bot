@@ -530,6 +530,12 @@
                                         <i class="fas fa-sort ml-1 text-gray-400"></i>
                                     </div>
                                 </th>
+                                <th @click="dbViewer.sort('nftName')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
+                                    <div class="flex items-center">
+                                        NFT Name
+                                        <i class="fas fa-sort ml-1 text-gray-400"></i>
+                                    </div>
+                                </th>
                                 <th @click="dbViewer.sort('priceEth')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
                                     <div class="flex items-center">
                                         Price (ETH)
@@ -561,6 +567,12 @@
                                         <div class="flex flex-col">
                                             <span x-text="sale.contractAddress.slice(0, 10) + '...'"></span>
                                             <span class="text-xs text-gray-500" x-text="'Token: ' + (sale.tokenId.length > 10 ? sale.tokenId.slice(0, 10) + '...' : sale.tokenId)"></span>
+                                        </div>
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                        <div class="flex flex-col">
+                                            <span x-text="sale.nftName || 'Unknown'" class="font-medium" :class="sale.nftName ? 'text-blue-600' : 'text-gray-400'"></span>
+                                            <span x-show="sale.collectionName" class="text-xs text-gray-500" x-text="sale.collectionName"></span>
                                         </div>
                                     </td>
                                     <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
@@ -605,7 +617,7 @@
                                 </tr>
                             </template>
                             <tr x-show="!dbViewer.loading && (!dbViewer.data?.sales || dbViewer.data.sales.length === 0)">
-                                <td colspan="8" class="px-6 py-8 whitespace-nowrap text-sm text-gray-500 text-center">
+                                <td colspan="9" class="px-6 py-8 whitespace-nowrap text-sm text-gray-500 text-center">
                                     <div class="flex flex-col items-center">
                                         <i class="fas fa-database text-3xl text-gray-300 mb-2"></i>
                                         <p>No sales data found</p>

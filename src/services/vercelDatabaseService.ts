@@ -57,6 +57,14 @@ export class VercelDatabaseService implements IDatabaseService {
           processed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
           tweet_id VARCHAR(255),
           posted BOOLEAN DEFAULT FALSE,
+          collection_name TEXT,
+          collection_logo TEXT,
+          nft_name TEXT,
+          nft_image TEXT,
+          nft_description TEXT,
+          marketplace_logo TEXT,
+          current_usd_value TEXT,
+          verified_collection BOOLEAN DEFAULT FALSE,
           created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
@@ -116,8 +124,10 @@ export class VercelDatabaseService implements IDatabaseService {
         INSERT INTO processed_sales (
           transaction_hash, contract_address, token_id, marketplace,
           buyer_address, seller_address, price_eth, price_usd,
-          block_number, block_timestamp, processed_at, posted
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+          block_number, block_timestamp, processed_at, posted,
+          collection_name, collection_logo, nft_name, nft_image,
+          nft_description, marketplace_logo, current_usd_value, verified_collection
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
         RETURNING id
       `, [
         sale.transactionHash,
@@ -131,7 +141,15 @@ export class VercelDatabaseService implements IDatabaseService {
         sale.blockNumber,
         new Date(sale.blockTimestamp),
         new Date(sale.processedAt),
-        sale.posted
+        sale.posted,
+        sale.collectionName || null,
+        sale.collectionLogo || null,
+        sale.nftName || null,
+        sale.nftImage || null,
+        sale.nftDescription || null,
+        sale.marketplaceLogo || null,
+        sale.currentUsdValue || null,
+        sale.verifiedCollection || false
       ]);
 
       const insertedId = result.rows[0].id;
@@ -175,7 +193,11 @@ export class VercelDatabaseService implements IDatabaseService {
           token_id as "tokenId", marketplace, buyer_address as "buyerAddress",
           seller_address as "sellerAddress", price_eth as "priceEth", price_usd as "priceUsd",
           block_number as "blockNumber", block_timestamp as "blockTimestamp",
-          processed_at as "processedAt", tweet_id as "tweetId", posted
+          processed_at as "processedAt", tweet_id as "tweetId", posted,
+          collection_name as "collectionName", collection_logo as "collectionLogo",
+          nft_name as "nftName", nft_image as "nftImage", nft_description as "nftDescription",
+          marketplace_logo as "marketplaceLogo", current_usd_value as "currentUsdValue",
+          verified_collection as "verifiedCollection"
         FROM processed_sales 
         ORDER BY block_number DESC 
         LIMIT $1
@@ -207,7 +229,11 @@ export class VercelDatabaseService implements IDatabaseService {
           token_id as "tokenId", marketplace, buyer_address as "buyerAddress",
           seller_address as "sellerAddress", price_eth as "priceEth", price_usd as "priceUsd",
           block_number as "blockNumber", block_timestamp as "blockTimestamp",
-          processed_at as "processedAt", tweet_id as "tweetId", posted
+          processed_at as "processedAt", tweet_id as "tweetId", posted,
+          collection_name as "collectionName", collection_logo as "collectionLogo",
+          nft_name as "nftName", nft_image as "nftImage", nft_description as "nftDescription",
+          marketplace_logo as "marketplaceLogo", current_usd_value as "currentUsdValue",
+          verified_collection as "verifiedCollection"
         FROM processed_sales 
         WHERE posted = FALSE 
         ORDER BY block_number DESC 

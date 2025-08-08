@@ -62,6 +62,14 @@ export class DatabaseService implements IDatabaseService {
         processed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         tweet_id TEXT,
         posted INTEGER DEFAULT 0,
+        collection_name TEXT,
+        collection_logo TEXT,
+        nft_name TEXT,
+        nft_image TEXT,
+        nft_description TEXT,
+        marketplace_logo TEXT,
+        current_usd_value TEXT,
+        verified_collection INTEGER DEFAULT 0,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
@@ -113,8 +121,10 @@ export class DatabaseService implements IDatabaseService {
         INSERT INTO processed_sales (
           transaction_hash, contract_address, token_id, marketplace,
           buyer_address, seller_address, price_eth, price_usd,
-          block_number, block_timestamp, processed_at, posted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          block_number, block_timestamp, processed_at, posted,
+          collection_name, collection_logo, nft_name, nft_image,
+          nft_description, marketplace_logo, current_usd_value, verified_collection
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         sale.transactionHash,
         sale.contractAddress,
@@ -127,7 +137,15 @@ export class DatabaseService implements IDatabaseService {
         sale.blockNumber,
         sale.blockTimestamp,
         sale.processedAt,
-        sale.posted ? 1 : 0
+        sale.posted ? 1 : 0,
+        sale.collectionName || null,
+        sale.collectionLogo || null,
+        sale.nftName || null,
+        sale.nftImage || null,
+        sale.nftDescription || null,
+        sale.marketplaceLogo || null,
+        sale.currentUsdValue || null,
+        sale.verifiedCollection ? 1 : 0
       ]);
 
       logger.debug(`Inserted sale record with ID: ${result.lastID}`);
@@ -170,7 +188,11 @@ export class DatabaseService implements IDatabaseService {
           token_id as tokenId, marketplace, buyer_address as buyerAddress,
           seller_address as sellerAddress, price_eth as priceEth, price_usd as priceUsd,
           block_number as blockNumber, block_timestamp as blockTimestamp,
-          processed_at as processedAt, tweet_id as tweetId, posted
+          processed_at as processedAt, tweet_id as tweetId, posted,
+          collection_name as collectionName, collection_logo as collectionLogo,
+          nft_name as nftName, nft_image as nftImage, nft_description as nftDescription,
+          marketplace_logo as marketplaceLogo, current_usd_value as currentUsdValue,
+          verified_collection as verifiedCollection
         FROM processed_sales 
         ORDER BY block_number DESC 
         LIMIT ?
@@ -178,7 +200,8 @@ export class DatabaseService implements IDatabaseService {
 
       return rows.map(row => ({
         ...row,
-        posted: !!row.posted
+        posted: !!row.posted,
+        verifiedCollection: !!row.verifiedCollection
       }));
     } catch (error: any) {
       logger.error('Failed to get recent sales:', error.message);
@@ -199,7 +222,11 @@ export class DatabaseService implements IDatabaseService {
           token_id as tokenId, marketplace, buyer_address as buyerAddress,
           seller_address as sellerAddress, price_eth as priceEth, price_usd as priceUsd,
           block_number as blockNumber, block_timestamp as blockTimestamp,
-          processed_at as processedAt, tweet_id as tweetId, posted
+          processed_at as processedAt, tweet_id as tweetId, posted,
+          collection_name as collectionName, collection_logo as collectionLogo,
+          nft_name as nftName, nft_image as nftImage, nft_description as nftDescription,
+          marketplace_logo as marketplaceLogo, current_usd_value as currentUsdValue,
+          verified_collection as verifiedCollection
         FROM processed_sales 
         WHERE posted = 0 
         ORDER BY block_number DESC 
@@ -208,7 +235,8 @@ export class DatabaseService implements IDatabaseService {
 
       return rows.map(row => ({
         ...row,
-        posted: !!row.posted
+        posted: !!row.posted,
+        verifiedCollection: !!row.verifiedCollection
       }));
     } catch (error: any) {
       logger.error('Failed to get unposted sales:', error.message);
