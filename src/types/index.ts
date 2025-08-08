@@ -23,6 +23,7 @@ export interface NFTSale {
     decimals: number;
   };
   blockNumber: number;
+  blockTime: string;
   logIndex: number;
   bundleIndex: number;
   transactionHash: string;
@@ -54,11 +55,28 @@ export interface ProcessedSale {
   processedAt: string;
   tweetId?: string;
   posted: boolean;
+  // Enhanced metadata fields
+  collectionName?: string;
+  collectionLogo?: string;
+  nftName?: string;
+  nftImage?: string;
+  nftDescription?: string;
+  marketplaceLogo?: string;
+  currentUsdValue?: string;
+  verifiedCollection?: boolean;
 }
 
 // Configuration
 export interface Config {
   alchemy: {
+    apiKey: string;
+    baseUrl: string;
+  };
+  bitquery?: {
+    token: string;
+    baseUrl: string;
+  };
+  moralis?: {
     apiKey: string;
     baseUrl: string;
   };
@@ -108,6 +126,8 @@ export interface IDatabaseService {
   recordTweetPost(post: Omit<TwitterPost, 'id'>): Promise<number>;
   getRecentTweetPosts(hoursBack?: number): Promise<TwitterPost[]>;
   getTweetPostsInLast24Hours(): Promise<number>;
+  // Database management methods
+  resetDatabase(): Promise<void>;
   close(): Promise<void>;
 }
 

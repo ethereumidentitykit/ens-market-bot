@@ -351,36 +351,241 @@
                 </div>
             </div>
 
-            <!-- Recent Sales Table -->
+            <!-- Database Management -->
+            <div class="mb-8">
+                <div class="bg-white shadow rounded-lg">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <h3 class="text-lg leading-6 font-medium text-gray-900 flex items-center">
+                            <i class="fas fa-database text-gray-600 mr-2"></i>
+                            Database Management
+                        </h3>
+                    </div>
+                    <div class="p-6">
+                        <div class="bg-yellow-50 border border-yellow-200 rounded-md p-4 mb-4">
+                            <div class="flex">
+                                <div class="flex-shrink-0">
+                                    <i class="fas fa-exclamation-triangle text-yellow-400"></i>
+                                </div>
+                                <div class="ml-3">
+                                    <h4 class="text-sm font-medium text-yellow-800">⚠️ Warning</h4>
+                                    <p class="mt-1 text-sm text-yellow-700">
+                                        Resetting the database will permanently delete all sales data, tweet history, and reset the last processed block. 
+                                        This will cause the system to re-fetch historical data on the next sync.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <!-- Current Database Info -->
+                            <div class="bg-gray-50 rounded-lg p-4">
+                                <h4 class="text-sm font-medium text-gray-900 mb-3">Current Database Status</h4>
+                                <div class="space-y-2 text-sm">
+                                    <div class="flex justify-between">
+                                        <span class="text-gray-600">Total Sales:</span>
+                                        <span class="font-medium" x-text="stats.database?.totalSales || 0"></span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="text-gray-600">Posted Sales:</span>
+                                        <span class="font-medium" x-text="stats.database?.postedSales || 0"></span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="text-gray-600">Tweet Posts:</span>
+                                        <span class="font-medium" x-text="twitterRateLimit?.status?.postsInLast24Hours || 0"></span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="text-gray-600">Last Block:</span>
+                                        <span class="font-medium font-mono text-xs" x-text="stats.database?.lastProcessedBlock || 'N/A'"></span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Reset Actions -->
+                            <div class="space-y-4">
+                                <!-- Reset to Recent Blocks Button -->
+                                <button 
+                                    @click="resetToRecentBlocks()"
+                                    :disabled="processingReset"
+                                    class="w-full inline-flex items-center justify-center px-4 py-2 border border-blue-300 shadow-sm text-sm font-medium rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    <i class="fas fa-sync-alt mr-2" :class="{'fa-spin': processingReset}"></i>
+                                    <span x-show="!processingReset">Reset to Recent Sales</span>
+                                    <span x-show="processingReset">Resetting...</span>
+                                </button>
+
+                                <div class="text-xs text-gray-500 text-center mb-4">
+                                    Recommended if stuck on old blocks (keeps existing data)
+                                </div>
+
+                                <!-- Full Database Reset Button -->
+                                <button 
+                                    @click="confirmDatabaseReset()"
+                                    :disabled="databaseResetting"
+                                    class="w-full inline-flex items-center justify-center px-4 py-2 border border-red-300 shadow-sm text-sm font-medium rounded-md text-red-700 bg-red-50 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    <i class="fas fa-trash mr-2" :class="{'fa-spin': databaseResetting}"></i>
+                                    <span x-show="!databaseResetting">Reset Database</span>
+                                    <span x-show="databaseResetting">Resetting...</span>
+                                </button>
+
+                                <div class="text-xs text-gray-500 text-center">
+                                    This action cannot be undone
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Reset Results -->
+                        <div x-show="databaseResetMessage" x-transition class="mt-4">
+                            <div class="rounded-md p-4" 
+                                 :class="databaseResetMessageType === 'success' ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'">
+                                <div class="flex">
+                                    <div class="flex-shrink-0">
+                                        <i :class="databaseResetMessageType === 'success' ? 'fas fa-check-circle text-green-400' : 'fas fa-times-circle text-red-400'"></i>
+                                    </div>
+                                    <div class="ml-3">
+                                        <p class="text-sm" 
+                                           :class="databaseResetMessageType === 'success' ? 'text-green-700' : 'text-red-700'"
+                                           x-text="databaseResetMessage">
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Database Viewer -->
             <div class="bg-white shadow rounded-lg">
                 <div class="px-6 py-4 border-b border-gray-200">
-                    <h3 class="text-lg leading-6 font-medium text-gray-900">Recent Sales</h3>
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+                        <h3 class="text-lg leading-6 font-medium text-gray-900 flex items-center">
+                            <i class="fas fa-table text-gray-600 mr-2"></i>
+                            Database Viewer
+                        </h3>
+                        <div class="mt-3 sm:mt-0 sm:ml-4">
+                            <div class="flex items-center space-x-3">
+                                <!-- Search -->
+                                <div class="flex-1 min-w-0">
+                                    <input 
+                                        type="text" 
+                                        x-model="dbViewer.searchTerm"
+                                        @input="dbViewer.searchDebounced()"
+                                        placeholder="Search tx, address, marketplace..."
+                                        class="block w-full px-3 py-2 border border-gray-300 rounded-md text-sm placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                                    >
+                                </div>
+                                <!-- Records per page -->
+                                <select 
+                                    x-model="dbViewer.limit" 
+                                    @change="dbViewer.loadPage(1)"
+                                    class="block px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                                >
+                                    <option value="25">25</option>
+                                    <option value="50">50</option>
+                                    <option value="100">100</option>
+                                    <option value="200">200</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Stats and pagination info -->
+                    <div class="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between text-sm text-gray-500">
+                        <div>
+                            <span x-show="dbViewer.data?.stats?.searchTerm">
+                                Showing <span x-text="dbViewer.data?.stats?.filteredResults || 0"></span> of <span x-text="dbViewer.data?.stats?.totalSales || 0"></span> sales 
+                                matching "<span x-text="dbViewer.data?.stats?.searchTerm" class="font-medium"></span>"
+                            </span>
+                            <span x-show="!dbViewer.data?.stats?.searchTerm">
+                                <span x-text="dbViewer.data?.stats?.totalSales || 0"></span> total sales in database
+                            </span>
+                        </div>
+                        <div x-show="dbViewer.data?.pagination" class="mt-2 sm:mt-0">
+                            Page <span x-text="dbViewer.data?.pagination?.page || 1"></span> of <span x-text="dbViewer.data?.pagination?.totalPages || 1"></span>
+                        </div>
+                    </div>
                 </div>
-                <div class="overflow-x-auto">
+
+                <!-- Loading State -->
+                <div x-show="dbViewer.loading" class="px-6 py-8 text-center">
+                    <i class="fas fa-spinner fa-spin text-2xl text-gray-400 mb-2"></i>
+                    <p class="text-sm text-gray-500">Loading sales data...</p>
+                </div>
+
+                <!-- Table -->
+                <div x-show="!dbViewer.loading" class="overflow-x-auto">
                     <table class="min-w-full divide-y divide-gray-200">
                         <thead class="bg-gray-50">
                             <tr>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contract</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Token ID</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price (ETH)</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Marketplace</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Block</th>
+                                <th @click="dbViewer.sort('id')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
+                                    <div class="flex items-center">
+                                        ID
+                                        <i class="fas fa-sort ml-1 text-gray-400"></i>
+                                    </div>
+                                </th>
+                                <th @click="dbViewer.sort('contractAddress')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
+                                    <div class="flex items-center">
+                                        Contract
+                                        <i class="fas fa-sort ml-1 text-gray-400"></i>
+                                    </div>
+                                </th>
+                                <th @click="dbViewer.sort('priceEth')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
+                                    <div class="flex items-center">
+                                        Price (ETH)
+                                        <i class="fas fa-sort ml-1 text-gray-400"></i>
+                                    </div>
+                                </th>
+                                <th @click="dbViewer.sort('marketplace')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
+                                    <div class="flex items-center">
+                                        Marketplace
+                                        <i class="fas fa-sort ml-1 text-gray-400"></i>
+                                    </div>
+                                </th>
+                                <th @click="dbViewer.sort('blockNumber')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
+                                    <div class="flex items-center">
+                                        Block
+                                        <i class="fas fa-sort ml-1 text-gray-400"></i>
+                                    </div>
+                                </th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Buyer/Seller</th>
                                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">TX Hash</th>
                             </tr>
                         </thead>
                         <tbody class="bg-white divide-y divide-gray-200">
-                            <template x-for="sale in recentSales" :key="sale.id">
+                            <template x-for="sale in dbViewer.data?.sales || []" :key="sale.id">
                                 <tr class="hover:bg-gray-50">
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900" x-text="sale.id"></td>
                                     <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900">
-                                        <span x-text="sale.contractAddress.slice(0, 10) + '...'"></span>
+                                        <div class="flex flex-col">
+                                            <span x-text="sale.contractAddress.slice(0, 10) + '...'"></span>
+                                            <span class="text-xs text-gray-500" x-text="'Token: ' + (sale.tokenId.length > 10 ? sale.tokenId.slice(0, 10) + '...' : sale.tokenId)"></span>
+                                        </div>
                                     </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900" x-text="sale.tokenId"></td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900" x-text="parseFloat(sale.priceEth).toFixed(4)"></td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                        <span x-text="parseFloat(sale.priceEth).toFixed(4)" 
+                                              :class="parseFloat(sale.priceEth) >= 1 ? 'text-green-600 font-bold' : parseFloat(sale.priceEth) >= 0.1 ? 'text-blue-600' : 'text-gray-600'"></span>
+                                    </td>
                                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800" x-text="sale.marketplace"></span>
+                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium" 
+                                              :class="sale.marketplace === 'opensea' ? 'bg-blue-100 text-blue-800' : 
+                                                     sale.marketplace === 'x2y2' ? 'bg-purple-100 text-purple-800' :
+                                                     sale.marketplace === 'blur' ? 'bg-orange-100 text-orange-800' :
+                                                     'bg-gray-100 text-gray-800'"
+                                              x-text="sale.marketplace"></span>
                                     </td>
                                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" x-text="sale.blockNumber"></td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-xs font-mono text-gray-500">
+                                        <div class="flex flex-col space-y-1">
+                                            <div title="Buyer">
+                                                <span class="text-green-600">B:</span> <span x-text="sale.buyerAddress.slice(0, 8) + '...'"></span>
+                                            </div>
+                                            <div title="Seller">
+                                                <span class="text-red-600">S:</span> <span x-text="sale.sellerAddress.slice(0, 8) + '...'"></span>
+                                            </div>
+                                        </div>
+                                    </td>
                                     <td class="px-6 py-4 whitespace-nowrap">
                                         <span x-show="sale.posted" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                                             <i class="fas fa-check mr-1"></i>
@@ -399,13 +604,82 @@
                                     </td>
                                 </tr>
                             </template>
-                            <tr x-show="recentSales.length === 0">
-                                <td colspan="7" class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
-                                    No sales data available. Try processing some sales first.
+                            <tr x-show="!dbViewer.loading && (!dbViewer.data?.sales || dbViewer.data.sales.length === 0)">
+                                <td colspan="8" class="px-6 py-8 whitespace-nowrap text-sm text-gray-500 text-center">
+                                    <div class="flex flex-col items-center">
+                                        <i class="fas fa-database text-3xl text-gray-300 mb-2"></i>
+                                        <p>No sales data found</p>
+                                        <p class="text-xs mt-1">Try adjusting your search or process some sales first</p>
+                                    </div>
                                 </td>
                             </tr>
                         </tbody>
                     </table>
+                </div>
+
+                <!-- Pagination -->
+                <div x-show="!dbViewer.loading && dbViewer.data?.pagination?.totalPages > 1" class="bg-white px-4 py-3 border-t border-gray-200 sm:px-6">
+                    <div class="flex items-center justify-between">
+                        <div class="flex-1 flex justify-between sm:hidden">
+                            <button 
+                                @click="dbViewer.loadPage(dbViewer.data.pagination.page - 1)"
+                                :disabled="!dbViewer.data?.pagination?.hasPrev"
+                                class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                Previous
+                            </button>
+                            <button 
+                                @click="dbViewer.loadPage(dbViewer.data.pagination.page + 1)"
+                                :disabled="!dbViewer.data?.pagination?.hasNext"
+                                class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                Next
+                            </button>
+                        </div>
+                        <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+                            <div>
+                                <p class="text-sm text-gray-700">
+                                    Showing 
+                                    <span class="font-medium" x-text="((dbViewer.data?.pagination?.page - 1) * dbViewer.data?.pagination?.limit) + 1"></span>
+                                    to 
+                                    <span class="font-medium" x-text="Math.min(dbViewer.data?.pagination?.page * dbViewer.data?.pagination?.limit, dbViewer.data?.pagination?.total)"></span>
+                                    of 
+                                    <span class="font-medium" x-text="dbViewer.data?.pagination?.total"></span>
+                                    results
+                                </p>
+                            </div>
+                            <div>
+                                <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                                    <button 
+                                        @click="dbViewer.loadPage(dbViewer.data.pagination.page - 1)"
+                                        :disabled="!dbViewer.data?.pagination?.hasPrev"
+                                        class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        <i class="fas fa-chevron-left"></i>
+                                    </button>
+                                    
+                                    <template x-for="page in dbViewer.getPageNumbers()" :key="page">
+                                        <button 
+                                            @click="dbViewer.loadPage(page)"
+                                            :class="page === dbViewer.data?.pagination?.page ? 
+                                                    'z-10 bg-blue-50 border-blue-500 text-blue-600' : 
+                                                    'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'"
+                                            class="relative inline-flex items-center px-4 py-2 border text-sm font-medium"
+                                            x-text="page"
+                                        ></button>
+                                    </template>
+                                    
+                                    <button 
+                                        @click="dbViewer.loadPage(dbViewer.data.pagination.page + 1)"
+                                        :disabled="!dbViewer.data?.pagination?.hasNext"
+                                        class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        <i class="fas fa-chevron-right"></i>
+                                    </button>
+                                </nav>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </main>

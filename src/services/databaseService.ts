@@ -384,6 +384,30 @@ export class DatabaseService implements IDatabaseService {
   }
 
   /**
+   * Reset database - clear all data and reset system state
+   */
+  async resetDatabase(): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    try {
+      logger.info('Starting database reset...');
+
+      // Delete all data from tables
+      await this.db.exec('DELETE FROM twitter_posts');
+      await this.db.exec('DELETE FROM processed_sales');
+      await this.db.exec('DELETE FROM system_state');
+
+      // Reset auto-increment counters
+      await this.db.exec('DELETE FROM sqlite_sequence WHERE name IN ("processed_sales", "twitter_posts")');
+
+      logger.info('Database reset completed successfully');
+    } catch (error: any) {
+      logger.error('Failed to reset database:', error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Close database connection
    */
   async close(): Promise<void> {

@@ -18,9 +18,101 @@ function dashboard() {
         twitterMessage: '',
         twitterMessageType: 'info',
 
+        // Database management state
+        databaseResetting: false,
+        databaseResetMessage: '',
+        databaseResetMessageType: 'info',
+        processingReset: false,
+
+        // Database viewer state
+        dbViewer: {
+            data: null,
+            loading: false,
+            searchTerm: '',
+            sortBy: 'blockNumber',
+            sortOrder: 'desc',
+            limit: 50,
+            currentPage: 1,
+            searchTimeout: null,
+
+            async loadPage(page) {
+                this.loading = true;
+                this.currentPage = page;
+                
+                try {
+                    const params = new URLSearchParams({
+                        page: page.toString(),
+                        limit: this.limit.toString(),
+                        sortBy: this.sortBy,
+                        sortOrder: this.sortOrder
+                    });
+
+                    if (this.searchTerm.trim()) {
+                        params.append('search', this.searchTerm.trim());
+                    }
+
+                    const response = await fetch(`/api/database/sales?${params}`);
+                    const result = await response.json();
+
+                    if (result.success) {
+                        this.data = result.data;
+                    } else {
+                        console.error('Failed to load database data:', result.error);
+                    }
+                } catch (error) {
+                    console.error('Error loading database data:', error);
+                } finally {
+                    this.loading = false;
+                }
+            },
+
+            sort(field) {
+                if (this.sortBy === field) {
+                    this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
+                } else {
+                    this.sortBy = field;
+                    this.sortOrder = field === 'blockNumber' || field === 'priceEth' || field === 'id' ? 'desc' : 'asc';
+                }
+                this.loadPage(1);
+            },
+
+            searchDebounced() {
+                clearTimeout(this.searchTimeout);
+                this.searchTimeout = setTimeout(() => {
+                    this.loadPage(1);
+                }, 500);
+            },
+
+            getPageNumbers() {
+                if (!this.data?.pagination) return [];
+                
+                const current = this.data.pagination.page;
+                const total = this.data.pagination.totalPages;
+                const range = 2; // Show 2 pages on each side of current
+                
+                let start = Math.max(1, current - range);
+                let end = Math.min(total, current + range);
+                
+                // Adjust range if we're near the beginning or end
+                if (current <= range) {
+                    end = Math.min(total, 2 * range + 1);
+                } else if (current > total - range) {
+                    start = Math.max(1, total - 2 * range);
+                }
+                
+                const pages = [];
+                for (let i = start; i <= end; i++) {
+                    pages.push(i);
+                }
+                
+                return pages;
+            }
+        },
+
         // Initialize
         async init() {
             await this.refreshData();
+            await this.dbViewer.loadPage(1);
             // Auto-refresh every 30 seconds
             setInterval(() => {
                 if (!this.loading && !this.processing) {
@@ -367,6 +459,123 @@ function dashboard() {
         clearTwitterMessage() {
             this.twitterMessage = '';
             this.twitterMessageType = 'info';
+        },
+
+        // Database Management Methods
+        async resetToRecentBlocks() {
+            if (!confirm('Reset processing to start from recent blocks?\n\nThis will:\n• Clear the last processed block position\n• Keep existing sales data\n• Start fetching recent sales on next sync\n\nRecommended if stuck on old blocks.')) {
+                return;
+            }
+            
+            this.processingReset = true;
+            this.clearDatabaseResetMessage();
+            
+            try {
+                const response = await fetch('/api/processing/reset-to-recent', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    this.showDatabaseResetMessage(`✅ Processing reset successful! Found ${result.stats?.fetched || 0} sales, ${result.stats?.newSales || 0} new.`, 'success');
+                    await this.refreshData();
+                } else {
+                    this.showDatabaseResetMessage(`❌ Reset failed: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                this.showDatabaseResetMessage(`❌ Reset failed: ${error.message}`, 'error');
+            } finally {
+                this.processingReset = false;
+            }
+        },
+
+        async confirmDatabaseReset() {
+            const confirmation = confirm(
+                '⚠️ WARNING: This will permanently delete ALL data!\n\n' +
+                '• All sales records will be lost\n' +
+                '• All tweet history will be deleted\n' +
+                '• Last processed block will be reset\n' +
+                '• System will re-fetch historical data on next sync\n\n' +
+                'This action cannot be undone. Are you absolutely sure?'
+            );
+            
+            if (confirmation) {
+                const doubleConfirmation = confirm(
+                    '🚨 FINAL CONFIRMATION\n\n' +
+                    'Type "DELETE" in the next prompt to confirm database reset.'
+                );
+                
+                if (doubleConfirmation) {
+                    const finalConfirm = prompt('Type "DELETE" to confirm:');
+                    if (finalConfirm === 'DELETE') {
+                        await this.resetDatabase();
+                    } else {
+                        this.showDatabaseResetMessage('Database reset cancelled.', 'info');
+                    }
+                } else {
+                    this.showDatabaseResetMessage('Database reset cancelled.', 'info');
+                }
+            }
+        },
+
+        async resetDatabase() {
+            this.databaseResetting = true;
+            this.clearDatabaseResetMessage();
+            
+            try {
+                const response = await fetch('/api/database/reset', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    this.showDatabaseResetMessage(
+                        '✅ Database reset successful! All data has been cleared and the system is ready for fresh data ingestion.',
+                        'success'
+                    );
+                    
+                    // Refresh the dashboard to show empty state
+                    await this.refreshData();
+                } else {
+                    this.showDatabaseResetMessage(
+                        `❌ Database reset failed: ${result.error}`,
+                        'error'
+                    );
+                }
+            } catch (error) {
+                console.error('Database reset error:', error);
+                this.showDatabaseResetMessage(
+                    `❌ Database reset failed: ${error.message}`,
+                    'error'
+                );
+            } finally {
+                this.databaseResetting = false;
+            }
+        },
+
+        showDatabaseResetMessage(message, type) {
+            this.databaseResetMessage = message;
+            this.databaseResetMessageType = type;
+            
+            // Auto-clear success messages after 10 seconds
+            if (type === 'success') {
+                setTimeout(() => {
+                    this.clearDatabaseResetMessage();
+                }, 10000);
+            }
+        },
+
+        clearDatabaseResetMessage() {
+            this.databaseResetMessage = '';
+            this.databaseResetMessageType = 'info';
         }
     };
 }

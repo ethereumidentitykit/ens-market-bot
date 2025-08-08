@@ -1,14 +1,14 @@
-import { AlchemyService } from './alchemyService';
+import { MoralisService, EnhancedNFTSale } from './moralisService';
 import { IDatabaseService } from '../types';
 import { logger } from '../utils/logger';
 import { NFTSale, ProcessedSale } from '../types';
 
 export class SalesProcessingService {
-  private alchemyService: AlchemyService;
+  private moralisService: MoralisService;
   private databaseService: IDatabaseService;
 
-  constructor(alchemyService: AlchemyService, databaseService: IDatabaseService) {
-    this.alchemyService = alchemyService;
+  constructor(moralisService: MoralisService, databaseService: IDatabaseService) {
+    this.moralisService = moralisService;
     this.databaseService = databaseService;
   }
 
@@ -28,18 +28,32 @@ export class SalesProcessingService {
 
   /**
    * Calculate total sale price from all fees
+   * Handles both ETH and WETH (both use 18 decimals)
    */
-  private calculateTotalPrice(sale: NFTSale): string {
+  private calculateTotalPrice(sale: EnhancedNFTSale): string {
     try {
-      const sellerFee = BigInt(sale.sellerFee.amount);
-      const protocolFee = BigInt(sale.protocolFee.amount);
-      const royaltyFee = BigInt(sale.royaltyFee.amount);
+      // Log the currency symbols for debugging
+      logger.debug(`Processing sale with currencies - Seller: ${sale.sellerFee.symbol}, Protocol: ${sale.protocolFee.symbol}, Royalty: ${sale.royaltyFee.symbol}`);
+      
+      // Handle null/empty fee amounts safely
+      const sellerFee = sale.sellerFee.amount ? BigInt(sale.sellerFee.amount) : BigInt(0);
+      const protocolFee = sale.protocolFee.amount ? BigInt(sale.protocolFee.amount) : BigInt(0);
+      const royaltyFee = sale.royaltyFee.amount ? BigInt(sale.royaltyFee.amount) : BigInt(0);
       
       const totalWei = sellerFee + protocolFee + royaltyFee;
-      return this.weiToEth(totalWei.toString());
+      
+      // Both ETH and WETH use 18 decimals, so we can treat them the same for price calculation
+      const ethValue = this.weiToEth(totalWei.toString());
+      
+      logger.debug(`Calculated total price: ${ethValue} ETH for tx ${sale.transactionHash}`);
+      return ethValue;
     } catch (error) {
-      logger.warn('Failed to calculate total price for sale:', error);
-      return this.weiToEth(sale.sellerFee.amount); // Fallback to seller fee only
+      logger.warn(`Failed to calculate total price for sale ${sale.transactionHash}:`, error);
+      logger.warn(`Fee amounts - Seller: ${sale.sellerFee.amount}, Protocol: ${sale.protocolFee.amount}, Royalty: ${sale.royaltyFee.amount}`);
+      
+      // Fallback to seller fee only with null safety
+      const fallbackAmount = sale.sellerFee.amount || '0';
+      return this.weiToEth(fallbackAmount);
     }
   }
 
@@ -53,11 +67,31 @@ export class SalesProcessingService {
   }
 
   /**
-   * Convert NFTSale to ProcessedSale format
+   * Filter sales based on minimum price and other criteria
    */
-  private convertToProcessedSale(sale: NFTSale): Omit<ProcessedSale, 'id'> {
+  private shouldProcessSale(sale: EnhancedNFTSale): boolean {
+    // Calculate total price in ETH
+    const totalPriceEth = parseFloat(this.calculateTotalPrice(sale));
+    
+    // Filter out sales below 0.1 ETH
+    if (totalPriceEth < 0.1) {
+      logger.debug(`Filtering out sale below 0.1 ETH: ${totalPriceEth} ETH (tx: ${sale.transactionHash})`);
+      return false;
+    }
+
+    // Add other filters here if needed
+    // For example, could filter by specific token ID patterns, marketplaces, etc.
+    
+    logger.debug(`Sale passes filters: ${totalPriceEth} ETH (tx: ${sale.transactionHash})`);
+    return true;
+  }
+
+  /**
+   * Convert NFTSale (Enhanced from Moralis) to ProcessedSale format
+   */
+  private convertToProcessedSale(sale: EnhancedNFTSale): Omit<ProcessedSale, 'id'> {
     const priceEth = this.calculateTotalPrice(sale);
-    const blockTimestamp = this.formatBlockTimestamp(sale.blockNumber);
+    const blockTimestamp = sale.blockTime || this.formatBlockTimestamp(sale.blockNumber);
 
     return {
       transactionHash: sale.transactionHash,
@@ -67,45 +101,63 @@ export class SalesProcessingService {
       buyerAddress: sale.buyerAddress.toLowerCase(),
       sellerAddress: sale.sellerAddress.toLowerCase(),
       priceEth,
-      priceUsd: undefined, // Will be populated later if needed
+      priceUsd: sale.currentUsdValue || undefined, // Use Moralis USD value if available
       blockNumber: sale.blockNumber,
       blockTimestamp,
       processedAt: new Date().toISOString(),
       posted: false,
+      // Enhanced metadata from Moralis
+      collectionName: sale.collectionName,
+      collectionLogo: sale.collectionLogo,
+      nftName: sale.nftName,
+      nftImage: sale.nftImage,
+      nftDescription: sale.nftDescription,
+      marketplaceLogo: sale.marketplaceLogo,
+      currentUsdValue: sale.currentUsdValue,
+      verifiedCollection: sale.verifiedCollection,
     };
   }
 
   /**
-   * Process new sales from Alchemy API
+   * Process new sales from Moralis API (with block filtering >= 22M)
    * Fetches recent sales and stores only new ones in database
    */
   async processNewSales(): Promise<{
     fetched: number;
     newSales: number;
     duplicates: number;
+    filtered: number;
     errors: number;
   }> {
     const stats = {
       fetched: 0,
       newSales: 0,
       duplicates: 0,
+      filtered: 0,
       errors: 0,
     };
 
     try {
-      logger.info('Starting to process new sales...');
+      logger.info('Starting to process new sales from Moralis (block >= 22M)...');
 
       // Get last processed block to optimize fetching
       const lastProcessedBlock = await this.databaseService.getSystemState('last_processed_block');
-      const fromBlock = lastProcessedBlock || undefined;
+      
+      // Moralis will automatically filter to recent blocks (>= 22M)
+      // If we have a processed block that's >= 22M, use it; otherwise start from 22M
+      let fromBlock: string | undefined = undefined;
+      if (lastProcessedBlock && parseInt(lastProcessedBlock) >= 22000000) {
+        fromBlock = lastProcessedBlock;
+        logger.info(`Fetching sales from last processed block: ${fromBlock}`);
+      } else {
+        logger.info('Fetching recent sales from block 22M onwards (Moralis will filter old data)');
+      }
 
-      logger.info(`Fetching sales from block: ${fromBlock || 'genesis'}`);
-
-      // Fetch recent sales from all contracts
-      const recentSales = await this.alchemyService.getAllRecentSales(fromBlock, 100);
+      // Fetch recent sales from all contracts with automatic block filtering
+      const recentSales = await this.moralisService.getAllRecentTrades(100, fromBlock);
       stats.fetched = recentSales.length;
 
-      logger.info(`Fetched ${recentSales.length} recent sales from Alchemy`);
+      logger.info(`Fetched ${recentSales.length} recent sales from Moralis (all >= block 22M)`);
 
       if (recentSales.length === 0) {
         logger.info('No new sales found');
@@ -123,6 +175,13 @@ export class SalesProcessingService {
           if (isAlreadyProcessed) {
             stats.duplicates++;
             logger.debug(`Skipping duplicate sale: ${sale.transactionHash}`);
+            continue;
+          }
+
+          // Apply filters (minimum price, etc.)
+          if (!this.shouldProcessSale(sale)) {
+            stats.filtered++;
+            logger.debug(`Skipping sale that doesn't meet criteria: ${sale.transactionHash}`);
             continue;
           }
 
@@ -147,7 +206,11 @@ export class SalesProcessingService {
         logger.info(`Updated last processed block to: ${highestBlockNumber}`);
       }
 
-      logger.info(`Sales processing completed:`, stats);
+      const filteringRate = stats.fetched > 0 ? (stats.filtered / stats.fetched * 100).toFixed(1) : '0';
+      logger.info(`Sales processing completed:`, {
+        ...stats,
+        filteringRate: `${filteringRate}%`
+      });
       return stats;
 
     } catch (error: any) {

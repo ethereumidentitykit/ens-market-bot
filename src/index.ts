@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import { config, validateConfig } from './utils/config';
 import { logger } from './utils/logger';
-import { AlchemyService } from './services/alchemyService';
+import { MoralisService } from './services/moralisService';
 import { DatabaseService } from './services/databaseService';
 import { VercelDatabaseService } from './services/vercelDatabaseService';
 import { IDatabaseService } from './types';
@@ -19,14 +19,14 @@ async function startApplication(): Promise<void> {
     logger.info('Configuration validated successfully');
 
     // Initialize services
-    const alchemyService = new AlchemyService();
+    const moralisService = new MoralisService();
     
     // Use Vercel-compatible database in production, SQLite locally
     const databaseService: IDatabaseService = config.nodeEnv === 'production' 
       ? new VercelDatabaseService()
       : new DatabaseService();
     
-    const salesProcessingService = new SalesProcessingService(alchemyService, databaseService);
+    const salesProcessingService = new SalesProcessingService(moralisService, databaseService);
     const schedulerService = new SchedulerService(salesProcessingService);
     const twitterService = new TwitterService();
     const tweetFormatter = new TweetFormatter();
@@ -58,12 +58,12 @@ async function startApplication(): Promise<void> {
     });
 
     // Test API endpoint
-    app.get('/api/test-alchemy', async (req, res) => {
+    app.get('/api/test-moralis', async (req, res) => {
       try {
-        const isConnected = await alchemyService.testConnection();
+        const isConnected = await moralisService.testConnection();
         res.json({
           success: isConnected,
-          message: isConnected ? 'Alchemy API connection successful' : 'Alchemy API connection failed'
+          message: isConnected ? 'Moralis API connection successful' : 'Moralis API connection failed'
         });
       } catch (error: any) {
         res.status(500).json({
@@ -80,20 +80,17 @@ async function startApplication(): Promise<void> {
         
         if (contractAddress) {
           // Fetch for specific contract
-          const response = await alchemyService.getNFTSales(
+          const response = await moralisService.getNFTTrades(
             contractAddress as string,
-            undefined,
-            'latest',
             parseInt(limit as string) || 10
           );
           res.json({ success: true, data: response });
         } else {
           // Fetch for all contracts
-          const sales = await alchemyService.getAllRecentSales(
-            undefined,
+          const sales = await moralisService.getAllRecentTrades(
             parseInt(limit as string) || 10
           );
-          res.json({ success: true, data: { nftSales: sales, count: sales.length } });
+          res.json({ success: true, data: { trades: sales, count: sales.length } });
         }
       } catch (error: any) {
         res.status(500).json({
@@ -106,8 +103,11 @@ async function startApplication(): Promise<void> {
     // Processing endpoints
     app.get('/api/process-sales', async (req, res) => {
       try {
-        const result = await salesProcessingService.manualSync();
-        res.json(result);
+        const results = await salesProcessingService.processNewSales();
+        res.json({
+          success: true,
+          data: results
+        });
       } catch (error: any) {
         res.status(500).json({
           success: false,
@@ -523,6 +523,131 @@ async function startApplication(): Promise<void> {
           success: false,
           error: error.message
         });
+      }
+    });
+
+    app.get('/api/database/sales', async (req, res) => {
+      try {
+        const page = parseInt(req.query.page as string) || 1;
+        const limit = parseInt(req.query.limit as string) || 50;
+        const offset = (page - 1) * limit;
+        const search = req.query.search as string || '';
+        const sortBy = req.query.sortBy as string || 'blockNumber';
+        const sortOrder = req.query.sortOrder as string || 'desc';
+
+        // Get total count first
+        const stats = await databaseService.getStats();
+        
+        // Get all sales for proper pagination and filtering
+        const allSales = await databaseService.getRecentSales(stats.totalSales);
+        
+        // Apply search filter if provided
+        let filteredSales = allSales;
+        if (search) {
+          const searchLower = search.toLowerCase();
+          filteredSales = allSales.filter(sale => 
+            sale.transactionHash.toLowerCase().includes(searchLower) ||
+            sale.contractAddress.toLowerCase().includes(searchLower) ||
+            sale.marketplace.toLowerCase().includes(searchLower) ||
+            sale.buyerAddress.toLowerCase().includes(searchLower) ||
+            sale.sellerAddress.toLowerCase().includes(searchLower) ||
+            sale.tokenId.includes(search) ||
+            sale.priceEth.includes(search)
+          );
+        }
+
+        // Apply sorting
+        filteredSales.sort((a, b) => {
+          let aVal: any = a[sortBy as keyof typeof a];
+          let bVal: any = b[sortBy as keyof typeof b];
+          
+          // Handle numeric fields
+          if (sortBy === 'blockNumber' || sortBy === 'id') {
+            aVal = Number(aVal);
+            bVal = Number(bVal);
+          } else if (sortBy === 'priceEth') {
+            aVal = parseFloat(aVal);
+            bVal = parseFloat(bVal);
+          }
+          
+          if (sortOrder === 'asc') {
+            return aVal > bVal ? 1 : -1;
+          } else {
+            return aVal < bVal ? 1 : -1;
+          }
+        });
+
+        // Apply pagination
+        const paginatedSales = filteredSales.slice(offset, offset + limit);
+        const totalFiltered = filteredSales.length;
+
+        res.json({
+          success: true,
+          data: {
+            sales: paginatedSales,
+            pagination: {
+              page,
+              limit,
+              total: totalFiltered,
+              totalPages: Math.ceil(totalFiltered / limit),
+              hasNext: page * limit < totalFiltered,
+              hasPrev: page > 1
+            },
+            stats: {
+              totalSales: stats.totalSales,
+              postedSales: stats.postedSales,
+              unpostedSales: stats.unpostedSales,
+              filteredResults: totalFiltered,
+              searchTerm: search
+            }
+          }
+        });
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.post('/api/database/reset', async (req, res) => {
+      try {
+        logger.warn('Database reset requested - this will delete ALL data!');
+        
+        await databaseService.resetDatabase();
+        
+        res.json({
+          success: true,
+          message: 'Database reset completed successfully. All sales and tweets deleted, lastProcessedBlock cleared.'
+        });
+      } catch (error: any) {
+        logger.error('Database reset failed:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    // Reset processing to start from recent blocks
+    app.post('/api/processing/reset-to-recent', async (req, res) => {
+      try {
+        logger.warn('Resetting processing to start from recent blocks...');
+        
+        // Clear the last processed block so we start fresh from recent sales
+        await databaseService.setSystemState('last_processed_block', '');
+        
+        // Trigger immediate processing of recent sales (without fromBlock constraint)
+        const stats = await salesProcessingService.processNewSales();
+        
+        res.json({ 
+          success: true, 
+          message: 'Processing reset to recent blocks completed successfully. Now fetching recent sales.',
+          stats: stats
+        });
+      } catch (error: any) {
+        logger.error('Failed to reset processing to recent blocks:', error.message);
+        res.status(500).json({ success: false, error: error.message });
       }
     });
 

@@ -398,6 +398,31 @@ export class VercelDatabaseService implements IDatabaseService {
   }
 
   /**
+   * Reset database - clear all data and reset system state
+   */
+  async resetDatabase(): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      logger.info('Starting database reset...');
+
+      // Delete all data from tables (order matters due to foreign keys)
+      await this.pool.query('DELETE FROM twitter_posts');
+      await this.pool.query('DELETE FROM processed_sales');
+      await this.pool.query('DELETE FROM system_state');
+
+      // Reset sequences (PostgreSQL equivalent of auto-increment)
+      await this.pool.query('ALTER SEQUENCE processed_sales_id_seq RESTART WITH 1');
+      await this.pool.query('ALTER SEQUENCE twitter_posts_id_seq RESTART WITH 1');
+
+      logger.info('Database reset completed successfully');
+    } catch (error: any) {
+      logger.error('Failed to reset database:', error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Close database connection
    */
   async close(): Promise<void> {
