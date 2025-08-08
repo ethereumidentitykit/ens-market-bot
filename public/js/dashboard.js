@@ -208,21 +208,21 @@ function dashboard() {
             }
         },
 
-        // Test Alchemy API connection
-        async testAlchemy() {
+        // Test Moralis API connection
+        async testMoralis() {
             this.testing = true;
             
             try {
-                const response = await fetch('/api/test-alchemy');
+                const response = await fetch('/api/test-moralis');
                 const data = await response.json();
                 
                 if (data.success) {
-                    this.showNotification('Alchemy API connection successful!', 'success');
+                    this.showNotification('Moralis API connection successful!', 'success');
                 } else {
-                    this.showNotification('Alchemy API connection failed: ' + data.message, 'error');
+                    this.showNotification('Moralis API connection failed: ' + data.message, 'error');
                 }
             } catch (error) {
-                console.error('Failed to test Alchemy API:', error);
+                console.error('Failed to test Moralis API:', error);
                 this.showNotification('Network error while testing API', 'error');
             } finally {
                 this.testing = false;
