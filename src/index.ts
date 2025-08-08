@@ -235,6 +235,21 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    app.post('/api/scheduler/force-stop', (req, res) => {
+      try {
+        schedulerService.forceStop();
+        res.json({
+          success: true,
+          message: 'Scheduler force stopped - all activity halted'
+        });
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     app.post('/api/scheduler/reset-errors', (req, res) => {
       try {
         schedulerService.resetErrorCounter();

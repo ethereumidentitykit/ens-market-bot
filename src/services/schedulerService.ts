@@ -20,9 +20,10 @@ export class SchedulerService {
    * Runs every 5 minutes as requested
    */
   start(): void {
+    // Stop existing job if running
     if (this.syncJob) {
-      logger.warn('Scheduler already running');
-      return;
+      logger.warn('Scheduler already running, stopping existing job first');
+      this.stop();
     }
 
     // Create cron job for every 5 minutes
@@ -52,7 +53,21 @@ export class SchedulerService {
       this.syncJob = null;
       this.isRunning = false;
       logger.info('Scheduler stopped');
+    } else {
+      logger.info('Scheduler was not running');
     }
+  }
+
+  /**
+   * Force stop all scheduler activity
+   */
+  forceStop(): void {
+    this.isRunning = false;
+    if (this.syncJob) {
+      this.syncJob.stop();
+      this.syncJob = null;
+    }
+    logger.info('Scheduler force stopped - all activity halted');
   }
 
   /**
@@ -60,6 +75,7 @@ export class SchedulerService {
    */
   private async runScheduledSync(): Promise<void> {
     if (!this.isRunning) {
+      logger.debug('Skipping scheduled sync - scheduler is stopped');
       return;
     }
 

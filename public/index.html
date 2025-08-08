@@ -300,6 +300,14 @@
                             <i class="fas fa-redo mr-2" :class="{'loading': schedulerLoading}"></i>
                             Reset Errors
                         </button>
+                        <button 
+                            @click="forceStopScheduler()" 
+                            :disabled="schedulerLoading"
+                            class="inline-flex items-center px-3 py-2 border border-red-300 shadow-sm text-sm leading-4 font-medium rounded-md text-red-700 bg-red-50 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50"
+                        >
+                            <i class="fas fa-hand-paper mr-2" :class="{'loading': schedulerLoading}"></i>
+                            Force Stop
+                        </button>
                     </div>
                 </div>
             </div>

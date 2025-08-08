@@ -343,6 +343,32 @@ function dashboard() {
             }
         },
 
+        // Force stop scheduler (emergency stop)
+        async forceStopScheduler() {
+            if (!confirm('Are you sure you want to FORCE STOP the scheduler? This will immediately halt all automated processing.')) {
+                return;
+            }
+
+            this.schedulerLoading = true;
+            
+            try {
+                const response = await fetch('/api/scheduler/force-stop', { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.success) {
+                    await this.loadSchedulerStatus();
+                    this.showNotification(data.message, 'warning');
+                } else {
+                    this.showNotification('Failed to force stop scheduler: ' + (data.error || 'Unknown error'), 'error');
+                }
+            } catch (error) {
+                console.error('Failed to force stop scheduler:', error);
+                this.showNotification('Network error while force stopping scheduler', 'error');
+            } finally {
+                this.schedulerLoading = false;
+            }
+        },
+
         // Twitter Methods
         async loadTwitterConfig() {
             try {
