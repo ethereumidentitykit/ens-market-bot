@@ -210,7 +210,7 @@ export class VercelDatabaseService implements IDatabaseService {
           processed_at as "processedAt", tweet_id as "tweetId", posted
         FROM processed_sales 
         WHERE posted = FALSE 
-        ORDER BY block_number ASC 
+        ORDER BY block_number DESC 
         LIMIT $1
       `, [limit]);
 

@@ -153,8 +153,8 @@ export class SalesProcessingService {
         logger.info('Fetching recent sales from block 22M onwards (Moralis will filter old data)');
       }
 
-      // Fetch recent sales from all contracts with automatic block filtering
-      const recentSales = await this.moralisService.getAllRecentTrades(100, fromBlock);
+      // Fetch recent sales with smaller limit to save compute units (Moralis charges per result)
+      const recentSales = await this.moralisService.getAllRecentTrades(20, fromBlock);
       stats.fetched = recentSales.length;
 
       logger.info(`Fetched ${recentSales.length} recent sales from Moralis (all >= block 22M)`);

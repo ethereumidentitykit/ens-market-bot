@@ -202,7 +202,7 @@ export class DatabaseService implements IDatabaseService {
           processed_at as processedAt, tweet_id as tweetId, posted
         FROM processed_sales 
         WHERE posted = 0 
-        ORDER BY block_number ASC 
+        ORDER BY block_number DESC 
         LIMIT ?
       `, [limit]);
 
