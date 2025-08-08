@@ -138,20 +138,20 @@ export class SalesProcessingService {
     };
 
     try {
-      logger.info('Starting to process new sales from Moralis (block >= 22M)...');
+      logger.info('Starting to process new sales from Moralis (block >= 23M)...');
 
       // Get last processed block to optimize fetching
       const lastProcessedBlock = await this.databaseService.getSystemState('last_processed_block');
       
-      // Moralis will automatically filter to recent blocks (>= 22M)
-      // If we have a processed block that's >= 22M, use it; otherwise start from 22M
-      let fromBlock: string | undefined = undefined;
-      if (lastProcessedBlock && parseInt(lastProcessedBlock) >= 22000000) {
-        fromBlock = lastProcessedBlock;
-        logger.info(`Fetching sales from last processed block: ${fromBlock}`);
-      } else {
-        logger.info('Fetching recent sales from block 22M onwards (Moralis will filter old data)');
-      }
+      // Moralis will automatically filter to recent blocks (>= 23M)
+      // If we have a processed block that's >= 23M, use it; otherwise start from 23M
+                let fromBlock: string | undefined = undefined;
+          if (lastProcessedBlock && parseInt(lastProcessedBlock) >= 23000000) {
+            fromBlock = lastProcessedBlock;
+            logger.info(`Fetching sales from last processed block: ${fromBlock}`);
+          } else {
+            logger.info('Fetching recent sales from block 23M onwards (Moralis will filter old data)');
+          }
 
       // Fetch recent sales with smaller limit to save compute units (Moralis charges per result)
       const recentSales = await this.moralisService.getAllRecentTrades(20, fromBlock);

@@ -75,7 +75,7 @@ export interface EnhancedNFTSale extends NFTSale {
 export class MoralisService {
   private readonly baseUrl: string;
   private readonly apiKey: string;
-  private readonly MIN_BLOCK_NUMBER = 22000000; // Only fetch trades from block 22M onwards
+  private readonly MIN_BLOCK_NUMBER = 23000000; // Only fetch trades from block 23M onwards
 
   constructor() {
     if (!config.moralis?.apiKey) {
