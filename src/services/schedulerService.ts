@@ -1,9 +1,11 @@
 import { CronJob } from 'cron';
 import { SalesProcessingService } from './salesProcessingService';
 import { logger } from '../utils/logger';
+import { IDatabaseService } from '../types';
 
 export class SchedulerService {
   private salesProcessingService: SalesProcessingService;
+  private databaseService: IDatabaseService;
   private syncJob: CronJob | null = null;
   private isRunning: boolean = false;
   private lastRunTime: Date | null = null;
@@ -11,13 +13,32 @@ export class SchedulerService {
   private consecutiveErrors: number = 0;
   private maxConsecutiveErrors: number = 5;
 
-  constructor(salesProcessingService: SalesProcessingService) {
+  constructor(salesProcessingService: SalesProcessingService, databaseService: IDatabaseService) {
     this.salesProcessingService = salesProcessingService;
+    this.databaseService = databaseService;
+  }
+
+  /**
+   * Initialize scheduler state from database
+   */
+  async initializeFromDatabase(): Promise<void> {
+    try {
+      const savedState = await this.databaseService.getSystemState('scheduler_enabled');
+      if (savedState === 'true') {
+        logger.info('Scheduler was enabled, starting automatically...');
+        this.start();
+      } else {
+        logger.info('Scheduler is disabled by default - use dashboard to start');
+      }
+    } catch (error: any) {
+      logger.warn('Could not load scheduler state from database:', error.message);
+      logger.info('Scheduler will remain stopped until manually started');
+    }
   }
 
   /**
    * Start the automated scheduling
-   * Runs every 5 minutes as requested
+   * Runs every 10 minutes to reduce API usage
    */
   start(): void {
     // Stop existing job if running
@@ -26,9 +47,9 @@ export class SchedulerService {
       this.stop();
     }
 
-    // Create cron job for every 5 minutes
+    // Create cron job for every 10 minutes
     this.syncJob = new CronJob(
-      '0 */5 * * * *', // Every 5 minutes at :00 seconds
+      '0 */10 * * * *', // Every 10 minutes at :00 seconds
       () => {
         this.runScheduledSync();
       },
@@ -40,7 +61,10 @@ export class SchedulerService {
     this.syncJob.start();
     this.isRunning = true;
     
-    logger.info('Scheduler started - will run every 5 minutes');
+    // Save enabled state to database
+    this.saveSchedulerState(true);
+    
+    logger.info('Scheduler started - will run every 10 minutes');
     logger.info(`Next run scheduled for: ${this.syncJob.nextDate().toString()}`);
   }
 
@@ -52,6 +76,10 @@ export class SchedulerService {
       this.syncJob.stop();
       this.syncJob = null;
       this.isRunning = false;
+      
+      // Save disabled state to database
+      this.saveSchedulerState(false);
+      
       logger.info('Scheduler stopped');
     } else {
       logger.info('Scheduler was not running');
@@ -67,7 +95,23 @@ export class SchedulerService {
       this.syncJob.stop();
       this.syncJob = null;
     }
+    
+    // Save disabled state to database
+    this.saveSchedulerState(false);
+    
     logger.info('Scheduler force stopped - all activity halted');
+  }
+
+  /**
+   * Save scheduler enabled/disabled state to database
+   */
+  private async saveSchedulerState(enabled: boolean): Promise<void> {
+    try {
+      await this.databaseService.setSystemState('scheduler_enabled', enabled.toString());
+      logger.debug(`Scheduler state saved: ${enabled ? 'enabled' : 'disabled'}`);
+    } catch (error: any) {
+      logger.warn('Could not save scheduler state to database:', error.message);
+    }
   }
 
   /**

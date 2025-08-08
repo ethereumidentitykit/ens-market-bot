@@ -27,7 +27,7 @@ async function startApplication(): Promise<void> {
       : new DatabaseService();
     
     const salesProcessingService = new SalesProcessingService(moralisService, databaseService);
-    const schedulerService = new SchedulerService(salesProcessingService);
+    const schedulerService = new SchedulerService(salesProcessingService, databaseService);
     const twitterService = new TwitterService();
     const tweetFormatter = new TweetFormatter();
     const rateLimitService = new RateLimitService(databaseService);
@@ -36,9 +36,9 @@ async function startApplication(): Promise<void> {
     await databaseService.initialize();
     logger.info('Database initialized successfully');
 
-    // Start scheduler
-    schedulerService.start();
-    logger.info('Automated scheduler started');
+    // Initialize scheduler state from database (don't auto-start)
+    await schedulerService.initializeFromDatabase();
+    logger.info('Scheduler initialized (use dashboard to start if needed)');
 
     // Initialize Express app
     const app = express();
