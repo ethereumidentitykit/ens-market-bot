@@ -23,6 +23,7 @@ function dashboard() {
         imageData: null,
         imageGenerationTime: null,
         imageGeneratedAt: null,
+        testImageToken: '',
 
         // Database management state
         databaseResetting: false,
@@ -485,8 +486,13 @@ function dashboard() {
 
             try {
                 const startTime = Date.now();
+                const body = this.testImageToken.trim() ? { tokenPrefix: this.testImageToken.trim() } : {};
                 const response = await fetch('/api/image/generate-test', {
-                    method: 'POST'
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(body)
                 });
 
                 const result = await response.json();

@@ -11,6 +11,7 @@ import { SchedulerService } from './services/schedulerService';
 import { TwitterService } from './services/twitterService';
 import { TweetFormatter } from './services/tweetFormatter';
 import { RateLimitService } from './services/rateLimitService';
+import { EthIdentityService } from './services/ethIdentityService';
 
 async function startApplication(): Promise<void> {
   try {
@@ -31,6 +32,7 @@ async function startApplication(): Promise<void> {
     const twitterService = new TwitterService();
     const tweetFormatter = new TweetFormatter();
     const rateLimitService = new RateLimitService(databaseService);
+    const ethIdentityService = new EthIdentityService();
 
     // Initialize database
     await databaseService.initialize();
@@ -42,6 +44,10 @@ async function startApplication(): Promise<void> {
 
     // Initialize Express app
     const app = express();
+
+    // Make services available to controllers
+    app.locals.databaseService = databaseService;
+    app.locals.ethIdentityService = ethIdentityService;
 
     // Middleware
     app.use(express.json());

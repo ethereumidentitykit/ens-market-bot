@@ -1,7 +1,17 @@
-import { createCanvas, Canvas, CanvasRenderingContext2D, loadImage } from 'canvas';
+import { createCanvas, Canvas, CanvasRenderingContext2D, loadImage, registerFont } from 'canvas';
 import * as fs from 'fs';
 import * as path from 'path';
 import axios from 'axios';
+import { logger } from '../utils/logger';
+import { EmojiService, EmojiInfo } from './emojiService';
+
+// Register emoji font for better emoji support
+try {
+  registerFont('/System/Library/Fonts/Apple Color Emoji.ttc', { family: 'Apple Color Emoji' });
+  logger.info('Successfully registered Apple Color Emoji font');
+} catch (error) {
+  logger.warn('Failed to register Apple Color Emoji font:', error);
+}
 
 export interface MockImageData {
   // Price information (from sales pipeline)
@@ -10,6 +20,7 @@ export interface MockImageData {
   
   // ENS name (from Moralis API)
   ensName: string;         // e.g., "name.eth"
+  nftImageUrl?: string;    // NFT image URL from Moralis API
   
   // Buyer information (from EthIdentityKit)
   buyerAddress: string;    // e.g., "0x1234..."
@@ -80,7 +91,7 @@ export class ImageGenerationService {
 
     // Draw the main template layout
     this.drawPriceSection(ctx, data.priceEth, data.priceUsd);
-    await this.drawENSImage(ctx, data.ensName);
+    await this.drawENSImage(ctx, data.ensName, data.nftImageUrl);
     await this.drawBuyerSellerSection(ctx, data.sellerEns || 'seller', data.buyerEns || 'buyer', data.sellerAvatar, data.buyerAvatar);
 
     return canvas.toBuffer('image/png');
@@ -125,7 +136,7 @@ export class ImageGenerationService {
   /**
    * Draw ENS image with rounded corners on the right side
    */
-  private static async drawENSImage(ctx: CanvasRenderingContext2D, ensName: string): Promise<void> {
+  private static async drawENSImage(ctx: CanvasRenderingContext2D, ensName: string, nftImageUrl?: string): Promise<void> {
     // SVG coordinates: x="552" y="48" width="400" height="400" rx="30"
     const imageX = 552;
     const imageY = 48;
@@ -133,41 +144,71 @@ export class ImageGenerationService {
     const borderRadius = 30;
 
     try {
-      // Try to load the placeholder image you provided
-      const placeholderImagePath = path.join(process.cwd(), 'data', 'nameplaceholder.png');
-      
-      if (fs.existsSync(placeholderImagePath)) {
-        // Load the placeholder image
-        const placeholderImage = await loadImage(placeholderImagePath);
+      let imageLoaded = false;
+
+      // First priority: Try to load the real NFT image from URL
+      if (nftImageUrl) {
+        try {
+          logger.info(`Loading NFT image from URL: ${nftImageUrl}`);
+          const nftImage = await this.loadImageFromUrl(nftImageUrl);
+          
+          // Draw rounded NFT image
+          ctx.save();
+          ctx.beginPath();
+          this.createRoundedRectPath(ctx, imageX, imageY, imageSize, imageSize, borderRadius);
+          ctx.clip();
+          ctx.drawImage(nftImage, imageX, imageY, imageSize, imageSize);
+          ctx.restore();
+          
+          logger.info('Successfully loaded and drew NFT image');
+          imageLoaded = true;
+        } catch (error) {
+          logger.warn(`Failed to load NFT image from ${nftImageUrl}:`, error);
+        }
+      }
+
+      // Second priority: Try to load the placeholder image if NFT image failed
+      if (!imageLoaded) {
+        const placeholderImagePath = path.join(process.cwd(), 'assets', 'nameplaceholder.png');
         
-        // Draw rounded image
-        ctx.save();
-        ctx.beginPath();
-        this.createRoundedRectPath(ctx, imageX, imageY, imageSize, imageSize, borderRadius);
-        ctx.clip();
-        ctx.drawImage(placeholderImage, imageX, imageY, imageSize, imageSize);
-        ctx.restore();
-      } else {
-        // Fallback to blue pill if placeholder not found
+        if (fs.existsSync(placeholderImagePath)) {
+          logger.info('Loading placeholder image as fallback');
+          const placeholderImage = await loadImage(placeholderImagePath);
+          
+          // Draw rounded placeholder image
+          ctx.save();
+          ctx.beginPath();
+          this.createRoundedRectPath(ctx, imageX, imageY, imageSize, imageSize, borderRadius);
+          ctx.clip();
+          ctx.drawImage(placeholderImage, imageX, imageY, imageSize, imageSize);
+          ctx.restore();
+          
+          imageLoaded = true;
+        }
+      }
+
+      // Final fallback: Draw blue pill with text
+      if (!imageLoaded) {
+        logger.info('Using blue pill fallback for ENS image');
         ctx.fillStyle = this.COLORS.ensPillBackground;
         this.drawRoundedRect(ctx, imageX, imageY, imageSize, imageSize, borderRadius);
         
-        // Don't draw text since the image should include the name already
         ctx.fillStyle = this.COLORS.primaryText;
         ctx.font = 'bold 48px Arial';
         ctx.textAlign = 'center';
-        ctx.fillText(ensName, imageX + imageSize / 2, imageY + imageSize / 2 + 16);
+        await this.renderTextWithEmojis(ctx, ensName, imageX + imageSize / 2, imageY + imageSize / 2 + 16, 48);
       }
+
     } catch (error) {
-      console.warn('Failed to load ENS placeholder image:', error);
-      // Fallback to blue pill
+      logger.warn('Failed to load any ENS image, using blue pill fallback:', error);
+      // Final fallback to blue pill
       ctx.fillStyle = this.COLORS.ensPillBackground;
       this.drawRoundedRect(ctx, imageX, imageY, imageSize, imageSize, borderRadius);
       
       ctx.fillStyle = this.COLORS.primaryText;
       ctx.font = 'bold 48px Arial';
       ctx.textAlign = 'center';
-      ctx.fillText(ensName, imageX + imageSize / 2, imageY + imageSize / 2 + 16);
+      await this.renderTextWithEmojis(ctx, ensName, imageX + imageSize / 2, imageY + imageSize / 2 + 16, 48);
     }
   }
 
@@ -213,14 +254,13 @@ export class ImageGenerationService {
 
     // Seller text positioning
     ctx.fillStyle = this.COLORS.primaryText;
-    ctx.font = 'bold 42px Arial'; // Larger font to match SVG proportions
+    ctx.font = 'bold 42px Arial'; // Seller text
     ctx.textAlign = 'left';
 
     const sellerTextX = sellerAvatarX + avatarSize + textPadding;
     const sellerTextY = pillY + pillHeight / 2 + 14; // Centered vertically
     const sellerMaxTextWidth = pillWidth - avatarSize - avatarPadding - textPadding - 40;
-    const truncatedSellerName = this.truncateText(ctx, sellerEns, sellerMaxTextWidth);
-    ctx.fillText(truncatedSellerName, sellerTextX, sellerTextY);
+    await this.renderTextWithEmojis(ctx, sellerEns, sellerTextX, sellerTextY, 40, sellerMaxTextWidth);
 
     // Draw buyer avatar and text
     // Avatar position from SVG: x="555" y="522" 
@@ -229,11 +269,11 @@ export class ImageGenerationService {
     await this.drawAvatar(ctx, buyerAvatarUrl, buyerAvatarX, buyerAvatarY, avatarSize);
 
     // Buyer text positioning
+    ctx.font = 'bold 42px Arial'; // Buyer text
     const buyerTextX = buyerAvatarX + avatarSize + textPadding;
     const buyerTextY = pillY + pillHeight / 2 + 14; // Centered vertically
     const buyerMaxTextWidth = pillWidth - avatarSize - avatarPadding - textPadding - 40;
-    const truncatedBuyerName = this.truncateText(ctx, buyerEns, buyerMaxTextWidth);
-    ctx.fillText(truncatedBuyerName, buyerTextX, buyerTextY);
+    await this.renderTextWithEmojis(ctx, buyerEns, buyerTextX, buyerTextY, 40, buyerMaxTextWidth);
 
     // Draw arrow between pills
     // From SVG path: arrow positioned around x=500-530, y=572
@@ -242,6 +282,8 @@ export class ImageGenerationService {
     const arrowY = pillY + pillHeight / 2;
     this.drawArrow(ctx, arrowStartX, arrowY, arrowEndX, arrowY);
   }
+
+
 
   /**
    * Truncate text to fit within specified width
@@ -309,26 +351,55 @@ export class ImageGenerationService {
         const avatarImage = await this.loadImageFromUrl(avatarUrl);
         ctx.drawImage(avatarImage, x, y, size, size);
       } else {
-        // Draw default avatar (gray circle with initials)
+        // Try to load user placeholder image
+        const userPlaceholderPath = path.join(process.cwd(), 'assets', 'userplaceholder.png');
+        
+        if (fs.existsSync(userPlaceholderPath)) {
+          logger.info('Loading user placeholder for missing avatar');
+          const placeholderImage = await loadImage(userPlaceholderPath);
+          ctx.drawImage(placeholderImage, x, y, size, size);
+        } else {
+          // Final fallback: Draw default avatar (gray circle with icon)
+          ctx.fillStyle = '#666666';
+          ctx.fillRect(x, y, size, size);
+          
+          // Add default avatar icon (simple circle)
+          ctx.fillStyle = '#999999';
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, radius * 0.6, 0, 2 * Math.PI);
+          ctx.fill();
+        }
+      }
+    } catch (error) {
+      logger.warn('Failed to load avatar, using fallback:', error instanceof Error ? error.message : String(error));
+      
+      try {
+        // Try to load user placeholder as fallback
+        const userPlaceholderPath = path.join(process.cwd(), 'assets', 'userplaceholder.png');
+        
+        if (fs.existsSync(userPlaceholderPath)) {
+          const placeholderImage = await loadImage(userPlaceholderPath);
+          ctx.drawImage(placeholderImage, x, y, size, size);
+        } else {
+          // Final fallback: Draw default avatar (gray circle with icon)
+          ctx.fillStyle = '#666666';
+          ctx.fillRect(x, y, size, size);
+          
+          ctx.fillStyle = '#999999';
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, radius * 0.6, 0, 2 * Math.PI);
+          ctx.fill();
+        }
+      } catch (fallbackError) {
+        // If even the placeholder fails, draw simple default
         ctx.fillStyle = '#666666';
         ctx.fillRect(x, y, size, size);
         
-        // Add default avatar icon (simple circle)
         ctx.fillStyle = '#999999';
         ctx.beginPath();
         ctx.arc(centerX, centerY, radius * 0.6, 0, 2 * Math.PI);
         ctx.fill();
       }
-    } catch (error) {
-      console.warn('Failed to load avatar, using default:', error instanceof Error ? error.message : String(error));
-      // Draw default avatar on error
-      ctx.fillStyle = '#666666';
-      ctx.fillRect(x, y, size, size);
-      
-      ctx.fillStyle = '#999999';
-      ctx.beginPath();
-      ctx.arc(centerX, centerY, radius * 0.6, 0, 2 * Math.PI);
-      ctx.fill();
     }
 
     ctx.restore();
@@ -364,19 +435,38 @@ export class ImageGenerationService {
   }
 
   /**
-   * Create a rounded rectangle path (for clipping)
+   * Create a rounded rectangle path (for clipping) - optimized for perfect capsules
    */
   private static createRoundedRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number): void {
-    ctx.moveTo(x + radius, y);
-    ctx.lineTo(x + width - radius, y);
-    ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
-    ctx.lineTo(x + width, y + height - radius);
-    ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
-    ctx.lineTo(x + radius, y + height);
-    ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
-    ctx.lineTo(x, y + radius);
-    ctx.quadraticCurveTo(x, y, x + radius, y);
-    ctx.closePath();
+    // For perfect capsules (when radius = height/2), use arc() for semicircular ends
+    if (radius >= height / 2) {
+      const actualRadius = height / 2;
+      const centerY = y + actualRadius;
+      
+      // Start at top-left of straight section
+      ctx.moveTo(x + actualRadius, y);
+      // Top line
+      ctx.lineTo(x + width - actualRadius, y);
+      // Right semicircle
+      ctx.arc(x + width - actualRadius, centerY, actualRadius, -Math.PI / 2, Math.PI / 2);
+      // Bottom line
+      ctx.lineTo(x + actualRadius, y + height);
+      // Left semicircle  
+      ctx.arc(x + actualRadius, centerY, actualRadius, Math.PI / 2, -Math.PI / 2);
+      ctx.closePath();
+    } else {
+      // Standard rounded rectangle for smaller radii
+      ctx.moveTo(x + radius, y);
+      ctx.lineTo(x + width - radius, y);
+      ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+      ctx.lineTo(x + width, y + height - radius);
+      ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+      ctx.lineTo(x + radius, y + height);
+      ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+      ctx.lineTo(x, y + radius);
+      ctx.quadraticCurveTo(x, y, x + radius, y);
+      ctx.closePath();
+    }
   }
 
   /**
@@ -430,6 +520,7 @@ export class ImageGenerationService {
       priceEth: 5.51,
       priceUsd: 22560.01,
       ensName: 'name.eth', // Back to simple name for blue pill display
+      nftImageUrl: undefined, // No NFT image URL for mock data, will use placeholder
       buyerAddress: '0x1234567890abcdef1234567890abcdef12345678',
       buyerEns: 'james.eth',
       buyerAvatar: 'https://metadata.ens.domains/mainnet/avatar/vitalik.eth',
@@ -450,6 +541,7 @@ export class ImageGenerationService {
         priceEth: 5.51,
         priceUsd: 22560.01,
         ensName: 'name.eth',
+        nftImageUrl: undefined,
         buyerAddress: '0x1234567890abcdef1234567890abcdef12345678',
         buyerEns: 'james.eth',
         buyerAvatar: 'https://metadata.ens.domains/mainnet/avatar/vitalik.eth',
@@ -463,6 +555,7 @@ export class ImageGenerationService {
         priceEth: 12.25,
         priceUsd: 50120.75,
         ensName: 'premium.eth',
+        nftImageUrl: undefined,
         buyerAddress: '0x1234567890abcdef1234567890abcdef12345678',
         buyerEns: 'collector.eth',
         buyerAvatar: undefined, // No avatar - should show default
@@ -476,6 +569,7 @@ export class ImageGenerationService {
         priceEth: 0.75,
         priceUsd: 3067.50,
         ensName: 'test.eth',
+        nftImageUrl: undefined,
         buyerAddress: '0x1234567890abcdef1234567890abcdef12345678',
         buyerEns: 'buyer.eth',
         buyerAvatar: 'https://invalid-url-should-fallback.com/avatar.png', // Invalid URL - should fallback
@@ -486,5 +580,120 @@ export class ImageGenerationService {
         timestamp: new Date()
       }
     ];
+  }
+
+  /**
+   * Load and render an emoji SVG at specified position and size
+   */
+  private static async loadEmojiSvg(svgPath: string, size: number): Promise<any | null> {
+    try {
+      if (!fs.existsSync(svgPath)) {
+        logger.warn(`Emoji SVG not found: ${svgPath}`);
+        return null;
+      }
+
+      // For now, we'll use loadImage which should work with SVG files
+      // node-canvas can load SVG files directly
+      const image = await loadImage(svgPath);
+      return image;
+    } catch (error) {
+      logger.warn(`Failed to load emoji SVG: ${svgPath}`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Render text with emoji support - replaces emojis with SVG images
+   */
+  private static async renderTextWithEmojis(
+    ctx: CanvasRenderingContext2D,
+    text: string,
+    x: number,
+    y: number,
+    fontSize: number,
+    maxWidth?: number
+  ): Promise<void> {
+    // Detect emojis in the text
+    const emojis = EmojiService.detectKnownEmojis(text);
+    
+    if (emojis.length === 0) {
+      // No emojis, render normally
+      if (maxWidth) {
+        const truncatedText = this.truncateText(ctx, text, maxWidth);
+        ctx.fillText(truncatedText, x, y);
+      } else {
+        ctx.fillText(text, x, y);
+      }
+      return;
+    }
+
+    // For simplicity, if we need truncation and have emojis, 
+    // we'll just try to render and see if it fits
+    let currentX = x;
+    let lastPosition = 0;
+    const emojiSize = fontSize * 0.9; // Make emoji slightly smaller than font
+    
+    for (const emojiInfo of emojis) {
+      // Check if we're past maxWidth
+      if (maxWidth && (currentX - x) > maxWidth) {
+        break;
+      }
+      
+      // Render text before this emoji
+      if (emojiInfo.position > lastPosition) {
+        const textBefore = text.substring(lastPosition, emojiInfo.position);
+        if (textBefore.trim()) {
+          // Check if text would fit
+          const textWidth = ctx.measureText(textBefore).width;
+          if (maxWidth && (currentX - x + textWidth) > maxWidth) {
+            // Truncate this text segment
+            const truncated = this.truncateText(ctx, textBefore, maxWidth - (currentX - x));
+            ctx.fillText(truncated, currentX, y);
+            return; // Stop rendering here
+          }
+          ctx.fillText(textBefore, currentX, y);
+          currentX += textWidth;
+        }
+      }
+      
+      // Check if emoji would fit
+      if (maxWidth && (currentX - x + emojiSize) > maxWidth) {
+        break;
+      }
+      
+      // Render the emoji as SVG
+      const emojiImage = await this.loadEmojiSvg(emojiInfo.svgPath, emojiSize);
+      if (emojiImage) {
+        // Position emoji to align with text baseline
+        const emojiY = y - emojiSize * 0.75; // Adjust for baseline alignment
+        ctx.drawImage(emojiImage, currentX, emojiY, emojiSize, emojiSize);
+        currentX += emojiSize + 2; // Small spacing after emoji
+      } else {
+        // Fallback: render emoji as text (might not work well, but better than nothing)
+        const emojiWidth = ctx.measureText(emojiInfo.emoji).width;
+        if (!maxWidth || (currentX - x + emojiWidth) <= maxWidth) {
+          ctx.fillText(emojiInfo.emoji, currentX, y);
+          currentX += emojiWidth;
+        }
+      }
+      
+      lastPosition = emojiInfo.position + emojiInfo.emoji.length;
+    }
+    
+    // Render remaining text after last emoji
+    if (lastPosition < text.length) {
+      const textAfter = text.substring(lastPosition);
+      if (textAfter.trim()) {
+        if (maxWidth) {
+          const remainingWidth = maxWidth - (currentX - x);
+          if (remainingWidth > 20) { // Only render if we have reasonable space
+            const truncated = this.truncateText(ctx, textAfter, remainingWidth);
+            ctx.fillText(truncated, currentX, y);
+          }
+        } else {
+          ctx.fillText(textAfter, currentX, y);
+        }
+      }
+    }
   }
 }

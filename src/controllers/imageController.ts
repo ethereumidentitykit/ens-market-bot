@@ -1,44 +1,98 @@
 import { Request, Response } from 'express';
 import { ImageGenerationService } from '../services/imageGenerationService';
+import { RealDataImageService } from '../services/realDataImageService';
+import { EthIdentityService } from '../services/ethIdentityService';
 import { logger } from '../utils/logger';
 import * as path from 'path';
 
 export class ImageController {
   /**
-   * Generate a test image with mock data
+   * Generate a test image using real data from database
    */
   public static async generateTestImage(req: Request, res: Response): Promise<void> {
     try {
-      logger.info('Generating test image with mock data');
+      const { tokenPrefix } = req.body;
+      logger.info('Generating test image with real database data', { tokenPrefix });
       
-      // Get mock data
-      const mockData = ImageGenerationService.getMockData();
+      // Get database service and EthIdentityService from req.app.locals (set up in main app)
+      const { databaseService, ethIdentityService } = req.app.locals;
       
-      // Generate image
+      if (!databaseService || !ethIdentityService) {
+        throw new Error('Required services not available');
+      }
+      
+      // Create RealDataImageService instance
+      const realDataService = new RealDataImageService(databaseService, ethIdentityService);
+      
+      // Generate image using real data
       const startTime = Date.now();
-      const imageBuffer = await ImageGenerationService.generateSaleImage(mockData);
+      const result = await realDataService.generateTestImageFromDatabase(tokenPrefix);
+      
+      if (!result) {
+        // Fallback to mock data if no real data available
+        const message = tokenPrefix 
+          ? `No sale found with token prefix '${tokenPrefix}', falling back to mock data`
+          : 'No real data available, falling back to mock data';
+        logger.warn(message);
+        const mockData = ImageGenerationService.getMockData();
+        const imageBuffer = await ImageGenerationService.generateSaleImage(mockData);
+        const endTime = Date.now();
+        
+        const filename = `test-image-mock-${Date.now()}.png`;
+        await ImageGenerationService.saveImageToFile(imageBuffer, filename);
+        const imageUrl = `/generated-images/${filename}`;
+        
+        res.json({
+          success: true,
+          imageUrl,
+          dataSource: 'mock',
+          tokenPrefix: tokenPrefix || null,
+          fallbackReason: tokenPrefix ? `Token prefix '${tokenPrefix}' not found` : 'No database data available',
+          mockData: {
+            priceEth: mockData.priceEth,
+            priceUsd: mockData.priceUsd,
+            ensName: mockData.ensName,
+            buyerEns: mockData.buyerEns,
+            sellerEns: mockData.sellerEns,
+            buyerAvatar: mockData.buyerAvatar ? 'Loaded' : 'Default',
+            sellerAvatar: mockData.sellerAvatar ? 'Loaded' : 'Default'
+          },
+          generationTime: endTime - startTime,
+          dimensions: '1000x666px',
+          filename
+        });
+        return;
+      }
+      
+      const { imageBuffer, imageData } = result;
       const endTime = Date.now();
       
       // Save image with timestamp
-      const filename = `test-image-${Date.now()}.png`;
-      const imagePath = await ImageGenerationService.saveImageToFile(imageBuffer, filename);
+      const filename = `test-image-real-${Date.now()}.png`;
+      await ImageGenerationService.saveImageToFile(imageBuffer, filename);
       
       // Create URL for the generated image
       const imageUrl = `/generated-images/${filename}`;
       
-      logger.info(`Test image generated successfully: ${filename} (${endTime - startTime}ms)`);
+      logger.info(`Test image generated successfully from real data: ${filename} (${endTime - startTime}ms)`);
       
       res.json({
         success: true,
         imageUrl,
-        mockData: {
-          priceEth: mockData.priceEth,
-          priceUsd: mockData.priceUsd,
-          ensName: mockData.ensName,
-          buyerEns: mockData.buyerEns,
-          sellerEns: mockData.sellerEns,
-          buyerAvatar: mockData.buyerAvatar ? 'Loaded' : 'Default',
-          sellerAvatar: mockData.sellerAvatar ? 'Loaded' : 'Default'
+        dataSource: 'database',
+        tokenPrefix: tokenPrefix || null,
+        selectionMethod: tokenPrefix ? 'token-prefix' : 'random',
+        realData: {
+          priceEth: imageData.priceEth,
+          priceUsd: imageData.priceUsd,
+          ensName: imageData.ensName,
+          buyerEns: imageData.buyerEns,
+          sellerEns: imageData.sellerEns,
+          buyerAvatar: imageData.buyerAvatar ? 'Loaded' : 'Default',
+          sellerAvatar: imageData.sellerAvatar ? 'Loaded' : 'Default',
+          nftImageUrl: imageData.nftImageUrl ? 'Available' : 'Not available',
+          transactionHash: imageData.transactionHash,
+          saleId: imageData.saleId
         },
         generationTime: endTime - startTime,
         dimensions: '1000x666px',

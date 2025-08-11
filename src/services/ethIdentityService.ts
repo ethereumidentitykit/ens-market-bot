@@ -27,6 +27,14 @@ export interface ResolvedName {
   hasEns: boolean;
 }
 
+export interface ResolvedProfile {
+  address: string;
+  displayName: string;
+  ensName?: string;
+  avatar?: string;
+  hasEns: boolean;
+}
+
 /**
  * Service for resolving Ethereum addresses to ENS names using EthIdentityKit API
  * API Documentation: https://ethidentitykit.com/docs/api/users/account
@@ -96,6 +104,56 @@ export class EthIdentityService {
       setTimeout(() => {
         this.cache.delete(normalizedAddress);
       }, this.cacheTimeout);
+      
+      return fallback;
+    }
+  }
+
+  /**
+   * Get full profile information including avatar for an address
+   */
+  async getProfile(address: string): Promise<ResolvedProfile> {
+    const normalizedAddress = address.toLowerCase();
+    
+    try {
+      logger.debug(`Getting profile for address: ${address}`);
+      
+      const response = await axios.get<EthIdentityAccount>(
+        `${this.baseUrl}/users/${address}/account`,
+        {
+          timeout: 10000, // 10 second timeout
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'ENS-Sales-Bot/1.0'
+          }
+        }
+      );
+
+      const account = response.data;
+      
+      // Get avatar from ENS records
+      const avatar = account.ens?.avatar || account.ens?.records?.avatar;
+      
+      const profile: ResolvedProfile = {
+        address: normalizedAddress,
+        displayName: this.getDisplayName(account),
+        ensName: account.ens?.name,
+        avatar: avatar,
+        hasEns: !!account.ens?.name
+      };
+
+      logger.debug(`Got profile ${address} -> ${profile.displayName} (ENS: ${profile.hasEns}, Avatar: ${!!profile.avatar})`);
+      return profile;
+
+    } catch (error: any) {
+      logger.warn(`Failed to get profile for address ${address}:`, error.message);
+      
+      // Return fallback with shortened address
+      const fallback: ResolvedProfile = {
+        address: normalizedAddress,
+        displayName: this.shortenAddress(address),
+        hasEns: false
+      };
       
       return fallback;
     }
