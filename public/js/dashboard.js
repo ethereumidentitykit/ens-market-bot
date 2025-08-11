@@ -18,6 +18,12 @@ function dashboard() {
         twitterMessage: '',
         twitterMessageType: 'info',
 
+        // Image generation state
+        generatedImage: null,
+        imageData: null,
+        imageGenerationTime: null,
+        imageGeneratedAt: null,
+
         // Database management state
         databaseResetting: false,
         databaseResetMessage: '',
@@ -469,6 +475,52 @@ function dashboard() {
                 this.showTwitterMessage('Failed to refresh Twitter data', 'error');
             } finally {
                 this.loading = false;
+            }
+        },
+
+        // Image Generation Functions
+        async generateTestImage() {
+            this.loading = true;
+            this.clearTwitterMessage();
+
+            try {
+                const startTime = Date.now();
+                const response = await fetch('/api/image/generate-test', {
+                    method: 'POST'
+                });
+
+                const result = await response.json();
+                const endTime = Date.now();
+
+                if (response.ok) {
+                    this.generatedImage = result.imageUrl;
+                    this.imageData = result.mockData;
+                    this.imageGenerationTime = endTime - startTime;
+                    this.imageGeneratedAt = new Date().toLocaleString();
+                    
+                    this.showTwitterMessage(
+                        `Test image generated successfully in ${this.imageGenerationTime}ms`, 
+                        'success'
+                    );
+                } else {
+                    throw new Error(result.error || 'Failed to generate image');
+                }
+            } catch (error) {
+                console.error('Failed to generate test image:', error);
+                this.showTwitterMessage(`Failed to generate test image: ${error.message}`, 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        downloadGeneratedImage() {
+            if (this.generatedImage) {
+                const link = document.createElement('a');
+                link.href = this.generatedImage;
+                link.download = `ens-sale-test-${Date.now()}.png`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
             }
         },
 

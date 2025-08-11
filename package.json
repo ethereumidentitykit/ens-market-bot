@@ -33,6 +33,7 @@
   "dependencies": {
     "@types/pg": "^8.15.5",
     "axios": "^1.11.0",
+    "canvas": "^3.1.2",
     "cron": "^4.3.3",
     "crypto-js": "^4.2.0",
     "dotenv": "^17.2.1",

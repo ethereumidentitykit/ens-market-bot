@@ -582,6 +582,20 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    // Image Generation API endpoints
+    app.post('/api/image/generate-test', async (req, res) => {
+      const { ImageController } = await import('./controllers/imageController');
+      await ImageController.generateTestImage(req, res);
+    });
+
+    app.post('/api/image/generate-custom', async (req, res) => {
+      const { ImageController } = await import('./controllers/imageController');
+      await ImageController.generateCustomImage(req, res);
+    });
+
+    // Serve generated images
+    app.use('/generated-images', express.static(path.join(__dirname, '../data')));
+
     app.get('/api/database/sales', async (req, res) => {
       try {
         const page = parseInt(req.query.page as string) || 1;
