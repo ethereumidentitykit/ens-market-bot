@@ -1,5 +1,6 @@
 import { logger } from '../utils/logger';
 import { MockImageData } from '../types/imageTypes';
+import { IDatabaseService } from '../types';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -334,9 +335,22 @@ export class PuppeteerImageService {
   }
 
   /**
-   * Save image buffer to file (same as original service)
+   * Save image buffer to database or file (environment-aware)
    */
-  public static async saveImageToFile(buffer: Buffer, filename: string): Promise<string> {
+  public static async saveImageToFile(buffer: Buffer, filename: string, databaseService?: IDatabaseService): Promise<string> {
+    // In serverless environments (Vercel), store in database
+    if (databaseService && (process.env.VERCEL === '1' || process.env.NODE_ENV === 'production')) {
+      try {
+        await databaseService.storeGeneratedImage(filename, buffer);
+        logger.info(`Image stored in database: ${filename}`);
+        return `/api/images/${filename}`;
+      } catch (error) {
+        logger.error('Failed to store image in database, falling back to local file:', error);
+        // Fall through to file storage as backup
+      }
+    }
+    
+    // Local development: store as file
     const dataDir = path.join(process.cwd(), 'data');
     
     // Ensure data directory exists

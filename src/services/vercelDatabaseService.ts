@@ -101,6 +101,17 @@ export class VercelDatabaseService implements IDatabaseService {
         )
       `);
 
+      // Create generated_images table for storing images in serverless environment
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS generated_images (
+          id SERIAL PRIMARY KEY,
+          filename VARCHAR(255) NOT NULL UNIQUE,
+          image_data BYTEA NOT NULL,
+          content_type VARCHAR(50) NOT NULL DEFAULT 'image/png',
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
       // Create index for rate limiting queries
       await this.pool.query(`
         CREATE INDEX IF NOT EXISTS idx_twitter_posts_posted_at ON twitter_posts(posted_at);
@@ -445,6 +456,72 @@ export class VercelDatabaseService implements IDatabaseService {
     } catch (error: any) {
       logger.error('Failed to reset database:', error.message);
       throw error;
+    }
+  }
+
+  /**
+   * Store generated image in database
+   */
+  async storeGeneratedImage(filename: string, imageBuffer: Buffer, contentType: string = 'image/png'): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+    
+    try {
+      await this.pool.query(
+        'INSERT INTO generated_images (filename, image_data, content_type) VALUES ($1, $2, $3) ON CONFLICT (filename) DO UPDATE SET image_data = $2, content_type = $3, created_at = CURRENT_TIMESTAMP',
+        [filename, imageBuffer, contentType]
+      );
+      logger.info(`Stored generated image in database: ${filename}`);
+    } catch (error: any) {
+      logger.error('Failed to store generated image:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Retrieve generated image from database
+   */
+  async getGeneratedImage(filename: string): Promise<{ buffer: Buffer; contentType: string } | null> {
+    if (!this.pool) throw new Error('Database not initialized');
+    
+    try {
+      const result = await this.pool.query(
+        'SELECT image_data, content_type FROM generated_images WHERE filename = $1',
+        [filename]
+      );
+      
+      if (result.rows.length > 0) {
+        const row = result.rows[0];
+        return {
+          buffer: row.image_data,
+          contentType: row.content_type
+        };
+      }
+      
+      return null;
+    } catch (error: any) {
+      logger.error('Failed to retrieve generated image:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Clean up old generated images (keep only last 100)
+   */
+  async cleanupOldImages(): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+    
+    try {
+      await this.pool.query(`
+        DELETE FROM generated_images 
+        WHERE id NOT IN (
+          SELECT id FROM generated_images 
+          ORDER BY created_at DESC 
+          LIMIT 100
+        )
+      `);
+      logger.info('Cleaned up old generated images');
+    } catch (error: any) {
+      logger.error('Failed to cleanup old images:', error.message);
     }
   }
 

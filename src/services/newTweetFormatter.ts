@@ -67,8 +67,14 @@ export class NewTweetFormatter {
           
           // Save image for preview
           const filename = `tweet-image-${sale.id}-${Date.now()}.png`;
-          await PuppeteerImageService.saveImageToFile(imageBuffer, filename);
-          imageUrl = `/generated-images/${filename}`;
+          const savedPath = await PuppeteerImageService.saveImageToFile(imageBuffer, filename, this.databaseService);
+          
+          // Set image URL based on storage location
+          if (savedPath.startsWith('/api/images/')) {
+            imageUrl = savedPath; // Database storage (Vercel)
+          } else {
+            imageUrl = `/generated-images/${filename}`; // File storage (local)
+          }
           imageData = saleImageData;
           
           logger.info(`Generated image for tweet: ${filename}`);

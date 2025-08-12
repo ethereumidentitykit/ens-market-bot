@@ -39,8 +39,8 @@ export class ImageController {
         const endTime = Date.now();
         
         const filename = `test-image-mock-${Date.now()}.png`;
-        await PuppeteerImageService.saveImageToFile(imageBuffer, filename);
-        const imageUrl = `/generated-images/${filename}`;
+        const savedPath = await PuppeteerImageService.saveImageToFile(imageBuffer, filename, databaseService);
+        const imageUrl = savedPath.startsWith('/api/images/') ? savedPath : `/generated-images/${filename}`;
         
         res.json({
           success: true,
@@ -69,10 +69,10 @@ export class ImageController {
       
       // Save image with timestamp
       const filename = `test-image-real-${Date.now()}.png`;
-      await PuppeteerImageService.saveImageToFile(imageBuffer, filename);
+      const savedPath = await PuppeteerImageService.saveImageToFile(imageBuffer, filename, databaseService);
       
       // Create URL for the generated image
-      const imageUrl = `/generated-images/${filename}`;
+      const imageUrl = savedPath.startsWith('/api/images/') ? savedPath : `/generated-images/${filename}`;
       
       logger.info(`Test image generated successfully from real data: ${filename} (${endTime - startTime}ms)`);
       
@@ -123,6 +123,9 @@ export class ImageController {
         return;
       }
       
+      // Get database service from req.app.locals
+      const { databaseService } = req.app.locals;
+      
       logger.info('Generating custom image with provided data');
       
       const startTime = Date.now();
@@ -131,10 +134,10 @@ export class ImageController {
       
       // Save image with timestamp
       const filename = `custom-image-${Date.now()}.png`;
-      const imagePath = await PuppeteerImageService.saveImageToFile(imageBuffer, filename);
+      const savedPath = await PuppeteerImageService.saveImageToFile(imageBuffer, filename, databaseService);
       
       // Create URL for the generated image
-      const imageUrl = `/generated-images/${filename}`;
+      const imageUrl = savedPath.startsWith('/api/images/') ? savedPath : `/generated-images/${filename}`;
       
       logger.info(`Custom image generated successfully: ${filename} (${endTime - startTime}ms)`);
       

@@ -879,6 +879,31 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    // Serve generated images from database
+    app.get('/api/images/:filename', async (req, res) => {
+      try {
+        const { filename } = req.params;
+        const imageData = await databaseService.getGeneratedImage(filename);
+        
+        if (!imageData) {
+          return res.status(404).json({
+            success: false,
+            error: 'Image not found'
+          });
+        }
+        
+        res.setHeader('Content-Type', imageData.contentType);
+        res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+        res.send(imageData.buffer);
+      } catch (error: any) {
+        logger.error('Error serving generated image:', error.message);
+        res.status(500).json({
+          success: false,
+          error: 'Failed to retrieve image'
+        });
+      }
+    });
+
     // Serve admin dashboard
     app.get('/', (req, res) => {
       res.sendFile(path.join(__dirname, '../public/index.html'));
