@@ -44,7 +44,6 @@
     "pg": "^8.16.3",
     "puppeteer": "^24.16.1",
     "puppeteer-core": "^24.16.1",
-    "skia-canvas": "^2.0.2",
     "sqlite": "^5.1.1",
     "sqlite3": "^5.1.7",
     "svg2img": "^1.0.0-beta.2"

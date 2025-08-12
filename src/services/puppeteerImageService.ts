@@ -1,5 +1,5 @@
 import { logger } from '../utils/logger';
-import { MockImageData } from './imageGenerationService';
+import { MockImageData } from '../types/imageTypes';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -336,7 +336,7 @@ export class PuppeteerImageService {
   /**
    * Save image buffer to file (same as original service)
    */
-  public static async saveImageToFile(buffer: Buffer, filename: string): Promise<void> {
+  public static async saveImageToFile(buffer: Buffer, filename: string): Promise<string> {
     const dataDir = path.join(process.cwd(), 'data');
     
     // Ensure data directory exists
@@ -348,5 +348,26 @@ export class PuppeteerImageService {
     fs.writeFileSync(filePath, buffer);
     
     logger.info(`Image saved to: ${filePath}`);
+    return filePath;
+  }
+
+  /**
+   * Get mock data for testing
+   */
+  public static getMockData(): MockImageData {
+    return {
+      priceEth: 5.51,
+      priceUsd: 22560.01,
+      ensName: 'name.eth', // Back to simple name for blue pill display
+      nftImageUrl: undefined, // No NFT image URL for mock data, will use placeholder
+      buyerAddress: '0x1234567890abcdef1234567890abcdef12345678',
+      buyerEns: 'james.eth',
+      buyerAvatar: 'https://metadata.ens.domains/mainnet/avatar/vitalik.eth',
+      sellerAddress: '0xabcdef1234567890abcdef1234567890abcdef12',
+      sellerEns: 'maxi.eth', 
+      sellerAvatar: 'https://metadata.ens.domains/mainnet/avatar/brantly.eth',
+      transactionHash: '0xtest123456789abcdef',
+      timestamp: new Date()
+    };
   }
 }

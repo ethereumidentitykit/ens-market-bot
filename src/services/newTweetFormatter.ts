@@ -2,7 +2,7 @@ import { ProcessedSale } from '../types';
 import { logger } from '../utils/logger';
 import { EthIdentityService, EthIdentityAccount } from './ethIdentityService';
 import { RealDataImageService, RealImageData } from './realDataImageService';
-import { ImageGenerationService, MockImageData } from './imageGenerationService';
+import { MockImageData } from '../types/imageTypes';
 import { PuppeteerImageService } from './puppeteerImageService';
 import { IDatabaseService } from '../types';
 
