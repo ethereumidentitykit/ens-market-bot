@@ -1,4 +1,3 @@
-import puppeteer from 'puppeteer';
 import { logger } from '../utils/logger';
 import { MockImageData } from './imageGenerationService';
 import * as fs from 'fs';
@@ -12,19 +11,40 @@ export class PuppeteerImageService {
    * Generate ENS sale image using Puppeteer
    */
   public static async generateSaleImage(data: MockImageData): Promise<Buffer> {
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--single-process',
-        '--disable-gpu'
-      ]
-    });
+    // Environment-aware Puppeteer setup
+    const isProduction = process.env.NODE_ENV === 'production' || process.env.VERCEL === '1';
+    
+    let browser;
+    
+    if (isProduction) {
+      // Use Vercel-compatible setup in production
+      const puppeteer = await import('puppeteer-core');
+      const chromium = await import('@sparticuz/chromium');
+      
+      browser = await puppeteer.default.launch({
+        args: chromium.default.args,
+        executablePath: await chromium.default.executablePath(),
+        headless: true,
+        ignoreDefaultArgs: ['--disable-extensions'],
+      });
+    } else {
+      // Use regular Puppeteer locally
+      const puppeteer = await import('puppeteer');
+      
+      browser = await puppeteer.default.launch({
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',
+          '--disable-gpu'
+        ]
+      });
+    }
 
     try {
       const page = await browser.newPage();

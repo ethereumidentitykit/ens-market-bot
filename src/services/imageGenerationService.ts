@@ -7,7 +7,7 @@ import axios from 'axios';
 import { logger } from '../utils/logger';
 import { UnicodeEmojiService, UnicodeEmojiInfo } from './unicodeEmojiService';
 import { ens_normalize } from '@adraffy/ens-normalize';
-import puppeteer from 'puppeteer';
+
 
 // Register emoji font for better emoji support with skia-canvas
 try {
@@ -497,13 +497,42 @@ export class ImageGenerationService {
    * Convert SVG to PNG using Puppeteer for accurate rendering of custom fonts and emojis
    */
   private static async convertSvgToPng(svgContent: string): Promise<Buffer> {
-    let browser = null;
-    try {
-      browser = await puppeteer.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
-      });
+    // Environment-aware Puppeteer setup
+    const isProduction = process.env.NODE_ENV === 'production' || process.env.VERCEL === '1';
+    
+    let browser;
+    
+    if (isProduction) {
+      // Use Vercel-compatible setup in production
+      const puppeteer = await import('puppeteer-core');
+      const chromium = await import('@sparticuz/chromium');
       
+      browser = await puppeteer.default.launch({
+        args: chromium.default.args,
+        executablePath: await chromium.default.executablePath(),
+        headless: true,
+        ignoreDefaultArgs: ['--disable-extensions'],
+      });
+    } else {
+      // Use regular Puppeteer locally
+      const puppeteer = await import('puppeteer');
+      
+      browser = await puppeteer.default.launch({
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',
+          '--disable-gpu'
+        ]
+      });
+    }
+
+    try {
       const page = await browser.newPage();
       await page.setViewport({ width: 270, height: 270 });
       
@@ -542,14 +571,14 @@ export class ImageGenerationService {
       
       // Wait for image to load
       await page.waitForSelector('img');
-      await page.evaluate(() => {
+      await (page as any).evaluate(() => {
         return new Promise((resolve) => {
           const img = document.querySelector('img');
-          if (img && img.complete) {
+          if (img && (img as any).complete) {
             resolve(true);
           } else if (img) {
-            img.onload = () => resolve(true);
-            img.onerror = () => resolve(true);
+            (img as any).onload = () => resolve(true);
+            (img as any).onerror = () => resolve(true);
           } else {
             resolve(true);
           }
