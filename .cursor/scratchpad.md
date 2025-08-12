@@ -103,5 +103,185 @@
 ### Process Used
 Same approach as previous SVG integration - analyzed coordinates and styling from new SVG file, then updated hardcoded canvas drawing to match exactly.
 
-**Last Updated**: August 12, 2025  
-**Status**: ✅ Production Ready with Full Emoji Support
+---
+
+## New Enhancement Request - Admin Dashboard Tweet Generation
+
+**Request Date**: January 25, 2025
+**Mode**: Planner
+
+### Background and Motivation
+
+The current admin dashboard allows manual posting but lacks a comprehensive tweet preview and generation system. The user wants to enhance the Twitter area of the admin dashboard to include:
+
+1. **Local Tweet Generation**: Generate complete Twitter posts locally without consuming API calls
+2. **Enhanced Preview**: Show exactly what will be posted before sending
+3. **Testing Capability**: Perfect the format and content before using limited Twitter API calls
+4. **Reorganized UI**: Move image generation to manual actions area, enhance Twitter area
+
+### New Tweet Format Requirements
+
+```
+"hernandez.eth sold for 2.00 ETH ($8,000.00)
+
+@maxidoteth sold to 0xabcdefg1
+
+#ENS #ENSDomains #Ethereum"
+```
+
+**Format Breakdown**:
+- **Line 1**: ENS name + sale price (ETH + USD)
+- **Line 2**: Seller handle + "sold to" + buyer handle  
+- **Line 3**: Standard hashtags
+- **Image**: Generated using existing imageGenerationService
+
+**Handle Resolution Logic**:
+1. Check if address has ENS name (via ethidkit API response)
+2. If ENS exists, check for `com.twitter` record:
+   - If Twitter handle exists: use @twitterhandle format
+   - If no Twitter record: use ensname.eth format (no @ prefix)
+3. If no ENS: use truncated ETH address format
+
+### Key Challenges and Analysis
+
+1. **UI Reorganization**:
+   - Move image generation from Twitter area to Manual Actions
+   - Redesign Twitter area for tweet generation workflow
+   - Maintain existing functionality while adding new features
+
+2. **Tweet Text Generation**:
+   - Format tweet text according to new specification
+   - Handle ENS name resolution with Twitter record lookup
+   - Implement proper fallback chain: Twitter handle → ENS name → truncated address
+   - Add standard hashtags
+
+3. **Preview Integration**:
+   - Show generated tweet text
+   - Display generated image
+   - Character count validation (280 char limit)
+   - "Generate Post" and "Send Post" button workflow
+
+4. **Data Integration**:
+   - Use existing database sales data
+   - Leverage existing ethidkit integration for ENS + Twitter record resolution
+   - Parse `com.twitter` records from ENS data for proper @handle tagging
+   - Utilize existing image generation service
+   - Maintain existing Twitter posting functionality
+
+### High-level Task Breakdown
+
+#### Phase 1: Backend Tweet Generation Service
+- [ ] **Task 1.1**: Create tweet text generation service
+  - Success Criteria: Function generates proper format with ENS/address resolution
+  - Estimated Time: 1 hour
+
+- [ ] **Task 1.2**: Add tweet generation endpoint to API
+  - Success Criteria: Endpoint accepts sale ID, returns tweet text + image
+  - Estimated Time: 30 minutes
+
+#### Phase 2: Frontend UI Reorganization  
+- [ ] **Task 2.1**: Restructure admin dashboard HTML layout
+  - Success Criteria: Image generation moved to Manual Actions, Twitter area cleared
+  - Estimated Time: 45 minutes
+
+- [ ] **Task 2.2**: Update CSS styling for new layout
+  - Success Criteria: Clean, organized appearance matching existing design
+  - Estimated Time: 30 minutes
+
+#### Phase 3: Tweet Generation UI Implementation
+- [ ] **Task 3.1**: Add "Generate Post" functionality
+  - Success Criteria: Button generates tweet preview with text and image
+  - Estimated Time: 1 hour
+
+- [ ] **Task 3.2**: Add tweet preview display area
+  - Success Criteria: Shows formatted tweet text, image, and character count
+  - Estimated Time: 45 minutes
+
+- [ ] **Task 3.3**: Add "Send Post" functionality  
+  - Success Criteria: Button posts the generated content to Twitter
+  - Estimated Time: 30 minutes
+
+#### Phase 4: Testing and Refinement
+- [ ] **Task 4.1**: Test tweet generation with various sale scenarios
+  - Success Criteria: Handles ENS names, addresses, long names, emojis properly
+  - Estimated Time: 30 minutes
+
+- [ ] **Task 4.2**: Validate Twitter character limits and formatting
+  - Success Criteria: All generated tweets under 280 chars, proper formatting
+  - Estimated Time: 15 minutes
+
+### Project Status Board
+
+#### Ready to Execute
+- [ ] Create tweet text generation service
+- [ ] Add tweet generation API endpoint  
+- [ ] Restructure admin dashboard layout
+- [ ] Implement "Generate Post" UI
+- [ ] Add tweet preview display
+- [ ] Implement "Send Post" functionality
+- [ ] Test with various scenarios
+- [ ] Validate formatting and limits
+
+#### Blocked/Waiting
+- None currently
+
+#### Completed
+- ✅ Create tweet text generation service with ENS/Twitter handle resolution
+- ✅ Add tweet generation API endpoint
+- ✅ Restructure admin dashboard HTML layout
+- ✅ Add Generate Post functionality
+- ✅ Add tweet preview display area  
+- ✅ Add Send Post functionality
+- ✅ Integrate image generation into tweet generation workflow
+
+### Technical Considerations
+
+1. **Character Limits**: Twitter has 280 character limit - need validation
+2. **Image Handling**: Existing imageGenerationService integration
+3. **ENS Resolution**: Use existing ethidkit data from sales records
+4. **Error Handling**: Graceful fallbacks for missing data
+5. **UI/UX**: Maintain existing design patterns and responsiveness
+
+### Executor's Feedback or Assistance Requests
+
+**Phase 1-3 Complete** ✅ - Full tweet generation system implemented successfully!
+
+**Backend Complete**:
+- `NewTweetFormatter` service with proper ENS + Twitter handle resolution
+- API endpoints: `/api/tweet/generate/:saleId` and `/api/tweet/send/:saleId`
+- Full integration with existing database and Twitter services
+
+**Frontend Complete**:
+- Restructured admin dashboard layout (moved image generation to Manual Actions)
+- Enhanced Twitter area with tweet generation workflow
+- Added sale selection dropdown with refresh capability
+- Added "Generate Post" button with loading states
+- Added comprehensive tweet preview with character count and validation
+- Added tweet breakdown showing line-by-line format and handle resolution
+- Added "Send Post" button with rate limit protection
+- Added proper error handling and user feedback
+
+**Image Integration Complete** ✅ - Tweet generation now includes image generation and attachment!
+
+**Additional Features Implemented**:
+- **Image Generation**: Automatically generates images when creating tweet previews
+- **Twitter Media Upload**: Extended TwitterService to support image uploads via multipart form data
+- **Image Preview**: Shows generated images in the admin dashboard preview
+- **Image Attachment**: Attaches images to tweets when posting to Twitter
+- **Graceful Fallbacks**: Continues with text-only tweets if image generation fails
+- **Visual Indicators**: Shows image badges and status in the UI
+
+**Technical Implementation**:
+- **NewTweetFormatter**: Now generates both text and images using RealDataImageService
+- **TwitterService**: Added `uploadMedia()` method with proper OAuth authentication
+- **API Endpoints**: Return image URLs and buffer data for preview and posting
+- **Frontend**: Displays generated images with proper styling and responsive design
+
+**Next**: Ready for full testing to validate the complete tweet generation workflow with images!
+
+### Lessons
+
+*This section will be updated with any new learnings during implementation*
+
+**Last Updated**: January 25, 2025  
+**Status**: 📋 Planning Complete - Ready for Execution

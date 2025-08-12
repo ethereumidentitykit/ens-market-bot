@@ -10,6 +10,7 @@ import { SalesProcessingService } from './services/salesProcessingService';
 import { SchedulerService } from './services/schedulerService';
 import { TwitterService } from './services/twitterService';
 import { TweetFormatter } from './services/tweetFormatter';
+import { NewTweetFormatter } from './services/newTweetFormatter';
 import { RateLimitService } from './services/rateLimitService';
 import { EthIdentityService } from './services/ethIdentityService';
 
@@ -31,6 +32,7 @@ async function startApplication(): Promise<void> {
     const schedulerService = new SchedulerService(salesProcessingService, databaseService);
     const twitterService = new TwitterService();
     const tweetFormatter = new TweetFormatter();
+    const newTweetFormatter = new NewTweetFormatter(databaseService);
     const rateLimitService = new RateLimitService(databaseService);
     const ethIdentityService = new EthIdentityService();
 
@@ -578,6 +580,156 @@ async function startApplication(): Promise<void> {
             error: 'Failed to post tweet',
             twitterError: tweetResult.error,
             tweetContent: formattedTweet.content
+          });
+        }
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    // New Tweet Generation API endpoints
+    app.get('/api/tweet/generate/:saleId', async (req, res) => {
+      try {
+        const saleId = parseInt(req.params.saleId);
+        if (isNaN(saleId)) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid sale ID'
+          });
+        }
+
+        // Get the sale from database
+        const unpostedSales = await databaseService.getUnpostedSales(100);
+        const sale = unpostedSales.find(s => s.id === saleId);
+        
+        if (!sale) {
+          return res.status(404).json({
+            success: false,
+            error: 'Sale not found'
+          });
+        }
+
+        // Generate new format tweet with preview
+        const preview = await newTweetFormatter.previewTweet(sale);
+        
+        res.json({
+          success: true,
+          data: {
+            sale: {
+              id: sale.id,
+              transactionHash: sale.transactionHash,
+              nftName: sale.nftName,
+              priceEth: sale.priceEth,
+              priceUsd: sale.priceUsd,
+              buyerAddress: sale.buyerAddress,
+              sellerAddress: sale.sellerAddress
+            },
+            tweet: preview.tweet,
+            validation: preview.validation,
+            breakdown: preview.breakdown,
+            imageUrl: preview.tweet.imageUrl,
+            hasImage: !!preview.tweet.imageBuffer
+          }
+        });
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.post('/api/tweet/send/:saleId', async (req, res) => {
+      try {
+        const configValidation = twitterService.validateConfig();
+        if (!configValidation.valid) {
+          return res.status(400).json({
+            success: false,
+            error: 'Twitter API configuration incomplete',
+            missingFields: configValidation.missingFields
+          });
+        }
+
+        const saleId = parseInt(req.params.saleId);
+        if (isNaN(saleId)) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid sale ID'
+          });
+        }
+
+        // Get the sale from database
+        const unpostedSales = await databaseService.getUnpostedSales(100);
+        const sale = unpostedSales.find(s => s.id === saleId);
+        
+        if (!sale) {
+          return res.status(404).json({
+            success: false,
+            error: 'Sale not found'
+          });
+        }
+
+        if (sale.posted) {
+          return res.status(400).json({
+            success: false,
+            error: 'Sale has already been posted to Twitter'
+          });
+        }
+
+        // Check rate limit first
+        await rateLimitService.validateTweetPost();
+
+        // Generate new format tweet
+        const generatedTweet = await newTweetFormatter.generateTweet(sale);
+        
+        if (!generatedTweet.isValid) {
+          return res.status(400).json({
+            success: false,
+            error: 'Unable to generate valid tweet',
+            details: generatedTweet
+          });
+        }
+
+        // Post to Twitter with image
+        const tweetResult = await twitterService.postTweet(generatedTweet.text, generatedTweet.imageBuffer);
+        
+        if (tweetResult.success && tweetResult.tweetId) {
+          // Record successful post in rate limiter
+          await rateLimitService.recordTweetPost(tweetResult.tweetId, generatedTweet.text, saleId);
+          
+          // Mark as posted in database
+          await databaseService.markAsPosted(saleId, tweetResult.tweetId);
+          
+          // Get updated rate limit status
+          const rateLimitStatus = await rateLimitService.canPostTweet();
+          
+          res.json({
+            success: true,
+            data: {
+              tweetId: tweetResult.tweetId,
+              tweetContent: generatedTweet.text,
+              characterCount: generatedTweet.characterCount,
+              saleId: saleId,
+              rateLimitStatus,
+              hasImage: !!generatedTweet.imageBuffer
+            }
+          });
+        } else {
+          // Record failed post
+          await rateLimitService.recordFailedTweetPost(
+            generatedTweet.text, 
+            tweetResult.error || 'Unknown error',
+            saleId
+          );
+          
+          res.status(500).json({
+            success: false,
+            error: 'Failed to post tweet',
+            twitterError: tweetResult.error,
+            tweetContent: generatedTweet.text
           });
         }
       } catch (error: any) {

@@ -25,6 +25,15 @@ function dashboard() {
         imageGeneratedAt: null,
         testImageToken: '',
 
+        // New tweet generation state
+        unpostedSales: [],
+        selectedSaleId: '',
+        generatedTweet: null,
+        tweetBreakdown: null,
+        tweetImageUrl: null,
+        tweetGenerating: false,
+        tweetSending: false,
+
         // Database management state
         databaseResetting: false,
         databaseResetMessage: '',
@@ -119,6 +128,7 @@ function dashboard() {
         // Initialize
         async init() {
             await this.refreshData();
+            await this.loadUnpostedSales();
             await this.dbViewer.loadPage(1);
             // Auto-refresh every 30 seconds
             setInterval(() => {
@@ -543,6 +553,130 @@ function dashboard() {
         clearTwitterMessage() {
             this.twitterMessage = '';
             this.twitterMessageType = 'info';
+        },
+
+        // New Tweet Generation Methods
+        async loadUnpostedSales() {
+            try {
+                const response = await fetch('/api/unposted-sales?limit=20');
+                const data = await response.json();
+                
+                if (data.success) {
+                    this.unpostedSales = data.data;
+                } else {
+                    console.error('Failed to load unposted sales:', data.error);
+                    this.unpostedSales = [];
+                }
+            } catch (error) {
+                console.error('Failed to load unposted sales:', error);
+                this.unpostedSales = [];
+            }
+        },
+
+        async refreshUnpostedSales() {
+            this.loading = true;
+            try {
+                await this.loadUnpostedSales();
+                this.showTwitterMessage('Unposted sales refreshed', 'success');
+            } catch (error) {
+                console.error('Failed to refresh unposted sales:', error);
+                this.showTwitterMessage('Failed to refresh sales list', 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        clearTweetPreview() {
+            this.generatedTweet = null;
+            this.tweetBreakdown = null;
+            this.tweetImageUrl = null;
+        },
+
+        async generateTweetPost() {
+            if (!this.selectedSaleId) {
+                this.showTwitterMessage('Please select a sale first', 'error');
+                return;
+            }
+
+            this.tweetGenerating = true;
+            this.clearTwitterMessage();
+            this.clearTweetPreview();
+
+            try {
+                const response = await fetch(`/api/tweet/generate/${this.selectedSaleId}`);
+                const data = await response.json();
+
+                if (data.success) {
+                    this.generatedTweet = data.data.tweet;
+                    this.tweetBreakdown = data.data.breakdown;
+                    this.tweetImageUrl = data.data.imageUrl;
+                    
+                    if (data.data.tweet.isValid) {
+                        const imageMsg = data.data.hasImage ? ' with image' : '';
+                        this.showTwitterMessage(`Tweet generated successfully${imageMsg}!`, 'success');
+                    } else {
+                        this.showTwitterMessage('Tweet generated but has validation issues', 'warning');
+                    }
+                } else {
+                    this.showTwitterMessage(`Failed to generate tweet: ${data.error}`, 'error');
+                }
+            } catch (error) {
+                console.error('Failed to generate tweet:', error);
+                this.showTwitterMessage('Network error while generating tweet', 'error');
+            } finally {
+                this.tweetGenerating = false;
+            }
+        },
+
+        async sendTweetPost() {
+            if (!this.selectedSaleId) {
+                this.showTwitterMessage('No sale selected', 'error');
+                return;
+            }
+
+            if (!this.generatedTweet?.isValid) {
+                this.showTwitterMessage('Cannot send invalid tweet', 'error');
+                return;
+            }
+
+            if (!confirm('Send this tweet? This will consume one API call from your daily limit.')) {
+                return;
+            }
+
+            this.tweetSending = true;
+            this.clearTwitterMessage();
+
+            try {
+                const response = await fetch(`/api/tweet/send/${this.selectedSaleId}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    this.showTwitterMessage(
+                        `✅ Tweet posted successfully! Tweet ID: ${data.data.tweetId}`, 
+                        'success'
+                    );
+                    
+                    // Clear the preview and refresh data
+                    this.clearTweetPreview();
+                    this.selectedSaleId = '';
+                    await Promise.all([
+                        this.refreshData(),
+                        this.loadUnpostedSales()
+                    ]);
+                } else {
+                    this.showTwitterMessage(
+                        `❌ Failed to post tweet: ${data.error}`, 
+                        'error'
+                    );
+                }
+            } catch (error) {
+                console.error('Failed to send tweet:', error);
+                this.showTwitterMessage('Network error while sending tweet', 'error');
+            } finally {
+                this.tweetSending = false;
+            }
         },
 
         // Database Management Methods

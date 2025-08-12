@@ -81,7 +81,7 @@ export class TwitterService {
   /**
    * Post a tweet to Twitter
    */
-  async postTweet(content: string): Promise<TwitterPostResult> {
+  async postTweet(content: string, imageBuffer?: Buffer): Promise<TwitterPostResult> {
     try {
       // Validate content length
       if (content.length > 280) {
@@ -96,7 +96,17 @@ export class TwitterService {
         return { success: false, error };
       }
 
-      logger.info(`Posting tweet: "${content.substring(0, 50)}..."`);
+      logger.info(`Posting tweet: "${content.substring(0, 50)}..."${imageBuffer ? ' with image' : ''}`);
+
+      // If image is provided, upload it first
+      let mediaId: string | undefined;
+      if (imageBuffer) {
+        const uploadedMediaId = await this.uploadMedia(imageBuffer);
+        if (!uploadedMediaId) {
+          return { success: false, error: 'Failed to upload image' };
+        }
+        mediaId = uploadedMediaId;
+      }
 
       const requestData = {
         url: 'https://api.twitter.com/2/tweets',
@@ -110,7 +120,12 @@ export class TwitterService {
 
       const authHeader = this.oauth.toHeader(this.oauth.authorize(requestData, token));
       
-      const postData = JSON.stringify({ text: content });
+      const tweetData: any = { text: content };
+      if (mediaId) {
+        tweetData.media = { media_ids: [mediaId] };
+      }
+      
+      const postData = JSON.stringify(tweetData);
       
       const response = await this.makeRequest(
         requestData.url, 
@@ -139,6 +154,114 @@ export class TwitterService {
       logger.error('Error posting tweet:', error.message);
       return { success: false, error: error.message };
     }
+  }
+
+  /**
+   * Upload media to Twitter
+   */
+  private async uploadMedia(imageBuffer: Buffer): Promise<string | null> {
+    try {
+      logger.info('Uploading media to Twitter...');
+      
+      const requestData = {
+        url: 'https://upload.twitter.com/1.1/media/upload.json',
+        method: 'POST',
+      };
+
+      const token = {
+        key: config.twitter.accessToken,
+        secret: config.twitter.accessTokenSecret,
+      };
+
+      const authHeader = this.oauth.toHeader(this.oauth.authorize(requestData, token));
+      
+      const response = await this.uploadMediaRequest(
+        requestData.url,
+        authHeader.Authorization,
+        imageBuffer
+      );
+      
+      if (response.success && response.data) {
+        const responseData = JSON.parse(response.data);
+        
+        if (responseData.media_id_string) {
+          const mediaId = responseData.media_id_string;
+          logger.info(`Media uploaded successfully - ID: ${mediaId}`);
+          return mediaId;
+        } else {
+          logger.error('Unexpected media upload response format:', response.data);
+          return null;
+        }
+      } else {
+        logger.error('Failed to upload media:', response.error);
+        return null;
+      }
+    } catch (error: any) {
+      logger.error('Error uploading media:', error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Make multipart form request for media upload
+   */
+  private uploadMediaRequest(
+    url: string,
+    authHeader: string,
+    imageBuffer: Buffer
+  ): Promise<{ success: boolean; data?: string; error?: string }> {
+    return new Promise((resolve) => {
+      const urlObj = new URL(url);
+      const boundary = `----formdata-twitter-${Date.now()}`;
+      
+      // Create multipart form data
+      const formData = Buffer.concat([
+        Buffer.from(`--${boundary}\r\n`),
+        Buffer.from('Content-Disposition: form-data; name="media"; filename="image.png"\r\n'),
+        Buffer.from('Content-Type: image/png\r\n\r\n'),
+        imageBuffer,
+        Buffer.from(`\r\n--${boundary}--\r\n`)
+      ]);
+      
+      const options = {
+        hostname: urlObj.hostname,
+        path: urlObj.pathname + urlObj.search,
+        method: 'POST',
+        headers: {
+          'Authorization': authHeader,
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+          'Content-Length': formData.length.toString(),
+          'User-Agent': 'NFT-Sales-Bot/1.0',
+        },
+      };
+
+      const req = https.request(options, (res) => {
+        let data = '';
+        
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+        
+        res.on('end', () => {
+          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+            resolve({ success: true, data });
+          } else {
+            const error = `HTTP ${res.statusCode}: ${data}`;
+            logger.error(`Twitter media upload error: ${error}`);
+            resolve({ success: false, error });
+          }
+        });
+      });
+
+      req.on('error', (err) => {
+        const error = `Request error: ${err.message}`;
+        logger.error(`Twitter media upload request error: ${error}`);
+        resolve({ success: false, error });
+      });
+
+      req.write(formData);
+      req.end();
+    });
   }
 
   /**

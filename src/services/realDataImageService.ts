@@ -142,7 +142,7 @@ export class RealDataImageService {
   /**
    * Convert ProcessedSale to RealImageData with ENS lookups
    */
-  private async convertSaleToImageData(sale: ProcessedSale): Promise<RealImageData> {
+  async convertSaleToImageData(sale: ProcessedSale): Promise<RealImageData> {
     logger.info(`Converting sale to image data: ${sale.transactionHash}`);
     
     // Parse prices
