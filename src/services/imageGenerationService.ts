@@ -45,12 +45,14 @@ export class ImageGenerationService {
   private static readonly CANVAS_WIDTH = 1000;
   private static readonly CANVAS_HEIGHT = 666;
   
-  // Design colors
+  // Design colors (updated for new SVG template)
   private static readonly COLORS = {
-    background: '#2D2D2D',
+    background: '#1E1E1E', // Main dark background
+    gradientStart: '#610075', // Radial gradient start color
+    gradientEnd: '#0197B1', // Radial gradient end color
     primaryText: '#FFFFFF',
-    ensPillBackground: '#4A90E2',
-    buyerSellerPill: '#1A1A1A',
+    ensPillBackground: '#4496E7', // Updated blue color from new SVG
+    buyerSellerPill: '#242424', // Updated pill color from new SVG
     arrow: '#FFFFFF'
   };
 
@@ -86,9 +88,12 @@ export class ImageGenerationService {
     const canvas = new Canvas(this.CANVAS_WIDTH, this.CANVAS_HEIGHT);
     const ctx = canvas.getContext('2d');
 
-    // Fill background
+    // Fill main background
     ctx.fillStyle = this.COLORS.background;
     ctx.fillRect(0, 0, this.CANVAS_WIDTH, this.CANVAS_HEIGHT);
+
+    // Draw background image
+    await this.drawBackgroundImage(ctx);
 
     // Draw main card container
     this.drawMainCard(ctx);
@@ -102,11 +107,31 @@ export class ImageGenerationService {
   }
 
   /**
+   * Draw background image provided by user
+   */
+  private static async drawBackgroundImage(ctx: SkiaCanvasRenderingContext2D): Promise<void> {
+    try {
+      const path = require('path');
+      const backgroundPath = path.join(__dirname, '../../assets/background.png');
+      const backgroundImage = await loadImage(backgroundPath);
+      
+      // Draw background image to fill entire canvas
+      ctx.drawImage(backgroundImage, 0, 0, this.CANVAS_WIDTH, this.CANVAS_HEIGHT);
+      
+    } catch (error) {
+      logger.warn('Failed to load background image, using solid color fallback:', error);
+      // Fallback to solid color if image fails to load
+      ctx.fillStyle = this.COLORS.background;
+      ctx.fillRect(0, 0, this.CANVAS_WIDTH, this.CANVAS_HEIGHT);
+    }
+  }
+
+  /**
    * Draw main card container
    */
   private static drawMainCard(ctx: SkiaCanvasRenderingContext2D): void {
-    // No card background - just use the main dark background
-    // Twitter will handle the rounded corners automatically
+    // Main card area now has gradient background applied above
+    // Individual elements will have their own shadows and styling
   }
 
   /**
@@ -120,21 +145,21 @@ export class ImageGenerationService {
     ctx.fillStyle = this.COLORS.primaryText;
     ctx.textAlign = 'center';
 
-    // Large ETH price - matching SVG font sizes
+    // Large ETH price - matching SVG font sizes with shadow
     ctx.font = 'bold 120px Arial'; // Larger to match SVG proportions
-    ctx.fillText(priceEth.toFixed(2), leftAreaCenter, priceY);
+    this.drawTextWithShadow(ctx, priceEth.toFixed(2), leftAreaCenter, priceY);
 
     // ETH label
     ctx.font = '40px Arial';
-    ctx.fillText('ETH', leftAreaCenter, priceY + 60);
+    this.drawTextWithShadow(ctx, 'ETH', leftAreaCenter, priceY + 60);
 
     // USD price
     ctx.font = 'bold 80px Arial'; // Larger to match proportions
-    ctx.fillText(`$${priceUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, leftAreaCenter, priceY + 170);
+    this.drawTextWithShadow(ctx, `$${priceUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, leftAreaCenter, priceY + 170);
 
     // USD label
     ctx.font = '40px Arial';
-    ctx.fillText('USD', leftAreaCenter, priceY + 230);
+    this.drawTextWithShadow(ctx, 'USD', leftAreaCenter, priceY + 230);
   }
 
   /**
@@ -152,7 +177,7 @@ export class ImageGenerationService {
       normalizedEnsName = ensName;
     }
 
-    // SVG coordinates: x="552" y="48" width="400" height="400" rx="30"
+    // SVG coordinates: x="556" y="70" width="400" height="400" rx="30" (reverted - minimal change from original)
     const imageX = 552;
     const imageY = 48;
     const imageSize = 400;
@@ -166,6 +191,9 @@ export class ImageGenerationService {
         try {
           logger.info(`Loading NFT image from URL: ${nftImageUrl}`);
           const nftImage = await this.loadImageFromUrl(nftImageUrl);
+          
+          // Draw shadow first
+          this.drawEnsImageShadow(ctx, imageX, imageY, imageSize, imageSize, borderRadius);
           
           // Draw rounded NFT image
           ctx.save();
@@ -190,6 +218,9 @@ export class ImageGenerationService {
           logger.info('Loading placeholder image as fallback');
           const placeholderImage = await loadImage(placeholderImagePath);
           
+          // Draw shadow first
+          this.drawEnsImageShadow(ctx, imageX, imageY, imageSize, imageSize, borderRadius);
+          
           // Draw rounded placeholder image
           ctx.save();
           ctx.beginPath();
@@ -202,9 +233,14 @@ export class ImageGenerationService {
         }
       }
 
-      // Final fallback: Draw blue pill with text
+      // Final fallback: Draw blue pill with text and shadow
       if (!imageLoaded) {
         logger.info('Using blue pill fallback for ENS image');
+        
+        // Draw shadow first (matching SVG filter0_d_0_1)
+        this.drawEnsImageShadow(ctx, imageX, imageY, imageSize, imageSize, borderRadius);
+        
+        // Draw blue pill
         ctx.fillStyle = this.COLORS.ensPillBackground;
         this.drawRoundedRect(ctx, imageX, imageY, imageSize, imageSize, borderRadius);
         
@@ -216,7 +252,9 @@ export class ImageGenerationService {
 
     } catch (error) {
       logger.warn('Failed to load any ENS image, using blue pill fallback:', error);
-      // Final fallback to blue pill
+      // Final fallback to blue pill with shadow
+      this.drawEnsImageShadow(ctx, imageX, imageY, imageSize, imageSize, borderRadius);
+      
       ctx.fillStyle = this.COLORS.ensPillBackground;
       this.drawRoundedRect(ctx, imageX, imageY, imageSize, imageSize, borderRadius);
       
@@ -237,9 +275,9 @@ export class ImageGenerationService {
     sellerAvatarUrl?: string,
     buyerAvatarUrl?: string
   ): Promise<void> {
-    // SVG coordinates for pills:
-    // Left pill: x="26" y="506" width="433" height="132" rx="66"
-    // Right pill: x="535" y="506" width="433" height="132" rx="66"
+    // SVG coordinates for pills (reverted to original positions):
+    // Left pill: x="30" y="528" width="433" height="132" rx="66" 
+    // Right pill: x="539" y="528" width="433" height="132" rx="66"
     const leftPillX = 26;
     const rightPillX = 535;
     const pillY = 506;
@@ -254,11 +292,14 @@ export class ImageGenerationService {
     // Text positioning
     const textPadding = 30;
 
-        // Draw seller pill (left)
+    // Draw seller pill (left) with shadow
+    this.drawPillShadow(ctx, leftPillX, pillY, pillWidth, pillHeight, borderRadius);
     ctx.fillStyle = this.COLORS.buyerSellerPill;
     this.drawRoundedRect(ctx, leftPillX, pillY, pillWidth, pillHeight, borderRadius);
 
-    // Draw buyer pill (right)
+    // Draw buyer pill (right) with shadow
+    this.drawPillShadow(ctx, rightPillX, pillY, pillWidth, pillHeight, borderRadius);
+    ctx.fillStyle = this.COLORS.buyerSellerPill;
     this.drawRoundedRect(ctx, rightPillX, pillY, pillWidth, pillHeight, borderRadius);
 
     // Draw seller avatar and text
@@ -538,6 +579,68 @@ export class ImageGenerationService {
   }
 
   /**
+   * Draw ENS image shadow (filter0_d_0_1 from SVG) - Enhanced for visibility
+   */
+  private static drawEnsImageShadow(ctx: SkiaCanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number): void {
+    // Save current state
+    ctx.save();
+    
+    // Enhanced shadow for visibility: no offset, increased opacity
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.4)'; // Dramatically increased from 0.5 to 0.8
+    ctx.shadowBlur = 50; // Keep SVG blur amount
+    ctx.shadowOffsetX = 0; // No offset as requested
+    ctx.shadowOffsetY = 0; // No offset as requested
+    
+    // Draw solid shape to create shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.4)'; // Much more opaque for visible shadow
+    this.drawRoundedRect(ctx, x, y, width, height, radius);
+    
+    // Restore state
+    ctx.restore();
+  }
+
+  /**
+   * Draw pill shadow (filter1_d_0_1 & filter2_d_0_1 from SVG) - Enhanced for visibility
+   */
+  private static drawPillShadow(ctx: SkiaCanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number): void {
+    // Save current state
+    ctx.save();
+    
+    // Enhanced shadow for visibility: no offset, increased opacity
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.4)'; // Dramatically increased from 0.4 to 0.7
+    ctx.shadowBlur = 50; // Keep SVG blur amount
+    ctx.shadowOffsetX = 0; // No offset as requested
+    ctx.shadowOffsetY = 0; // No offset as requested
+    
+    // Draw solid shape to create shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)'; // Much more opaque for visible shadow
+    this.drawRoundedRect(ctx, x, y, width, height, radius);
+    
+    // Restore state
+    ctx.restore();
+  }
+
+  /**
+   * Draw text with drop shadow effect (filter3_d_0_1 & filter4_d_0_1 from SVG) - Enhanced for visibility
+   */
+  private static drawTextWithShadow(ctx: SkiaCanvasRenderingContext2D, text: string, x: number, y: number): void {
+    // Save current state
+    ctx.save();
+    
+    // Enhanced shadow for visibility: no offset, reduced opacity
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.25)'; // Reduced from 0.6 to 0.4 as requested
+    ctx.shadowBlur = 50; // Keep blur for visibility
+    ctx.shadowOffsetX = 0; // No offset as requested
+    ctx.shadowOffsetY = 0; // No offset as requested
+    
+    // Draw text
+    ctx.fillText(text, x, y);
+    
+    // Restore state
+    ctx.restore();
+  }
+
+  /**
    * Draw a rounded rectangle
    */
   private static drawRoundedRect(ctx: SkiaCanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number): void {
@@ -712,12 +815,12 @@ export class ImageGenerationService {
     const emojis = UnicodeEmojiService.detectEmojis(text);
     
     if (emojis.length === 0) {
-      // No emojis, render normally
+      // No emojis, render normally with shadow
       if (maxWidth) {
         const truncatedText = this.truncateText(ctx, text, maxWidth);
-        ctx.fillText(truncatedText, x, y);
+        this.drawTextWithShadow(ctx, truncatedText, x, y);
       } else {
-        ctx.fillText(text, x, y);
+        this.drawTextWithShadow(ctx, text, x, y);
       }
       return;
     }
@@ -739,10 +842,10 @@ export class ImageGenerationService {
           const textWidth = ctx.measureText(textBefore).width;
           if (maxWidth && (currentX - x + textWidth) > maxWidth) {
             const truncated = this.truncateText(ctx, textBefore, maxWidth - (currentX - x));
-            ctx.fillText(truncated, currentX, y);
+            this.drawTextWithShadow(ctx, truncated, currentX, y);
             return;
           }
-          ctx.fillText(textBefore, currentX, y);
+          this.drawTextWithShadow(ctx, textBefore, currentX, y);
           currentX += textWidth;
         }
       }
@@ -760,6 +863,7 @@ export class ImageGenerationService {
       const emojiWidth = ctx.measureText(emojiInfo.emoji).width;
       if (!maxWidth || (currentX - x + emojiWidth) <= maxWidth) {
         // skia-canvas should handle ZWJ sequences correctly
+        // Draw emoji without shadow (no shadows needed on usernames)
         ctx.fillText(emojiInfo.emoji, currentX, y);
         currentX += emojiWidth;
       }
@@ -778,10 +882,10 @@ export class ImageGenerationService {
           const remainingWidth = maxWidth - (currentX - x);
           if (remainingWidth > 20) {
             const truncated = this.truncateText(ctx, textAfter, remainingWidth);
-            ctx.fillText(truncated, currentX, y);
+            this.drawTextWithShadow(ctx, truncated, currentX, y);
           }
         } else {
-          ctx.fillText(textAfter, currentX, y);
+          this.drawTextWithShadow(ctx, textAfter, currentX, y);
         }
       }
     }
