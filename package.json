@@ -31,6 +31,7 @@
     "typescript": "^5.9.2"
   },
   "dependencies": {
+    "@adraffy/ens-normalize": "^1.11.0",
     "@types/pg": "^8.15.5",
     "axios": "^1.11.0",
     "canvas": "^3.1.2",
@@ -41,7 +42,9 @@
     "node-fetch": "^2.7.0",
     "oauth-1.0a": "^2.2.6",
     "pg": "^8.16.3",
+    "puppeteer": "^24.16.1",
     "sqlite": "^5.1.1",
-    "sqlite3": "^5.1.7"
+    "sqlite3": "^5.1.7",
+    "svg2img": "^1.0.0-beta.2"
   }
 }

@@ -4,6 +4,8 @@ import * as path from 'path';
 import axios from 'axios';
 import { logger } from '../utils/logger';
 import { EmojiService, EmojiInfo } from './emojiService';
+import { ens_normalize } from '@adraffy/ens-normalize';
+import puppeteer from 'puppeteer';
 
 // Register emoji font for better emoji support
 try {
@@ -137,6 +139,17 @@ export class ImageGenerationService {
    * Draw ENS image with rounded corners on the right side
    */
   private static async drawENSImage(ctx: CanvasRenderingContext2D, ensName: string, nftImageUrl?: string): Promise<void> {
+    // Normalize ENS name to handle emojis and Unicode characters properly
+    let normalizedEnsName: string;
+    try {
+      normalizedEnsName = ens_normalize(ensName);
+      logger.info(`ENS name normalized: "${ensName}" -> "${normalizedEnsName}"`);
+    } catch (error) {
+      // If normalization fails, use the original name
+      logger.warn(`ENS normalization failed for "${ensName}": ${error}. Using original name.`);
+      normalizedEnsName = ensName;
+    }
+
     // SVG coordinates: x="552" y="48" width="400" height="400" rx="30"
     const imageX = 552;
     const imageY = 48;
@@ -196,7 +209,7 @@ export class ImageGenerationService {
         ctx.fillStyle = this.COLORS.primaryText;
         ctx.font = 'bold 48px Arial';
         ctx.textAlign = 'center';
-        await this.renderTextWithEmojis(ctx, ensName, imageX + imageSize / 2, imageY + imageSize / 2 + 16, 48);
+        await this.renderTextWithEmojis(ctx, normalizedEnsName, imageX + imageSize / 2, imageY + imageSize / 2 + 16, 48);
       }
 
     } catch (error) {
@@ -208,7 +221,7 @@ export class ImageGenerationService {
       ctx.fillStyle = this.COLORS.primaryText;
       ctx.font = 'bold 48px Arial';
       ctx.textAlign = 'center';
-      await this.renderTextWithEmojis(ctx, ensName, imageX + imageSize / 2, imageY + imageSize / 2 + 16, 48);
+      await this.renderTextWithEmojis(ctx, normalizedEnsName, imageX + imageSize / 2, imageY + imageSize / 2 + 16, 48);
     }
   }
 
@@ -406,22 +419,119 @@ export class ImageGenerationService {
   }
 
   /**
-   * Load image from URL with timeout and error handling
+   * Load image from URL with timeout and error handling, with SVG support
    */
   private static async loadImageFromUrl(url: string): Promise<any> {
     try {
       const response = await axios.get(url, {
         responseType: 'arraybuffer',
-        timeout: 5000, // 5 second timeout
+        timeout: 10000, // 10 second timeout for better reliability
         headers: {
           'User-Agent': 'ENS-Sales-Bot/1.0'
         }
       });
       
+      const contentType = response.headers['content-type'];
       const buffer = Buffer.from(response.data);
-      return await loadImage(buffer);
+      
+      // Check if it's an SVG image
+      if (contentType && contentType.includes('image/svg+xml')) {
+        logger.info('Converting SVG to PNG using Puppeteer for proper font/emoji rendering...');
+        
+        const svgContent = buffer.toString();
+        const pngBuffer = await this.convertSvgToPng(svgContent);
+        return await loadImage(pngBuffer);
+      } else {
+        // For regular images, load directly
+        return await loadImage(buffer);
+      }
     } catch (error) {
       throw new Error(`Failed to load image from ${url}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * Convert SVG to PNG using Puppeteer for accurate rendering of custom fonts and emojis
+   */
+  private static async convertSvgToPng(svgContent: string): Promise<Buffer> {
+    let browser = null;
+    try {
+      browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+      });
+      
+      const page = await browser.newPage();
+      await page.setViewport({ width: 270, height: 270 });
+      
+      // Create a data URL from the SVG
+      const svgDataUrl = `data:image/svg+xml;base64,${Buffer.from(svgContent).toString('base64')}`;
+      
+      // Navigate to a simple HTML page with the SVG
+      const html = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <style>
+              body {
+                margin: 0;
+                padding: 0;
+                width: 270px;
+                height: 270px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+              }
+              img {
+                width: 270px;
+                height: 270px;
+                object-fit: contain;
+              }
+            </style>
+          </head>
+          <body>
+            <img src="${svgDataUrl}" alt="ENS Image" />
+          </body>
+        </html>
+      `;
+      
+      await page.setContent(html);
+      
+      // Wait for image to load
+      await page.waitForSelector('img');
+      await page.evaluate(() => {
+        return new Promise((resolve) => {
+          const img = document.querySelector('img');
+          if (img && img.complete) {
+            resolve(true);
+          } else if (img) {
+            img.onload = () => resolve(true);
+            img.onerror = () => resolve(true);
+          } else {
+            resolve(true);
+          }
+        });
+      });
+      
+      // Small delay to ensure fonts are loaded
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Take screenshot
+      const screenshot = await page.screenshot({
+        type: 'png',
+        clip: { x: 0, y: 0, width: 270, height: 270 }
+      });
+      
+      await browser.close();
+      logger.info('Successfully converted SVG to PNG using Puppeteer');
+      
+      return Buffer.from(screenshot);
+    } catch (error) {
+      if (browser) {
+        await browser.close();
+      }
+      logger.error('Failed to convert SVG to PNG with Puppeteer:', error);
+      throw error;
     }
   }
 
