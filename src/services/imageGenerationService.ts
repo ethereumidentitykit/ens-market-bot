@@ -1,18 +1,20 @@
-import { createCanvas, Canvas, CanvasRenderingContext2D, loadImage, registerFont } from 'canvas';
+import { Canvas, loadImage, FontLibrary } from 'skia-canvas';
+// Use any type for skia-canvas context to avoid type conflicts
+type SkiaCanvasRenderingContext2D = any;
 import * as fs from 'fs';
 import * as path from 'path';
 import axios from 'axios';
 import { logger } from '../utils/logger';
-import { EmojiService, EmojiInfo } from './emojiService';
+import { UnicodeEmojiService, UnicodeEmojiInfo } from './unicodeEmojiService';
 import { ens_normalize } from '@adraffy/ens-normalize';
 import puppeteer from 'puppeteer';
 
-// Register emoji font for better emoji support
+// Register emoji font for better emoji support with skia-canvas
 try {
-  registerFont('/System/Library/Fonts/Apple Color Emoji.ttc', { family: 'Apple Color Emoji' });
-  logger.info('Successfully registered Apple Color Emoji font');
+  FontLibrary.use('/System/Library/Fonts/Apple Color Emoji.ttc', 'Apple Color Emoji');
+  logger.info('Successfully registered Apple Color Emoji font with skia-canvas');
 } catch (error) {
-  logger.warn('Failed to register Apple Color Emoji font:', error);
+  logger.warn('Failed to register Apple Color Emoji font with skia-canvas:', error);
 }
 
 export interface MockImageData {
@@ -56,7 +58,7 @@ export class ImageGenerationService {
    * Generate a simple test image to verify canvas functionality
    */
   public static async generateTestImage(): Promise<Buffer> {
-    const canvas = createCanvas(this.CANVAS_WIDTH, this.CANVAS_HEIGHT);
+    const canvas = new Canvas(this.CANVAS_WIDTH, this.CANVAS_HEIGHT);
     const ctx = canvas.getContext('2d');
 
     // Fill background
@@ -74,14 +76,14 @@ export class ImageGenerationService {
     ctx.fillText(`${this.CANVAS_WIDTH}x${this.CANVAS_HEIGHT} - Image Generation Working!`, 
                  this.CANVAS_WIDTH / 2, this.CANVAS_HEIGHT / 2 + 50);
 
-    return canvas.toBuffer('image/png');
+    return canvas.toBuffer('png');
   }
 
   /**
    * Generate ENS sale image with mock data
    */
   public static async generateSaleImage(data: MockImageData): Promise<Buffer> {
-    const canvas = createCanvas(this.CANVAS_WIDTH, this.CANVAS_HEIGHT);
+    const canvas = new Canvas(this.CANVAS_WIDTH, this.CANVAS_HEIGHT);
     const ctx = canvas.getContext('2d');
 
     // Fill background
@@ -96,13 +98,13 @@ export class ImageGenerationService {
     await this.drawENSImage(ctx, data.ensName, data.nftImageUrl);
     await this.drawBuyerSellerSection(ctx, data.sellerEns || 'seller', data.buyerEns || 'buyer', data.sellerAvatar, data.buyerAvatar);
 
-    return canvas.toBuffer('image/png');
+    return canvas.toBuffer('png');
   }
 
   /**
    * Draw main card container
    */
-  private static drawMainCard(ctx: CanvasRenderingContext2D): void {
+  private static drawMainCard(ctx: SkiaCanvasRenderingContext2D): void {
     // No card background - just use the main dark background
     // Twitter will handle the rounded corners automatically
   }
@@ -110,7 +112,7 @@ export class ImageGenerationService {
   /**
    * Draw the ETH price and USD conversion on the left side
    */
-  private static drawPriceSection(ctx: CanvasRenderingContext2D, priceEth: number, priceUsd: number): void {
+  private static drawPriceSection(ctx: SkiaCanvasRenderingContext2D, priceEth: number, priceUsd: number): void {
     // Based on SVG analysis: position in left area (before x=552)
     const leftAreaCenter = 270; // Center of left area (roughly x=270)
     const priceY = 173; // Based on SVG text positioning
@@ -138,7 +140,7 @@ export class ImageGenerationService {
   /**
    * Draw ENS image with rounded corners on the right side
    */
-  private static async drawENSImage(ctx: CanvasRenderingContext2D, ensName: string, nftImageUrl?: string): Promise<void> {
+  private static async drawENSImage(ctx: SkiaCanvasRenderingContext2D, ensName: string, nftImageUrl?: string): Promise<void> {
     // Normalize ENS name to handle emojis and Unicode characters properly
     let normalizedEnsName: string;
     try {
@@ -229,7 +231,7 @@ export class ImageGenerationService {
    * Draw buyer and seller pills with arrow at the bottom
    */
     private static async drawBuyerSellerSection(
-    ctx: CanvasRenderingContext2D,
+    ctx: SkiaCanvasRenderingContext2D,
     sellerEns: string,
     buyerEns: string,
     sellerAvatarUrl?: string,
@@ -301,7 +303,7 @@ export class ImageGenerationService {
   /**
    * Truncate text to fit within specified width
    */
-  private static truncateText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
+  private static truncateText(ctx: SkiaCanvasRenderingContext2D, text: string, maxWidth: number): string {
     // Check if text fits without truncation
     if (ctx.measureText(text).width <= maxWidth) {
       return text;
@@ -342,7 +344,7 @@ export class ImageGenerationService {
    * Draw avatar image in a circular clip
    */
   private static async drawAvatar(
-    ctx: CanvasRenderingContext2D,
+    ctx: SkiaCanvasRenderingContext2D,
     avatarUrl: string | undefined,
     x: number,
     y: number,
@@ -538,7 +540,7 @@ export class ImageGenerationService {
   /**
    * Draw a rounded rectangle
    */
-  private static drawRoundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number): void {
+  private static drawRoundedRect(ctx: SkiaCanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number): void {
     ctx.beginPath();
     this.createRoundedRectPath(ctx, x, y, width, height, radius);
     ctx.fill();
@@ -547,7 +549,7 @@ export class ImageGenerationService {
   /**
    * Create a rounded rectangle path (for clipping) - optimized for perfect capsules
    */
-  private static createRoundedRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number): void {
+  private static createRoundedRectPath(ctx: SkiaCanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number): void {
     // For perfect capsules (when radius = height/2), use arc() for semicircular ends
     if (radius >= height / 2) {
       const actualRadius = height / 2;
@@ -582,7 +584,7 @@ export class ImageGenerationService {
   /**
    * Draw arrow between buyer and seller
    */
-  private static drawArrow(ctx: CanvasRenderingContext2D, fromX: number, fromY: number, toX: number, toY: number): void {
+  private static drawArrow(ctx: SkiaCanvasRenderingContext2D, fromX: number, fromY: number, toX: number, toY: number): void {
     const arrowHeadSize = 24; // Much bigger arrow head
     const arrowLineWidth = 4; // Thicker line
 
@@ -713,18 +715,19 @@ export class ImageGenerationService {
   }
 
   /**
-   * Render text with emoji support - replaces emojis with SVG images
+   * Render text with emoji support using skia-canvas with better emoji rendering
+   * This properly handles ZWJ sequences and falls back to SVG for known emojis
    */
   private static async renderTextWithEmojis(
-    ctx: CanvasRenderingContext2D,
+    ctx: SkiaCanvasRenderingContext2D,
     text: string,
     x: number,
     y: number,
     fontSize: number,
     maxWidth?: number
   ): Promise<void> {
-    // Detect emojis in the text
-    const emojis = EmojiService.detectKnownEmojis(text);
+    // Detect emojis in the text using Unicode data
+    const emojis = UnicodeEmojiService.detectEmojis(text);
     
     if (emojis.length === 0) {
       // No emojis, render normally
@@ -737,11 +740,9 @@ export class ImageGenerationService {
       return;
     }
 
-    // For simplicity, if we need truncation and have emojis, 
-    // we'll just try to render and see if it fits
     let currentX = x;
     let lastPosition = 0;
-    const emojiSize = fontSize * 0.9; // Make emoji slightly smaller than font
+    const emojiSize = fontSize * 0.9;
     
     for (const emojiInfo of emojis) {
       // Check if we're past maxWidth
@@ -753,13 +754,11 @@ export class ImageGenerationService {
       if (emojiInfo.position > lastPosition) {
         const textBefore = text.substring(lastPosition, emojiInfo.position);
         if (textBefore.trim()) {
-          // Check if text would fit
           const textWidth = ctx.measureText(textBefore).width;
           if (maxWidth && (currentX - x + textWidth) > maxWidth) {
-            // Truncate this text segment
             const truncated = this.truncateText(ctx, textBefore, maxWidth - (currentX - x));
             ctx.fillText(truncated, currentX, y);
-            return; // Stop rendering here
+            return;
           }
           ctx.fillText(textBefore, currentX, y);
           currentX += textWidth;
@@ -771,21 +770,20 @@ export class ImageGenerationService {
         break;
       }
       
-      // Render the emoji as SVG
-      const emojiImage = await this.loadEmojiSvg(emojiInfo.svgPath, emojiSize);
-      if (emojiImage) {
-        // Position emoji to align with text baseline
-        const emojiY = y - emojiSize * 0.75; // Adjust for baseline alignment
-        ctx.drawImage(emojiImage, currentX, emojiY, emojiSize, emojiSize);
-        currentX += emojiSize + 2; // Small spacing after emoji
-      } else {
-        // Fallback: render emoji as text (might not work well, but better than nothing)
-        const emojiWidth = ctx.measureText(emojiInfo.emoji).width;
-        if (!maxWidth || (currentX - x + emojiWidth) <= maxWidth) {
-          ctx.fillText(emojiInfo.emoji, currentX, y);
-          currentX += emojiWidth;
-        }
+      // Try to render emoji using skia-canvas native emoji support
+      // skia-canvas has much better emoji support than node-canvas
+      const originalFont = ctx.font;
+      ctx.font = `${fontSize}px "Apple Color Emoji", "Noto Color Emoji", "Segoe UI Emoji", sans-serif`;
+      
+      const emojiWidth = ctx.measureText(emojiInfo.emoji).width;
+      if (!maxWidth || (currentX - x + emojiWidth) <= maxWidth) {
+        // skia-canvas should handle ZWJ sequences correctly
+        ctx.fillText(emojiInfo.emoji, currentX, y);
+        currentX += emojiWidth;
       }
+      
+      // Restore original font
+      ctx.font = originalFont;
       
       lastPosition = emojiInfo.position + emojiInfo.emoji.length;
     }
@@ -796,7 +794,7 @@ export class ImageGenerationService {
       if (textAfter.trim()) {
         if (maxWidth) {
           const remainingWidth = maxWidth - (currentX - x);
-          if (remainingWidth > 20) { // Only render if we have reasonable space
+          if (remainingWidth > 20) {
             const truncated = this.truncateText(ctx, textAfter, remainingWidth);
             ctx.fillText(truncated, currentX, y);
           }

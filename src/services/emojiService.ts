@@ -50,22 +50,50 @@ export class EmojiService {
   }
 
   /**
-   * Simple emoji detection using our mapping keys
+   * ZWJ-aware emoji detection that prioritizes longer sequences
+   * This ensures complex ZWJ sequences are matched before their components
    */
   static detectKnownEmojis(text: string): EmojiInfo[] {
     const emojis: EmojiInfo[] = [];
     
-    // Check each emoji in our mapping
-    for (const [emoji, fileName] of Object.entries(emojiMap)) {
+    // Sort emoji keys by length (descending) to match longest sequences first
+    // This is crucial for ZWJ sequences to avoid breaking them apart
+    const sortedEmojiKeys = Object.keys(emojiMap).sort((a, b) => b.length - a.length);
+    
+    // Track positions that have already been matched to avoid overlaps
+    const matchedPositions = new Set<number>();
+    
+    for (const emoji of sortedEmojiKeys) {
+      const fileName = emojiMap[emoji];
       let position = 0;
+      
       while ((position = text.indexOf(emoji, position)) !== -1) {
-        const svgPath = path.join(process.cwd(), 'assets', 'emojis', 'all', fileName);
-        emojis.push({
-          emoji,
-          position,
-          svgPath
-        });
-        position += emoji.length; // Move past this emoji
+        // Check if this position range is already covered by a longer emoji
+        const endPosition = position + emoji.length;
+        let isOverlapping = false;
+        
+        for (let i = position; i < endPosition; i++) {
+          if (matchedPositions.has(i)) {
+            isOverlapping = true;
+            break;
+          }
+        }
+        
+        if (!isOverlapping) {
+          // Mark all positions in this range as matched
+          for (let i = position; i < endPosition; i++) {
+            matchedPositions.add(i);
+          }
+          
+          const svgPath = path.join(process.cwd(), 'assets', 'emojis', 'all', fileName);
+          emojis.push({
+            emoji,
+            position,
+            svgPath
+          });
+        }
+        
+        position += 1; // Move forward by 1 to find overlapping matches
       }
     }
     
