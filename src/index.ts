@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import { config, validateConfig } from './utils/config';
 import { logger } from './utils/logger';
+import { MONITORED_CONTRACTS } from './config/contracts';
 import { MoralisService } from './services/moralisService';
 import { DatabaseService } from './services/databaseService';
 import { VercelDatabaseService } from './services/vercelDatabaseService';
@@ -61,7 +62,16 @@ async function startApplication(): Promise<void> {
         status: 'healthy', 
         timestamp: new Date().toISOString(),
         environment: config.nodeEnv,
-        contracts: config.contracts.length
+        contracts: config.contracts.length,
+        contractAddresses: config.contracts
+      });
+    });
+
+    // Get contract configuration
+    app.get('/api/contracts', (req, res) => {
+      res.json({ 
+        success: true,
+        contracts: MONITORED_CONTRACTS
       });
     });
 
@@ -118,7 +128,9 @@ async function startApplication(): Promise<void> {
         // Try a simple API call
         let apiTestResult = null;
         try {
-          const testResult = await moralisService.getNFTTrades('0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85', 1);
+          // Use first contract from our configuration for testing
+          const testContract = MONITORED_CONTRACTS[0].address;
+          const testResult = await moralisService.getNFTTrades(testContract, 1);
           apiTestResult = {
             success: true,
             resultCount: testResult?.trades?.length || 0,

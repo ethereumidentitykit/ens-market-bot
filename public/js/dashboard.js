@@ -49,6 +49,7 @@ function dashboard() {
             lastResult: null,
             error: null
         },
+        contracts: [], // Will be loaded from API
 
         dbViewer: {
             data: null,
@@ -138,6 +139,7 @@ function dashboard() {
         async init() {
             await this.refreshData();
             await this.loadUnpostedSales();
+            await this.loadContracts();
             await this.dbViewer.loadPage(1);
             // Auto-refresh every 30 seconds
             setInterval(() => {
@@ -145,6 +147,26 @@ function dashboard() {
                     this.refreshData();
                 }
             }, 30000);
+        },
+
+        // Load contracts from API
+        async loadContracts() {
+            try {
+                const response = await fetch('/api/contracts');
+                const result = await response.json();
+                if (result.success) {
+                    this.contracts = result.contracts;
+                } else {
+                    console.error('Failed to load contracts');
+                }
+            } catch (error) {
+                console.error('Error loading contracts:', error);
+                // Fallback to known contracts if API fails (should match contracts.ts)
+                this.contracts = [
+                    { address: '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85', name: 'ENS OG Registry' },
+                    { address: '0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401', name: 'ENS NameWrapper' }
+                ];
+            }
         },
 
         // Refresh all data

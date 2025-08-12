@@ -164,6 +164,7 @@ export class MoralisService {
     const allNewTrades: EnhancedNFTSale[] = [];
     
     logger.info(`Starting incremental fetch from block ${lastProcessedBlock} with batch size ${batchSize}`);
+    logger.info(`Processing ${config.contracts.length} contracts: ${config.contracts.join(', ')}`);
 
     for (const contractAddress of config.contracts) {
       logger.info(`Fetching incremental trades for contract: ${contractAddress}`);
@@ -237,13 +238,22 @@ export class MoralisService {
 
       } catch (error: any) {
         logger.error(`Error during incremental fetch for contract ${contractAddress}:`, error.message);
+        logger.error(`Error details:`, error);
+        // Continue processing other contracts even if one fails
       }
     }
 
     // Sort all trades by block number (newest first)
     allNewTrades.sort((a, b) => b.blockNumber - a.blockNumber);
     
+    // Log summary by contract
+    const contractSummary: { [key: string]: number } = {};
+    for (const trade of allNewTrades) {
+      contractSummary[trade.contractAddress] = (contractSummary[trade.contractAddress] || 0) + 1;
+    }
+    
     logger.info(`Incremental fetch complete: ${allNewTrades.length} total new trades found`);
+    logger.info(`Trades by contract:`, contractSummary);
     return allNewTrades;
   }
 

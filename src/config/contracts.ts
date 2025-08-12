@@ -5,11 +5,15 @@
 export const MONITORED_CONTRACTS = [
   {
     address: '0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401',
-    name: 'Contract 1', // You can add collection names here later
+    name: 'ENS NameWrapper',
+    displayName: 'NameWrapper', // For tweets
+    hashtag: 'ENS'
   },
   {
     address: '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85', 
-    name: 'ENS Domains', // This is actually ENS registry
+    name: 'ENS OG Registry',
+    displayName: 'ENS', // For tweets
+    hashtag: 'ENS'
   }
 ];
 

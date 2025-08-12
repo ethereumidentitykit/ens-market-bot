@@ -707,8 +707,9 @@
                                     <label class="block text-sm font-medium text-gray-700 mb-2">Contract (Optional)</label>
                                     <select x-model="historicalData.contractAddress" class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
                                         <option value="">All Contracts</option>
-                                        <option value="0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85">ENS Domains</option>
-                                        <option value="0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401">Contract 1</option>
+                                        <template x-for="contract in contracts" :key="contract.address">
+                                            <option :value="contract.address" x-text="contract.name"></option>
+                                        </template>
                                     </select>
                                 </div>
 
