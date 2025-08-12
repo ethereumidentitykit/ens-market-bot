@@ -694,25 +694,7 @@ export class ImageGenerationService {
     ];
   }
 
-  /**
-   * Load and render an emoji SVG at specified position and size
-   */
-  private static async loadEmojiSvg(svgPath: string, size: number): Promise<any | null> {
-    try {
-      if (!fs.existsSync(svgPath)) {
-        logger.warn(`Emoji SVG not found: ${svgPath}`);
-        return null;
-      }
 
-      // For now, we'll use loadImage which should work with SVG files
-      // node-canvas can load SVG files directly
-      const image = await loadImage(svgPath);
-      return image;
-    } catch (error) {
-      logger.warn(`Failed to load emoji SVG: ${svgPath}`, error);
-      return null;
-    }
-  }
 
   /**
    * Render text with emoji support using skia-canvas with better emoji rendering
