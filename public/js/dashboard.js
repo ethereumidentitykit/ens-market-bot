@@ -41,6 +41,15 @@ function dashboard() {
         processingReset: false,
 
         // Database viewer state
+        // Historical data population state
+        historicalData: {
+            targetBlock: '23100000',
+            contractAddress: '',
+            isRunning: false,
+            lastResult: null,
+            error: null
+        },
+
         dbViewer: {
             data: null,
             loading: false,
@@ -194,6 +203,44 @@ function dashboard() {
         },
 
         // Process new sales manually
+        async populateHistoricalData() {
+            this.historicalData.isRunning = true;
+            this.historicalData.error = null;
+            this.historicalData.lastResult = null;
+
+            try {
+                const payload = {
+                    targetBlock: parseInt(this.historicalData.targetBlock),
+                    contractAddress: this.historicalData.contractAddress || undefined
+                };
+
+                const response = await fetch('/api/populate-historical', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    this.historicalData.lastResult = result.data;
+                    // Refresh database viewer after population
+                    if (this.dbViewer) {
+                        await this.dbViewer.loadPage(1);
+                    }
+                } else {
+                    this.historicalData.error = result.error || 'Failed to populate historical data';
+                }
+            } catch (error) {
+                this.historicalData.error = error.message;
+                console.error('Historical population error:', error);
+            } finally {
+                this.historicalData.isRunning = false;
+            }
+        },
+
         async processSales() {
             this.processing = true;
             this.lastProcessResult = null;
