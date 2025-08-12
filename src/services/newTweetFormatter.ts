@@ -3,6 +3,7 @@ import { logger } from '../utils/logger';
 import { EthIdentityService, EthIdentityAccount } from './ethIdentityService';
 import { RealDataImageService, RealImageData } from './realDataImageService';
 import { ImageGenerationService, MockImageData } from './imageGenerationService';
+import { PuppeteerImageService } from './puppeteerImageService';
 import { IDatabaseService } from '../types';
 
 export interface GeneratedTweet {
@@ -61,12 +62,12 @@ export class NewTweetFormatter {
           // Convert RealImageData to MockImageData for image generation
           const mockImageData = this.convertRealToMockImageData(saleImageData, sale);
           
-          // Generate image buffer
-          imageBuffer = await ImageGenerationService.generateSaleImage(mockImageData);
+          // Generate image buffer using Puppeteer
+          imageBuffer = await PuppeteerImageService.generateSaleImage(mockImageData);
           
           // Save image for preview
           const filename = `tweet-image-${sale.id}-${Date.now()}.png`;
-          await ImageGenerationService.saveImageToFile(imageBuffer, filename);
+          await PuppeteerImageService.saveImageToFile(imageBuffer, filename);
           imageUrl = `/generated-images/${filename}`;
           imageData = saleImageData;
           
@@ -132,7 +133,7 @@ export class NewTweetFormatter {
     // Line 2: Seller handle + "sold to" + buyer handle
     const sellerHandle = this.getDisplayHandle(sellerAccount, sale.sellerAddress);
     const buyerHandle = this.getDisplayHandle(buyerAccount, sale.buyerAddress);
-    const line2 = `${sellerHandle} sold to ${buyerHandle}`;
+    const line2 = `${sellerHandle} -> ${buyerHandle}`;
 
     // Line 3: Standard hashtags
     const line3 = '#ENS #ENSDomains #Ethereum';

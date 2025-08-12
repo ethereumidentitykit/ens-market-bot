@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { ImageGenerationService } from '../services/imageGenerationService';
+import { PuppeteerImageService } from '../services/puppeteerImageService';
 import { RealDataImageService } from '../services/realDataImageService';
 import { EthIdentityService } from '../services/ethIdentityService';
 import { logger } from '../utils/logger';
@@ -35,7 +36,7 @@ export class ImageController {
           : 'No real data available, falling back to mock data';
         logger.warn(message);
         const mockData = ImageGenerationService.getMockData();
-        const imageBuffer = await ImageGenerationService.generateSaleImage(mockData);
+        const imageBuffer = await PuppeteerImageService.generateSaleImage(mockData);
         const endTime = Date.now();
         
         const filename = `test-image-mock-${Date.now()}.png`;
@@ -126,7 +127,7 @@ export class ImageController {
       logger.info('Generating custom image with provided data');
       
       const startTime = Date.now();
-      const imageBuffer = await ImageGenerationService.generateSaleImage(mockData);
+      const imageBuffer = await PuppeteerImageService.generateSaleImage(mockData);
       const endTime = Date.now();
       
       // Save image with timestamp
