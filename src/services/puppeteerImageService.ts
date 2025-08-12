@@ -94,6 +94,7 @@ export class PuppeteerImageService {
   private static generateHTML(data: MockImageData): string {
     // Get background image as base64 if it exists
     const backgroundImageBase64 = this.getBackgroundImageBase64();
+    const userPlaceholderBase64 = this.getUserPlaceholderBase64();
     
     return `
     <!DOCTYPE html>
@@ -131,7 +132,7 @@ export class PuppeteerImageService {
             .price-section {
                 position: absolute;
                 left: 270px;
-                top: 173px;
+                top: 80px;
                 text-align: center;
                 color: white;
                 transform: translateX(-50%);
@@ -148,7 +149,7 @@ export class PuppeteerImageService {
             .eth-label {
                 font-size: 40px;
                 text-shadow: 0px 0px 50px rgba(255, 255, 255, 0.25);
-                margin-bottom: 30px;
+                margin-bottom: 20px;
             }
 
             .usd-price {
@@ -187,20 +188,29 @@ export class PuppeteerImageService {
                 border-radius: 30px;
                 display: flex;
                 align-items: center;
-                justify-content: center;
+                justify-content: flex-start;
                 color: white;
-                font-size: 48px;
+                font-size: 58px;
                 font-weight: bold;
-                text-align: center;
                 box-shadow: 0px 0px 50px rgba(0, 0, 0, 0.4);
-                word-break: break-word;
                 padding: 20px;
+                overflow: hidden;
+            }
+
+            .ens-text {
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                max-width: 100%;
+                text-align: left;
+                flex-shrink: 1;
+                width: 100%;
             }
 
             /* Buyer/Seller Pills (Bottom) */
             .pills-section {
                 position: absolute;
-                bottom: 20px;
+                bottom: 28px;
                 left: 0;
                 right: 0;
                 display: flex;
@@ -216,7 +226,7 @@ export class PuppeteerImageService {
                 border-radius: 66px;
                 display: flex;
                 align-items: center;
-                padding: 16px 30px;
+                padding: 16px 20px;
                 box-shadow: 0px 0px 50px rgba(0, 0, 0, 0.4);
             }
 
@@ -225,8 +235,7 @@ export class PuppeteerImageService {
             }
 
             .pill-right {
-                justify-content: flex-end;
-                flex-direction: row-reverse;
+                justify-content: flex-start;
             }
 
             .avatar {
@@ -234,20 +243,23 @@ export class PuppeteerImageService {
                 height: 100px;
                 border-radius: 50px;
                 object-fit: cover;
-                margin: 0 20px;
+                margin: 0 16px 0 0;
             }
 
             .avatar-placeholder {
                 width: 100px;
                 height: 100px;
                 border-radius: 50px;
-                background: #666;
-                margin: 0 20px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 40px;
-                color: white;
+                margin: 0 16px 0 0;
+                background-color: #666;
+                background-size: contain;
+                background-position: center;
+                background-repeat: no-repeat;
+            }
+
+            .pill-right .avatar,
+            .pill-right .avatar-placeholder {
+                margin: 0 16px 0 0;
             }
 
             .pill-text {
@@ -255,16 +267,17 @@ export class PuppeteerImageService {
                 font-size: 36px;
                 font-weight: bold;
                 flex: 1;
-                text-align: center;
+                text-align: left;
                 word-break: break-word;
             }
 
             /* Arrow between pills */
             .arrow {
                 color: white;
-                font-size: 48px;
+                font-size: 72px;
                 font-weight: bold;
                 text-shadow: 0px 0px 50px rgba(255, 255, 255, 0.25);
+                line-height: 1;
             }
         </style>
     </head>
@@ -282,8 +295,8 @@ export class PuppeteerImageService {
             <div class="ens-image-section">
                 ${data.nftImageUrl ? 
                     `<img src="${data.nftImageUrl}" alt="NFT Image" class="ens-image" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                     <div class="ens-placeholder" style="display: none;">${data.ensName}</div>` :
-                    `<div class="ens-placeholder">${data.ensName}</div>`
+                     <div class="ens-placeholder" style="display: none;"><span class="ens-text">${data.ensName}</span></div>` :
+                    `<div class="ens-placeholder"><span class="ens-text">${data.ensName}</span></div>`
                 }
             </div>
 
@@ -292,9 +305,9 @@ export class PuppeteerImageService {
                 <!-- Seller Pill (Left) -->
                 <div class="pill pill-left">
                     ${data.sellerAvatar ? 
-                        `<img src="${data.sellerAvatar}" alt="Seller Avatar" class="avatar" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                         <div class="avatar-placeholder" style="display: none;">👤</div>` :
-                        `<div class="avatar-placeholder">👤</div>`
+                        `<img src="${data.sellerAvatar}" alt="Seller Avatar" class="avatar" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                         <div class="avatar-placeholder" style="display: none; ${userPlaceholderBase64 ? `background-image: url(${userPlaceholderBase64});` : ''}"></div>` :
+                        `<div class="avatar-placeholder" style="${userPlaceholderBase64 ? `background-image: url(${userPlaceholderBase64});` : ''}"></div>`
                     }
                     <div class="pill-text">${data.sellerEns || 'seller'}</div>
                 </div>
@@ -304,12 +317,12 @@ export class PuppeteerImageService {
 
                 <!-- Buyer Pill (Right) -->
                 <div class="pill pill-right">
-                    <div class="pill-text">${data.buyerEns || 'buyer'}</div>
                     ${data.buyerAvatar ? 
-                        `<img src="${data.buyerAvatar}" alt="Buyer Avatar" class="avatar" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                         <div class="avatar-placeholder" style="display: none;">👤</div>` :
-                        `<div class="avatar-placeholder">👤</div>`
+                        `<img src="${data.buyerAvatar}" alt="Buyer Avatar" class="avatar" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                         <div class="avatar-placeholder" style="display: none; ${userPlaceholderBase64 ? `background-image: url(${userPlaceholderBase64});` : ''}"></div>` :
+                        `<div class="avatar-placeholder" style="${userPlaceholderBase64 ? `background-image: url(${userPlaceholderBase64});` : ''}"></div>`
                     }
+                    <div class="pill-text">${data.buyerEns || 'buyer'}</div>
                 </div>
             </div>
         </div>
@@ -330,6 +343,23 @@ export class PuppeteerImageService {
       }
     } catch (error) {
       logger.warn('Failed to load background image for base64 conversion:', error);
+    }
+    return null;
+  }
+
+  /**
+   * Get user placeholder image as base64 data URL
+   */
+  private static getUserPlaceholderBase64(): string | null {
+    try {
+      const placeholderPath = path.join(__dirname, '../../assets/userplaceholder.png');
+      if (fs.existsSync(placeholderPath)) {
+        const imageBuffer = fs.readFileSync(placeholderPath);
+        const base64Image = imageBuffer.toString('base64');
+        return `data:image/png;base64,${base64Image}`;
+      }
+    } catch (error) {
+      logger.warn('Failed to load user placeholder image for base64 conversion:', error);
     }
     return null;
   }

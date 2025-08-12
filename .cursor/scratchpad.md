@@ -21,11 +21,12 @@
 - **Manual Posting**: Admin dashboard controls with preview
 
 ### 🎨 Image Generation
-- **Canvas Rendering**: Generates 1000x666 PNG images using skia-canvas
+- **Puppeteer Rendering**: Generates 1000x666 PNG images using Puppeteer + HTML/CSS
 - **ENS Name Display**: Shows sold ENS name with NFT image when available  
 - **Buyer/Seller Pills**: Clean layout with avatars and ENS names
 - **Price Display**: ETH and USD amounts prominently featured
 - **✅ Full Emoji Support**: All 5,033 Unicode emojis including complex ZWJ sequences
+- **Database Storage**: Images stored in database for Vercel compatibility
 - **Fallback Handling**: Graceful handling of missing NFT images/avatars
 
 ### 📊 Admin Dashboard
@@ -40,7 +41,7 @@
 - **Database**: SQLite (development) / PostgreSQL (production)
 - **Data Source**: Moralis Web3 API
 - **Identity Resolution**: EthIdentityKit API
-- **Image Generation**: skia-canvas with emoji support
+- **Image Generation**: Puppeteer with HTML/CSS rendering
 - **Frontend**: Alpine.js + Tailwind CSS
 - **Deployment**: Vercel
 
@@ -57,7 +58,7 @@
 - ✅ **Fast Performance**: ~25ms average generation time
 - ✅ **Cross-Platform**: Uses skia-canvas with system emoji fonts
 
-**Technical**: Migrated from node-canvas to skia-canvas, uses official Unicode Emoji 16.0 data files, leverages native system fonts for reliable emoji rendering.
+**Technical**: Originally used skia-canvas, migrated to Puppeteer for Vercel compatibility. Uses HTML/CSS rendering with environment-aware Puppeteer configuration. Images stored in database for serverless deployment.
 
 ## Deployment Status
 
@@ -277,11 +278,31 @@ The current admin dashboard allows manual posting but lacks a comprehensive twee
 - **API Endpoints**: Return image URLs and buffer data for preview and posting
 - **Frontend**: Displays generated images with proper styling and responsive design
 
-**Next**: Ready for full testing to validate the complete tweet generation workflow with images!
+## Recent Work - Image Generation Migration & Visual Fixes
+
+### Puppeteer Migration ✅ COMPLETE
+**Issue**: Vercel deployment failing with `libfontconfig.so.1` error (skia-canvas dependency)
+**Solution**: Migrated from skia-canvas to Puppeteer with HTML/CSS rendering
+- Environment-aware Puppeteer launch (puppeteer-core + @sparticuz/chromium for Vercel)
+- Database image storage for Vercel's read-only filesystem
+- Maintained all existing functionality including emoji support
+
+### Visual Fixes ✅ COMPLETE  
+**Issues Fixed**:
+- ✅ Right pill avatar positioning (now hugs left wall like left pill)
+- ✅ ENS text alignment (changed from centered to left-aligned)
+- ✅ Avatar placeholder scaling (uses `background-size: contain`)
+- ✅ Price positioning and text shadows restored
+- ✅ Arrow sizing restored
+
+**Key Fix**: `.pill-text` had `text-align: center` causing centering behavior
 
 ### Lessons
 
-*This section will be updated with any new learnings during implementation*
+- Always check explicit `text-align` properties first before analyzing complex layout systems
+- Vercel serverless requires environment-aware code for different dependencies  
+- Database storage needed for generated files in serverless environments
+- Changes not taking effect = check if compiled JS is running instead of TypeScript source
 
 **Last Updated**: January 25, 2025  
-**Status**: 📋 Planning Complete - Ready for Execution
+**Status**: ✅ Tweet Generation Complete - Production Ready
