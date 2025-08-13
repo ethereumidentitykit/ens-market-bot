@@ -3,12 +3,12 @@
 ## Run these commands on your VPS to fix the current problems:
 
 ```bash
-# 1. Upgrade to Node.js 20
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+# 1. Upgrade to Node.js 22 LTS (latest stable)
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt-get install -y nodejs
 
 # 2. Verify Node.js version
-node --version  # Should show v20.x.x
+node --version  # Should show v22.x.x
 
 # 3. Navigate to your project
 cd /var/www/twitterbot

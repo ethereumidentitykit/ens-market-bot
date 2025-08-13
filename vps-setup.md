@@ -30,8 +30,8 @@ chmod 600 ~/.ssh/authorized_keys
 
 ## 4. Install Node.js and dependencies
 ```bash
-# Install Node.js 20 (required for some packages)
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+# Install Node.js 22 LTS (latest stable)
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt-get install -y nodejs git
 
 # Install PM2 globally
