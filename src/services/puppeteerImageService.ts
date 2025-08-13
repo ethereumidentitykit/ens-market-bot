@@ -260,14 +260,14 @@ export class PuppeteerImageService {
                 height: 100px;
                 border-radius: 50px;
                 object-fit: cover;
-                margin: 0 16px 0 0;
+                margin: 0 15px 0 0;
             }
 
             .avatar-placeholder {
                 width: 100px;
                 height: 100px;
                 border-radius: 50px;
-                margin: 0 16px 0 0;
+                margin: 0 15px 0 0;
                 background-color: #666;
                 background-size: contain;
                 background-position: center;
@@ -276,7 +276,7 @@ export class PuppeteerImageService {
 
             .pill-right .avatar,
             .pill-right .avatar-placeholder {
-                margin: 0 16px 0 0;
+                margin: 0 15px 0 0;
             }
 
             .pill-text {

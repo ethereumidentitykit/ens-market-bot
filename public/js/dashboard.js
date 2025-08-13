@@ -1,6 +1,27 @@
 // Dashboard JavaScript using Alpine.js
 function dashboard() {
     return {
+        // View State
+        currentView: 'classic', // 'classic' or 'database'
+        
+        // Master API Toggles
+        apiToggles: {
+            twitterEnabled: true,
+            moralisEnabled: true
+        },
+        
+        // Auto-posting settings
+        autoPostSettings: {
+            enabled: false,
+            minEthDefault: 0.1,
+            minEth10kClub: 0.5,
+            minEth999Club: 0.3,
+            maxAgeHours: 1
+        },
+        
+        // Tweet history
+        tweetHistory: [],
+        
         // State
         stats: {},
         recentSales: [],
@@ -40,18 +61,11 @@ function dashboard() {
         databaseResetMessageType: 'info',
         processingReset: false,
 
-        // Database viewer state
-        // Historical data population state
-        historicalData: {
-            targetBlock: '23100000',
-            contractAddress: '',
-            isRunning: false,
-            lastResult: null,
-            error: null
-        },
-        contracts: [], // Will be loaded from API
+        // Sale modal state
+        selectedSale: null,
 
-        dbViewer: {
+        // Database viewer state
+        databaseView: {
             data: null,
             loading: false,
             searchTerm: '',
@@ -60,15 +74,17 @@ function dashboard() {
             limit: 50,
             currentPage: 1,
             searchTimeout: null,
+            ethFilter: 'all', // 'all', '0.1+', '0.5+', '1+', '5+', '10+'
 
             async loadPage(page) {
                 this.loading = true;
                 this.currentPage = page;
                 
                 try {
+                    // Get a larger dataset to apply client-side filtering
                     const params = new URLSearchParams({
-                        page: page.toString(),
-                        limit: this.limit.toString(),
+                        page: 1,
+                        limit: '1000', // Get more data for client-side filtering
                         sortBy: this.sortBy,
                         sortOrder: this.sortOrder
                     });
@@ -81,7 +97,32 @@ function dashboard() {
                     const result = await response.json();
 
                     if (result.success) {
-                        this.data = result.data;
+                        let sales = result.data.sales;
+                        
+                        // Apply ETH filter
+                        sales = this.applyEthFilter(sales);
+                        
+                        // Apply pagination to filtered results
+                        const totalFiltered = sales.length;
+                        const offset = (page - 1) * this.limit;
+                        const paginatedSales = sales.slice(offset, offset + this.limit);
+                        
+                        // Update data structure
+                        this.data = {
+                            sales: paginatedSales,
+                            stats: {
+                                ...result.data.stats,
+                                filteredResults: totalFiltered
+                            },
+                            pagination: {
+                                page: page,
+                                limit: this.limit,
+                                total: totalFiltered,
+                                totalPages: Math.ceil(totalFiltered / this.limit),
+                                hasPrev: page > 1,
+                                hasNext: page < Math.ceil(totalFiltered / this.limit)
+                            }
+                        };
                     } else {
                         console.error('Failed to load database data:', result.error);
                     }
@@ -109,44 +150,59 @@ function dashboard() {
                 }, 500);
             },
 
-            getPageNumbers() {
-                if (!this.data?.pagination) return [];
-                
-                const current = this.data.pagination.page;
-                const total = this.data.pagination.totalPages;
-                const range = 2; // Show 2 pages on each side of current
-                
-                let start = Math.max(1, current - range);
-                let end = Math.min(total, current + range);
-                
-                // Adjust range if we're near the beginning or end
-                if (current <= range) {
-                    end = Math.min(total, 2 * range + 1);
-                } else if (current > total - range) {
-                    start = Math.max(1, total - 2 * range);
+            setEthFilter(filter) {
+                this.ethFilter = filter;
+                this.loadPage(1);
+            },
+
+            applyEthFilter(sales) {
+                if (this.ethFilter === 'all') {
+                    return sales;
                 }
-                
-                const pages = [];
-                for (let i = start; i <= end; i++) {
-                    pages.push(i);
-                }
-                
-                return pages;
+
+                const threshold = parseFloat(this.ethFilter.replace('+', ''));
+                return sales.filter(sale => parseFloat(sale.priceEth) >= threshold);
             }
         },
 
+        // Historical data population state
+        historicalData: {
+            targetBlock: '23100000',
+            contractAddress: '',
+            isRunning: false,
+            lastResult: null,
+            error: null
+        },
+        contracts: [], // Will be loaded from API
+
         // Initialize
         async init() {
+            await this.loadToggleStates();
             await this.refreshData();
             await this.loadUnpostedSales();
             await this.loadContracts();
-            await this.dbViewer.loadPage(1);
+            await this.databaseView.loadPage(1);
             // Auto-refresh every 30 seconds
             setInterval(() => {
                 if (!this.loading && !this.processing) {
                     this.refreshData();
                 }
             }, 30000);
+        },
+
+        // Load initial toggle states from backend
+        async loadToggleStates() {
+            try {
+                const response = await fetch('/api/admin/toggle-status');
+                if (response.ok) {
+                    const data = await response.json();
+                    this.apiToggles.twitterEnabled = data.twitterEnabled;
+                    this.apiToggles.moralisEnabled = data.moralisEnabled;
+                    this.autoPostSettings.enabled = data.autoPostingEnabled;
+                }
+            } catch (error) {
+                console.error('Failed to load toggle states:', error);
+            }
         },
 
         // Load contracts from API
@@ -863,6 +919,144 @@ function dashboard() {
         clearDatabaseResetMessage() {
             this.databaseResetMessage = '';
             this.databaseResetMessageType = 'info';
+        },
+
+        // Time calculation function
+        getTimeAgo(timestamp) {
+            if (!timestamp) return 'Unknown';
+            
+            const now = new Date();
+            const created = new Date(timestamp);
+            const diffMs = now - created;
+            
+            const diffMinutes = Math.floor(diffMs / (1000 * 60));
+            const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+            const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+            
+            if (diffMinutes < 60) {
+                return diffMinutes === 0 ? 'Just now' : `${diffMinutes}m ago`;
+            } else if (diffHours < 24) {
+                return `${diffHours}h ago`;
+            } else if (diffDays < 30) {
+                return `${diffDays}d ago`;
+            } else {
+                const diffMonths = Math.floor(diffDays / 30);
+                return `${diffMonths}mo ago`;
+            }
+        },
+
+        // Modal functions
+        openSaleModal(sale) {
+            this.selectedSale = sale;
+        },
+
+        closeSaleModal() {
+            this.selectedSale = null;
+        },
+
+        // Master API Toggle Functions
+        async toggleTwitterAPI() {
+            try {
+                this.loading = true;
+                const response = await fetch('/api/admin/toggle-twitter', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: !this.apiToggles.twitterEnabled })
+                });
+                
+                if (response.ok) {
+                    this.apiToggles.twitterEnabled = !this.apiToggles.twitterEnabled;
+                    
+                    // Disable auto-posting if Twitter API is disabled
+                    if (!this.apiToggles.twitterEnabled && this.autoPostSettings.enabled) {
+                        this.autoPostSettings.enabled = false;
+                    }
+                    
+                    this.showMessage(
+                        `Twitter API ${this.apiToggles.twitterEnabled ? 'enabled' : 'disabled'}`,
+                        'success'
+                    );
+                } else {
+                    throw new Error('Failed to toggle Twitter API');
+                }
+            } catch (error) {
+                console.error('Toggle Twitter API error:', error);
+                this.showMessage('Failed to toggle Twitter API', 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async toggleMoralisAPI() {
+            try {
+                this.loading = true;
+                const response = await fetch('/api/admin/toggle-moralis', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: !this.apiToggles.moralisEnabled })
+                });
+                
+                if (response.ok) {
+                    this.apiToggles.moralisEnabled = !this.apiToggles.moralisEnabled;
+                    this.showMessage(
+                        `Moralis API ${this.apiToggles.moralisEnabled ? 'enabled' : 'disabled'}`,
+                        'success'
+                    );
+                } else {
+                    throw new Error('Failed to toggle Moralis API');
+                }
+            } catch (error) {
+                console.error('Toggle Moralis API error:', error);
+                this.showMessage('Failed to toggle Moralis API', 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async toggleAutoPosting() {
+            try {
+                this.loading = true;
+                const newState = !this.autoPostSettings.enabled;
+                
+                const response = await fetch('/api/admin/toggle-auto-posting', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: newState })
+                });
+                
+                if (response.ok) {
+                    this.autoPostSettings.enabled = newState;
+                    this.showMessage(
+                        `Auto-posting ${newState ? 'enabled' : 'disabled'}`,
+                        'success'
+                    );
+                } else {
+                    throw new Error('Failed to toggle auto-posting');
+                }
+            } catch (error) {
+                console.error('Toggle auto-posting error:', error);
+                this.showMessage('Failed to toggle auto-posting', 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        // Load tweet history
+        async loadTweetHistory() {
+            try {
+                const response = await fetch('/api/twitter/history');
+                if (response.ok) {
+                    this.tweetHistory = await response.json();
+                }
+            } catch (error) {
+                console.error('Failed to load tweet history:', error);
+            }
+        },
+
+        // Helper function to show messages
+        showMessage(text, type = 'info') {
+            // You can implement this to show notifications
+            console.log(`${type.toUpperCase()}: ${text}`);
         }
     };
 }

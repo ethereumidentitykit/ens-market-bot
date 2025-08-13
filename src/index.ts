@@ -14,6 +14,7 @@ import { TweetFormatter } from './services/tweetFormatter';
 import { NewTweetFormatter } from './services/newTweetFormatter';
 import { RateLimitService } from './services/rateLimitService';
 import { EthIdentityService } from './services/ethIdentityService';
+import { APIToggleService } from './services/apiToggleService';
 
 async function startApplication(): Promise<void> {
   try {
@@ -366,6 +367,102 @@ async function startApplication(): Promise<void> {
           error: error.message
         });
       }
+    });
+
+    // Initialize API Toggle Service with database
+    const apiToggleService = APIToggleService.getInstance();
+    await apiToggleService.initialize(databaseService);
+
+    // Admin API Toggle endpoints
+    app.post('/api/admin/toggle-twitter', async (req, res) => {
+      try {
+        const { enabled } = req.body;
+        if (typeof enabled !== 'boolean') {
+          return res.status(400).json({
+            success: false,
+            error: 'enabled must be a boolean'
+          });
+        }
+
+        await apiToggleService.setTwitterEnabled(enabled);
+        
+        logger.info(`Twitter API ${enabled ? 'enabled' : 'disabled'} via admin toggle`);
+        
+        const state = apiToggleService.getState();
+        res.json({
+          success: true,
+          twitterEnabled: state.twitterEnabled,
+          autoPostingEnabled: state.autoPostingEnabled
+        });
+      } catch (error: any) {
+        logger.error('Toggle Twitter API error:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.post('/api/admin/toggle-moralis', async (req, res) => {
+      try {
+        const { enabled } = req.body;
+        if (typeof enabled !== 'boolean') {
+          return res.status(400).json({
+            success: false,
+            error: 'enabled must be a boolean'
+          });
+        }
+
+        await apiToggleService.setMoralisEnabled(enabled);
+        logger.info(`Moralis API ${enabled ? 'enabled' : 'disabled'} via admin toggle`);
+        
+        const state = apiToggleService.getState();
+        res.json({
+          success: true,
+          moralisEnabled: state.moralisEnabled
+        });
+      } catch (error: any) {
+        logger.error('Toggle Moralis API error:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.post('/api/admin/toggle-auto-posting', async (req, res) => {
+      try {
+        const { enabled } = req.body;
+        if (typeof enabled !== 'boolean') {
+          return res.status(400).json({
+            success: false,
+            error: 'enabled must be a boolean'
+          });
+        }
+
+        await apiToggleService.setAutoPostingEnabled(enabled);
+        logger.info(`Auto-posting ${enabled ? 'enabled' : 'disabled'} via admin toggle`);
+        
+        const state = apiToggleService.getState();
+        res.json({
+          success: true,
+          autoPostingEnabled: state.autoPostingEnabled
+        });
+      } catch (error: any) {
+        logger.error('Toggle auto-posting error:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.get('/api/admin/toggle-status', (req, res) => {
+      const state = apiToggleService.getState();
+      res.json({
+        success: true,
+        ...state
+      });
     });
 
     // Twitter API endpoints

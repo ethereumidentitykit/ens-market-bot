@@ -3,6 +3,7 @@ import * as crypto from 'crypto-js';
 import https from 'https';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
+import { APIToggleService } from './apiToggleService';
 
 export interface TwitterPostResult {
   success: boolean;
@@ -18,8 +19,10 @@ export interface TwitterUser {
 
 export class TwitterService {
   private oauth: OAuth;
+  private apiToggleService: APIToggleService;
 
   constructor() {
+    this.apiToggleService = APIToggleService.getInstance();
     this.oauth = new OAuth({
       consumer: { 
         key: config.twitter.apiKey, 
@@ -33,9 +36,27 @@ export class TwitterService {
   }
 
   /**
+   * Check if Twitter API is enabled via admin toggle
+   */
+  private checkApiEnabled(): boolean {
+    if (!this.apiToggleService.isTwitterEnabled()) {
+      logger.warn('Twitter API call blocked - API disabled via admin toggle');
+      return false;
+    }
+    return true;
+  }
+
+  /**
    * Test Twitter API connection by verifying credentials
    */
   async testConnection(): Promise<{ success: boolean; user?: TwitterUser; error?: string }> {
+    if (!this.checkApiEnabled()) {
+      return { 
+        success: false, 
+        error: 'Twitter API is disabled via admin toggle' 
+      };
+    }
+
     try {
       logger.info('Testing Twitter API connection...');
       
@@ -82,6 +103,13 @@ export class TwitterService {
    * Post a tweet to Twitter
    */
   async postTweet(content: string, imageBuffer?: Buffer): Promise<TwitterPostResult> {
+    if (!this.checkApiEnabled()) {
+      return { 
+        success: false, 
+        error: 'Twitter API is disabled via admin toggle' 
+      };
+    }
+
     try {
       // Validate content length
       if (content.length > 280) {

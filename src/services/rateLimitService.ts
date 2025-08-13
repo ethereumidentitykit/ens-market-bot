@@ -45,7 +45,7 @@ export class RateLimitService {
         canPost
       };
 
-      logger.info(`Rate limit status: ${postsInLast24Hours}/${this.DAILY_LIMIT} posts used, ${remainingPosts} remaining`);
+      // Only log rate limit status when specifically requested (not for routine checks)
       return status;
     } catch (error: any) {
       logger.error('Failed to check rate limit status:', error.message);
@@ -67,7 +67,11 @@ export class RateLimitService {
       };
 
       await this.databaseService.recordTweetPost(post);
-      logger.info(`Recorded successful tweet post: ${tweetId}`);
+      
+      // Log rate limit status after posting a tweet
+      const status = await this.canPostTweet();
+      logger.info(`Tweet posted successfully: ${tweetId}`);
+      logger.info(`Rate limit status: ${status.postsInLast24Hours}/${this.DAILY_LIMIT} posts used, ${status.remainingPosts} remaining`);
     } catch (error: any) {
       logger.error('Failed to record tweet post:', error.message);
       throw error;
@@ -89,7 +93,11 @@ export class RateLimitService {
       };
 
       await this.databaseService.recordTweetPost(post);
-      logger.info(`Recorded failed tweet post attempt`);
+      
+      // Log rate limit status after failed tweet attempt
+      const status = await this.canPostTweet();
+      logger.warn(`Tweet posting failed: ${errorMessage}`);
+      logger.info(`Rate limit status: ${status.postsInLast24Hours}/${this.DAILY_LIMIT} posts used, ${status.remainingPosts} remaining`);
     } catch (error: any) {
       logger.error('Failed to record failed tweet post:', error.message);
       throw error;

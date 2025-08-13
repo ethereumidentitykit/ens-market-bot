@@ -2,6 +2,7 @@ import axios, { AxiosResponse } from 'axios';
 import { logger } from '../utils/logger';
 import { NFTSale } from '../types';
 import { config } from '../utils/config';
+import { APIToggleService } from './apiToggleService';
 
 /**
  * Moralis API Response Types
@@ -76,14 +77,27 @@ export class MoralisService {
   private readonly baseUrl: string;
   private readonly apiKey: string;
   private readonly MIN_BLOCK_NUMBER = 23000000; // Only fetch trades from block 23M onwards
+  private apiToggleService: APIToggleService;
 
   constructor() {
+    this.apiToggleService = APIToggleService.getInstance();
     if (!config.moralis?.apiKey) {
       throw new Error('MORALIS_API_KEY environment variable is required');
     }
     
     this.baseUrl = config.moralis.baseUrl;
     this.apiKey = config.moralis.apiKey;
+  }
+
+  /**
+   * Check if Moralis API is enabled via admin toggle
+   */
+  private checkApiEnabled(): boolean {
+    if (!this.apiToggleService.isMoralisEnabled()) {
+      logger.warn('Moralis API call blocked - API disabled via admin toggle');
+      return false;
+    }
+    return true;
   }
 
   /**
@@ -99,6 +113,10 @@ export class MoralisService {
     cursor?: string,
     fromBlock?: string
   ): Promise<{ trades: EnhancedNFTSale[], nextCursor?: string }> {
+    if (!this.checkApiEnabled()) {
+      return { trades: [] };
+    }
+
     try {
       logger.info(`Fetching NFT trades for contract: ${contractAddress} (limit: ${limit})`);
 
@@ -437,6 +455,10 @@ export class MoralisService {
    * Test connection to Moralis API
    */
   async testConnection(): Promise<boolean> {
+    if (!this.checkApiEnabled()) {
+      return false;
+    }
+
     try {
       logger.info('Testing Moralis API connection...');
       
@@ -487,6 +509,17 @@ export class MoralisService {
     finalCursor?: string;
     trades?: EnhancedNFTSale[];
   }> {
+    if (!this.checkApiEnabled()) {
+      return {
+        totalFetched: 0,
+        totalProcessed: 0,
+        totalFiltered: 0,
+        totalDuplicates: 0,
+        oldestBlockReached: 0,
+        targetBlockReached: false
+      };
+    }
+
     const stats = {
       totalFetched: 0,
       totalProcessed: 0,

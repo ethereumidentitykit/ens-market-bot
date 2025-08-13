@@ -2,6 +2,7 @@ import { MoralisService, EnhancedNFTSale } from './moralisService';
 import { IDatabaseService } from '../types';
 import { logger } from '../utils/logger';
 import { NFTSale, ProcessedSale } from '../types';
+import { MONITORED_CONTRACTS } from '../config/contracts';
 
 export class SalesProcessingService {
   private moralisService: MoralisService;
@@ -87,6 +88,23 @@ export class SalesProcessingService {
   }
 
   /**
+   * Get the proper collection name from our contracts config, fallback to Moralis name
+   */
+  private getCollectionName(contractAddress: string, moralisName?: string): string | undefined {
+    const contract = MONITORED_CONTRACTS.find(
+      c => c.address.toLowerCase() === contractAddress.toLowerCase()
+    );
+    
+    if (contract) {
+      logger.debug(`Using contract name "${contract.name}" for ${contractAddress} instead of Moralis name "${moralisName}"`);
+      return contract.name;
+    }
+    
+    // Fallback to Moralis name if contract not found in our config
+    return moralisName;
+  }
+
+  /**
    * Convert NFTSale (Enhanced from Moralis) to ProcessedSale format
    */
   private convertToProcessedSale(sale: EnhancedNFTSale): Omit<ProcessedSale, 'id'> {
@@ -106,8 +124,8 @@ export class SalesProcessingService {
       blockTimestamp,
       processedAt: new Date().toISOString(),
       posted: false,
-      // Enhanced metadata from Moralis
-      collectionName: sale.collectionName,
+      // Enhanced metadata from Moralis (override collection name with our config)
+      collectionName: this.getCollectionName(sale.contractAddress, sale.collectionName),
       collectionLogo: sale.collectionLogo,
       nftName: sale.nftName,
       nftImage: sale.nftImage,

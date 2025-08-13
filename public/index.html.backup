@@ -75,59 +75,6 @@
             </div>
         </header>
 
-        <!-- Master API Toggles -->
-        <div class="bg-yellow-50 border-b border-yellow-200">
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
-                <div class="flex items-center justify-between">
-                    <div class="flex items-center space-x-2">
-                        <i class="fas fa-toggle-on text-orange-500"></i>
-                        <span class="text-sm font-medium text-gray-900">Master API Controls</span>
-                    </div>
-                    <div class="flex items-center space-x-4">
-                        <!-- Twitter API Toggle -->
-                        <div class="flex items-center space-x-2">
-                            <span class="text-sm text-gray-700">Twitter API:</span>
-                            <button 
-                                @click="toggleTwitterAPI()"
-                                :disabled="loading"
-                                :class="apiToggles.twitterEnabled ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'"
-                                class="relative inline-flex items-center px-3 py-1 rounded-full text-xs font-medium text-white transition-colors disabled:opacity-50"
-                            >
-                                <i :class="apiToggles.twitterEnabled ? 'fas fa-check' : 'fas fa-times'" class="mr-1"></i>
-                                <span x-text="apiToggles.twitterEnabled ? 'Enabled' : 'Disabled'"></span>
-                            </button>
-                        </div>
-                        <!-- Moralis API Toggle -->
-                        <div class="flex items-center space-x-2">
-                            <span class="text-sm text-gray-700">Moralis API:</span>
-                            <button 
-                                @click="toggleMoralisAPI()"
-                                :disabled="loading"
-                                :class="apiToggles.moralisEnabled ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'"
-                                class="relative inline-flex items-center px-3 py-1 rounded-full text-xs font-medium text-white transition-colors disabled:opacity-50"
-                            >
-                                <i :class="apiToggles.moralisEnabled ? 'fas fa-check' : 'fas fa-times'" class="mr-1"></i>
-                                <span x-text="apiToggles.moralisEnabled ? 'Enabled' : 'Disabled'"></span>
-                            </button>
-                        </div>
-                        <!-- Auto-Posting Toggle -->
-                        <div class="flex items-center space-x-2">
-                            <span class="text-sm text-gray-700">Auto-Posting:</span>
-                            <button 
-                                @click="toggleAutoPosting()"
-                                :disabled="loading || !apiToggles.twitterEnabled"
-                                :class="autoPostSettings.enabled ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-600 hover:bg-gray-700'"
-                                class="relative inline-flex items-center px-3 py-1 rounded-full text-xs font-medium text-white transition-colors disabled:opacity-50"
-                            >
-                                <i :class="autoPostSettings.enabled ? 'fas fa-robot' : 'fas fa-pause'" class="mr-1"></i>
-                                <span x-text="autoPostSettings.enabled ? 'Auto' : 'Manual'"></span>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
         <!-- Main Content -->
         <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
             <!-- Stats Cards -->
@@ -1110,6 +1057,386 @@
         </div>
         <!-- End Classic Dashboard -->
 
+        <!-- Clean Dashboard -->
+        <div x-show="currentView === 'clean'" x-transition class="min-h-screen bg-gray-900">
+            <!-- Clean Dashboard Header -->
+            <header class="bg-gray-800 shadow-lg border-b border-gray-700">
+                <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <div class="flex justify-between items-center py-6">
+                        <div class="flex items-center">
+                            <i class="fas fa-robot text-blue-400 text-2xl mr-3"></i>
+                            <div>
+                                <h1 class="text-2xl font-bold text-white">ENS Sales Bot</h1>
+                                <p class="text-sm text-gray-400">Clean Dashboard</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-4">
+                            <div class="flex items-center">
+                                <span class="relative flex h-3 w-3 mr-2">
+                                    <span x-show="systemStatus === 'healthy'" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                    <span x-show="systemStatus === 'healthy'" class="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                                    <span x-show="systemStatus !== 'healthy'" class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                                </span>
+                                <span class="text-sm font-medium text-gray-300" x-text="systemStatus === 'healthy' ? 'System Healthy' : 'System Issues'"></span>
+                            </div>
+                            <button 
+                                @click="refreshData()" 
+                                :disabled="loading"
+                                class="inline-flex items-center px-3 py-2 border border-gray-600 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-300 bg-gray-700 hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                            >
+                                <i class="fas fa-sync-alt mr-2" :class="{'loading': loading}"></i>
+                                Refresh
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Clean Dashboard Content -->
+            <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                <!-- Overview Section -->
+                <section class="mb-8">
+                    <h2 class="text-xl font-semibold text-white mb-6 flex items-center">
+                        <i class="fas fa-chart-line text-blue-400 mr-3"></i>
+                        System Overview
+                    </h2>
+                    
+                    <!-- Key Metrics -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+                        <!-- Total Sales -->
+                        <div class="bg-gray-800 border border-gray-700 rounded-lg p-6 hover:border-blue-500/50 transition-colors">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <p class="text-sm font-medium text-gray-400">Total Sales</p>
+                                    <p class="text-2xl font-bold text-white" x-text="stats.database?.totalSales || 0"></p>
+                                </div>
+                                <i class="fas fa-chart-line text-blue-400 text-2xl"></i>
+                            </div>
+                        </div>
+
+                        <!-- Posted Sales -->
+                        <div class="bg-gray-800 border border-gray-700 rounded-lg p-6 hover:border-purple-500/50 transition-colors">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <p class="text-sm font-medium text-gray-400">Posted to Twitter</p>
+                                    <p class="text-2xl font-bold text-white" x-text="stats.database?.postedSales || 0"></p>
+                                </div>
+                                <i class="fab fa-twitter text-purple-400 text-2xl"></i>
+                            </div>
+                        </div>
+
+                        <!-- Pending Posts -->
+                        <div class="bg-gray-800 border border-gray-700 rounded-lg p-6 hover:border-yellow-500/50 transition-colors">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <p class="text-sm font-medium text-gray-400">Pending Posts</p>
+                                    <p class="text-2xl font-bold text-white" x-text="stats.database?.unpostedSales || 0"></p>
+                                </div>
+                                <i class="fas fa-clock text-yellow-400 text-2xl"></i>
+                            </div>
+                        </div>
+
+                        <!-- Twitter Rate Limit -->
+                        <div class="bg-gray-800 border border-gray-700 rounded-lg p-6 hover:border-red-500/50 transition-colors">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <p class="text-sm font-medium text-gray-400">Rate Limit</p>
+                                    <p class="text-2xl font-bold text-white">
+                                        <span x-text="twitterRateLimit?.status?.postsInLast24Hours || 0"></span>/<span x-text="twitterRateLimit?.dailyLimit || 15"></span>
+                                    </p>
+                                </div>
+                                <i class="fas fa-tachometer-alt text-red-400 text-2xl"></i>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Twitter Operations Section -->
+                <section class="mb-8">
+                    <h2 class="text-xl font-semibold text-white mb-6 flex items-center">
+                        <i class="fab fa-twitter text-purple-400 mr-3"></i>
+                        Twitter Operations
+                    </h2>
+                    
+                    <div class="bg-gray-800 border border-gray-700 rounded-lg p-6">
+                        <!-- Twitter Status Row -->
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                            <div class="flex items-center">
+                                <span class="text-sm font-medium text-gray-400 mr-3">API Status:</span>
+                                <span x-show="twitterConfig?.configured" class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-900 text-green-300 border border-green-700">
+                                    <i class="fas fa-check mr-1"></i>
+                                    Connected
+                                </span>
+                                <span x-show="!twitterConfig?.configured" class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-red-900 text-red-300 border border-red-700">
+                                    <i class="fas fa-times mr-1"></i>
+                                    Not Configured
+                                </span>
+                            </div>
+                            
+                            <div class="flex items-center">
+                                <span class="text-sm font-medium text-gray-400 mr-3">Rate Limit:</span>
+                                <span x-show="!twitterRateLimit?.status?.limitReached" class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-900 text-green-300 border border-green-700">
+                                    <i class="fas fa-check-circle mr-1"></i>
+                                    OK
+                                </span>
+                                <span x-show="twitterRateLimit?.status?.limitReached" class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-red-900 text-red-300 border border-red-700">
+                                    <i class="fas fa-exclamation-triangle mr-1"></i>
+                                    Limit Reached
+                                </span>
+                            </div>
+
+                            <div class="flex items-center">
+                                <span class="text-sm font-medium text-gray-400 mr-3">Remaining:</span>
+                                <span class="text-sm font-bold" 
+                                      :class="twitterRateLimit?.status?.remainingPosts > 5 ? 'text-green-400' : twitterRateLimit?.status?.remainingPosts > 0 ? 'text-yellow-400' : 'text-red-400'"
+                                      x-text="twitterRateLimit?.status?.remainingPosts || 0">
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- Tweet Generation -->
+                        <div class="border-t border-gray-700 pt-6">
+                            <h3 class="text-lg font-medium text-white mb-4">Tweet Generation</h3>
+                            
+                            <!-- Sale Selection -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-400 mb-2">Select Sale</label>
+                                    <select 
+                                        x-model="selectedSaleId"
+                                        @change="clearTweetPreview()"
+                                        class="block w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    >
+                                        <option value="">Select a sale...</option>
+                                        <template x-for="sale in unpostedSales" :key="sale.id">
+                                            <option :value="sale.id" x-text="`${sale.nftName || 'Unknown'} - ${parseFloat(sale.priceEth).toFixed(2)} ETH`"></option>
+                                        </template>
+                                    </select>
+                                </div>
+                                
+                                <div class="flex items-end space-x-3">
+                                    <button 
+                                        @click="generateTweetPost()" 
+                                        :disabled="!selectedSaleId || tweetGenerating"
+                                        class="flex-1 inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        <i class="fas fa-magic mr-2" :class="{'loading': tweetGenerating}"></i>
+                                        <span x-show="!tweetGenerating">Generate</span>
+                                        <span x-show="tweetGenerating">Generating...</span>
+                                    </button>
+                                    
+                                    <button 
+                                        @click="sendTweetPost()" 
+                                        :disabled="!generatedTweet?.isValid || tweetSending || twitterRateLimit?.status?.limitReached"
+                                        class="flex-1 inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        <i class="fab fa-twitter mr-2" :class="{'loading': tweetSending}"></i>
+                                        <span x-show="!tweetSending">Send</span>
+                                        <span x-show="tweetSending">Sending...</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Tweet Preview -->
+                            <div x-show="generatedTweet" x-transition class="mt-4 p-4 bg-gray-700 border border-gray-600 rounded-lg">
+                                <div class="flex items-center justify-between mb-2">
+                                    <h4 class="text-sm font-medium text-white">Tweet Preview</h4>
+                                    <div class="flex items-center space-x-2">
+                                        <span x-show="tweetImageUrl" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-900 text-purple-300">
+                                            <i class="fas fa-image mr-1"></i>Image
+                                        </span>
+                                        <span class="text-xs" 
+                                              :class="generatedTweet?.characterCount <= 280 ? 'text-green-400' : 'text-red-400'"
+                                              x-text="`${generatedTweet?.characterCount || 0}/280`">
+                                        </span>
+                                    </div>
+                                </div>
+                                <div class="bg-gray-800 rounded p-3 font-mono text-sm text-gray-300 whitespace-pre-wrap" x-text="generatedTweet?.text"></div>
+                                
+                                <!-- Generated Image Preview -->
+                                <div x-show="tweetImageUrl" x-transition class="mt-4">
+                                    <img 
+                                        :src="tweetImageUrl" 
+                                        alt="Generated Tweet Image" 
+                                        class="w-full max-w-md rounded-lg border border-gray-600"
+                                    >
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Data Management Section -->
+                <section class="mb-8">
+                    <h2 class="text-xl font-semibold text-white mb-6 flex items-center">
+                        <i class="fas fa-database text-blue-400 mr-3"></i>
+                        Data Management
+                    </h2>
+                    
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <!-- Scheduler Controls -->
+                        <div class="bg-gray-800 border border-gray-700 rounded-lg p-6">
+                            <h3 class="text-lg font-medium text-white mb-4 flex items-center">
+                                <i class="fas fa-clock text-green-400 mr-2"></i>
+                                Scheduler
+                            </h3>
+                            
+                            <div class="space-y-4">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-sm text-gray-400">Status:</span>
+                                    <span x-show="schedulerStatus?.isRunning" class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-900 text-green-300 border border-green-700">
+                                        <i class="fas fa-play mr-1"></i>
+                                        Running
+                                    </span>
+                                    <span x-show="!schedulerStatus?.isRunning" class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-red-900 text-red-300 border border-red-700">
+                                        <i class="fas fa-stop mr-1"></i>
+                                        Stopped
+                                    </span>
+                                </div>
+                                
+                                <div class="flex items-center justify-between">
+                                    <span class="text-sm text-gray-400">Next Run:</span>
+                                    <span class="text-sm text-gray-300" x-text="schedulerStatus?.nextRunTime ? formatTimestamp(schedulerStatus.nextRunTime) : 'N/A'"></span>
+                                </div>
+                                
+                                <div class="pt-4 border-t border-gray-700">
+                                    <button 
+                                        @click="toggleScheduler()" 
+                                        :disabled="schedulerLoading"
+                                        class="w-full inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                                    >
+                                        <i class="fas" :class="schedulerStatus?.isRunning ? 'fa-stop' : 'fa-play'" :class="{'loading': schedulerLoading}"></i>
+                                        <span class="ml-2" x-text="schedulerStatus?.isRunning ? 'Stop Scheduler' : 'Start Scheduler'"></span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Processing Controls -->
+                        <div class="bg-gray-800 border border-gray-700 rounded-lg p-6">
+                            <h3 class="text-lg font-medium text-white mb-4 flex items-center">
+                                <i class="fas fa-cogs text-purple-400 mr-2"></i>
+                                Processing
+                            </h3>
+                            
+                            <div class="space-y-3">
+                                <button 
+                                    @click="processSales()" 
+                                    :disabled="processing"
+                                    class="w-full inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50"
+                                >
+                                    <i class="fas fa-sync mr-2" :class="{'loading': processing}"></i>
+                                    Process New Sales
+                                </button>
+                                
+                                <button 
+                                    @click="populateHistoricalData()" 
+                                    :disabled="historicalData.isRunning"
+                                    class="w-full inline-flex justify-center items-center px-4 py-2 border border-gray-600 text-sm font-medium rounded-md text-gray-300 bg-gray-700 hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                                >
+                                    <i class="fas fa-history mr-2" :class="{'fa-spin': historicalData.isRunning}"></i>
+                                    <span x-text="historicalData.isRunning ? 'Populating...' : 'Populate Historical'"></span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- System Tools Section -->
+                <section>
+                    <h2 class="text-xl font-semibold text-white mb-6 flex items-center">
+                        <i class="fas fa-tools text-yellow-400 mr-3"></i>
+                        System Tools
+                    </h2>
+                    
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <!-- Testing Tools -->
+                        <div class="bg-gray-800 border border-gray-700 rounded-lg p-6">
+                            <h3 class="text-lg font-medium text-white mb-4">Testing & Debugging</h3>
+                            
+                            <div class="space-y-3">
+                                <button 
+                                    @click="testTwitterConnection()" 
+                                    :disabled="testing"
+                                    class="w-full inline-flex justify-center items-center px-4 py-2 border border-gray-600 text-sm font-medium rounded-md text-gray-300 bg-gray-700 hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                                >
+                                    <i class="fas fa-plug mr-2"></i>
+                                    Test Twitter Connection
+                                </button>
+                                
+                                <button 
+                                    @click="testMoralis()" 
+                                    :disabled="testing"
+                                    class="w-full inline-flex justify-center items-center px-4 py-2 border border-gray-600 text-sm font-medium rounded-md text-gray-300 bg-gray-700 hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                                >
+                                    <i class="fas fa-flask mr-2"></i>
+                                    Test Moralis API
+                                </button>
+                                
+                                <button 
+                                    @click="generateTestImage()" 
+                                    :disabled="loading"
+                                    class="w-full inline-flex justify-center items-center px-4 py-2 border border-gray-600 text-sm font-medium rounded-md text-gray-300 bg-gray-700 hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                                >
+                                    <i class="fas fa-image mr-2"></i>
+                                    Generate Test Image
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Database Tools -->
+                        <div class="bg-gray-800 border border-gray-700 rounded-lg p-6">
+                            <h3 class="text-lg font-medium text-white mb-4">Database Tools</h3>
+                            
+                            <div class="space-y-3">
+                                <button 
+                                    @click="resetToRecentBlocks()"
+                                    :disabled="processingReset"
+                                    class="w-full inline-flex justify-center items-center px-4 py-2 border border-gray-600 text-sm font-medium rounded-md text-gray-300 bg-gray-700 hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                                >
+                                    <i class="fas fa-sync-alt mr-2" :class="{'fa-spin': processingReset}"></i>
+                                    Reset to Recent
+                                </button>
+                                
+                                <button 
+                                    @click="confirmDatabaseReset()"
+                                    :disabled="databaseResetting"
+                                    class="w-full inline-flex justify-center items-center px-4 py-2 border border-red-600 text-sm font-medium rounded-md text-red-300 bg-red-900 hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50"
+                                >
+                                    <i class="fas fa-trash mr-2"></i>
+                                    Reset Database
+                                </button>
+                                
+                                <button 
+                                    @click="currentView = 'classic'"
+                                    class="w-full inline-flex justify-center items-center px-4 py-2 border border-gray-600 text-sm font-medium rounded-md text-gray-300 bg-gray-700 hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                                >
+                                    <i class="fas fa-table mr-2"></i>
+                                    View Full Database
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Alert Messages -->
+                <div x-show="twitterMessage" x-transition class="mt-8">
+                    <div class="rounded-md p-4 border" 
+                         :class="twitterMessageType === 'success' ? 'bg-green-900 border-green-700 text-green-300' : 'bg-red-900 border-red-700 text-red-300'">
+                        <div class="flex">
+                            <div class="flex-shrink-0">
+                                <i x-show="twitterMessageType === 'success'" class="fas fa-check-circle"></i>
+                                <i x-show="twitterMessageType === 'error'" class="fas fa-exclamation-circle"></i>
+                            </div>
+                            <div class="ml-3">
+                                <p class="text-sm font-medium" x-text="twitterMessage"></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+        <!-- End Clean Dashboard -->
 
         <!-- Database View -->
         <div x-show="currentView === 'database'" x-transition class="min-h-screen bg-gray-900">
