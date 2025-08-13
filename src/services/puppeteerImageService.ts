@@ -64,8 +64,16 @@ export class PuppeteerImageService {
       // Set the HTML content
       await page.setContent(htmlContent, { 
         waitUntil: 'networkidle0',
-        timeout: 10000 
+        timeout: 15000 
       });
+
+      // Wait for fonts to load
+      await page.evaluateOnNewDocument(() => {
+        document.fonts.ready;
+      });
+      
+      // Small delay to ensure fonts are rendered
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       // Take screenshot
       const screenshot = await page.screenshot({
@@ -109,6 +117,9 @@ export class PuppeteerImageService {
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>ENS Sale Image</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
         <style>
             * {
                 margin: 0;
@@ -119,7 +130,7 @@ export class PuppeteerImageService {
             body {
                 width: ${this.IMAGE_WIDTH}px;
                 height: ${this.IMAGE_HEIGHT}px;
-                font-family: Arial, sans-serif;
+                font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
                 overflow: hidden;
                 position: relative;
                 background: #1E1E1E;
