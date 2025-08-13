@@ -17,7 +17,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
           cache: 'npm'
           
       - name: Install dependencies
@@ -40,19 +40,23 @@ jobs:
             echo "🚀 Starting deployment..."
             
             # Navigate to project directory
-            cd /var/www/ens-twitter-bot || { echo "❌ Project directory not found"; exit 1; }
+            cd /var/www/twitterbot || { echo "❌ Project directory not found"; exit 1; }
             
             # Pull latest changes
             echo "📥 Pulling latest changes..."
             git pull origin main
             
-            # Install dependencies
+            # Install dependencies (including dev deps for build)
             echo "📦 Installing dependencies..."
-            npm ci --production
+            npm ci
             
             # Build the project
             echo "🔨 Building project..."
             npm run build
+            
+            # Install production-only dependencies for runtime
+            echo "📦 Installing production dependencies..."
+            npm ci --omit=dev
             
             # Restart the application with PM2
             echo "🔄 Restarting application..."

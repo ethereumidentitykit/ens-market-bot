@@ -30,8 +30,8 @@ chmod 600 ~/.ssh/authorized_keys
 
 ## 4. Install Node.js and dependencies
 ```bash
-# Install Node.js 18
-curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+# Install Node.js 20 (required for some packages)
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs git
 
 # Install PM2 globally
@@ -47,14 +47,19 @@ sudo apt-get install -y postgresql postgresql-contrib
 sudo mkdir -p /var/www
 sudo chown deploy:deploy /var/www
 
-# Clone your repository
+# Clone your repository (adjust URL to your actual repo)
 cd /var/www
-git clone https://github.com/YOUR_USERNAME/ens-twitter-bot.git
-cd ens-twitter-bot
+git clone https://github.com/caveman-eth/twitterbot.git
+cd twitterbot
 
-# Install dependencies and build
-npm ci --production
+# Install ALL dependencies (including dev dependencies for TypeScript build)
+npm ci
+
+# Build the project
 npm run build
+
+# Now install production-only dependencies for runtime
+npm ci --omit=dev
 ```
 
 ## 6. Setup environment variables
