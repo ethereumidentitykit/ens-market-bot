@@ -10,7 +10,7 @@
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
     "format": "prettier --write src/**/*.ts",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "echo \"No tests specified - skipping\"",
     "vercel-build": "npm run build"
   },
   "keywords": [],
