@@ -1,0 +1,72 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # Allows manual triggering
+
+jobs:
+  deploy:
+    name: Deploy to Production VPS
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Build TypeScript
+        run: npm run build
+        
+      - name: Run tests (if any)
+        run: npm test --if-present
+        
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            echo "🚀 Starting deployment..."
+            
+            # Navigate to project directory
+            cd /var/www/ens-twitter-bot || { echo "❌ Project directory not found"; exit 1; }
+            
+            # Pull latest changes
+            echo "📥 Pulling latest changes..."
+            git pull origin main
+            
+            # Install dependencies
+            echo "📦 Installing dependencies..."
+            npm ci --production
+            
+            # Build the project
+            echo "🔨 Building project..."
+            npm run build
+            
+            # Restart the application with PM2
+            echo "🔄 Restarting application..."
+            pm2 reload ens-twitter-bot --update-env || pm2 start dist/index.js --name ens-twitter-bot
+            
+            # Show PM2 status
+            pm2 status
+            
+            echo "✅ Deployment completed successfully at $(date)"
+            
+      - name: Deployment Status
+        if: success()
+        run: echo "✅ Deployment to VPS completed successfully!"
+        
+      - name: Deployment Failed
+        if: failure()
+        run: echo "❌ Deployment failed. Check the logs above."
