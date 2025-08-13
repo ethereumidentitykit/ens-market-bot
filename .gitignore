@@ -37,3 +37,6 @@ Thumbs.db
 
 # Unmapped emoji files (not needed for deployment)
 assets/emojis/unmapped/
+
+# Scratchpad (private project notes)
+.cursor/scratchpad.md
