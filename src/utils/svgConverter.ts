@@ -9,12 +9,12 @@ export class SvgConverter {
    */
   public static async convertSvgToPng(svgContent: string): Promise<Buffer> {
     // Environment-aware Puppeteer setup
-    const isProduction = process.env.NODE_ENV === 'production' || process.env.VERCEL === '1';
+    const isVercel = process.env.VERCEL === '1';
     
     let browser;
     
-    if (isProduction) {
-      // Use Vercel-compatible setup in production
+    if (isVercel) {
+      // Use Vercel-specific Chromium setup
       const puppeteer = await import('puppeteer-core');
       const chromium = await import('@sparticuz/chromium');
       
@@ -25,7 +25,7 @@ export class SvgConverter {
         ignoreDefaultArgs: ['--disable-extensions'],
       });
     } else {
-      // Use regular Puppeteer locally
+      // Use regular Puppeteer for VPS and local development
       const puppeteer = await import('puppeteer');
       
       browser = await puppeteer.default.launch({

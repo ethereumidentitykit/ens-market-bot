@@ -24,10 +24,10 @@ async function startApplication(): Promise<void> {
     // Initialize services
     const moralisService = new MoralisService();
     
-    // Use Vercel-compatible database in production, SQLite locally
-    const databaseService: IDatabaseService = config.nodeEnv === 'production' 
-      ? new VercelDatabaseService()
-      : new DatabaseService();
+    // Use PostgreSQL if DATABASE_URL is provided, otherwise SQLite
+    const databaseService: IDatabaseService = process.env.DATABASE_URL?.startsWith('postgresql://') 
+      ? new VercelDatabaseService()  // Works for any PostgreSQL, not just Vercel
+      : new DatabaseService();       // SQLite for local development
     
     const salesProcessingService = new SalesProcessingService(moralisService, databaseService);
     const schedulerService = new SchedulerService(salesProcessingService, databaseService);

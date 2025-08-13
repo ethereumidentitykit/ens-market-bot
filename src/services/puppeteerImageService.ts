@@ -14,12 +14,12 @@ export class PuppeteerImageService {
    */
   public static async generateSaleImage(data: MockImageData): Promise<Buffer> {
     // Environment-aware Puppeteer setup
-    const isProduction = process.env.NODE_ENV === 'production' || process.env.VERCEL === '1';
+    const isVercel = process.env.VERCEL === '1';
     
     let browser;
     
-    if (isProduction) {
-      // Use Vercel-compatible setup in production
+    if (isVercel) {
+      // Use Vercel-specific Chromium setup
       const puppeteer = await import('puppeteer-core');
       const chromium = await import('@sparticuz/chromium');
       
@@ -30,7 +30,7 @@ export class PuppeteerImageService {
         ignoreDefaultArgs: ['--disable-extensions'],
       });
     } else {
-      // Use regular Puppeteer locally
+      // Use regular Puppeteer for VPS and local development
       const puppeteer = await import('puppeteer');
       
       browser = await puppeteer.default.launch({
@@ -383,8 +383,8 @@ export class PuppeteerImageService {
    * Save image buffer to database or file (environment-aware)
    */
   public static async saveImageToFile(buffer: Buffer, filename: string, databaseService?: IDatabaseService): Promise<string> {
-    // In serverless environments (Vercel), store in database
-    if (databaseService && (process.env.VERCEL === '1' || process.env.NODE_ENV === 'production')) {
+    // Only store in database on Vercel (serverless), use filesystem on VPS
+    if (databaseService && process.env.VERCEL === '1') {
       try {
         await databaseService.storeGeneratedImage(filename, buffer);
         logger.info(`Image stored in database: ${filename}`);
@@ -395,7 +395,7 @@ export class PuppeteerImageService {
       }
     }
     
-    // Local development: store as file
+    // VPS and local development: store as file
     const dataDir = path.join(process.cwd(), 'data');
     
     // Ensure data directory exists
