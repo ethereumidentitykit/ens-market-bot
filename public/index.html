@@ -656,6 +656,82 @@
                 </div>
             </div>
 
+            <!-- Tweet History Section -->
+            <div class="mb-8">
+                <div class="bg-white shadow rounded-lg">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <h3 class="text-lg leading-6 font-medium text-gray-900 flex items-center">
+                            <i class="fab fa-twitter text-blue-500 mr-2"></i>
+                            Tweet History
+                            <span class="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800" x-text="tweetHistory.length + ' tweets'"></span>
+                        </h3>
+                    </div>
+                    <div class="p-6">
+                        <!-- Tweet History List -->
+                        <div x-show="tweetHistory.length === 0" class="text-center py-8 text-gray-500">
+                            <i class="fas fa-history text-4xl mb-3"></i>
+                            <p>No tweet history found.</p>
+                        </div>
+                        
+                        <div x-show="tweetHistory.length > 0" class="space-y-3 max-h-96 overflow-y-auto">
+                            <template x-for="tweet in tweetHistory" :key="tweet.id">
+                                <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                                    <div class="flex items-start justify-between">
+                                        <div class="flex-1">
+                                            <!-- Tweet Status -->
+                                            <div class="flex items-center mb-2">
+                                                <span x-show="tweet.success" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                                    <i class="fas fa-check mr-1"></i>
+                                                    Posted
+                                                </span>
+                                                <span x-show="!tweet.success" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                                    <i class="fas fa-times mr-1"></i>
+                                                    Failed
+                                                </span>
+                                                <span x-show="tweet.saleId" class="ml-2 text-xs text-gray-500">
+                                                    Sale ID: <span x-text="tweet.saleId"></span>
+                                                </span>
+                                            </div>
+                                            
+                                            <!-- Tweet Content -->
+                                            <p class="text-sm text-gray-900 mb-2" x-text="tweet.tweetContent"></p>
+                                            
+                                            <!-- Tweet Info -->
+                                            <div class="flex items-center text-xs text-gray-500 space-x-4">
+                                                <span x-show="tweet.success">
+                                                    <i class="fab fa-twitter mr-1"></i>
+                                                    <a :href="'https://twitter.com/user/status/' + tweet.tweetId" target="_blank" class="text-blue-600 hover:underline" x-text="tweet.tweetId"></a>
+                                                </span>
+                                                <span>
+                                                    <i class="fas fa-clock mr-1"></i>
+                                                    <span x-text="getTimeAgo(tweet.postedAt)"></span>
+                                                </span>
+                                                <span x-show="!tweet.success && tweet.errorMessage" class="text-red-600">
+                                                    <i class="fas fa-exclamation-triangle mr-1"></i>
+                                                    <span x-text="tweet.errorMessage"></span>
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                        
+                        <!-- Refresh Button -->
+                        <div class="mt-4 flex justify-end">
+                            <button 
+                                @click="loadTweetHistory()"
+                                :disabled="loading"
+                                class="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                            >
+                                <i class="fas fa-sync-alt mr-2" :class="{'animate-spin': loading}"></i>
+                                Refresh History
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Database Management -->
             <div class="mb-8">
                 <div class="bg-white shadow rounded-lg">

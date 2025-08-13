@@ -932,6 +932,29 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    // Twitter History API endpoint
+    app.get('/api/twitter/history', async (req, res) => {
+      try {
+        const hoursBack = parseInt(req.query.hours as string) || 24;
+        const tweetHistory = await databaseService.getRecentTweetPosts(hoursBack);
+        
+        res.json({
+          success: true,
+          data: {
+            tweets: tweetHistory,
+            count: tweetHistory.length,
+            hoursBack: hoursBack
+          }
+        });
+      } catch (error: any) {
+        logger.error('Failed to fetch tweet history:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     // Image Generation API endpoints
     app.post('/api/image/generate-test', async (req, res) => {
       const { ImageController } = await import('./controllers/imageController');

@@ -181,11 +181,13 @@ function dashboard() {
             await this.refreshData();
             await this.loadUnpostedSales();
             await this.loadContracts();
+            await this.loadTweetHistory();
             await this.databaseView.loadPage(1);
             // Auto-refresh every 30 seconds
             setInterval(() => {
                 if (!this.loading && !this.processing) {
                     this.refreshData();
+                    this.loadTweetHistory();
                 }
             }, 30000);
         },
@@ -1046,10 +1048,12 @@ function dashboard() {
             try {
                 const response = await fetch('/api/twitter/history');
                 if (response.ok) {
-                    this.tweetHistory = await response.json();
+                    const data = await response.json();
+                    this.tweetHistory = data.success ? data.data.tweets : [];
                 }
             } catch (error) {
                 console.error('Failed to load tweet history:', error);
+                this.tweetHistory = [];
             }
         },
 
