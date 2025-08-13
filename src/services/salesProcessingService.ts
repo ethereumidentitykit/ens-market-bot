@@ -146,6 +146,7 @@ export class SalesProcessingService {
     duplicates: number;
     filtered: number;
     errors: number;
+    processedSales: ProcessedSale[];
   }> {
     const stats = {
       fetched: 0,
@@ -153,6 +154,7 @@ export class SalesProcessingService {
       duplicates: 0,
       filtered: 0,
       errors: 0,
+      processedSales: [] as ProcessedSale[],
     };
 
     try {
@@ -212,7 +214,11 @@ export class SalesProcessingService {
 
           // Convert and store the sale
           const processedSale = this.convertToProcessedSale(sale);
-          await this.databaseService.insertSale(processedSale);
+          const saleId = await this.databaseService.insertSale(processedSale);
+          
+          // Create sale with ID and add to results
+          const saleWithId: ProcessedSale = { ...processedSale, id: saleId };
+          stats.processedSales.push(saleWithId);
           
           stats.newSales++;
           highestBlockNumber = Math.max(highestBlockNumber, sale.blockNumber);
@@ -329,6 +335,7 @@ export class SalesProcessingService {
       newSales: number;
       duplicates: number;
       errors: number;
+      processedSales: ProcessedSale[];
     };
     error?: string;
   }> {

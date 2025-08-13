@@ -15,6 +15,8 @@ import { NewTweetFormatter } from './services/newTweetFormatter';
 import { RateLimitService } from './services/rateLimitService';
 import { EthIdentityService } from './services/ethIdentityService';
 import { APIToggleService } from './services/apiToggleService';
+import { AutoTweetService } from './services/autoTweetService';
+import { WorldTimeService } from './services/worldTimeService';
 
 async function startApplication(): Promise<void> {
   try {
@@ -31,12 +33,14 @@ async function startApplication(): Promise<void> {
       : new DatabaseService();       // SQLite for local development
     
     const salesProcessingService = new SalesProcessingService(moralisService, databaseService);
-    const schedulerService = new SchedulerService(salesProcessingService, databaseService);
     const twitterService = new TwitterService();
     const tweetFormatter = new TweetFormatter();
     const newTweetFormatter = new NewTweetFormatter(databaseService);
     const rateLimitService = new RateLimitService(databaseService);
     const ethIdentityService = new EthIdentityService();
+    const worldTimeService = new WorldTimeService();
+    const autoTweetService = new AutoTweetService(newTweetFormatter, twitterService, rateLimitService, databaseService, worldTimeService);
+    const schedulerService = new SchedulerService(salesProcessingService, autoTweetService, databaseService);
 
     // Initialize database
     await databaseService.initialize();
@@ -463,6 +467,88 @@ async function startApplication(): Promise<void> {
         success: true,
         ...state
       });
+    });
+
+    // Auto-post settings endpoints
+    app.get('/api/admin/autopost-settings', async (req, res) => {
+      try {
+        // Load settings from database
+        const minEthDefault = await databaseService.getSystemState('autopost_min_eth_default') || '0.1';
+        const minEth10kClub = await databaseService.getSystemState('autopost_min_eth_10k') || '0.5';
+        const minEth999Club = await databaseService.getSystemState('autopost_min_eth_999') || '0.3';
+        const maxAgeHours = await databaseService.getSystemState('autopost_max_age_hours') || '1';
+        
+        res.json({
+          success: true,
+          settings: {
+            minEthDefault: parseFloat(minEthDefault),
+            minEth10kClub: parseFloat(minEth10kClub),
+            minEth999Club: parseFloat(minEth999Club),
+            maxAgeHours: parseInt(maxAgeHours)
+          }
+        });
+      } catch (error: any) {
+        logger.error('Failed to load auto-post settings:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.post('/api/admin/autopost-settings', async (req, res) => {
+      try {
+        const { minEthDefault, minEth10kClub, minEth999Club, maxAgeHours } = req.body;
+        
+        // Validate inputs
+        if (typeof minEthDefault !== 'number' || minEthDefault < 0) {
+          return res.status(400).json({
+            success: false,
+            error: 'minEthDefault must be a positive number'
+          });
+        }
+        
+        if (typeof minEth10kClub !== 'number' || minEth10kClub < 0) {
+          return res.status(400).json({
+            success: false,
+            error: 'minEth10kClub must be a positive number'
+          });
+        }
+        
+        if (typeof minEth999Club !== 'number' || minEth999Club < 0) {
+          return res.status(400).json({
+            success: false,
+            error: 'minEth999Club must be a positive number'
+          });
+        }
+        
+        if (typeof maxAgeHours !== 'number' || maxAgeHours < 1 || maxAgeHours > 24) {
+          return res.status(400).json({
+            success: false,
+            error: 'maxAgeHours must be between 1 and 24'
+          });
+        }
+        
+        // Save to database
+        await databaseService.setSystemState('autopost_min_eth_default', minEthDefault.toString());
+        await databaseService.setSystemState('autopost_min_eth_10k', minEth10kClub.toString());
+        await databaseService.setSystemState('autopost_min_eth_999', minEth999Club.toString());
+        await databaseService.setSystemState('autopost_max_age_hours', maxAgeHours.toString());
+        
+        logger.info('Auto-post settings updated:', { minEthDefault, minEth10kClub, minEth999Club, maxAgeHours });
+        
+        res.json({
+          success: true,
+          message: 'Auto-post settings saved successfully',
+          settings: { minEthDefault, minEth10kClub, minEth999Club, maxAgeHours }
+        });
+      } catch (error: any) {
+        logger.error('Failed to save auto-post settings:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
     });
 
     // Twitter API endpoints
@@ -1154,6 +1240,9 @@ async function startApplication(): Promise<void> {
       
       // Stop scheduler first
       schedulerService.stop();
+      
+      // Stop world time service
+      worldTimeService.stop();
       
       server.close(() => {
         logger.info('HTTP server closed');

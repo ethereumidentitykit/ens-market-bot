@@ -75,6 +75,141 @@
             </div>
         </header>
 
+        <!-- Automatic Posting Controls -->
+        <div class="bg-gradient-to-r from-blue-600 to-purple-600 border-b border-gray-200 text-white">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="py-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <div>
+                            <h2 class="text-xl font-semibold flex items-center">
+                                <i class="fas fa-robot mr-2"></i>
+                                Automatic Posting
+                            </h2>
+                            <p class="text-blue-100 text-sm mt-1">Configure automated ENS sales posting to Twitter</p>
+                        </div>
+                        <!-- Master Auto-Posting Toggle -->
+                        <button 
+                            @click="toggleAutoPosting()"
+                            :disabled="loading || !apiToggles.twitterEnabled"
+                            :class="autoPostSettings.enabled ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-500 hover:bg-gray-600'"
+                            class="relative inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <i :class="autoPostSettings.enabled ? 'fas fa-play' : 'fas fa-pause'" class="mr-2"></i>
+                            <span x-text="autoPostSettings.enabled ? 'Auto-Posting ON' : 'Auto-Posting OFF'"></span>
+                        </button>
+                    </div>
+                    
+                    <!-- Settings Grid -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <!-- Default ETH Minimum -->
+                        <div class="bg-white/10 backdrop-blur rounded-lg p-4">
+                            <label class="block text-sm font-medium text-blue-100 mb-2">Default Minimum (ETH)</label>
+                            <div class="flex items-center space-x-2">
+                                <input 
+                                    type="number" 
+                                    step="0.01" 
+                                    min="0"
+                                    x-model.number="autoPostSettings.minEthDefault"
+                                    class="w-20 px-2 py-1 bg-white/20 border border-white/30 rounded text-white placeholder-blue-200 focus:outline-none focus:ring-2 focus:ring-white/50 focus:border-transparent text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                    placeholder="0.1"
+                                >
+                                <button 
+                                    @click="saveAutoPostSettings()"
+                                    class="px-2 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs font-medium transition-colors"
+                                >
+                                    Save
+                                </button>
+                            </div>
+                            <p class="text-xs text-blue-200 mt-1">For standard ENS names</p>
+                        </div>
+                        
+                        <!-- 10k Club ETH Minimum -->
+                        <div class="bg-white/10 backdrop-blur rounded-lg p-4">
+                            <label class="block text-sm font-medium text-blue-100 mb-2">10k Club Minimum (ETH)</label>
+                            <div class="flex items-center space-x-2">
+                                <input 
+                                    type="number" 
+                                    step="0.01" 
+                                    min="0"
+                                    x-model.number="autoPostSettings.minEth10kClub"
+                                    class="w-20 px-2 py-1 bg-white/20 border border-white/30 rounded text-white placeholder-blue-200 focus:outline-none focus:ring-2 focus:ring-white/50 focus:border-transparent text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                    placeholder="0.5"
+                                >
+                                <button 
+                                    @click="saveAutoPostSettings()"
+                                    class="px-2 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs font-medium transition-colors"
+                                >
+                                    Save
+                                </button>
+                            </div>
+                            <p class="text-xs text-blue-200 mt-1">For 1234.eth style names</p>
+                        </div>
+                        
+                        <!-- 999 Club ETH Minimum -->
+                        <div class="bg-white/10 backdrop-blur rounded-lg p-4">
+                            <label class="block text-sm font-medium text-blue-100 mb-2">999 Club Minimum (ETH)</label>
+                            <div class="flex items-center space-x-2">
+                                <input 
+                                    type="number" 
+                                    step="0.01" 
+                                    min="0"
+                                    x-model.number="autoPostSettings.minEth999Club"
+                                    class="w-20 px-2 py-1 bg-white/20 border border-white/30 rounded text-white placeholder-blue-200 focus:outline-none focus:ring-2 focus:ring-white/50 focus:border-transparent text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                    placeholder="0.3"
+                                >
+                                <button 
+                                    @click="saveAutoPostSettings()"
+                                    class="px-2 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs font-medium transition-colors"
+                                >
+                                    Save
+                                </button>
+                            </div>
+                            <p class="text-xs text-blue-200 mt-1">For 123.eth style names</p>
+                        </div>
+                        
+                        <!-- Max Age Hours -->
+                        <div class="bg-white/10 backdrop-blur rounded-lg p-4">
+                            <label class="block text-sm font-medium text-blue-100 mb-2">Max Age (Hours)</label>
+                            <div class="flex items-center space-x-2">
+                                <input 
+                                    type="number" 
+                                    min="1" 
+                                    max="24"
+                                    x-model.number="autoPostSettings.maxAgeHours"
+                                    class="w-16 px-2 py-1 bg-white/20 border border-white/30 rounded text-white placeholder-blue-200 focus:outline-none focus:ring-2 focus:ring-white/50 focus:border-transparent text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                    placeholder="1"
+                                >
+                                <button 
+                                    @click="saveAutoPostSettings()"
+                                    class="px-2 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs font-medium transition-colors"
+                                >
+                                    Save
+                                </button>
+                            </div>
+                            <p class="text-xs text-blue-200 mt-1">Sales older than this won't be posted</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Status Info -->
+                    <div class="mt-4 flex items-center space-x-4 text-sm">
+                        <div class="flex items-center">
+                            <div :class="apiToggles.twitterEnabled ? 'bg-green-400' : 'bg-red-400'" class="w-2 h-2 rounded-full mr-2"></div>
+                            <span class="text-blue-100">Twitter API: <span x-text="apiToggles.twitterEnabled ? 'Connected' : 'Disabled'"></span></span>
+                        </div>
+                        <div class="flex items-center">
+                            <div :class="apiToggles.moralisEnabled ? 'bg-green-400' : 'bg-red-400'" class="w-2 h-2 rounded-full mr-2"></div>
+                            <span class="text-blue-100">Moralis API: <span x-text="apiToggles.moralisEnabled ? 'Connected' : 'Disabled'"></span></span>
+                        </div>
+                        <div class="flex items-center" x-show="autoPostSettings.enabled">
+                            <div class="bg-blue-400 w-2 h-2 rounded-full mr-2 animate-pulse"></div>
+                            <span class="text-blue-100">Auto-posting active</span>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Master API Toggles -->
         <div class="bg-yellow-50 border-b border-yellow-200">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
@@ -957,16 +1092,16 @@
                                 <div class="flex-1 min-w-0">
                                     <input 
                                         type="text" 
-                                        x-model="dbViewer.searchTerm"
-                                        @input="dbViewer.searchDebounced()"
+                                        x-model="databaseView.searchTerm"
+                                        @input="databaseView.searchDebounced()"
                                         placeholder="Search tx, address, marketplace..."
                                         class="block w-full px-3 py-2 border border-gray-300 rounded-md text-sm placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                                     >
                                 </div>
                                 <!-- Records per page -->
                                 <select 
-                                    x-model="dbViewer.limit" 
-                                    @change="dbViewer.loadPage(1)"
+                                    x-model="databaseView.limit" 
+                                    @change="databaseView.loadPage(1)"
                                     class="block px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                                 >
                                     <option value="25">25</option>
@@ -981,62 +1116,62 @@
                     <!-- Stats and pagination info -->
                     <div class="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between text-sm text-gray-500">
                         <div>
-                            <span x-show="dbViewer.data?.stats?.searchTerm">
-                                Showing <span x-text="dbViewer.data?.stats?.filteredResults || 0"></span> of <span x-text="dbViewer.data?.stats?.totalSales || 0"></span> sales 
-                                matching "<span x-text="dbViewer.data?.stats?.searchTerm" class="font-medium"></span>"
+                            <span x-show="databaseView.data?.stats?.searchTerm">
+                                Showing <span x-text="databaseView.data?.stats?.filteredResults || 0"></span> of <span x-text="databaseView.data?.stats?.totalSales || 0"></span> sales 
+                                matching "<span x-text="databaseView.data?.stats?.searchTerm" class="font-medium"></span>"
                             </span>
-                            <span x-show="!dbViewer.data?.stats?.searchTerm">
-                                <span x-text="dbViewer.data?.stats?.totalSales || 0"></span> total sales in database
+                            <span x-show="!databaseView.data?.stats?.searchTerm">
+                                <span x-text="databaseView.data?.stats?.totalSales || 0"></span> total sales in database
                             </span>
                         </div>
-                        <div x-show="dbViewer.data?.pagination" class="mt-2 sm:mt-0">
-                            Page <span x-text="dbViewer.data?.pagination?.page || 1"></span> of <span x-text="dbViewer.data?.pagination?.totalPages || 1"></span>
+                        <div x-show="databaseView.data?.pagination" class="mt-2 sm:mt-0">
+                            Page <span x-text="databaseView.data?.pagination?.page || 1"></span> of <span x-text="databaseView.data?.pagination?.totalPages || 1"></span>
                         </div>
                     </div>
                 </div>
 
                 <!-- Loading State -->
-                <div x-show="dbViewer.loading" class="px-6 py-8 text-center">
+                <div x-show="databaseView.loading" class="px-6 py-8 text-center">
                     <i class="fas fa-spinner fa-spin text-2xl text-gray-400 mb-2"></i>
                     <p class="text-sm text-gray-500">Loading sales data...</p>
                 </div>
 
                 <!-- Table -->
-                <div x-show="!dbViewer.loading" class="overflow-x-auto">
+                <div x-show="!databaseView.loading" class="overflow-x-auto">
                     <table class="min-w-full divide-y divide-gray-200">
                         <thead class="bg-gray-50">
                             <tr>
-                                <th @click="dbViewer.sort('id')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
+                                <th @click="databaseView.sort('id')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
                                     <div class="flex items-center">
                                         ID
                                         <i class="fas fa-sort ml-1 text-gray-400"></i>
                                     </div>
                                 </th>
-                                <th @click="dbViewer.sort('contractAddress')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
+                                <th @click="databaseView.sort('contractAddress')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
                                     <div class="flex items-center">
                                         Contract
                                         <i class="fas fa-sort ml-1 text-gray-400"></i>
                                     </div>
                                 </th>
-                                <th @click="dbViewer.sort('nftName')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
+                                <th @click="databaseView.sort('nftName')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
                                     <div class="flex items-center">
                                         NFT Name
                                         <i class="fas fa-sort ml-1 text-gray-400"></i>
                                     </div>
                                 </th>
-                                <th @click="dbViewer.sort('priceEth')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
+                                <th @click="databaseView.sort('priceEth')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
                                     <div class="flex items-center">
                                         Price (ETH)
                                         <i class="fas fa-sort ml-1 text-gray-400"></i>
                                     </div>
                                 </th>
-                                <th @click="dbViewer.sort('marketplace')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
+                                <th @click="databaseView.sort('marketplace')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
                                     <div class="flex items-center">
                                         Marketplace
                                         <i class="fas fa-sort ml-1 text-gray-400"></i>
                                     </div>
                                 </th>
-                                <th @click="dbViewer.sort('blockNumber')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
+                                <th @click="databaseView.sort('blockNumber')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
                                     <div class="flex items-center">
                                         Block
                                         <i class="fas fa-sort ml-1 text-gray-400"></i>
@@ -1048,7 +1183,7 @@
                             </tr>
                         </thead>
                         <tbody class="bg-white divide-y divide-gray-200">
-                            <template x-for="sale in dbViewer.data?.sales || []" :key="sale.id">
+                            <template x-for="sale in databaseView.data?.sales || []" :key="sale.id">
                                 <tr class="hover:bg-gray-50">
                                     <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900" x-text="sale.id"></td>
                                     <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900">
@@ -1104,7 +1239,7 @@
                                     </td>
                                 </tr>
                             </template>
-                            <tr x-show="!dbViewer.loading && (!dbViewer.data?.sales || dbViewer.data.sales.length === 0)">
+                            <tr x-show="!databaseView.loading && (!databaseView.data?.sales || databaseView.data.sales.length === 0)">
                                 <td colspan="9" class="px-6 py-8 whitespace-nowrap text-sm text-gray-500 text-center">
                                     <div class="flex flex-col items-center">
                                         <i class="fas fa-database text-3xl text-gray-300 mb-2"></i>
@@ -1118,19 +1253,19 @@
                 </div>
 
                 <!-- Pagination -->
-                <div x-show="!dbViewer.loading && dbViewer.data?.pagination?.totalPages > 1" class="bg-white px-4 py-3 border-t border-gray-200 sm:px-6">
+                <div x-show="!databaseView.loading && databaseView.data?.pagination?.totalPages > 1" class="bg-white px-4 py-3 border-t border-gray-200 sm:px-6">
                     <div class="flex items-center justify-between">
                         <div class="flex-1 flex justify-between sm:hidden">
                             <button 
-                                @click="dbViewer.loadPage(dbViewer.data.pagination.page - 1)"
-                                :disabled="!dbViewer.data?.pagination?.hasPrev"
+                                @click="databaseView.loadPage(databaseView.data.pagination.page - 1)"
+                                :disabled="!databaseView.data?.pagination?.hasPrev"
                                 class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 Previous
                             </button>
                             <button 
-                                @click="dbViewer.loadPage(dbViewer.data.pagination.page + 1)"
-                                :disabled="!dbViewer.data?.pagination?.hasNext"
+                                @click="databaseView.loadPage(databaseView.data.pagination.page + 1)"
+                                :disabled="!databaseView.data?.pagination?.hasNext"
                                 class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 Next
@@ -1140,28 +1275,28 @@
                             <div>
                                 <p class="text-sm text-gray-700">
                                     Showing 
-                                    <span class="font-medium" x-text="((dbViewer.data?.pagination?.page - 1) * dbViewer.data?.pagination?.limit) + 1"></span>
+                                    <span class="font-medium" x-text="((databaseView.data?.pagination?.page - 1) * databaseView.data?.pagination?.limit) + 1"></span>
                                     to 
-                                    <span class="font-medium" x-text="Math.min(dbViewer.data?.pagination?.page * dbViewer.data?.pagination?.limit, dbViewer.data?.pagination?.total)"></span>
+                                    <span class="font-medium" x-text="Math.min(databaseView.data?.pagination?.page * databaseView.data?.pagination?.limit, databaseView.data?.pagination?.total)"></span>
                                     of 
-                                    <span class="font-medium" x-text="dbViewer.data?.pagination?.total"></span>
+                                    <span class="font-medium" x-text="databaseView.data?.pagination?.total"></span>
                                     results
                                 </p>
                             </div>
                             <div>
                                 <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
                                     <button 
-                                        @click="dbViewer.loadPage(dbViewer.data.pagination.page - 1)"
-                                        :disabled="!dbViewer.data?.pagination?.hasPrev"
+                                        @click="databaseView.loadPage(databaseView.data.pagination.page - 1)"
+                                        :disabled="!databaseView.data?.pagination?.hasPrev"
                                         class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         <i class="fas fa-chevron-left"></i>
                                     </button>
                                     
-                                    <template x-for="page in dbViewer.getPageNumbers()" :key="page">
+                                    <template x-for="page in databaseView.getPageNumbers()" :key="page">
                                         <button 
-                                            @click="dbViewer.loadPage(page)"
-                                            :class="page === dbViewer.data?.pagination?.page ? 
+                                            @click="databaseView.loadPage(page)"
+                                            :class="page === databaseView.data?.pagination?.page ? 
                                                     'z-10 bg-blue-50 border-blue-500 text-blue-600' : 
                                                     'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'"
                                             class="relative inline-flex items-center px-4 py-2 border text-sm font-medium"
@@ -1170,8 +1305,8 @@
                                     </template>
                                     
                                     <button 
-                                        @click="dbViewer.loadPage(dbViewer.data.pagination.page + 1)"
-                                        :disabled="!dbViewer.data?.pagination?.hasNext"
+                                        @click="databaseView.loadPage(databaseView.data.pagination.page + 1)"
+                                        :disabled="!databaseView.data?.pagination?.hasNext"
                                         class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         <i class="fas fa-chevron-right"></i>

@@ -178,6 +178,7 @@ function dashboard() {
         // Initialize
         async init() {
             await this.loadToggleStates();
+            await this.loadAutoPostSettings();
             await this.refreshData();
             await this.loadUnpostedSales();
             await this.loadContracts();
@@ -1056,6 +1057,69 @@ function dashboard() {
                 this.tweetHistory = [];
             }
         },
+
+        // Load auto-post settings from backend
+        async loadAutoPostSettings() {
+            try {
+                console.log('Loading auto-post settings...');
+                const response = await fetch('/api/admin/autopost-settings');
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('Loaded settings response:', data);
+                    if (data.success) {
+                        this.autoPostSettings = {
+                            ...this.autoPostSettings,
+                            ...data.settings
+                        };
+                        console.log('Updated autoPostSettings:', this.autoPostSettings);
+                    }
+                } else {
+                    console.error('Failed to load settings, status:', response.status);
+                }
+            } catch (error) {
+                console.error('Failed to load auto-post settings:', error);
+            }
+        },
+
+        // Save auto-post settings to backend
+        async saveAutoPostSettings() {
+            try {
+                console.log('Saving auto-post settings:', this.autoPostSettings);
+                
+                // Use settings directly since x-model.number handles conversion
+                const settings = {
+                    minEthDefault: this.autoPostSettings.minEthDefault || 0.1,
+                    minEth10kClub: this.autoPostSettings.minEth10kClub || 0.5,
+                    minEth999Club: this.autoPostSettings.minEth999Club || 0.3,
+                    maxAgeHours: this.autoPostSettings.maxAgeHours || 1
+                };
+                
+                console.log('Converted settings:', settings);
+                
+                const response = await fetch('/api/admin/autopost-settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(settings)
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    console.log('Auto-post settings saved successfully:', result);
+                    this.showMessage('Settings saved successfully!', 'success');
+                } else {
+                    const error = await response.text();
+                    console.error('Failed to save auto-post settings:', error);
+                    this.showMessage('Failed to save settings', 'error');
+                }
+            } catch (error) {
+                console.error('Error saving auto-post settings:', error);
+                this.showMessage('Error saving settings', 'error');
+            }
+        },
+
+
+
+
 
         // Helper function to show messages
         showMessage(text, type = 'info') {
