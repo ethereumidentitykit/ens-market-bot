@@ -460,6 +460,28 @@ export class VercelDatabaseService implements IDatabaseService {
   }
 
   /**
+   * Clear only sales table - keep tweets, settings, and system state
+   */
+  async clearSalesTable(): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      logger.info('Starting sales table clear...');
+
+      // Delete only sales data
+      await this.pool.query('DELETE FROM processed_sales');
+
+      // Reset sequence for sales table only
+      await this.pool.query('ALTER SEQUENCE processed_sales_id_seq RESTART WITH 1');
+
+      logger.info('Sales table cleared successfully');
+    } catch (error: any) {
+      logger.error('Failed to clear sales table:', error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Store generated image in database
    */
   async storeGeneratedImage(filename: string, imageBuffer: Buffer, contentType: string = 'image/png'): Promise<void> {

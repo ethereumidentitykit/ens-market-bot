@@ -57,6 +57,7 @@ function dashboard() {
 
         // Database management state
         databaseResetting: false,
+        salesClearing: false,
         databaseResetMessage: '',
         databaseResetMessageType: 'info',
         processingReset: false,
@@ -840,31 +841,20 @@ function dashboard() {
         },
 
         async confirmDatabaseReset() {
-            const confirmation = confirm(
+            const finalConfirm = prompt(
                 '⚠️ WARNING: This will permanently delete ALL data!\n\n' +
                 '• All sales records will be lost\n' +
                 '• All tweet history will be deleted\n' +
                 '• Last processed block will be reset\n' +
                 '• System will re-fetch historical data on next sync\n\n' +
-                'This action cannot be undone. Are you absolutely sure?'
+                'This action cannot be undone.\n\n' +
+                'Type "DELETE" to confirm:'
             );
             
-            if (confirmation) {
-                const doubleConfirmation = confirm(
-                    '🚨 FINAL CONFIRMATION\n\n' +
-                    'Type "DELETE" in the next prompt to confirm database reset.'
-                );
-                
-                if (doubleConfirmation) {
-                    const finalConfirm = prompt('Type "DELETE" to confirm:');
-                    if (finalConfirm === 'DELETE') {
-                        await this.resetDatabase();
-                    } else {
-                        this.showDatabaseResetMessage('Database reset cancelled.', 'info');
-                    }
-                } else {
-                    this.showDatabaseResetMessage('Database reset cancelled.', 'info');
-                }
+            if (finalConfirm === 'DELETE') {
+                await this.resetDatabase();
+            } else {
+                this.showDatabaseResetMessage('Database reset cancelled.', 'info');
             }
         },
 
@@ -904,6 +894,52 @@ function dashboard() {
                 );
             } finally {
                 this.databaseResetting = false;
+            }
+        },
+
+        async confirmClearSales() {
+            const confirmation = confirm(
+                '⚠️ Clear Sales Table\n\n' +
+                'This will permanently delete:\n' +
+                '• All sales records\n' +
+                '• Sales will restart from ID 1\n\n' +
+                'This will NOT delete:\n' +
+                '• Tweet history\n' +
+                '• Settings and configurations\n' +
+                '• API toggle states\n\n' +
+                'Are you sure you want to clear all sales data?'
+            );
+            
+            if (confirmation) {
+                await this.clearSalesTable();
+            }
+        },
+
+        async clearSalesTable() {
+            this.salesClearing = true;
+            this.clearDatabaseResetMessage();
+            
+            try {
+                const response = await fetch('/api/database/clear-sales', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    this.showDatabaseResetMessage('Sales table cleared successfully! Ready for fresh sales data.', 'success');
+                    // Refresh stats to show empty sales
+                    await this.refreshData();
+                } else {
+                    this.showDatabaseResetMessage(`Failed to clear sales table: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                this.showDatabaseResetMessage(`Error clearing sales table: ${error.message}`, 'error');
+            } finally {
+                this.salesClearing = false;
             }
         },
 

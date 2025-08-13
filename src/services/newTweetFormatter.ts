@@ -161,7 +161,11 @@ export class NewTweetFormatter {
       return 'https://vision.io/marketplace';
     }
     
-    return `https://vision.io/name/ens/${cleanName}.eth`;
+    // Normalize emoji by removing variation selectors (U+FE0F) that Vision.io doesn't expect
+    const normalizedName = cleanName.replace(/\uFE0F/g, '');
+    
+    // For tweet display, use the readable emoji URL (Twitter will handle the encoding when clicked)
+    return `https://vision.io/name/ens/${normalizedName}.eth`;
   }
 
   /**

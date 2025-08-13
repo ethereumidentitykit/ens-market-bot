@@ -1158,6 +1158,25 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    app.post('/api/database/clear-sales', async (req, res) => {
+      try {
+        logger.warn('Sales table clear requested - this will delete all sales data!');
+        
+        await databaseService.clearSalesTable();
+        
+        res.json({
+          success: true,
+          message: 'Sales table cleared successfully. All sales data deleted, ready for fresh data.'
+        });
+      } catch (error: any) {
+        logger.error('Sales table clear failed:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     // Reset processing to start from recent blocks
     app.post('/api/processing/reset-to-recent', async (req, res) => {
       try {

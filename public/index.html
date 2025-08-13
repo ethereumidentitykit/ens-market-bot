@@ -933,6 +933,21 @@
                                     Recommended if stuck on old blocks (keeps existing data)
                                 </div>
 
+                                <!-- Clear Sales Table Button -->
+                                <button 
+                                    @click="confirmClearSales()"
+                                    :disabled="salesClearing"
+                                    class="w-full inline-flex items-center justify-center px-4 py-2 border border-orange-300 shadow-sm text-sm font-medium rounded-md text-orange-700 bg-orange-50 hover:bg-orange-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    <i class="fas fa-table mr-2" :class="{'fa-spin': salesClearing}"></i>
+                                    <span x-show="!salesClearing">Clear Sales Table</span>
+                                    <span x-show="salesClearing">Clearing...</span>
+                                </button>
+
+                                <div class="text-xs text-gray-500 text-center mb-4">
+                                    Deletes sales data only (keeps tweets & settings)
+                                </div>
+
                                 <!-- Full Database Reset Button -->
                                 <button 
                                     @click="confirmDatabaseReset()"

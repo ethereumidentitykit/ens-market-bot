@@ -128,6 +128,7 @@ export interface IDatabaseService {
   getTweetPostsInLast24Hours(): Promise<number>;
   // Database management methods
   resetDatabase(): Promise<void>;
+  clearSalesTable(): Promise<void>;
   close(): Promise<void>;
   // Image storage methods
   storeGeneratedImage(filename: string, imageBuffer: Buffer, contentType?: string): Promise<void>;

@@ -447,6 +447,28 @@ export class DatabaseService implements IDatabaseService {
   }
 
   /**
+   * Clear only sales table - keep tweets, settings, and system state
+   */
+  async clearSalesTable(): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    try {
+      logger.info('Starting sales table clear...');
+
+      // Delete only sales data
+      await this.db.exec('DELETE FROM processed_sales');
+
+      // Reset auto-increment counter for sales table only
+      await this.db.exec('DELETE FROM sqlite_sequence WHERE name = "processed_sales"');
+
+      logger.info('Sales table cleared successfully');
+    } catch (error: any) {
+      logger.error('Failed to clear sales table:', error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Store generated image in database
    */
   async storeGeneratedImage(filename: string, imageBuffer: Buffer, contentType: string = 'image/png'): Promise<void> {
