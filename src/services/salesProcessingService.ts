@@ -3,6 +3,15 @@ import { IDatabaseService } from '../types';
 import { logger } from '../utils/logger';
 import { NFTSale, ProcessedSale } from '../types';
 import { MONITORED_CONTRACTS } from '../config/contracts';
+import axios from 'axios';
+
+interface ENSMetadata {
+  name: string;
+  description: string;
+  image: string;
+  image_url: string;
+  attributes: any[];
+}
 
 export class SalesProcessingService {
   private moralisService: MoralisService;
@@ -74,9 +83,9 @@ export class SalesProcessingService {
     // Calculate total price in ETH
     const totalPriceEth = parseFloat(this.calculateTotalPrice(sale));
     
-    // Filter out sales below 0.1 ETH
-    if (totalPriceEth < 0.1) {
-      logger.debug(`Filtering out sale below 0.1 ETH: ${totalPriceEth} ETH (tx: ${sale.transactionHash})`);
+    // Filter out sales below 0.05 ETH (temp reduced from 0.1)
+    if (totalPriceEth < 0.05) {
+      logger.debug(`Filtering out sale below 0.05 ETH: ${totalPriceEth} ETH (tx: ${sale.transactionHash})`);
       return false;
     }
 
@@ -105,11 +114,51 @@ export class SalesProcessingService {
   }
 
   /**
+   * Fetch ENS metadata from the official ENS metadata API
+   */
+  private async fetchENSMetadata(contractAddress: string, tokenId: string): Promise<ENSMetadata | null> {
+    try {
+      const url = `https://metadata.ens.domains/mainnet/${contractAddress}/${tokenId}`;
+      logger.debug(`Fetching ENS metadata from: ${url}`);
+      
+      const response = await axios.get<ENSMetadata>(url, {
+        timeout: 5000, // 5 second timeout
+      });
+      
+      logger.debug(`Successfully fetched ENS metadata: ${response.data.name}`);
+      return response.data;
+      
+    } catch (error: any) {
+      logger.warn(`Failed to fetch ENS metadata for ${contractAddress}/${tokenId}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
    * Convert NFTSale (Enhanced from Moralis) to ProcessedSale format
    */
-  private convertToProcessedSale(sale: EnhancedNFTSale): Omit<ProcessedSale, 'id'> {
+  private async convertToProcessedSale(sale: EnhancedNFTSale): Promise<Omit<ProcessedSale, 'id'>> {
     const priceEth = this.calculateTotalPrice(sale);
     const blockTimestamp = sale.blockTime || this.formatBlockTimestamp(sale.blockNumber);
+
+    // Use Moralis data initially
+    let nftName = sale.nftName;
+    let nftImage = sale.nftImage;
+    let nftDescription = sale.nftDescription;
+
+    // If missing name or image, try ENS metadata API as fallback
+    if (!nftName || !nftImage) {
+      logger.debug(`Missing metadata from Moralis - name: ${!!nftName}, image: ${!!nftImage}. Trying ENS API...`);
+      
+      const ensMetadata = await this.fetchENSMetadata(sale.contractAddress, sale.tokenId);
+      if (ensMetadata) {
+        nftName = nftName || ensMetadata.name;
+        nftImage = nftImage || ensMetadata.image;
+        nftDescription = nftDescription || ensMetadata.description;
+        
+        logger.info(`ENS metadata enriched: ${ensMetadata.name} (${sale.transactionHash})`);
+      }
+    }
 
     return {
       transactionHash: sale.transactionHash,
@@ -124,12 +173,12 @@ export class SalesProcessingService {
       blockTimestamp,
       processedAt: new Date().toISOString(),
       posted: false,
-      // Enhanced metadata from Moralis (override collection name with our config)
+      // Enhanced metadata (from Moralis + ENS API fallback, override collection name with our config)
       collectionName: this.getCollectionName(sale.contractAddress, sale.collectionName),
       collectionLogo: sale.collectionLogo,
-      nftName: sale.nftName,
-      nftImage: sale.nftImage,
-      nftDescription: sale.nftDescription,
+      nftName,
+      nftImage,
+      nftDescription,
       marketplaceLogo: sale.marketplaceLogo,
       currentUsdValue: sale.currentUsdValue,
       verifiedCollection: sale.verifiedCollection,
@@ -213,7 +262,7 @@ export class SalesProcessingService {
           }
 
           // Convert and store the sale
-          const processedSale = this.convertToProcessedSale(sale);
+          const processedSale = await this.convertToProcessedSale(sale);
           const saleId = await this.databaseService.insertSale(processedSale);
           
           // Create sale with ID and add to results
@@ -260,8 +309,8 @@ export class SalesProcessingService {
   /**
    * Public method to convert sale to processed format
    */
-  public convertToProcessedSalePublic(sale: EnhancedNFTSale): Omit<ProcessedSale, 'id'> {
-    return this.convertToProcessedSale(sale);
+  public async convertToProcessedSalePublic(sale: EnhancedNFTSale): Promise<Omit<ProcessedSale, 'id'>> {
+    return await this.convertToProcessedSale(sale);
   }
 
   /**

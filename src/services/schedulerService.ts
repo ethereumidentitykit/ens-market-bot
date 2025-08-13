@@ -137,6 +137,9 @@ export class SchedulerService {
     logger.info('Starting scheduled sales sync...');
 
     try {
+      // Refresh NTP time cache before processing
+      await this.autoTweetService.refreshTimeCache();
+      
       // Process new sales
       const result = await this.salesProcessingService.processNewSales();
       

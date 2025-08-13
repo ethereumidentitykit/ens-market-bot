@@ -228,7 +228,7 @@ async function startApplication(): Promise<void> {
               }
 
               // Convert and store the sale using SalesProcessingService logic
-              const processedSale = salesProcessingService.convertToProcessedSalePublic(trade);
+              const processedSale = await salesProcessingService.convertToProcessedSalePublic(trade);
               await databaseService.insertSale(processedSale);
               
               processedSales++;

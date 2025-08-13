@@ -141,11 +141,27 @@ export class NewTweetFormatter {
     const buyerHandle = this.getDisplayHandle(buyerAccount, sale.buyerAddress);
     const line2 = `${sellerHandle} -> ${buyerHandle}`;
 
-    // Line 3: Standard hashtags
-    const line3 = '#ENS #ENSDomains #Ethereum';
+    // Line 3: Vision.io marketplace link
+    const visionUrl = this.buildVisionioUrl(ensName);
+    const line3 = visionUrl;
 
     // Combine with double line breaks
     return `${line1}\n\n${line2}\n\n${line3}`;
+  }
+
+  /**
+   * Build Vision.io marketplace URL for an ENS name
+   */
+  private buildVisionioUrl(ensName: string): string {
+    // Remove .eth suffix if present and clean the name
+    const cleanName = ensName.replace(/\.eth$/i, '').trim();
+    
+    // Handle cases where ensName might be "Unknown ENS" or similar
+    if (!cleanName || cleanName.toLowerCase().includes('unknown') || cleanName.toLowerCase().includes('ens')) {
+      return 'https://vision.io/marketplace';
+    }
+    
+    return `https://vision.io/name/ens/${cleanName}.eth`;
   }
 
   /**
@@ -162,7 +178,7 @@ export class NewTweetFormatter {
     // Check for Twitter handle first
     const twitterHandle = account.ens?.records?.['com.twitter'];
     if (twitterHandle) {
-      return `@${twitterHandle}`;
+      return `${twitterHandle}`;
     }
 
     // Check for ENS name

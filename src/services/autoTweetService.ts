@@ -299,4 +299,11 @@ export class AutoTweetService {
       maxAgeHours: 1
     };
   }
+
+  /**
+   * Refresh NTP time cache (called by scheduler)
+   */
+  public async refreshTimeCache(): Promise<void> {
+    await this.worldTimeService.refreshTime();
+  }
 }

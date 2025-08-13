@@ -29,8 +29,8 @@ export class WorldTimeService {
   private currentServerIndex: number = 0;
 
   constructor() {
-    // Start the periodic fetch
-    this.startPeriodicFetch();
+    // Initialize with immediate fetch, but no periodic interval
+    this.fetchCurrentTime();
   }
 
   /**
@@ -42,8 +42,8 @@ export class WorldTimeService {
     if (this.cachedTime && this.lastFetch) {
       const timeSinceLastFetch = Date.now() - this.lastFetch.getTime();
       
-      // If cache is still fresh (less than 1 minute old), use it
-      if (timeSinceLastFetch < this.CACHE_DURATION_MS) {
+      // If cache is still fresh (less than 5 minutes old), use it
+      if (timeSinceLastFetch < (this.CACHE_DURATION_MS * 5)) {
         const currentTime = new Date(this.cachedTime.getTime() + timeSinceLastFetch);
         return currentTime;
       }
@@ -143,29 +143,22 @@ export class WorldTimeService {
   }
 
   /**
-   * Start periodic fetching of time every minute
+   * Refresh time cache (called by scheduler when needed)
    */
-  private startPeriodicFetch(): void {
-    // Fetch immediately on startup
-    this.fetchCurrentTime();
-
-    // Set up interval to fetch every minute
-    this.fetchInterval = setInterval(() => {
-      this.fetchCurrentTime();
-    }, this.CACHE_DURATION_MS);
-
-    logger.info('WorldTimeService started - fetching UTC time from NTP servers every minute');
+  public async refreshTime(): Promise<void> {
+    await this.fetchCurrentTime();
+    logger.debug('NTP time cache refreshed');
   }
 
   /**
-   * Stop the periodic fetching (for cleanup)
+   * Stop the service (cleanup)
    */
   public stop(): void {
     if (this.fetchInterval) {
       clearInterval(this.fetchInterval);
       this.fetchInterval = null;
-      logger.info('WorldTimeService stopped');
     }
+    logger.info('WorldTimeService stopped');
   }
 
   /**
