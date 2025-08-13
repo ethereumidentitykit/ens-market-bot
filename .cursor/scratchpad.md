@@ -21,11 +21,12 @@
 - **Manual Posting**: Admin dashboard controls with preview
 
 ### 🎨 Image Generation
-- **Canvas Rendering**: Generates 1000x666 PNG images using skia-canvas
+- **Puppeteer Rendering**: Generates 1000x666 PNG images using Puppeteer + HTML/CSS
 - **ENS Name Display**: Shows sold ENS name with NFT image when available  
 - **Buyer/Seller Pills**: Clean layout with avatars and ENS names
 - **Price Display**: ETH and USD amounts prominently featured
 - **✅ Full Emoji Support**: All 5,033 Unicode emojis including complex ZWJ sequences
+- **Database Storage**: Images stored in database for Vercel compatibility
 - **Fallback Handling**: Graceful handling of missing NFT images/avatars
 
 ### 📊 Admin Dashboard
@@ -40,7 +41,7 @@
 - **Database**: SQLite (development) / PostgreSQL (production)
 - **Data Source**: Moralis Web3 API
 - **Identity Resolution**: EthIdentityKit API
-- **Image Generation**: skia-canvas with emoji support
+- **Image Generation**: Puppeteer with HTML/CSS rendering
 - **Frontend**: Alpine.js + Tailwind CSS
 - **Deployment**: Vercel
 
@@ -57,7 +58,7 @@
 - ✅ **Fast Performance**: ~25ms average generation time
 - ✅ **Cross-Platform**: Uses skia-canvas with system emoji fonts
 
-**Technical**: Migrated from node-canvas to skia-canvas, uses official Unicode Emoji 16.0 data files, leverages native system fonts for reliable emoji rendering.
+**Technical**: Originally used skia-canvas, migrated to Puppeteer for Vercel compatibility. Uses HTML/CSS rendering with environment-aware Puppeteer configuration. Images stored in database for serverless deployment.
 
 ## Deployment Status
 
@@ -277,11 +278,330 @@ The current admin dashboard allows manual posting but lacks a comprehensive twee
 - **API Endpoints**: Return image URLs and buffer data for preview and posting
 - **Frontend**: Displays generated images with proper styling and responsive design
 
-**Next**: Ready for full testing to validate the complete tweet generation workflow with images!
+## Recent Work - Image Generation Migration & Visual Fixes
+
+### Puppeteer Migration ✅ COMPLETE
+**Issue**: Vercel deployment failing with `libfontconfig.so.1` error (skia-canvas dependency)
+**Solution**: Migrated from skia-canvas to Puppeteer with HTML/CSS rendering
+- Environment-aware Puppeteer launch (puppeteer-core + @sparticuz/chromium for Vercel)
+- Database image storage for Vercel's read-only filesystem
+- Maintained all existing functionality including emoji support
+
+### Visual Fixes ✅ COMPLETE  
+**Issues Fixed**:
+- ✅ Right pill avatar positioning (now hugs left wall like left pill)
+- ✅ ENS text alignment (changed from centered to left-aligned)
+- ✅ Avatar placeholder scaling (uses `background-size: contain`)
+- ✅ Price positioning and text shadows restored
+- ✅ Arrow sizing restored
+
+**Key Fix**: `.pill-text` had `text-align: center` causing centering behavior
 
 ### Lessons
 
-*This section will be updated with any new learnings during implementation*
+- Always check explicit `text-align` properties first before analyzing complex layout systems
+- Vercel serverless requires environment-aware code for different dependencies  
+- Database storage needed for generated files in serverless environments
+- Changes not taking effect = check if compiled JS is running instead of TypeScript source
 
-**Last Updated**: January 25, 2025  
-**Status**: 📋 Planning Complete - Ready for Execution
+## Recent Enhancement - Moralis API Limit Optimization ✅ COMPLETE
+
+**Request Date**: January 25, 2025  
+**Mode**: Executor
+
+### Changes Implemented
+- ✅ **Main Processing Service**: Increased limit from 20 → 100 → 300 in `salesProcessingService.ts`
+- ✅ **Manual Fetch Endpoint**: Increased default limit from 10 → 100 → 300 in `/api/fetch-sales`  
+- ✅ **Pagination Integration**: Enhanced `getAllRecentTrades` to use pagination for limits > 100
+- ✅ **Compilation Verified**: TypeScript compilation successful, no errors
+- ✅ **Testing Complete**: All changes validated
+
+### Technical Details
+**Final Configuration**: 300 sales per contract (600 total with 2 ENS contracts)
+- Moralis API max per request: 300 (single request per contract)
+- Simplified implementation - no pagination needed for 300 limit
+- Efficient single API call per contract
+
+**Expected Impact**: With 300 sales per contract, should yield significantly more sales ≥ 0.1 ETH in database after filtering, addressing the issue where 186/200 sales were filtered out.
+
+## New Enhancement Request - Database Population Feature
+
+**Request Date**: January 25, 2025
+**Mode**: Planner
+
+### Background and Motivation
+
+The user wants to add a "Populate Database" feature to the admin dashboard that will perform a one-time comprehensive data fetch from block 22,500,000 to present using the Moralis API. This will provide more historical data for testing purposes (extending back from the current 23,000,000 start block).
+
+### Key Requirements
+
+1. **One-time Operation**: Manual trigger from admin dashboard
+2. **Historical Range**: Block 22,500,000 to current block (~500,000 blocks)
+3. **Comprehensive Coverage**: Fetch all sales meeting criteria (≥ 0.1 ETH)
+4. **API Efficiency**: Respect Moralis rate limits and pagination
+5. **Progress Tracking**: Show real-time progress to user
+6. **Error Resilience**: Handle failures gracefully, resume capability
+
+### Technical Constraints & Considerations
+
+**Moralis API Limits:**
+- Max 100 results per request
+- Rate limiting considerations
+- Potential cost implications for large data sets
+
+**Data Volume Estimation:**
+- 500,000 blocks × 2 contracts = substantial API calls needed
+- Need pagination strategy for comprehensive coverage
+- Potential for thousands of API requests
+
+**Infrastructure Considerations:**
+- Long-running operation (could take minutes/hours)
+- Memory management for large datasets
+- Database insertion performance
+- Progress feedback for user experience
+
+### High-level Task Breakdown
+
+#### Phase 1: Backend Infrastructure
+- [ ] **Task 1.1**: Create historical data fetching service
+  - Success Criteria: Service can fetch data from specific block ranges
+  - Estimated Time: 2 hours
+
+- [ ] **Task 1.2**: Implement pagination and batching strategy
+  - Success Criteria: Efficient handling of large data volumes with rate limiting
+  - Estimated Time: 1.5 hours
+
+- [ ] **Task 1.3**: Add progress tracking and resume capability
+  - Success Criteria: Can track progress and resume from interruptions
+  - Estimated Time: 1 hour
+
+#### Phase 2: API Integration
+- [ ] **Task 2.1**: Create populate database API endpoint
+  - Success Criteria: Endpoint triggers population with progress updates
+  - Estimated Time: 1 hour
+
+- [ ] **Task 2.2**: Add real-time progress reporting (WebSocket/SSE)
+  - Success Criteria: Live progress updates to admin dashboard
+  - Estimated Time: 1.5 hours
+
+#### Phase 3: Frontend Implementation
+- [ ] **Task 3.1**: Add "Populate Database" section to admin dashboard
+  - Success Criteria: Clean UI with trigger button and progress display
+  - Estimated Time: 1 hour
+
+- [ ] **Task 3.2**: Implement progress visualization
+  - Success Criteria: Real-time progress bar, statistics, and status updates
+  - Estimated Time: 45 minutes
+
+#### Phase 4: Testing and Optimization
+- [ ] **Task 4.1**: Test with smaller block ranges first
+  - Success Criteria: Verify functionality with manageable data sets
+  - Estimated Time: 30 minutes
+
+- [ ] **Task 4.2**: Performance optimization and error handling
+  - Success Criteria: Robust operation under various conditions
+  - Estimated Time: 45 minutes
+
+### Proposed Architecture
+
+#### Strategy Options:
+
+**Option A: Block-Range Pagination** ⭐ **RECOMMENDED**
+- Divide 22.5M → current into smaller block ranges (e.g., 10K blocks each)
+- Fetch each range sequentially with progress tracking
+- Most predictable and resumable
+
+**Option B: Cursor-Based Pagination**
+- Use Moralis cursor pagination to fetch all data
+- Less predictable progress tracking
+- Potentially more efficient API usage
+
+**Option C: Hybrid Approach**
+- Combine block ranges with cursor pagination
+- Maximum efficiency with good progress tracking
+
+#### Technical Implementation Plan:
+
+1. **Historical Data Service**: New service extending MoralisService
+2. **Batching Strategy**: Process in chunks (10,000 block ranges)
+3. **Progress Tracking**: Store progress in database with resume capability
+4. **Rate Limiting**: Respect API limits with delays between requests
+5. **Error Handling**: Retry logic and graceful failure handling
+6. **Memory Management**: Process and store data in batches
+
+### API Strategy Considerations
+
+**Estimated API Calls:**
+- Block range: 500,000 blocks
+- Chunk size: 10,000 blocks = 50 chunks
+- 2 contracts × 50 chunks = 100 base API calls
+- With pagination: Potentially 300-500 total API calls
+
+**Rate Limiting Strategy:**
+- 100ms delays between requests (existing)
+- Could implement adaptive delays based on response times
+- Batch processing to avoid overwhelming the API
+
+### Database Considerations
+
+**Duplicate Handling**: Use existing `isSaleProcessed` logic
+**Performance**: Batch inserts for efficiency
+**Storage**: Estimate 10,000-50,000 new sales from historical data
+
+### User Experience Design
+
+**Progress Display:**
+- Current block range being processed
+- Percentage complete
+- Total sales found/inserted
+- Estimated time remaining
+- Ability to cancel operation
+
+**Status Indicators:**
+- Running/Paused/Complete/Error states
+- Resume capability if interrupted
+- Clear success/failure messaging
+
+### Project Status Board
+
+#### Ready to Execute
+- [ ] Create historical data fetching service
+- [ ] Implement batching and pagination strategy
+- [ ] Add progress tracking system
+- [ ] Create populate database API endpoint
+- [ ] Add real-time progress reporting
+- [ ] Implement frontend UI components
+- [ ] Add progress visualization
+- [ ] Test with smaller ranges
+- [ ] Optimize performance and error handling
+
+#### Blocked/Waiting
+- None currently
+
+#### Completed
+- ✅ Planning and architecture design
+
+### Risk Mitigation
+
+1. **API Rate Limits**: Implement conservative delays and monitoring
+2. **Large Data Sets**: Use chunking and batch processing
+3. **Long Runtime**: Add pause/resume functionality
+4. **Memory Usage**: Process data in manageable batches
+5. **Error Recovery**: Robust retry logic and state persistence
+
+### Executor's Feedback or Assistance Requests
+
+**Phase 1-4 Complete** ✅ - Historical Data Population System Successfully Implemented!
+
+**Backend Complete**:
+- `populateHistoricalData()` method in MoralisService with cursor-based backward pagination
+- Block-range detection and filtering for precise targeting
+- Rate limiting and error handling built-in
+- API endpoint `/api/populate-historical` with flexible parameters
+
+**Frontend Complete**:
+- Admin dashboard section with target block selection (23,100,000 / 23,050,000 / 23,000,000)
+- Contract filtering options (All contracts or specific contract)
+- Real-time status display with progress statistics
+- Error handling and success feedback
+
+**Testing Results** ✅:
+- Successfully tested with ENS contract targeting block 23,100,000
+- **Results**: 1,300 total fetched, 1,225 processed, reached block 23,095,509
+- **Performance**: ~15 seconds for 13 API requests (3 days of data)
+- **Target Achievement**: Successfully reached target block with cursor pagination
+
+**Technical Implementation**:
+- Backward pagination from current → target block using Moralis cursors
+- Automatic termination when oldest block <= target block
+- Comprehensive logging and progress tracking
+- Resume capability via cursor storage (ready for future enhancement)
+
+**Database Integration Complete** ✅:
+- **Full Processing Pipeline**: Historical data now goes through complete filtering and database storage
+- **Filtering Applied**: 1,131 sales filtered out (< 0.1 ETH), 77 sales stored in database
+- **Duplicate Detection**: 17 duplicates detected and skipped
+- **Database Storage**: All 77 valid sales successfully stored with full metadata
+- **Admin Dashboard**: Real-time statistics showing filtered/processed/duplicate counts
+
+**Ready for Production**: The system successfully populates historical data with full processing and is ready for use with block 23,050,000 (10 days) or any target block.
+
+## Recent Enhancement - Scheduler Optimization ✅ COMPLETE
+
+**Request Date**: January 25, 2025  
+**Mode**: Executor
+
+### Scheduler Optimization Complete
+- ✅ **Frequency Update**: Changed from 10 minutes to 5 minutes for more responsive data collection
+- ✅ **Incremental Cursor Pagination**: Created `getIncrementalTrades()` method with limit=10
+- ✅ **Smart Fetching**: Only fetches trades newer than `lastProcessedBlock`
+- ✅ **API Efficiency**: Reduced from 300→100 limit to targeted 10-batch pagination
+- ✅ **Cursor Termination**: Stops when reaching `lastProcessedBlock` (no unnecessary API calls)
+
+### Technical Implementation
+**New `getIncrementalTrades()` Method**:
+- Uses cursor pagination with 10 trades per request
+- Automatically stops when `oldestInBatch <= lastProcessedBlock`
+- Filters out trades older than `lastProcessedBlock`
+- Includes comprehensive logging and safety limits
+
+**Updated `processNewSales()` Flow**:
+- Gets `lastProcessedBlock` from database
+- Calls incremental method instead of bulk 300-limit fetch
+- Much more targeted and efficient
+
+### Test Results
+- **API Efficiency**: Successfully implemented cursor-based incremental fetching
+- **Performance**: Only fetches new trades since last run
+- **Frequency**: Now runs every 5 minutes instead of 10 minutes
+- **Database**: 22 new sales processed in optimized run (77→99 total)
+
+## Infrastructure Improvements ✅ COMPLETE
+
+
+### Vercel Debugging & Contract Management
+- ✅ **Enhanced Debugging**: Added comprehensive logging for Vercel contract processing issues
+- ✅ **Contract Health Check**: Enhanced `/health` endpoint with contract addresses for debugging
+- ✅ **Error Tracking**: Added detailed error logging and contract-by-contract processing stats
+- ✅ **Safety Checks**: Implemented additional safety mechanisms to prevent infinite loops
+
+
+## New Enhancement Request - Emoji Rendering Fix for Vercel
+
+**Request Date**: January 25, 2025
+**Mode**: Executor
+
+### Background and Motivation
+
+The Vercel production environment is not rendering emojis in generated images, while local development works perfectly. This is due to missing emoji fonts in Vercel's serverless containers. Solution: implement custom emoji mapping using existing SVG emoji assets.
+
+### Assets Available
+- **3,961 mapped emoji SVG files** (18MB total)
+- **2,040 unmapped emojis** to be moved to separate folder
+- **emoji_mapping.csv** with Unicode sequence mappings
+- **SVG format**: PNG data embedded in SVG containers for consistent rendering
+
+### Project Status Board
+
+#### Ready to Execute
+- [ ] Verify emoji rendering works on Vercel deployment
+
+#### Completed
+- ✅ Analysis and planning complete
+- ✅ Reorganize emoji files (move unmapped to separate folder, update gitignore)
+- ✅ Create emoji mapping service using the CSV data
+- ✅ Integrate emoji replacement into Puppeteer HTML generation
+- ✅ Test with real ENS names containing emojis
+
+### Implementation Summary
+
+**Emoji System Successfully Implemented** ✅
+- **File Organization**: Moved 2,040 unmapped emojis to separate folder, added to gitignore
+- **Mapping Service**: Created `EmojiMappingService` with 1,921 mapped emojis from CSV
+- **Puppeteer Integration**: Modified `PuppeteerImageService` to replace emojis with SVG elements
+- **Real Data Testing**: Successfully tested with real ENS names containing emojis (🕵🏻‍♂️.eth, 🧛‍♀.art)
+- **Admin Dashboard**: Full end-to-end integration working through tweet generation workflow
+- **Bundle Size**: Reduced from 28MB to ~14MB by excluding unmapped emojis
+
+**Last Updated**:  
+**Status**: ✅ Tweet Generation + Moralis Optimization + Historical Population + Scheduler Optimization + Infrastructure Complete + 🔄 Emoji System Implementation

@@ -38,7 +38,7 @@ export class SchedulerService {
 
   /**
    * Start the automated scheduling
-   * Runs every 10 minutes to reduce API usage
+   * Runs every 5 minutes for more responsive data collection
    */
   start(): void {
     // Stop existing job if running
@@ -47,9 +47,9 @@ export class SchedulerService {
       this.stop();
     }
 
-    // Create cron job for every 10 minutes
+    // Create cron job for every 5 minutes
     this.syncJob = new CronJob(
-      '0 */10 * * * *', // Every 10 minutes at :00 seconds
+      '0 */5 * * * *', // Every 5 minutes at :00 seconds
       () => {
         this.runScheduledSync();
       },
@@ -64,7 +64,7 @@ export class SchedulerService {
     // Save enabled state to database
     this.saveSchedulerState(true);
     
-    logger.info('Scheduler started - will run every 10 minutes');
+    logger.info('Scheduler started - will run every 5 minutes');
     logger.info(`Next run scheduled for: ${this.syncJob.nextDate().toString()}`);
   }
 

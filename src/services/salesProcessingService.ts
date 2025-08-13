@@ -138,26 +138,33 @@ export class SalesProcessingService {
     };
 
     try {
-      logger.info('Starting to process new sales from Moralis (block >= 23M)...');
+      logger.info('Starting to process new sales from Moralis using incremental fetch...');
 
       // Get last processed block to optimize fetching
-      const lastProcessedBlock = await this.databaseService.getSystemState('last_processed_block');
+      const lastProcessedBlockStr = await this.databaseService.getSystemState('last_processed_block');
       
-      // Moralis will automatically filter to recent blocks (>= 23M)
-      // If we have a processed block that's >= 23M, use it; otherwise start from 23M
-                let fromBlock: string | undefined = undefined;
-          if (lastProcessedBlock && parseInt(lastProcessedBlock) >= 23000000) {
-            fromBlock = lastProcessedBlock;
-            logger.info(`Fetching sales from last processed block: ${fromBlock}`);
-          } else {
-            logger.info('Fetching recent sales from block 23M onwards (Moralis will filter old data)');
-          }
+      // Determine starting block for incremental fetch
+      let lastProcessedBlock: number;
+      if (lastProcessedBlockStr && parseInt(lastProcessedBlockStr) >= 23000000) {
+        lastProcessedBlock = parseInt(lastProcessedBlockStr);
+        logger.info(`Using incremental fetch from last processed block: ${lastProcessedBlock}`);
+      } else {
+        // If no lastProcessedBlock, get the highest block from database
+        const recentSales = await this.databaseService.getRecentSales(1);
+        if (recentSales.length > 0) {
+          lastProcessedBlock = recentSales[0].blockNumber;
+          logger.info(`No lastProcessedBlock found, using highest DB block: ${lastProcessedBlock}`);
+        } else {
+          lastProcessedBlock = 23000000; // Default to 23M minimum
+          logger.info(`Empty database, using incremental fetch from default block: ${lastProcessedBlock}`);
+        }
+      }
 
-      // Fetch recent sales with smaller limit to save compute units (Moralis charges per result)
-      const recentSales = await this.moralisService.getAllRecentTrades(20, fromBlock);
+      // Fetch only new sales using cursor pagination with limit=10
+      const recentSales = await this.moralisService.getIncrementalTrades(lastProcessedBlock, 10);
       stats.fetched = recentSales.length;
 
-      logger.info(`Fetched ${recentSales.length} recent sales from Moralis (all >= block 22M)`);
+      logger.info(`Fetched ${recentSales.length} new sales from incremental fetch`);
 
       if (recentSales.length === 0) {
         logger.info('No new sales found');
@@ -217,6 +224,27 @@ export class SalesProcessingService {
       logger.error('Failed to process new sales:', error.message);
       throw error;
     }
+  }
+
+  /**
+   * Public method to check if a sale should be processed (filters)
+   */
+  public shouldProcessSalePublic(sale: EnhancedNFTSale): boolean {
+    return this.shouldProcessSale(sale);
+  }
+
+  /**
+   * Public method to convert sale to processed format
+   */
+  public convertToProcessedSalePublic(sale: EnhancedNFTSale): Omit<ProcessedSale, 'id'> {
+    return this.convertToProcessedSale(sale);
+  }
+
+  /**
+   * Public method to calculate total price
+   */
+  public calculateTotalPricePublic(sale: EnhancedNFTSale): string {
+    return this.calculateTotalPrice(sale);
   }
 
   /**

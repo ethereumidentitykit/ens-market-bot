@@ -107,6 +107,17 @@ export class DatabaseService implements IDatabaseService {
       )
     `);
 
+    // Create generated_images table for storing images in serverless environment
+    await this.db.exec(`
+      CREATE TABLE IF NOT EXISTS generated_images (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        filename TEXT NOT NULL UNIQUE,
+        image_data BLOB NOT NULL,
+        content_type TEXT NOT NULL DEFAULT 'image/png',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     logger.info('Database tables created successfully');
   }
 
@@ -432,6 +443,71 @@ export class DatabaseService implements IDatabaseService {
     } catch (error: any) {
       logger.error('Failed to reset database:', error.message);
       throw error;
+    }
+  }
+
+  /**
+   * Store generated image in database
+   */
+  async storeGeneratedImage(filename: string, imageBuffer: Buffer, contentType: string = 'image/png'): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+    
+    try {
+      await this.db.run(
+        'INSERT OR REPLACE INTO generated_images (filename, image_data, content_type) VALUES (?, ?, ?)',
+        [filename, imageBuffer, contentType]
+      );
+      logger.info(`Stored generated image in database: ${filename}`);
+    } catch (error: any) {
+      logger.error('Failed to store generated image:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Retrieve generated image from database
+   */
+  async getGeneratedImage(filename: string): Promise<{ buffer: Buffer; contentType: string } | null> {
+    if (!this.db) throw new Error('Database not initialized');
+    
+    try {
+      const row = await this.db.get(
+        'SELECT image_data, content_type FROM generated_images WHERE filename = ?',
+        [filename]
+      );
+      
+      if (row) {
+        return {
+          buffer: row.image_data,
+          contentType: row.content_type
+        };
+      }
+      
+      return null;
+    } catch (error: any) {
+      logger.error('Failed to retrieve generated image:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Clean up old generated images (keep only last 100)
+   */
+  async cleanupOldImages(): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+    
+    try {
+      await this.db.run(`
+        DELETE FROM generated_images 
+        WHERE id NOT IN (
+          SELECT id FROM generated_images 
+          ORDER BY created_at DESC 
+          LIMIT 100
+        )
+      `);
+      logger.info('Cleaned up old generated images');
+    } catch (error: any) {
+      logger.error('Failed to cleanup old images:', error.message);
     }
   }
 

@@ -1,6 +1,7 @@
 import { ProcessedSale } from '../types';
 import { logger } from '../utils/logger';
 import { EthIdentityService, ResolvedName } from './ethIdentityService';
+import { MONITORED_CONTRACTS } from '../config/contracts';
 
 export interface FormattedTweet {
   content: string;
@@ -21,17 +22,15 @@ export class TweetFormatter {
   private readonly ETHERSCAN_BASE_URL = 'https://etherscan.io/tx/';
   private readonly ethIdentityService = new EthIdentityService();
   
-  // Collection name mappings for better readability
-  private readonly COLLECTION_NAMES: Record<string, { name: string; hashtag: string }> = {
-    '0xd4416b13d2b3a9abae7acd5d6c2bbdbe25686401': {
-      name: 'NameWrapper',
-      hashtag: 'ENS'
-    },
-    '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85': {
-      name: 'ENS',
-      hashtag: 'ENS'
-    }
-  };
+  // Collection name mappings dynamically built from contracts configuration
+  private readonly COLLECTION_NAMES: Record<string, { name: string; hashtag: string }> = 
+    MONITORED_CONTRACTS.reduce((acc, contract) => {
+      acc[contract.address.toLowerCase()] = {
+        name: contract.displayName || contract.name,
+        hashtag: contract.hashtag || 'NFT'
+      };
+      return acc;
+    }, {} as Record<string, { name: string; hashtag: string }>);
 
   /**
    * Format an NFT sale into a tweet with resolved ENS names (async)

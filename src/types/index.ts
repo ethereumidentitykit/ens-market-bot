@@ -129,6 +129,10 @@ export interface IDatabaseService {
   // Database management methods
   resetDatabase(): Promise<void>;
   close(): Promise<void>;
+  // Image storage methods
+  storeGeneratedImage(filename: string, imageBuffer: Buffer, contentType?: string): Promise<void>;
+  getGeneratedImage(filename: string): Promise<{ buffer: Buffer; contentType: string } | null>;
+  cleanupOldImages(): Promise<void>;
 }
 
 // API Response Types

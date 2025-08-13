@@ -682,6 +682,113 @@
                 </div>
             </div>
 
+            <!-- Historical Data Population -->
+            <div class="mb-8">
+                <div class="bg-white shadow rounded-lg p-6">
+                    <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4 flex items-center">
+                        <i class="fas fa-history text-purple-600 mr-2"></i>
+                        Historical Data Population
+                    </h3>
+                    
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <!-- Controls -->
+                        <div>
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Target Block</label>
+                                    <select x-model="historicalData.targetBlock" class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                        <option value="23100000">23,100,000 (3 days ago - Testing)</option>
+                                        <option value="23050000">23,050,000 (10 days ago)</option>
+                                        <option value="23000000">23,000,000 (Current minimum)</option>
+                                    </select>
+                                </div>
+                                
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Contract (Optional)</label>
+                                    <select x-model="historicalData.contractAddress" class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                        <option value="">All Contracts</option>
+                                        <template x-for="contract in contracts" :key="contract.address">
+                                            <option :value="contract.address" x-text="contract.name"></option>
+                                        </template>
+                                    </select>
+                                </div>
+
+                                <button 
+                                    @click="populateHistoricalData()" 
+                                    :disabled="historicalData.isRunning"
+                                    class="w-full inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50"
+                                >
+                                    <i class="fas fa-download mr-2" :class="{'fa-spin': historicalData.isRunning}"></i>
+                                    <span x-text="historicalData.isRunning ? 'Populating...' : 'Start Population'"></span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Status -->
+                        <div>
+                            <div class="bg-gray-50 rounded-lg p-4">
+                                <h4 class="text-sm font-medium text-gray-900 mb-3">Population Status</h4>
+                                
+                                <div class="space-y-2 text-sm">
+                                    <div class="flex justify-between">
+                                        <span class="text-gray-600">Status:</span>
+                                        <span class="font-medium" 
+                                              :class="historicalData.isRunning ? 'text-blue-600' : (historicalData.lastResult ? 'text-green-600' : 'text-gray-500')"
+                                              x-text="historicalData.isRunning ? 'Running...' : (historicalData.lastResult ? 'Completed' : 'Ready')">
+                                        </span>
+                                    </div>
+                                    
+                                    <template x-if="historicalData.lastResult">
+                                        <div class="border-t pt-2 space-y-1">
+                                            <div class="flex justify-between">
+                                                <span class="text-gray-600">Total Fetched:</span>
+                                                <span class="font-medium" x-text="historicalData.lastResult.totalFetched"></span>
+                                            </div>
+                                            <div class="flex justify-between">
+                                                <span class="text-gray-600">Total Processed:</span>
+                                                <span class="font-medium" x-text="historicalData.lastResult.actualProcessed || historicalData.lastResult.totalProcessed"></span>
+                                            </div>
+                                            <div class="flex justify-between">
+                                                <span class="text-gray-600">Filtered Out:</span>
+                                                <span class="font-medium" x-text="historicalData.lastResult.actualFiltered || 0"></span>
+                                            </div>
+                                            <div class="flex justify-between">
+                                                <span class="text-gray-600">Duplicates:</span>
+                                                <span class="font-medium" x-text="historicalData.lastResult.actualDuplicates || 0"></span>
+                                            </div>
+                                            <div class="flex justify-between">
+                                                <span class="text-gray-600">Oldest Block:</span>
+                                                <span class="font-medium" x-text="historicalData.lastResult.oldestBlockReached?.toLocaleString()"></span>
+                                            </div>
+                                            <div class="flex justify-between">
+                                                <span class="text-gray-600">Target Reached:</span>
+                                                <span class="font-medium" 
+                                                      :class="historicalData.lastResult.targetBlockReached ? 'text-green-600' : 'text-red-600'"
+                                                      x-text="historicalData.lastResult.targetBlockReached ? 'Yes' : 'No'">
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Error Display -->
+                    <div x-show="historicalData.error" class="mt-4 bg-red-50 border border-red-200 rounded-md p-4">
+                        <div class="flex">
+                            <div class="flex-shrink-0">
+                                <i class="fas fa-exclamation-circle text-red-400"></i>
+                            </div>
+                            <div class="ml-3">
+                                <h3 class="text-sm font-medium text-red-800">Population Error</h3>
+                                <p class="mt-1 text-sm text-red-700" x-text="historicalData.error"></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Database Viewer -->
             <div class="bg-white shadow rounded-lg">
                 <div class="px-6 py-4 border-b border-gray-200">

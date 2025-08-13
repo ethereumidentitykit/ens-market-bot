@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import { config, validateConfig } from './utils/config';
 import { logger } from './utils/logger';
+import { MONITORED_CONTRACTS } from './config/contracts';
 import { MoralisService } from './services/moralisService';
 import { DatabaseService } from './services/databaseService';
 import { VercelDatabaseService } from './services/vercelDatabaseService';
@@ -61,7 +62,16 @@ async function startApplication(): Promise<void> {
         status: 'healthy', 
         timestamp: new Date().toISOString(),
         environment: config.nodeEnv,
-        contracts: config.contracts.length
+        contracts: config.contracts.length,
+        contractAddresses: config.contracts
+      });
+    });
+
+    // Get contract configuration
+    app.get('/api/contracts', (req, res) => {
+      res.json({ 
+        success: true,
+        contracts: MONITORED_CONTRACTS
       });
     });
 
@@ -90,13 +100,13 @@ async function startApplication(): Promise<void> {
           // Fetch for specific contract
           const response = await moralisService.getNFTTrades(
             contractAddress as string,
-            parseInt(limit as string) || 10
+            parseInt(limit as string) || 300
           );
           res.json({ success: true, data: response });
         } else {
           // Fetch for all contracts
           const sales = await moralisService.getAllRecentTrades(
-            parseInt(limit as string) || 10
+            parseInt(limit as string) || 300
           );
           res.json({ success: true, data: { trades: sales, count: sales.length } });
         }
@@ -118,7 +128,9 @@ async function startApplication(): Promise<void> {
         // Try a simple API call
         let apiTestResult = null;
         try {
-          const testResult = await moralisService.getNFTTrades('0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85', 1);
+          // Use first contract from our configuration for testing
+          const testContract = MONITORED_CONTRACTS[0].address;
+          const testResult = await moralisService.getNFTTrades(testContract, 1);
           apiTestResult = {
             success: true,
             resultCount: testResult?.trades?.length || 0,
@@ -158,6 +170,89 @@ async function startApplication(): Promise<void> {
           data: results
         });
       } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    // Historical data population endpoint
+    app.post('/api/populate-historical', async (req, res) => {
+      try {
+        const { targetBlock, contractAddress, resumeCursor } = req.body;
+        
+        // Default to 23100000 for testing
+        const target = targetBlock || 23100000;
+        
+        logger.info(`API: Starting historical population to block ${target}`);
+        
+        // Get historical trades from Moralis
+        const fetchResults = await moralisService.populateHistoricalData(
+          target,
+          contractAddress,
+          resumeCursor
+        );
+        
+        // Now process the trades through our existing logic
+        let processedSales = 0;
+        let filteredSales = 0;
+        let duplicateSales = 0;
+        let errorCount = 0;
+        
+        if (fetchResults.trades && fetchResults.trades.length > 0) {
+          logger.info(`Processing ${fetchResults.trades.length} fetched trades through sales processing logic...`);
+          
+          for (const trade of fetchResults.trades) {
+            try {
+              // Check if already processed (duplicate detection)
+              const isAlreadyProcessed = await databaseService.isSaleProcessed(trade.transactionHash);
+              
+              if (isAlreadyProcessed) {
+                duplicateSales++;
+                logger.debug(`Skipping duplicate sale: ${trade.transactionHash}`);
+                continue;
+              }
+
+              // Apply filters using SalesProcessingService logic
+              if (!salesProcessingService.shouldProcessSalePublic(trade)) {
+                filteredSales++;
+                const totalPriceEth = parseFloat(salesProcessingService.calculateTotalPricePublic(trade));
+                logger.debug(`Filtering out sale below 0.1 ETH: ${totalPriceEth} ETH (tx: ${trade.transactionHash})`);
+                continue;
+              }
+
+              // Convert and store the sale using SalesProcessingService logic
+              const processedSale = salesProcessingService.convertToProcessedSalePublic(trade);
+              await databaseService.insertSale(processedSale);
+              
+              processedSales++;
+              const totalPriceEth = parseFloat(salesProcessingService.calculateTotalPricePublic(trade));
+              logger.debug(`Processed historical sale: ${trade.transactionHash} for ${totalPriceEth} ETH`);
+
+            } catch (error: any) {
+              errorCount++;
+              logger.error(`Failed to process historical sale ${trade.transactionHash}:`, error.message);
+            }
+          }
+        }
+        
+        const finalResults = {
+          ...fetchResults,
+          actualProcessed: processedSales,
+          actualFiltered: filteredSales,
+          actualDuplicates: duplicateSales,
+          actualErrors: errorCount
+        };
+        
+        logger.info(`Historical population complete: ${processedSales} processed, ${filteredSales} filtered, ${duplicateSales} duplicates, ${errorCount} errors`);
+        
+        res.json({
+          success: true,
+          data: finalResults
+        });
+      } catch (error: any) {
+        logger.error('Historical population failed:', error.message);
         res.status(500).json({
           success: false,
           error: error.message
@@ -876,6 +971,31 @@ async function startApplication(): Promise<void> {
       } catch (error: any) {
         logger.error('Failed to reset processing to recent blocks:', error.message);
         res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
+    // Serve generated images from database
+    app.get('/api/images/:filename', async (req, res) => {
+      try {
+        const { filename } = req.params;
+        const imageData = await databaseService.getGeneratedImage(filename);
+        
+        if (!imageData) {
+          return res.status(404).json({
+            success: false,
+            error: 'Image not found'
+          });
+        }
+        
+        res.setHeader('Content-Type', imageData.contentType);
+        res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+        res.send(imageData.buffer);
+      } catch (error: any) {
+        logger.error('Error serving generated image:', error.message);
+        res.status(500).json({
+          success: false,
+          error: 'Failed to retrieve image'
+        });
       }
     });
 

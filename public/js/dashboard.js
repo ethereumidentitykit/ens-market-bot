@@ -41,6 +41,16 @@ function dashboard() {
         processingReset: false,
 
         // Database viewer state
+        // Historical data population state
+        historicalData: {
+            targetBlock: '23100000',
+            contractAddress: '',
+            isRunning: false,
+            lastResult: null,
+            error: null
+        },
+        contracts: [], // Will be loaded from API
+
         dbViewer: {
             data: null,
             loading: false,
@@ -129,6 +139,7 @@ function dashboard() {
         async init() {
             await this.refreshData();
             await this.loadUnpostedSales();
+            await this.loadContracts();
             await this.dbViewer.loadPage(1);
             // Auto-refresh every 30 seconds
             setInterval(() => {
@@ -136,6 +147,26 @@ function dashboard() {
                     this.refreshData();
                 }
             }, 30000);
+        },
+
+        // Load contracts from API
+        async loadContracts() {
+            try {
+                const response = await fetch('/api/contracts');
+                const result = await response.json();
+                if (result.success) {
+                    this.contracts = result.contracts;
+                } else {
+                    console.error('Failed to load contracts');
+                }
+            } catch (error) {
+                console.error('Error loading contracts:', error);
+                // Fallback to known contracts if API fails (should match contracts.ts)
+                this.contracts = [
+                    { address: '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85', name: 'ENS OG Registry' },
+                    { address: '0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401', name: 'ENS NameWrapper' }
+                ];
+            }
         },
 
         // Refresh all data
@@ -194,6 +225,44 @@ function dashboard() {
         },
 
         // Process new sales manually
+        async populateHistoricalData() {
+            this.historicalData.isRunning = true;
+            this.historicalData.error = null;
+            this.historicalData.lastResult = null;
+
+            try {
+                const payload = {
+                    targetBlock: parseInt(this.historicalData.targetBlock),
+                    contractAddress: this.historicalData.contractAddress || undefined
+                };
+
+                const response = await fetch('/api/populate-historical', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    this.historicalData.lastResult = result.data;
+                    // Refresh database viewer after population
+                    if (this.dbViewer) {
+                        await this.dbViewer.loadPage(1);
+                    }
+                } else {
+                    this.historicalData.error = result.error || 'Failed to populate historical data';
+                }
+            } catch (error) {
+                this.historicalData.error = error.message;
+                console.error('Historical population error:', error);
+            } finally {
+                this.historicalData.isRunning = false;
+            }
+        },
+
         async processSales() {
             this.processing = true;
             this.lastProcessResult = null;

@@ -1,7 +1,8 @@
 import { IDatabaseService } from '../types';
 import { ProcessedSale } from '../types';
 import { EthIdentityService, ResolvedProfile } from './ethIdentityService';
-import { ImageGenerationService, MockImageData } from './imageGenerationService';
+import { MockImageData } from '../types/imageTypes';
+import { PuppeteerImageService } from './puppeteerImageService';
 import { logger } from '../utils/logger';
 
 /**
@@ -248,7 +249,7 @@ export class RealDataImageService {
       timestamp: new Date()
     };
 
-    return await ImageGenerationService.generateSaleImage(mockData);
+    return await PuppeteerImageService.generateSaleImage(mockData);
   }
 
   /**

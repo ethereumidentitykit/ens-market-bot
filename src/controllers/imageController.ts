@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { ImageGenerationService } from '../services/imageGenerationService';
+import { PuppeteerImageService } from '../services/puppeteerImageService';
 import { RealDataImageService } from '../services/realDataImageService';
 import { EthIdentityService } from '../services/ethIdentityService';
 import { logger } from '../utils/logger';
@@ -34,13 +34,13 @@ export class ImageController {
           ? `No sale found with token prefix '${tokenPrefix}', falling back to mock data`
           : 'No real data available, falling back to mock data';
         logger.warn(message);
-        const mockData = ImageGenerationService.getMockData();
-        const imageBuffer = await ImageGenerationService.generateSaleImage(mockData);
+        const mockData = PuppeteerImageService.getMockData();
+        const imageBuffer = await PuppeteerImageService.generateSaleImage(mockData);
         const endTime = Date.now();
         
         const filename = `test-image-mock-${Date.now()}.png`;
-        await ImageGenerationService.saveImageToFile(imageBuffer, filename);
-        const imageUrl = `/generated-images/${filename}`;
+        const savedPath = await PuppeteerImageService.saveImageToFile(imageBuffer, filename, databaseService);
+        const imageUrl = savedPath.startsWith('/api/images/') ? savedPath : `/generated-images/${filename}`;
         
         res.json({
           success: true,
@@ -69,10 +69,10 @@ export class ImageController {
       
       // Save image with timestamp
       const filename = `test-image-real-${Date.now()}.png`;
-      await ImageGenerationService.saveImageToFile(imageBuffer, filename);
+      const savedPath = await PuppeteerImageService.saveImageToFile(imageBuffer, filename, databaseService);
       
       // Create URL for the generated image
-      const imageUrl = `/generated-images/${filename}`;
+      const imageUrl = savedPath.startsWith('/api/images/') ? savedPath : `/generated-images/${filename}`;
       
       logger.info(`Test image generated successfully from real data: ${filename} (${endTime - startTime}ms)`);
       
@@ -123,18 +123,21 @@ export class ImageController {
         return;
       }
       
+      // Get database service from req.app.locals
+      const { databaseService } = req.app.locals;
+      
       logger.info('Generating custom image with provided data');
       
       const startTime = Date.now();
-      const imageBuffer = await ImageGenerationService.generateSaleImage(mockData);
+      const imageBuffer = await PuppeteerImageService.generateSaleImage(mockData);
       const endTime = Date.now();
       
       // Save image with timestamp
       const filename = `custom-image-${Date.now()}.png`;
-      const imagePath = await ImageGenerationService.saveImageToFile(imageBuffer, filename);
+      const savedPath = await PuppeteerImageService.saveImageToFile(imageBuffer, filename, databaseService);
       
       // Create URL for the generated image
-      const imageUrl = `/generated-images/${filename}`;
+      const imageUrl = savedPath.startsWith('/api/images/') ? savedPath : `/generated-images/${filename}`;
       
       logger.info(`Custom image generated successfully: ${filename} (${endTime - startTime}ms)`);
       

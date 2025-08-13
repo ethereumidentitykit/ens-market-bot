@@ -34,3 +34,6 @@ Thumbs.db
 
 # Vercel
 .vercel
+
+# Unmapped emoji files (not needed for deployment)
+assets/emojis/unmapped/

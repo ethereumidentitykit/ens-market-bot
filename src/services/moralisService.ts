@@ -155,7 +155,110 @@ export class MoralisService {
   }
 
   /**
-   * Get NFT trades for all configured contracts
+   * Get incremental NFT trades since last processed block using cursor pagination
+   * Optimized for scheduler use - fetches only new trades since lastProcessedBlock
+   * @param lastProcessedBlock - Block number to start from (fetch trades newer than this)
+   * @param batchSize - Number of trades to fetch per API call (default: 10)
+   */
+  async getIncrementalTrades(lastProcessedBlock: number, batchSize: number = 10): Promise<EnhancedNFTSale[]> {
+    const allNewTrades: EnhancedNFTSale[] = [];
+    
+    logger.info(`Starting incremental fetch from block ${lastProcessedBlock} with batch size ${batchSize}`);
+    logger.info(`Processing ${config.contracts.length} contracts: ${config.contracts.join(', ')}`);
+
+    for (const contractAddress of config.contracts) {
+      logger.info(`Fetching incremental trades for contract: ${contractAddress}`);
+      
+      let cursor: string | undefined;
+      let foundNewTrades = true;
+      let requestCount = 0;
+      let contractNewTrades = 0;
+
+      try {
+        while (foundNewTrades) {
+          requestCount++;
+          logger.debug(`Request #${requestCount} for contract ${contractAddress}${cursor ? ` (cursor: ${cursor.substring(0, 20)}...)` : ' (initial)'}`);
+
+          // Fetch trades with current cursor
+          const { trades, nextCursor } = await this.getNFTTrades(contractAddress, batchSize, cursor);
+          
+          if (trades.length === 0) {
+            logger.debug(`No more trades available for contract ${contractAddress}`);
+            break;
+          }
+
+          // Check block range in current batch
+          const blockNumbers = trades.map(t => t.blockNumber);
+          const oldestInBatch = Math.min(...blockNumbers);
+          const newestInBatch = Math.max(...blockNumbers);
+          
+          logger.debug(`Batch block range: ${oldestInBatch} → ${newestInBatch} (${trades.length} trades)`);
+
+          // Filter for trades newer than lastProcessedBlock
+          const newTrades = trades.filter(trade => trade.blockNumber > lastProcessedBlock);
+          
+          if (newTrades.length > 0) {
+            allNewTrades.push(...newTrades);
+            contractNewTrades += newTrades.length;
+            logger.debug(`Found ${newTrades.length} new trades in this batch (${newTrades.length}/${trades.length})`);
+          }
+
+          // If oldest trade in batch is < lastProcessedBlock, we've hit older data (all duplicates from here)
+          if (oldestInBatch < lastProcessedBlock) {
+            logger.debug(`Hit older data (block ${oldestInBatch} < ${lastProcessedBlock}) for contract ${contractAddress} - stopping`);
+            foundNewTrades = false;
+            break;
+          }
+
+          // Continue with next page
+          cursor = nextCursor;
+          if (!cursor) {
+            logger.debug(`No more pages available for contract ${contractAddress}`);
+            foundNewTrades = false;
+          }
+
+          // Rate limiting
+          await new Promise(resolve => setTimeout(resolve, 100));
+
+          // Safety check - prevent infinite loops
+          if (requestCount > 20) {
+            logger.warn(`Stopping after ${requestCount} requests for safety on contract ${contractAddress}`);
+            break;
+          }
+
+          // Additional safety: if we're not finding any new trades for several requests, stop
+          if (newTrades.length === 0 && requestCount > 5) {
+            logger.debug(`No new trades found for ${requestCount} consecutive requests, stopping for ${contractAddress}`);
+            foundNewTrades = false;
+            break;
+          }
+        }
+
+        logger.info(`Completed incremental fetch for ${contractAddress}: ${contractNewTrades} new trades in ${requestCount} requests`);
+
+      } catch (error: any) {
+        logger.error(`Error during incremental fetch for contract ${contractAddress}:`, error.message);
+        logger.error(`Error details:`, error);
+        // Continue processing other contracts even if one fails
+      }
+    }
+
+    // Sort all trades by block number (newest first)
+    allNewTrades.sort((a, b) => b.blockNumber - a.blockNumber);
+    
+    // Log summary by contract
+    const contractSummary: { [key: string]: number } = {};
+    for (const trade of allNewTrades) {
+      contractSummary[trade.contractAddress] = (contractSummary[trade.contractAddress] || 0) + 1;
+    }
+    
+    logger.info(`Incremental fetch complete: ${allNewTrades.length} total new trades found`);
+    logger.info(`Trades by contract:`, contractSummary);
+    return allNewTrades;
+  }
+
+  /**
+   * Get NFT trades for all configured contracts (legacy method)
    * @param limit - Maximum number of trades per contract
    * @param fromBlock - Optional starting block (defaults to 22M for recent data)
    */
@@ -361,5 +464,123 @@ export class MoralisService {
     // Moralis includes rate limit info in response headers
     // This would be populated during actual API calls
     return {};
+  }
+
+  /**
+   * Populate historical data from current block back to target block
+   * Uses cursor pagination to go backwards through time until target block is reached
+   * @param targetBlock - Stop when we reach this block number (e.g., 23100000)
+   * @param contractAddress - Specific contract to process (optional, defaults to all contracts)
+   * @param resumeCursor - Resume from this cursor if provided
+   */
+  async populateHistoricalData(
+    targetBlock: number,
+    contractAddress?: string,
+    resumeCursor?: string
+  ): Promise<{
+    totalFetched: number;
+    totalProcessed: number;
+    totalFiltered: number;
+    totalDuplicates: number;
+    oldestBlockReached: number;
+    targetBlockReached: boolean;
+    finalCursor?: string;
+    trades?: EnhancedNFTSale[];
+  }> {
+    const stats = {
+      totalFetched: 0,
+      totalProcessed: 0,
+      totalFiltered: 0,
+      totalDuplicates: 0,
+      oldestBlockReached: 0,
+      targetBlockReached: false,
+      finalCursor: undefined as string | undefined,
+      trades: [] as EnhancedNFTSale[]
+    };
+
+    // Use single contract or all contracts
+    const contracts = contractAddress ? [contractAddress] : config.contracts;
+    
+    logger.info(`Starting historical data population to block ${targetBlock}`);
+    logger.info(`Processing contracts: ${contracts.join(', ')}`);
+
+    for (const contract of contracts) {
+      logger.info(`\n=== Processing contract: ${contract} ===`);
+      
+      let cursor: string | undefined = resumeCursor;
+      let targetReached = false;
+      let requestCount = 0;
+
+      try {
+        while (!targetReached) {
+          requestCount++;
+          logger.info(`Request #${requestCount} for contract ${contract}${cursor ? ` (cursor: ${cursor.substring(0, 20)}...)` : ' (initial)'}`);
+
+          // Fetch trades with current cursor
+          const { trades, nextCursor } = await this.getNFTTrades(contract, 100, cursor);
+          
+          if (trades.length === 0) {
+            logger.info(`No more trades available for contract ${contract}`);
+            break;
+          }
+
+          stats.totalFetched += trades.length;
+
+          // Check block range in current batch
+          const blockNumbers = trades.map(t => t.blockNumber);
+          const oldestInBatch = Math.min(...blockNumbers);
+          const newestInBatch = Math.max(...blockNumbers);
+          
+          logger.info(`Batch block range: ${oldestInBatch} → ${newestInBatch} (${trades.length} trades)`);
+
+          // Update oldest block reached
+          stats.oldestBlockReached = Math.min(stats.oldestBlockReached || oldestInBatch, oldestInBatch);
+
+          // Filter trades that are >= target block
+          let tradesToProcess = trades;
+          if (oldestInBatch <= targetBlock) {
+            tradesToProcess = trades.filter(trade => trade.blockNumber >= targetBlock);
+            targetReached = true;
+            stats.targetBlockReached = true;
+            logger.info(`Target block ${targetBlock} reached! Processing ${tradesToProcess.length} valid trades from final batch.`);
+          }
+
+          // Just count the trades for now - actual processing will be handled by caller
+          stats.totalProcessed += tradesToProcess.length;
+          
+          // Store trades for return to caller for processing
+          stats.trades.push(...tradesToProcess);
+
+          // Store cursor for potential resume
+          stats.finalCursor = nextCursor;
+          cursor = nextCursor;
+
+          // Rate limiting
+          if (cursor && !targetReached) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+
+          // Safety check - prevent infinite loops
+          if (requestCount > 1000) {
+            logger.warn(`Stopping after ${requestCount} requests for safety`);
+            break;
+          }
+        }
+
+        logger.info(`Completed contract ${contract}: ${requestCount} requests, oldest block: ${stats.oldestBlockReached}`);
+
+      } catch (error: any) {
+        logger.error(`Error processing contract ${contract}:`, error.message);
+        throw error;
+      }
+    }
+
+    logger.info(`\n=== Historical Population Complete ===`);
+    logger.info(`Total fetched: ${stats.totalFetched}`);
+    logger.info(`Total processed: ${stats.totalProcessed}`);
+    logger.info(`Oldest block reached: ${stats.oldestBlockReached}`);
+    logger.info(`Target block reached: ${stats.targetBlockReached}`);
+
+    return stats;
   }
 }
