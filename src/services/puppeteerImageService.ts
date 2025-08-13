@@ -1,6 +1,7 @@
 import { logger } from '../utils/logger';
 import { MockImageData } from '../types/imageTypes';
 import { IDatabaseService } from '../types';
+import { emojiMappingService } from './emojiMappingService';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -57,8 +58,8 @@ export class PuppeteerImageService {
         deviceScaleFactor: 1
       });
 
-      // Generate HTML content
-      const htmlContent = this.generateHTML(data);
+      // Generate HTML content with emoji replacement
+      const htmlContent = await this.generateHTML(data);
       
       // Set the HTML content
       await page.setContent(htmlContent, { 
@@ -91,10 +92,15 @@ export class PuppeteerImageService {
   /**
    * Generate HTML template with embedded CSS
    */
-  private static generateHTML(data: MockImageData): string {
+  private static async generateHTML(data: MockImageData): Promise<string> {
     // Get background image as base64 if it exists
     const backgroundImageBase64 = this.getBackgroundImageBase64();
     const userPlaceholderBase64 = this.getUserPlaceholderBase64();
+    
+    // Replace emojis in text fields with SVG elements
+    const ensNameWithEmojis = await emojiMappingService.replaceEmojisWithSvg(data.ensName);
+    const sellerEnsWithEmojis = await emojiMappingService.replaceEmojisWithSvg(data.sellerEns || 'seller');
+    const buyerEnsWithEmojis = await emojiMappingService.replaceEmojisWithSvg(data.buyerEns || 'buyer');
     
     return `
     <!DOCTYPE html>
@@ -279,6 +285,15 @@ export class PuppeteerImageService {
                 text-shadow: 0px 0px 50px rgba(255, 255, 255, 0.25);
                 line-height: 1;
             }
+
+            /* Emoji SVG styling */
+            .emoji-inline {
+                display: inline-block !important;
+                vertical-align: middle !important;
+                width: 1.2em !important;
+                height: 1.2em !important;
+                margin: 0 0.1em !important;
+            }
         </style>
     </head>
     <body>
@@ -295,8 +310,8 @@ export class PuppeteerImageService {
             <div class="ens-image-section">
                 ${data.nftImageUrl ? 
                     `<img src="${data.nftImageUrl}" alt="NFT Image" class="ens-image" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                     <div class="ens-placeholder" style="display: none;"><span class="ens-text">${data.ensName}</span></div>` :
-                    `<div class="ens-placeholder"><span class="ens-text">${data.ensName}</span></div>`
+                     <div class="ens-placeholder" style="display: none;"><span class="ens-text">${ensNameWithEmojis}</span></div>` :
+                    `<div class="ens-placeholder"><span class="ens-text">${ensNameWithEmojis}</span></div>`
                 }
             </div>
 
@@ -309,7 +324,7 @@ export class PuppeteerImageService {
                          <div class="avatar-placeholder" style="display: none; ${userPlaceholderBase64 ? `background-image: url(${userPlaceholderBase64});` : ''}"></div>` :
                         `<div class="avatar-placeholder" style="${userPlaceholderBase64 ? `background-image: url(${userPlaceholderBase64});` : ''}"></div>`
                     }
-                    <div class="pill-text">${data.sellerEns || 'seller'}</div>
+                    <div class="pill-text">${sellerEnsWithEmojis}</div>
                 </div>
 
                 <!-- Arrow -->
@@ -322,7 +337,7 @@ export class PuppeteerImageService {
                          <div class="avatar-placeholder" style="display: none; ${userPlaceholderBase64 ? `background-image: url(${userPlaceholderBase64});` : ''}"></div>` :
                         `<div class="avatar-placeholder" style="${userPlaceholderBase64 ? `background-image: url(${userPlaceholderBase64});` : ''}"></div>`
                     }
-                    <div class="pill-text">${data.buyerEns || 'buyer'}</div>
+                    <div class="pill-text">${buyerEnsWithEmojis}</div>
                 </div>
             </div>
         </div>
