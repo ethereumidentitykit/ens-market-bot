@@ -211,7 +211,7 @@ async function startApplication(): Promise<void> {
           for (const trade of fetchResults.trades) {
             try {
               // Check if already processed (duplicate detection)
-              const isAlreadyProcessed = await databaseService.isSaleProcessed(trade.transactionHash);
+              const isAlreadyProcessed = await databaseService.isSaleProcessed(trade.tokenId);
               
               if (isAlreadyProcessed) {
                 duplicateSales++;
@@ -1151,6 +1151,25 @@ async function startApplication(): Promise<void> {
         });
       } catch (error: any) {
         logger.error('Database reset failed:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.post('/api/database/migrate-schema', async (req, res) => {
+      try {
+        logger.warn('Database schema migration requested - this will DROP and RECREATE tables!');
+        
+        await databaseService.migrateSchema();
+        
+        res.json({
+          success: true,
+          message: 'Database schema migration completed successfully. Tables recreated with new schema.'
+        });
+      } catch (error: any) {
+        logger.error('Database schema migration failed:', error.message);
         res.status(500).json({
           success: false,
           error: error.message

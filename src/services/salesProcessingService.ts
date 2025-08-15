@@ -246,7 +246,7 @@ export class SalesProcessingService {
       for (const sale of recentSales) {
         try {
           // Check if already processed
-          const isAlreadyProcessed = await this.databaseService.isSaleProcessed(sale.transactionHash);
+          const isAlreadyProcessed = await this.databaseService.isSaleProcessed(sale.tokenId);
           
           if (isAlreadyProcessed) {
             stats.duplicates++;
