@@ -93,6 +93,7 @@ export interface Config {
   port: number;
   nodeEnv: string;
   logLevel: string;
+  wethPriceMultiplier: number;
 }
 
 // Twitter Post Record

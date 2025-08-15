@@ -67,6 +67,7 @@ export interface EnhancedNFTSale extends NFTSale {
   marketplaceLogo?: string;
   currentUsdValue?: string;
   verifiedCollection?: boolean;
+  priceTokenAddress?: string; // For WETH detection
 }
 
 /**
@@ -421,6 +422,7 @@ export class MoralisService {
       marketplaceLogo,
       currentUsdValue,
       verifiedCollection,
+      priceTokenAddress: trade.price_token_address,
     };
   }
 

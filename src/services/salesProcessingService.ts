@@ -3,6 +3,7 @@ import { IDatabaseService } from '../types';
 import { logger } from '../utils/logger';
 import { NFTSale, ProcessedSale } from '../types';
 import { MONITORED_CONTRACTS } from '../config/contracts';
+import { config } from '../utils/config';
 import axios from 'axios';
 
 interface ENSMetadata {
@@ -77,11 +78,80 @@ export class SalesProcessingService {
   }
 
   /**
+   * Apply WETH price correction if needed
+   * Moralis API bug: WETH sales are reported with double the actual price
+   */
+  private applyWethPriceCorrection(
+    sale: EnhancedNFTSale, 
+    ethPrice: string, 
+    usdPrice?: string
+  ): { applied: boolean; correctedEthPrice: string; correctedUsdPrice?: string } {
+    // Check if this is a WETH sale and multiplier is not 1.0
+    const isWethSale = this.isWethSale(sale);
+    const multiplier = config.wethPriceMultiplier;
+    
+    if (!isWethSale || multiplier === 1.0) {
+      return {
+        applied: false,
+        correctedEthPrice: ethPrice,
+        correctedUsdPrice: usdPrice
+      };
+    }
+    
+    // Apply multiplier to ETH price
+    const originalEthPrice = parseFloat(ethPrice);
+    const correctedEthPrice = (originalEthPrice * multiplier).toFixed(8);
+    
+    // Apply multiplier to USD price if available
+    let correctedUsdPrice = usdPrice;
+    if (usdPrice) {
+      const originalUsdPrice = parseFloat(usdPrice);
+      correctedUsdPrice = (originalUsdPrice * multiplier).toFixed(2);
+    }
+    
+    // Log the correction
+    logger.info(`🔧 WETH price correction applied (${multiplier}x): ${sale.transactionHash}`);
+    logger.info(`   ETH: ${ethPrice} → ${correctedEthPrice}`);
+    if (usdPrice && correctedUsdPrice) {
+      logger.info(`   USD: $${usdPrice} → $${correctedUsdPrice}`);
+    }
+    
+    return {
+      applied: true,
+      correctedEthPrice,
+      correctedUsdPrice
+    };
+  }
+  
+  /**
+   * Check if this is a WETH sale by examining the price token address
+   */
+  private isWethSale(sale: EnhancedNFTSale): boolean {
+    const wethAddresses = [
+      '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', // WETH mainnet
+      '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'  // WETH mainnet (different case)
+    ];
+    
+    if (!sale.priceTokenAddress) {
+      return false;
+    }
+    
+    return wethAddresses.includes(sale.priceTokenAddress.toLowerCase());
+  }
+
+  /**
    * Filter sales based on minimum price and other criteria
    */
   private shouldProcessSale(sale: EnhancedNFTSale): boolean {
-    // Calculate total price in ETH
-    const totalPriceEth = parseFloat(this.calculateTotalPrice(sale));
+    // Calculate total price in ETH with WETH correction applied
+    let totalPriceEth = parseFloat(this.calculateTotalPrice(sale));
+    
+    // Apply WETH price correction for filtering (same logic as in convertToProcessedSale)
+    if (this.isWethSale(sale) && config.wethPriceMultiplier !== 1.0) {
+      const originalPrice = totalPriceEth;
+      totalPriceEth = totalPriceEth * config.wethPriceMultiplier;
+      logger.debug(`WETH price correction for filtering: ${originalPrice} ETH → ${totalPriceEth} ETH (multiplier: ${config.wethPriceMultiplier})`);
+    }
     
     // Filter out sales below 0.05 ETH (temp reduced from 0.1)
     if (totalPriceEth < 0.05) {
@@ -138,7 +208,16 @@ export class SalesProcessingService {
    * Convert NFTSale (Enhanced from Moralis) to ProcessedSale format
    */
   private async convertToProcessedSale(sale: EnhancedNFTSale): Promise<Omit<ProcessedSale, 'id'>> {
-    const priceEth = this.calculateTotalPrice(sale);
+    let priceEth = this.calculateTotalPrice(sale);
+    let priceUsd = sale.currentUsdValue;
+    
+    // Apply WETH price multiplier if this is a WETH sale
+    const wethMultiplier = this.applyWethPriceCorrection(sale, priceEth, priceUsd);
+    if (wethMultiplier.applied) {
+      priceEth = wethMultiplier.correctedEthPrice;
+      priceUsd = wethMultiplier.correctedUsdPrice;
+    }
+    
     const blockTimestamp = sale.blockTime || this.formatBlockTimestamp(sale.blockNumber);
 
     // Use Moralis data initially
@@ -168,7 +247,7 @@ export class SalesProcessingService {
       buyerAddress: sale.buyerAddress.toLowerCase(),
       sellerAddress: sale.sellerAddress.toLowerCase(),
       priceEth,
-      priceUsd: sale.currentUsdValue || undefined, // Use Moralis USD value if available
+      priceUsd: priceUsd || undefined, // Use corrected USD value if WETH was applied
       blockNumber: sale.blockNumber,
       blockTimestamp,
       processedAt: new Date().toISOString(),
