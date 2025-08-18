@@ -1093,245 +1093,6 @@
                 </div>
             </div>
 
-            <!-- Database Viewer -->
-            <div class="bg-white shadow rounded-lg">
-                <div class="px-6 py-4 border-b border-gray-200">
-                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between">
-                        <h3 class="text-lg leading-6 font-medium text-gray-900 flex items-center">
-                            <i class="fas fa-table text-gray-600 mr-2"></i>
-                            Database Viewer
-                        </h3>
-                        <div class="mt-3 sm:mt-0 sm:ml-4">
-                            <div class="flex items-center space-x-3">
-                                <!-- Search -->
-                                <div class="flex-1 min-w-0">
-                                    <input 
-                                        type="text" 
-                                        x-model="databaseView.searchTerm"
-                                        @input="databaseView.searchDebounced()"
-                                        placeholder="Search tx, address, marketplace..."
-                                        class="block w-full px-3 py-2 border border-gray-300 rounded-md text-sm placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                                    >
-                                </div>
-                                <!-- Records per page -->
-                                <select 
-                                    x-model="databaseView.limit" 
-                                    @change="databaseView.loadPage(1)"
-                                    class="block px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                                >
-                                    <option value="25">25</option>
-                                    <option value="50">50</option>
-                                    <option value="100">100</option>
-                                    <option value="200">200</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Stats and pagination info -->
-                    <div class="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between text-sm text-gray-500">
-                        <div>
-                            <span x-show="databaseView.data?.stats?.searchTerm">
-                                Showing <span x-text="databaseView.data?.stats?.filteredResults || 0"></span> of <span x-text="databaseView.data?.stats?.totalSales || 0"></span> sales 
-                                matching "<span x-text="databaseView.data?.stats?.searchTerm" class="font-medium"></span>"
-                            </span>
-                            <span x-show="!databaseView.data?.stats?.searchTerm">
-                                <span x-text="databaseView.data?.stats?.totalSales || 0"></span> total sales in database
-                            </span>
-                        </div>
-                        <div x-show="databaseView.data?.pagination" class="mt-2 sm:mt-0">
-                            Page <span x-text="databaseView.data?.pagination?.page || 1"></span> of <span x-text="databaseView.data?.pagination?.totalPages || 1"></span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Loading State -->
-                <div x-show="databaseView.loading" class="px-6 py-8 text-center">
-                    <i class="fas fa-spinner fa-spin text-2xl text-gray-400 mb-2"></i>
-                    <p class="text-sm text-gray-500">Loading sales data...</p>
-                </div>
-
-                <!-- Table -->
-                <div x-show="!databaseView.loading" class="overflow-x-auto">
-                    <table class="min-w-full divide-y divide-gray-200">
-                        <thead class="bg-gray-50">
-                            <tr>
-                                <th @click="databaseView.sort('id')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
-                                    <div class="flex items-center">
-                                        ID
-                                        <i class="fas fa-sort ml-1 text-gray-400"></i>
-                                    </div>
-                                </th>
-                                <th @click="databaseView.sort('contractAddress')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
-                                    <div class="flex items-center">
-                                        Contract
-                                        <i class="fas fa-sort ml-1 text-gray-400"></i>
-                                    </div>
-                                </th>
-                                <th @click="databaseView.sort('nftName')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
-                                    <div class="flex items-center">
-                                        NFT Name
-                                        <i class="fas fa-sort ml-1 text-gray-400"></i>
-                                    </div>
-                                </th>
-                                <th @click="databaseView.sort('priceEth')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
-                                    <div class="flex items-center">
-                                        Price (ETH)
-                                        <i class="fas fa-sort ml-1 text-gray-400"></i>
-                                    </div>
-                                </th>
-                                <th @click="databaseView.sort('marketplace')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
-                                    <div class="flex items-center">
-                                        Marketplace
-                                        <i class="fas fa-sort ml-1 text-gray-400"></i>
-                                    </div>
-                                </th>
-                                <th @click="databaseView.sort('blockNumber')" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
-                                    <div class="flex items-center">
-                                        Block
-                                        <i class="fas fa-sort ml-1 text-gray-400"></i>
-                                    </div>
-                                </th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Buyer/Seller</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">TX Hash</th>
-                            </tr>
-                        </thead>
-                        <tbody class="bg-white divide-y divide-gray-200">
-                            <template x-for="sale in databaseView.data?.sales || []" :key="sale.id">
-                                <tr class="hover:bg-gray-50">
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900" x-text="sale.id"></td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900">
-                                        <div class="flex flex-col">
-                                            <span x-text="sale.contractAddress.slice(0, 10) + '...'"></span>
-                                            <span class="text-xs text-gray-500" x-text="'Token: ' + (sale.tokenId.length > 10 ? sale.tokenId.slice(0, 10) + '...' : sale.tokenId)"></span>
-                                        </div>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                        <div class="flex flex-col">
-                                            <span x-text="sale.nftName || 'Unknown'" class="font-medium" :class="sale.nftName ? 'text-blue-600' : 'text-gray-400'"></span>
-                                            <span x-show="sale.collectionName" class="text-xs text-gray-500" x-text="sale.collectionName"></span>
-                                        </div>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                        <span x-text="parseFloat(sale.priceEth).toFixed(4)" 
-                                              :class="parseFloat(sale.priceEth) >= 1 ? 'text-green-600 font-bold' : parseFloat(sale.priceEth) >= 0.1 ? 'text-blue-600' : 'text-gray-600'"></span>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium" 
-                                              :class="sale.marketplace === 'opensea' ? 'bg-blue-100 text-blue-800' : 
-                                                     sale.marketplace === 'x2y2' ? 'bg-purple-100 text-purple-800' :
-                                                     sale.marketplace === 'blur' ? 'bg-orange-100 text-orange-800' :
-                                                     'bg-gray-100 text-gray-800'"
-                                              x-text="sale.marketplace"></span>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" x-text="sale.blockNumber"></td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-xs font-mono text-gray-500">
-                                        <div class="flex flex-col space-y-1">
-                                            <div title="Buyer">
-                                                <span class="text-green-600">B:</span> <span x-text="sale.buyerAddress.slice(0, 8) + '...'"></span>
-                                            </div>
-                                            <div title="Seller">
-                                                <span class="text-red-600">S:</span> <span x-text="sale.sellerAddress.slice(0, 8) + '...'"></span>
-                                            </div>
-                                        </div>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap">
-                                        <span x-show="sale.posted" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                            <i class="fas fa-check mr-1"></i>
-                                            Posted
-                                        </span>
-                                        <span x-show="!sale.posted" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                                            <i class="fas fa-clock mr-1"></i>
-                                            Pending
-                                        </span>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-500">
-                                        <a :href="'https://etherscan.io/tx/' + sale.transactionHash" target="_blank" class="text-blue-600 hover:text-blue-900">
-                                            <span x-text="sale.transactionHash.slice(0, 10) + '...'"></span>
-                                            <i class="fas fa-external-link-alt ml-1 text-xs"></i>
-                                        </a>
-                                    </td>
-                                </tr>
-                            </template>
-                            <tr x-show="!databaseView.loading && (!databaseView.data?.sales || databaseView.data.sales.length === 0)">
-                                <td colspan="9" class="px-6 py-8 whitespace-nowrap text-sm text-gray-500 text-center">
-                                    <div class="flex flex-col items-center">
-                                        <i class="fas fa-database text-3xl text-gray-300 mb-2"></i>
-                                        <p>No sales data found</p>
-                                        <p class="text-xs mt-1">Try adjusting your search or process some sales first</p>
-                                    </div>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-
-                <!-- Pagination -->
-                <div x-show="!databaseView.loading && databaseView.data?.pagination?.totalPages > 1" class="bg-white px-4 py-3 border-t border-gray-200 sm:px-6">
-                    <div class="flex items-center justify-between">
-                        <div class="flex-1 flex justify-between sm:hidden">
-                            <button 
-                                @click="databaseView.loadPage(databaseView.data.pagination.page - 1)"
-                                :disabled="!databaseView.data?.pagination?.hasPrev"
-                                class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                Previous
-                            </button>
-                            <button 
-                                @click="databaseView.loadPage(databaseView.data.pagination.page + 1)"
-                                :disabled="!databaseView.data?.pagination?.hasNext"
-                                class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                Next
-                            </button>
-                        </div>
-                        <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
-                            <div>
-                                <p class="text-sm text-gray-700">
-                                    Showing 
-                                    <span class="font-medium" x-text="((databaseView.data?.pagination?.page - 1) * databaseView.data?.pagination?.limit) + 1"></span>
-                                    to 
-                                    <span class="font-medium" x-text="Math.min(databaseView.data?.pagination?.page * databaseView.data?.pagination?.limit, databaseView.data?.pagination?.total)"></span>
-                                    of 
-                                    <span class="font-medium" x-text="databaseView.data?.pagination?.total"></span>
-                                    results
-                                </p>
-                            </div>
-                            <div>
-                                <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
-                                    <button 
-                                        @click="databaseView.loadPage(databaseView.data.pagination.page - 1)"
-                                        :disabled="!databaseView.data?.pagination?.hasPrev"
-                                        class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                        <i class="fas fa-chevron-left"></i>
-                                    </button>
-                                    
-                                    <template x-for="page in databaseView.getPageNumbers()" :key="page">
-                                        <button 
-                                            @click="databaseView.loadPage(page)"
-                                            :class="page === databaseView.data?.pagination?.page ? 
-                                                    'z-10 bg-blue-50 border-blue-500 text-blue-600' : 
-                                                    'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'"
-                                            class="relative inline-flex items-center px-4 py-2 border text-sm font-medium"
-                                            x-text="page"
-                                        ></button>
-                                    </template>
-                                    
-                                    <button 
-                                        @click="databaseView.loadPage(databaseView.data.pagination.page + 1)"
-                                        :disabled="!databaseView.data?.pagination?.hasNext"
-                                        class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                        <i class="fas fa-chevron-right"></i>
-                                    </button>
-                                </nav>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
         </main>
         </div>
         <!-- End Classic Dashboard -->
@@ -1346,8 +1107,8 @@
                         <div class="flex items-center">
                             <i class="fas fa-database text-green-400 text-2xl mr-3"></i>
                             <div>
-                                <h1 class="text-2xl font-bold text-white">Sales Database</h1>
-                                <p class="text-sm text-gray-400">ENS Sales Records</p>
+                                <h1 class="text-2xl font-bold text-white">ENS Database</h1>
+                                <p class="text-sm text-gray-400">Sales & Registrations</p>
                             </div>
                         </div>
                         <div class="flex items-center space-x-4">
@@ -1370,6 +1131,33 @@
 
             <!-- Database Content -->
             <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                
+                <!-- Database Sub-Navigation -->
+                <div class="mb-6">
+                    <div class="border-b border-gray-700">
+                        <nav class="-mb-px flex space-x-8">
+                            <button
+                                @click="databaseSubView = 'sales'"
+                                :class="databaseSubView === 'sales' ? 'border-green-500 text-green-400' : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-600'"
+                                class="py-2 px-1 border-b-2 font-medium text-sm transition-colors duration-200 flex items-center"
+                            >
+                                <i class="fas fa-exchange-alt mr-2"></i>
+                                Sales Database
+                            </button>
+                            <button
+                                @click="databaseSubView = 'registrations'; registrationsView.loadPage(1)"
+                                :class="databaseSubView === 'registrations' ? 'border-green-500 text-green-400' : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-600'"
+                                class="py-2 px-1 border-b-2 font-medium text-sm transition-colors duration-200 flex items-center"
+                            >
+                                <i class="fas fa-plus-circle mr-2"></i>
+                                ENS Registrations
+                            </button>
+                        </nav>
+                    </div>
+                </div>
+
+                <!-- Sales Database View -->
+                <div x-show="databaseSubView === 'sales'" x-transition>
                 <!-- ETH Value Filter -->
                 <div class="mb-6 bg-gray-800 border border-gray-700 rounded-lg p-4">
                     <h3 class="text-sm font-medium text-gray-300 mb-3 flex items-center">
@@ -1561,6 +1349,174 @@
                         </button>
                     </div>
                 </div>
+                </div>
+                <!-- End Sales Database View -->
+
+                <!-- ENS Registrations Database View -->
+                <div x-show="databaseSubView === 'registrations'" x-transition>
+                    <!-- Loading State -->
+                    <div x-show="registrationsView.loading" class="text-center py-12">
+                        <i class="fas fa-spinner fa-spin text-3xl text-gray-400 mb-4"></i>
+                        <p class="text-gray-400">Loading ENS registrations...</p>
+                    </div>
+
+                    <!-- Error State -->
+                    <div x-show="registrationsView.error && !registrationsView.loading" class="text-center py-12">
+                        <i class="fas fa-exclamation-triangle text-3xl text-red-400 mb-4"></i>
+                        <p class="text-red-400" x-text="registrationsView.error"></p>
+                    </div>
+
+                    <!-- Registrations Content -->
+                    <div x-show="registrationsView.data && !registrationsView.loading">
+                        <!-- Registrations Stats -->
+                        <div class="bg-gray-800 border border-gray-700 rounded-lg p-6 mb-6">
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                <div class="text-center">
+                                    <div class="text-2xl font-bold text-green-400" x-text="registrationsView.data?.stats?.totalRegistrations || 0"></div>
+                                    <div class="text-sm text-gray-400">Total Registrations</div>
+                                </div>
+                                <div class="text-center">
+                                    <div class="text-2xl font-bold text-blue-400" x-text="registrationsView.data?.stats?.pendingTweets || 0"></div>
+                                    <div class="text-sm text-gray-400">Pending Tweets</div>
+                                </div>
+                                <div class="text-center">
+                                    <div class="text-2xl font-bold text-purple-400" x-text="registrationsView.data?.stats?.totalValue || '0.00'"></div>
+                                    <div class="text-sm text-gray-400">Total ETH Value</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Search and Controls -->
+                        <div class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-6">
+                            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                                <div class="flex-1">
+                                    <input 
+                                        type="text" 
+                                        x-model="registrationsView.searchTerm"
+                                        @input="registrationsView.searchDebounced()"
+                                        placeholder="Search ENS names, addresses..."
+                                        class="block w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                                    >
+                                </div>
+                                <select 
+                                    x-model="registrationsView.limit" 
+                                    @change="registrationsView.loadPage(1)"
+                                    class="px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                                >
+                                    <option value="25">25 per page</option>
+                                    <option value="50">50 per page</option>
+                                    <option value="100">100 per page</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Registrations Table -->
+                        <div class="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
+                            <div class="overflow-x-auto">
+                                <table class="min-w-full divide-y divide-gray-700">
+                                    <thead class="bg-gray-900">
+                                        <tr>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                                                ENS Name
+                                            </th>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                                                Cost
+                                            </th>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                                                Owner
+                                            </th>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                                                Registration Time
+                                            </th>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                                                Added to DB
+                                            </th>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                                                Status
+                                            </th>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                                                Transaction
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-gray-700">
+                                        <template x-for="registration in registrationsView.data?.registrations || []" :key="registration.id">
+                                            <tr class="bg-gray-800 hover:bg-gray-750">
+                                                <td class="px-6 py-4 whitespace-nowrap">
+                                                    <div class="flex items-center">
+                                                        <img x-show="registration.image" :src="registration.image" class="h-10 w-10 rounded-lg mr-3" alt="">
+                                                        <div>
+                                                            <div class="text-sm font-medium text-white" x-text="registration.fullName || registration.ensName + '.eth'"></div>
+                                                            <div class="text-xs text-gray-400" x-text="'Registered ' + new Date(registration.blockTimestamp).toLocaleDateString()"></div>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td class="px-6 py-4 whitespace-nowrap">
+                                                    <div class="text-sm font-medium text-white" x-text="parseFloat(registration.costEth || 0).toFixed(4) + ' ETH'"></div>
+                                                    <div class="text-xs text-gray-400" x-show="registration.costUsd" x-text="'$' + parseFloat(registration.costUsd).toFixed(2)"></div>
+                                                </td>
+                                                <td class="px-6 py-4 whitespace-nowrap">
+                                                    <div class="text-sm font-mono text-white" x-text="registration.ownerAddress.substring(0, 10) + '...'"></div>
+                                                </td>
+                                                <td class="px-6 py-4 whitespace-nowrap">
+                                                    <div class="text-sm text-white" x-text="new Date(registration.blockTimestamp).toLocaleDateString()"></div>
+                                                    <div class="text-xs text-gray-400" x-text="new Date(registration.blockTimestamp).toLocaleTimeString()"></div>
+                                                </td>
+                                                <td class="px-6 py-4 whitespace-nowrap">
+                                                    <div class="text-sm text-white" x-text="getRelativeTime(registration.processedAt)"></div>
+                                                    <div class="text-xs text-gray-400" x-text="new Date(registration.processedAt).toLocaleString()"></div>
+                                                </td>
+                                                <td class="px-6 py-4 whitespace-nowrap">
+                                                    <span x-show="registration.posted" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-900 text-green-300">
+                                                        <i class="fas fa-check-circle mr-1"></i>
+                                                        Tweeted
+                                                    </span>
+                                                    <span x-show="!registration.posted" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-900 text-yellow-300">
+                                                        <i class="fas fa-clock mr-1"></i>
+                                                        Pending
+                                                    </span>
+                                                </td>
+                                                <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-300">
+                                                    <a :href="'https://etherscan.io/tx/' + registration.transactionHash" target="_blank" class="text-green-400 hover:text-green-300">
+                                                        <span x-text="registration.transactionHash.substring(0, 10) + '...'"></span>
+                                                        <i class="fas fa-external-link-alt ml-1 text-xs"></i>
+                                                    </a>
+                                                </td>
+                                            </tr>
+                                        </template>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Pagination -->
+                        <div x-show="registrationsView.data?.pagination" class="mt-6 flex items-center justify-between">
+                            <div class="text-sm text-gray-400">
+                                Showing <span x-text="((registrationsView.currentPage - 1) * registrationsView.limit) + 1"></span>
+                                to <span x-text="Math.min(registrationsView.currentPage * registrationsView.limit, registrationsView.data?.stats?.totalRegistrations || 0)"></span>
+                                of <span x-text="registrationsView.data?.stats?.totalRegistrations || 0"></span> registrations
+                            </div>
+                            <nav class="flex items-center space-x-2">
+                                <button 
+                                    @click="registrationsView.loadPage(Math.max(1, registrationsView.currentPage - 1))"
+                                    :disabled="registrationsView.currentPage <= 1"
+                                    class="px-3 py-2 border border-gray-600 text-sm font-medium rounded-md text-gray-300 bg-gray-700 hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50"
+                                >
+                                    Previous
+                                </button>
+                                <button 
+                                    @click="registrationsView.loadPage(Math.min(registrationsView.data?.pagination?.totalPages || 1, registrationsView.currentPage + 1))"
+                                    :disabled="registrationsView.currentPage >= (registrationsView.data?.pagination?.totalPages || 1)"
+                                    class="px-3 py-2 border border-gray-600 text-sm font-medium rounded-md text-gray-300 bg-gray-700 hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50"
+                                >
+                                    Next
+                                </button>
+                            </nav>
+                        </div>
+                    </div>
+                </div>
+                <!-- End ENS Registrations Database View -->
+
             </main>
         </div>
         <!-- End Database View -->

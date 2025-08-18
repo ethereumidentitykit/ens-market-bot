@@ -3,6 +3,7 @@ function dashboard() {
     return {
         // View State
         currentView: 'classic', // 'classic' or 'database'
+        databaseSubView: 'sales', // 'sales' or 'registrations'
         
         // Master API Toggles
         apiToggles: {
@@ -166,6 +167,75 @@ function dashboard() {
             }
         },
 
+        // ENS Registrations viewer state
+        registrationsView: {
+            data: null,
+            loading: false,
+            searchTerm: '',
+            sortBy: 'blockNumber',
+            sortOrder: 'desc',
+            limit: 25,
+            currentPage: 1,
+            searchTimeout: null,
+            error: null,
+
+            async loadPage(page) {
+                this.loading = true;
+                this.currentPage = page;
+                this.error = null;
+                
+                try {
+                    const params = new URLSearchParams({
+                        page: page,
+                        limit: this.limit,
+                        sortBy: this.sortBy,
+                        sortOrder: this.sortOrder
+                    });
+
+                    if (this.searchTerm.trim()) {
+                        params.append('search', this.searchTerm.trim());
+                    }
+
+                    const response = await fetch(`/api/database/registrations?${params}`);
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    
+                    const result = await response.json();
+
+                    if (result.success) {
+                        this.data = result.data;
+                    } else {
+                        this.error = result.error || 'Failed to load registrations';
+                        this.data = null;
+                    }
+                } catch (error) {
+                    this.error = error.message;
+                    this.data = null;
+                } finally {
+                    this.loading = false;
+                }
+            },
+
+            sort(field) {
+                if (this.sortBy === field) {
+                    this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
+                } else {
+                    this.sortBy = field;
+                    this.sortOrder = field === 'blockNumber' || field === 'costEth' || field === 'id' ? 'desc' : 'asc';
+                }
+                this.loadPage(1);
+            },
+
+            searchDebounced() {
+                clearTimeout(this.searchTimeout);
+                this.searchTimeout = setTimeout(() => {
+                    this.loadPage(1);
+                }, 500);
+            }
+        },
+
         // Historical data population state
         historicalData: {
             targetBlock: '23100000',
@@ -176,6 +246,28 @@ function dashboard() {
         },
         contracts: [], // Will be loaded from API
 
+        // Helper function for relative time
+        getRelativeTime(timestamp) {
+            const now = new Date();
+            const time = new Date(timestamp);
+            const diffInSeconds = Math.floor((now - time) / 1000);
+
+            if (diffInSeconds < 60) {
+                return `${diffInSeconds} seconds ago`;
+            } else if (diffInSeconds < 3600) {
+                const minutes = Math.floor(diffInSeconds / 60);
+                return `${minutes} minute${minutes !== 1 ? 's' : ''} ago`;
+            } else if (diffInSeconds < 86400) {
+                const hours = Math.floor(diffInSeconds / 3600);
+                return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
+            } else if (diffInSeconds < 604800) {
+                const days = Math.floor(diffInSeconds / 86400);
+                return `${days} day${days !== 1 ? 's' : ''} ago`;
+            } else {
+                return time.toLocaleDateString();
+            }
+        },
+
         // Initialize
         async init() {
             await this.loadToggleStates();
@@ -185,6 +277,7 @@ function dashboard() {
             await this.loadContracts();
             await this.loadTweetHistory();
             await this.databaseView.loadPage(1);
+            await this.registrationsView.loadPage(1);
             // Auto-refresh every 30 seconds
             setInterval(() => {
                 if (!this.loading && !this.processing) {

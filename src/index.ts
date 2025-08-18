@@ -1141,6 +1141,91 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    app.get('/api/database/registrations', async (req, res) => {
+      try {
+        const page = parseInt(req.query.page as string) || 1;
+        const limit = parseInt(req.query.limit as string) || 25;
+        const offset = (page - 1) * limit;
+        const search = req.query.search as string || '';
+        const sortBy = req.query.sortBy as string || 'blockNumber';
+        const sortOrder = req.query.sortOrder as string || 'desc';
+
+        // Get all registrations for proper pagination and filtering
+        const allRegistrations = await databaseService.getRecentRegistrations(1000);
+        
+        // Apply search filter if provided
+        let filteredRegistrations = allRegistrations;
+        if (search) {
+          const searchLower = search.toLowerCase();
+          filteredRegistrations = allRegistrations.filter(registration => 
+            registration.ensName.toLowerCase().includes(searchLower) ||
+            registration.fullName.toLowerCase().includes(searchLower) ||
+            registration.transactionHash.toLowerCase().includes(searchLower) ||
+            registration.ownerAddress.toLowerCase().includes(searchLower) ||
+            registration.tokenId.includes(search) ||
+            registration.costEth?.includes(search)
+          );
+        }
+
+        // Apply sorting
+        filteredRegistrations.sort((a, b) => {
+          let aVal: any = a[sortBy as keyof typeof a];
+          let bVal: any = b[sortBy as keyof typeof b];
+          
+          // Handle numeric fields
+          if (sortBy === 'blockNumber' || sortBy === 'id') {
+            aVal = Number(aVal);
+            bVal = Number(bVal);
+          } else if (sortBy === 'costEth') {
+            aVal = parseFloat(aVal || '0');
+            bVal = parseFloat(bVal || '0');
+          }
+          
+          if (sortOrder === 'asc') {
+            return aVal > bVal ? 1 : -1;
+          } else {
+            return aVal < bVal ? 1 : -1;
+          }
+        });
+
+        // Apply pagination
+        const paginatedRegistrations = filteredRegistrations.slice(offset, offset + limit);
+        const totalFiltered = filteredRegistrations.length;
+        
+        // Calculate stats
+        const totalRegistrations = allRegistrations.length;
+        const pendingTweets = allRegistrations.filter(r => !r.posted).length;
+        const totalValue = allRegistrations.reduce((sum, r) => sum + parseFloat(r.costEth || '0'), 0);
+
+        res.json({
+          success: true,
+          data: {
+            registrations: paginatedRegistrations,
+            pagination: {
+              page,
+              limit,
+              total: totalFiltered,
+              totalPages: Math.ceil(totalFiltered / limit),
+              hasNext: page * limit < totalFiltered,
+              hasPrev: page > 1
+            },
+            stats: {
+              totalRegistrations: totalRegistrations,
+              pendingTweets: pendingTweets,
+              totalValue: totalValue.toFixed(4),
+              filteredResults: totalFiltered,
+              searchTerm: search
+            }
+          }
+        });
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     app.post('/api/database/reset', async (req, res) => {
       try {
         logger.warn('Database reset requested - this will delete ALL data!');
