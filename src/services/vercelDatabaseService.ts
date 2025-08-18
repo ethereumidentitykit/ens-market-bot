@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
-import { ProcessedSale, IDatabaseService, TwitterPost } from '../types';
+import { ProcessedSale, IDatabaseService, TwitterPost, ENSRegistration } from '../types';
 
 /**
  * PostgreSQL database service for Vercel deployment
@@ -99,6 +99,43 @@ export class VercelDatabaseService implements IDatabaseService {
           success BOOLEAN NOT NULL DEFAULT TRUE,
           error_message TEXT
         )
+      `);
+
+      // Create ens_registrations table
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS ens_registrations (
+          id SERIAL PRIMARY KEY,
+          transaction_hash VARCHAR(66) NOT NULL,
+          contract_address VARCHAR(42) NOT NULL,
+          token_id VARCHAR(255) NOT NULL UNIQUE,
+          ens_name VARCHAR(255) NOT NULL,
+          full_name VARCHAR(255) NOT NULL,
+          owner_address VARCHAR(42) NOT NULL,
+          cost_wei VARCHAR(100) NOT NULL,
+          cost_eth DECIMAL(18,8),
+          cost_usd DECIMAL(12,2),
+          block_number INTEGER NOT NULL,
+          block_timestamp TIMESTAMP NOT NULL,
+          processed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          image TEXT,
+          description TEXT,
+          tweet_id VARCHAR(255),
+          posted BOOLEAN DEFAULT FALSE,
+          expires_at TIMESTAMP,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // Create indexes for faster lookups on ens_registrations
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_ens_transaction_hash ON ens_registrations(transaction_hash)
+      `);
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_ens_token_id ON ens_registrations(token_id)
+      `);
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_ens_posted ON ens_registrations(posted)
       `);
 
       // Create generated_images table for storing images in serverless environment
@@ -571,6 +608,138 @@ export class VercelDatabaseService implements IDatabaseService {
     } catch (error: any) {
       logger.error('Failed to cleanup old images:', error.message);
     }
+  }
+
+  // ENS Registration methods
+  async insertRegistration(registration: Omit<ENSRegistration, 'id'>): Promise<number> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        INSERT INTO ens_registrations (
+          transaction_hash, contract_address, token_id, ens_name, full_name,
+          owner_address, cost_wei, cost_eth, cost_usd, block_number, 
+          block_timestamp, processed_at, image, description, expires_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        RETURNING id
+      `, [
+        registration.transactionHash,
+        registration.contractAddress,
+        registration.tokenId,
+        registration.ensName,
+        registration.fullName,
+        registration.ownerAddress,
+        registration.costWei,
+        registration.costEth || null,
+        registration.costUsd || null,
+        registration.blockNumber,
+        registration.blockTimestamp,
+        registration.processedAt,
+        registration.image || null,
+        registration.description || null,
+        registration.expiresAt || null
+      ]);
+
+      const id = result.rows[0].id;
+      logger.debug(`Inserted ENS registration: ${registration.ensName} (ID: ${id})`);
+      return id;
+    } catch (error: any) {
+      logger.error('Failed to insert ENS registration:', error.message);
+      throw error;
+    }
+  }
+
+  async isRegistrationProcessed(tokenId: string): Promise<boolean> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(
+        'SELECT COUNT(*) as count FROM ens_registrations WHERE token_id = $1',
+        [tokenId]
+      );
+      
+      return parseInt(result.rows[0].count) > 0;
+    } catch (error: any) {
+      logger.error('Failed to check if ENS registration processed:', error.message);
+      throw error;
+    }
+  }
+
+  async getRecentRegistrations(limit: number = 10): Promise<ENSRegistration[]> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        SELECT * FROM ens_registrations 
+        ORDER BY block_number DESC 
+        LIMIT $1
+      `, [limit]);
+
+      return this.mapRegistrationRows(result.rows);
+    } catch (error: any) {
+      logger.error('Failed to get recent ENS registrations:', error.message);
+      throw error;
+    }
+  }
+
+  async getUnpostedRegistrations(limit: number = 10): Promise<ENSRegistration[]> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        SELECT * FROM ens_registrations 
+        WHERE posted = FALSE 
+        ORDER BY block_number ASC 
+        LIMIT $1
+      `, [limit]);
+
+      return this.mapRegistrationRows(result.rows);
+    } catch (error: any) {
+      logger.error('Failed to get unposted ENS registrations:', error.message);
+      throw error;
+    }
+  }
+
+  async markRegistrationAsPosted(id: number, tweetId: string): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      await this.pool.query(`
+        UPDATE ens_registrations 
+        SET posted = TRUE, tweet_id = $1, updated_at = CURRENT_TIMESTAMP 
+        WHERE id = $2
+      `, [tweetId, id]);
+
+      logger.debug(`Marked ENS registration ${id} as posted with tweet ID: ${tweetId}`);
+    } catch (error: any) {
+      logger.error('Failed to mark ENS registration as posted:', error.message);
+      throw error;
+    }
+  }
+
+  private mapRegistrationRows(rows: any[]): ENSRegistration[] {
+    return rows.map((row: any) => ({
+      id: row.id,
+      transactionHash: row.transaction_hash,
+      contractAddress: row.contract_address,
+      tokenId: row.token_id,
+      ensName: row.ens_name,
+      fullName: row.full_name,
+      ownerAddress: row.owner_address,
+      costWei: row.cost_wei,
+      costEth: row.cost_eth,
+      costUsd: row.cost_usd,
+      blockNumber: row.block_number,
+      blockTimestamp: row.block_timestamp,
+      processedAt: row.processed_at,
+      image: row.image,
+      description: row.description,
+      tweetId: row.tweet_id,
+      posted: row.posted,
+      expiresAt: row.expires_at,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    }));
   }
 
   /**

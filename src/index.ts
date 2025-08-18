@@ -8,7 +8,7 @@ import { MONITORED_CONTRACTS } from './config/contracts';
 import { MoralisService } from './services/moralisService';
 import { DatabaseService } from './services/databaseService';
 import { VercelDatabaseService } from './services/vercelDatabaseService';
-import { IDatabaseService } from './types';
+import { IDatabaseService, ENSRegistration } from './types';
 import { SalesProcessingService } from './services/salesProcessingService';
 import { SchedulerService } from './services/schedulerService';
 import { TwitterService } from './services/twitterService';
@@ -1403,7 +1403,41 @@ async function startApplication(): Promise<void> {
                 logger.warn('⚠️ Failed to fetch ENS metadata for', ensName);
               }
               
-              // TODO: Store registration in database (include metadata)
+              // Convert cost from wei to ETH
+              const costInWei = BigInt(cost);
+              const costInEth = (Number(costInWei) / 1e18).toFixed(6);
+              
+              // Check if this registration is already processed
+              const isProcessed = await databaseService.isRegistrationProcessed(tokenId);
+              if (isProcessed) {
+                logger.info(`⚠️ ENS registration ${ensName} already processed, skipping...`);
+                return;
+              }
+
+              // Prepare registration data
+              const registrationData: Omit<ENSRegistration, 'id'> = {
+                transactionHash: eventData.transactionHash,
+                contractAddress: eventData.contractAddress,
+                tokenId,
+                ensName,
+                fullName: ensMetadata?.name || `${ensName}.eth`,
+                ownerAddress,
+                costWei: cost,
+                costEth: costInEth,
+                costUsd: undefined, // TODO: Add USD conversion if needed
+                blockNumber: parseInt(eventData.blockNumber),
+                blockTimestamp: new Date(parseInt(eventData.blockTimestamp) * 1000).toISOString(),
+                processedAt: new Date().toISOString(),
+                image: ensMetadata?.image,
+                description: ensMetadata?.description,
+                posted: false,
+                expiresAt: undefined, // TODO: Calculate expiration if needed
+              };
+
+              // Store registration in database
+              const registrationId = await databaseService.insertRegistration(registrationData);
+              logger.info(`💾 ENS registration stored in database with ID: ${registrationId}`);
+
               // TODO: Format and send tweet
               
               logger.info('✅ ENS registration event processed successfully');

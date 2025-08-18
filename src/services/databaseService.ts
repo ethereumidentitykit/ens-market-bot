@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
-import { ProcessedSale, IDatabaseService, TwitterPost } from '../types';
+import { ProcessedSale, IDatabaseService, TwitterPost, ENSRegistration } from '../types';
 
 export class DatabaseService implements IDatabaseService {
   private db: Database<sqlite3.Database, sqlite3.Statement> | null = null;
@@ -105,6 +105,43 @@ export class DatabaseService implements IDatabaseService {
         error_message TEXT,
         FOREIGN KEY (sale_id) REFERENCES processed_sales (id)
       )
+    `);
+
+    // Create ens_registrations table
+    await this.db.exec(`
+      CREATE TABLE IF NOT EXISTS ens_registrations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        transaction_hash TEXT NOT NULL,
+        contract_address TEXT NOT NULL,
+        token_id TEXT NOT NULL UNIQUE,
+        ens_name TEXT NOT NULL,
+        full_name TEXT NOT NULL,
+        owner_address TEXT NOT NULL,
+        cost_wei TEXT NOT NULL,
+        cost_eth TEXT,
+        cost_usd TEXT,
+        block_number INTEGER NOT NULL,
+        block_timestamp TEXT NOT NULL,
+        processed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        image TEXT,
+        description TEXT,
+        tweet_id TEXT,
+        posted INTEGER DEFAULT 0,
+        expires_at TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Create indexes for faster lookups on ens_registrations
+    await this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_ens_transaction_hash ON ens_registrations(transaction_hash);
+    `);
+    await this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_ens_token_id ON ens_registrations(token_id);
+    `);
+    await this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_ens_posted ON ens_registrations(posted);
     `);
 
     // Create generated_images table for storing images in serverless environment
@@ -557,6 +594,136 @@ export class DatabaseService implements IDatabaseService {
     } catch (error: any) {
       logger.error('Failed to cleanup old images:', error.message);
     }
+  }
+
+  // ENS Registration methods
+  async insertRegistration(registration: Omit<ENSRegistration, 'id'>): Promise<number> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.db.run(`
+        INSERT INTO ens_registrations (
+          transaction_hash, contract_address, token_id, ens_name, full_name,
+          owner_address, cost_wei, cost_eth, cost_usd, block_number, 
+          block_timestamp, processed_at, image, description, expires_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        registration.transactionHash,
+        registration.contractAddress,
+        registration.tokenId,
+        registration.ensName,
+        registration.fullName,
+        registration.ownerAddress,
+        registration.costWei,
+        registration.costEth || null,
+        registration.costUsd || null,
+        registration.blockNumber,
+        registration.blockTimestamp,
+        registration.processedAt,
+        registration.image || null,
+        registration.description || null,
+        registration.expiresAt || null
+      ]);
+
+      const id = result.lastID as number;
+      logger.debug(`Inserted ENS registration: ${registration.ensName} (ID: ${id})`);
+      return id;
+    } catch (error: any) {
+      logger.error('Failed to insert ENS registration:', error.message);
+      throw error;
+    }
+  }
+
+  async isRegistrationProcessed(tokenId: string): Promise<boolean> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.db.get<{ count: number }>(`
+        SELECT COUNT(*) as count FROM ens_registrations WHERE token_id = ?
+      `, [tokenId]);
+      
+      return (result?.count || 0) > 0;
+    } catch (error: any) {
+      logger.error('Failed to check if ENS registration processed:', error.message);
+      throw error;
+    }
+  }
+
+  async getRecentRegistrations(limit: number = 10): Promise<ENSRegistration[]> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    try {
+      const rows = await this.db.all<ENSRegistration[]>(`
+        SELECT * FROM ens_registrations 
+        ORDER BY block_number DESC 
+        LIMIT ?
+      `, [limit]);
+
+      return this.mapRegistrationRows(rows);
+    } catch (error: any) {
+      logger.error('Failed to get recent ENS registrations:', error.message);
+      throw error;
+    }
+  }
+
+  async getUnpostedRegistrations(limit: number = 10): Promise<ENSRegistration[]> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    try {
+      const rows = await this.db.all<ENSRegistration[]>(`
+        SELECT * FROM ens_registrations 
+        WHERE posted = 0 
+        ORDER BY block_number ASC 
+        LIMIT ?
+      `, [limit]);
+
+      return this.mapRegistrationRows(rows);
+    } catch (error: any) {
+      logger.error('Failed to get unposted ENS registrations:', error.message);
+      throw error;
+    }
+  }
+
+  async markRegistrationAsPosted(id: number, tweetId: string): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    try {
+      await this.db.run(`
+        UPDATE ens_registrations 
+        SET posted = 1, tweet_id = ?, updated_at = CURRENT_TIMESTAMP 
+        WHERE id = ?
+      `, [tweetId, id]);
+
+      logger.debug(`Marked ENS registration ${id} as posted with tweet ID: ${tweetId}`);
+    } catch (error: any) {
+      logger.error('Failed to mark ENS registration as posted:', error.message);
+      throw error;
+    }
+  }
+
+  private mapRegistrationRows(rows: any[]): ENSRegistration[] {
+    return rows.map((row: any) => ({
+      id: row.id,
+      transactionHash: row.transaction_hash,
+      contractAddress: row.contract_address,
+      tokenId: row.token_id,
+      ensName: row.ens_name,
+      fullName: row.full_name,
+      ownerAddress: row.owner_address,
+      costWei: row.cost_wei,
+      costEth: row.cost_eth,
+      costUsd: row.cost_usd,
+      blockNumber: row.block_number,
+      blockTimestamp: row.block_timestamp,
+      processedAt: row.processed_at,
+      image: row.image,
+      description: row.description,
+      tweetId: row.tweet_id,
+      posted: Boolean(row.posted),
+      expiresAt: row.expires_at,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    }));
   }
 
   /**

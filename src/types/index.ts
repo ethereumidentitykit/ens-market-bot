@@ -66,6 +66,33 @@ export interface ProcessedSale {
   verifiedCollection?: boolean;
 }
 
+// ENS Registration Record
+export interface ENSRegistration {
+  id?: number;
+  transactionHash: string;
+  contractAddress: string;  // ENS ETH Registrar Controller address
+  tokenId: string;         // keccak256 hash of ENS name
+  ensName: string;         // The ENS name (e.g., "hsueh")
+  fullName: string;        // Full ENS name (e.g., "hsueh.eth")
+  ownerAddress: string;    // Address that registered the ENS
+  costWei: string;         // Cost in wei
+  costEth?: string;        // Cost in ETH (calculated)
+  costUsd?: string;        // Cost in USD (if available)
+  blockNumber: number;
+  blockTimestamp: string;
+  processedAt: string;
+  // ENS Metadata
+  image?: string;          // ENS NFT image URL
+  description?: string;    // ENS description
+  // Tweet tracking
+  tweetId?: string;
+  posted: boolean;
+  // Timestamps
+  expiresAt?: string;      // When the registration expires
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 // Configuration
 export interface Config {
   alchemy: {
@@ -136,6 +163,12 @@ export interface IDatabaseService {
   storeGeneratedImage(filename: string, imageBuffer: Buffer, contentType?: string): Promise<void>;
   getGeneratedImage(filename: string): Promise<{ buffer: Buffer; contentType: string } | null>;
   cleanupOldImages(): Promise<void>;
+  // ENS registration methods
+  insertRegistration(registration: Omit<ENSRegistration, 'id'>): Promise<number>;
+  isRegistrationProcessed(tokenId: string): Promise<boolean>;
+  getRecentRegistrations(limit?: number): Promise<ENSRegistration[]>;
+  getUnpostedRegistrations(limit?: number): Promise<ENSRegistration[]>;
+  markRegistrationAsPosted(id: number, tweetId: string): Promise<void>;
 }
 
 // API Response Types
