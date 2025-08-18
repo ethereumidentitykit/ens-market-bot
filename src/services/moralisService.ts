@@ -47,6 +47,35 @@ interface MoralisNFTTrade {
   metadata?: MoralisNFTMetadata;
 }
 
+interface MoralisTokenPriceResponse {
+  tokenName: string;
+  tokenSymbol: string;
+  tokenLogo: string;
+  tokenDecimals: string;
+  nativePrice: {
+    value: string;
+    decimals: number;
+    name: string;
+    symbol: string;
+    address: string;
+  };
+  usdPrice: number;
+  usdPriceFormatted: string;
+  exchangeName: string;
+  exchangeAddress: string;
+  tokenAddress: string;
+  priceLastChangedAtBlock: string;
+  blockTimestamp: string;
+  possibleSpam: boolean;
+  verifiedContract: boolean;
+  pairAddress: string;
+  pairTotalLiquidityUsd: string;
+  securityScore: number;
+  usdPrice24hr: number;
+  usdPrice24hrUsdChange: number;
+  usdPrice24hrPercentChange: number;
+}
+
 interface MoralisNFTTradesResponse {
   page: number;
   page_size: number;
@@ -617,5 +646,38 @@ export class MoralisService {
     logger.info(`Target block reached: ${stats.targetBlockReached}`);
 
     return stats;
+  }
+
+  /**
+   * Get current ETH price in USD from Moralis Token Price API
+   * Uses WETH contract address since ENS registrations are paid in ETH
+   */
+  async getETHPriceUSD(): Promise<number | null> {
+    try {
+      const wethContractAddress = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'; // WETH contract
+      
+      const response: AxiosResponse<MoralisTokenPriceResponse> = await axios.get(
+        `${this.baseUrl}/erc20/${wethContractAddress}/price`,
+        {
+          params: {
+            chain: 'eth',
+            exchange: 'uniswapv3'
+          },
+          headers: {
+            'X-API-Key': this.apiKey,
+            'accept': 'application/json',
+          },
+          timeout: 10000, // 10 second timeout
+        }
+      );
+
+      const priceData = response.data;
+      logger.debug(`ETH price fetched: $${priceData.usdPrice} (via ${priceData.exchangeName})`);
+      
+      return priceData.usdPrice;
+    } catch (error: any) {
+      logger.warn('Failed to fetch ETH price from Moralis:', error.message);
+      return null;
+    }
   }
 }

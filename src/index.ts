@@ -1407,6 +1407,19 @@ async function startApplication(): Promise<void> {
               const costInWei = BigInt(cost);
               const costInEth = (Number(costInWei) / 1e18).toFixed(6);
               
+              // Get current ETH price in USD for cost calculation
+              let costUsd: string | undefined;
+              try {
+                const ethPriceUsd = await moralisService.getETHPriceUSD();
+                if (ethPriceUsd) {
+                  const costInUsd = parseFloat(costInEth) * ethPriceUsd;
+                  costUsd = costInUsd.toFixed(2);
+                  logger.info(`💰 ETH price: $${ethPriceUsd}, Registration cost: ${costInEth} ETH ($${costUsd})`);
+                }
+              } catch (error: any) {
+                logger.warn('Failed to fetch ETH price for USD conversion:', error.message);
+              }
+              
               // Check if this registration is already processed
               const isProcessed = await databaseService.isRegistrationProcessed(tokenId);
               if (isProcessed) {
@@ -1424,7 +1437,7 @@ async function startApplication(): Promise<void> {
                 ownerAddress,
                 costWei: cost,
                 costEth: costInEth,
-                costUsd: undefined, // TODO: Add USD conversion if needed
+                costUsd: costUsd,
                 blockNumber: parseInt(eventData.blockNumber),
                 blockTimestamp: new Date(parseInt(eventData.blockTimestamp) * 1000).toISOString(),
                 processedAt: new Date().toISOString(),
