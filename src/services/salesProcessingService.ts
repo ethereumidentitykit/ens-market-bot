@@ -2,6 +2,17 @@ import { MoralisService, EnhancedNFTSale } from './moralisService';
 import { IDatabaseService } from '../types';
 import { logger } from '../utils/logger';
 import { NFTSale, ProcessedSale } from '../types';
+import { MONITORED_CONTRACTS } from '../config/contracts';
+import { config } from '../utils/config';
+import axios from 'axios';
+
+interface ENSMetadata {
+  name: string;
+  description: string;
+  image: string;
+  image_url: string;
+  attributes: any[];
+}
 
 export class SalesProcessingService {
   private moralisService: MoralisService;
@@ -67,15 +78,84 @@ export class SalesProcessingService {
   }
 
   /**
+   * Apply WETH price correction if needed
+   * Moralis API bug: WETH sales are reported with double the actual price
+   */
+  private applyWethPriceCorrection(
+    sale: EnhancedNFTSale, 
+    ethPrice: string, 
+    usdPrice?: string
+  ): { applied: boolean; correctedEthPrice: string; correctedUsdPrice?: string } {
+    // Check if this is a WETH sale and multiplier is not 1.0
+    const isWethSale = this.isWethSale(sale);
+    const multiplier = config.wethPriceMultiplier;
+    
+    if (!isWethSale || multiplier === 1.0) {
+      return {
+        applied: false,
+        correctedEthPrice: ethPrice,
+        correctedUsdPrice: usdPrice
+      };
+    }
+    
+    // Apply multiplier to ETH price
+    const originalEthPrice = parseFloat(ethPrice);
+    const correctedEthPrice = (originalEthPrice * multiplier).toFixed(8);
+    
+    // Apply multiplier to USD price if available
+    let correctedUsdPrice = usdPrice;
+    if (usdPrice) {
+      const originalUsdPrice = parseFloat(usdPrice);
+      correctedUsdPrice = (originalUsdPrice * multiplier).toFixed(2);
+    }
+    
+    // Log the correction
+    logger.info(`🔧 WETH price correction applied (${multiplier}x): ${sale.transactionHash}`);
+    logger.info(`   ETH: ${ethPrice} → ${correctedEthPrice}`);
+    if (usdPrice && correctedUsdPrice) {
+      logger.info(`   USD: $${usdPrice} → $${correctedUsdPrice}`);
+    }
+    
+    return {
+      applied: true,
+      correctedEthPrice,
+      correctedUsdPrice
+    };
+  }
+  
+  /**
+   * Check if this is a WETH sale by examining the price token address
+   */
+  private isWethSale(sale: EnhancedNFTSale): boolean {
+    const wethAddresses = [
+      '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', // WETH mainnet
+      '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'  // WETH mainnet (different case)
+    ];
+    
+    if (!sale.priceTokenAddress) {
+      return false;
+    }
+    
+    return wethAddresses.includes(sale.priceTokenAddress.toLowerCase());
+  }
+
+  /**
    * Filter sales based on minimum price and other criteria
    */
   private shouldProcessSale(sale: EnhancedNFTSale): boolean {
-    // Calculate total price in ETH
-    const totalPriceEth = parseFloat(this.calculateTotalPrice(sale));
+    // Calculate total price in ETH with WETH correction applied
+    let totalPriceEth = parseFloat(this.calculateTotalPrice(sale));
     
-    // Filter out sales below 0.1 ETH
-    if (totalPriceEth < 0.1) {
-      logger.debug(`Filtering out sale below 0.1 ETH: ${totalPriceEth} ETH (tx: ${sale.transactionHash})`);
+    // Apply WETH price correction for filtering (same logic as in convertToProcessedSale)
+    if (this.isWethSale(sale) && config.wethPriceMultiplier !== 1.0) {
+      const originalPrice = totalPriceEth;
+      totalPriceEth = totalPriceEth * config.wethPriceMultiplier;
+      logger.debug(`WETH price correction for filtering: ${originalPrice} ETH → ${totalPriceEth} ETH (multiplier: ${config.wethPriceMultiplier})`);
+    }
+    
+    // Filter out sales below 0.05 ETH (temp reduced from 0.1)
+    if (totalPriceEth < 0.05) {
+      logger.debug(`Filtering out sale below 0.05 ETH: ${totalPriceEth} ETH (tx: ${sale.transactionHash})`);
       return false;
     }
 
@@ -87,11 +167,77 @@ export class SalesProcessingService {
   }
 
   /**
+   * Get the proper collection name from our contracts config, fallback to Moralis name
+   */
+  private getCollectionName(contractAddress: string, moralisName?: string): string | undefined {
+    const contract = MONITORED_CONTRACTS.find(
+      c => c.address.toLowerCase() === contractAddress.toLowerCase()
+    );
+    
+    if (contract) {
+      logger.debug(`Using contract name "${contract.name}" for ${contractAddress} instead of Moralis name "${moralisName}"`);
+      return contract.name;
+    }
+    
+    // Fallback to Moralis name if contract not found in our config
+    return moralisName;
+  }
+
+  /**
+   * Fetch ENS metadata from the official ENS metadata API
+   */
+  private async fetchENSMetadata(contractAddress: string, tokenId: string): Promise<ENSMetadata | null> {
+    try {
+      const url = `https://metadata.ens.domains/mainnet/${contractAddress}/${tokenId}`;
+      logger.debug(`Fetching ENS metadata from: ${url}`);
+      
+      const response = await axios.get<ENSMetadata>(url, {
+        timeout: 5000, // 5 second timeout
+      });
+      
+      logger.debug(`Successfully fetched ENS metadata: ${response.data.name}`);
+      return response.data;
+      
+    } catch (error: any) {
+      logger.warn(`Failed to fetch ENS metadata for ${contractAddress}/${tokenId}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
    * Convert NFTSale (Enhanced from Moralis) to ProcessedSale format
    */
-  private convertToProcessedSale(sale: EnhancedNFTSale): Omit<ProcessedSale, 'id'> {
-    const priceEth = this.calculateTotalPrice(sale);
+  private async convertToProcessedSale(sale: EnhancedNFTSale): Promise<Omit<ProcessedSale, 'id'>> {
+    let priceEth = this.calculateTotalPrice(sale);
+    let priceUsd = sale.currentUsdValue;
+    
+    // Apply WETH price multiplier if this is a WETH sale
+    const wethMultiplier = this.applyWethPriceCorrection(sale, priceEth, priceUsd);
+    if (wethMultiplier.applied) {
+      priceEth = wethMultiplier.correctedEthPrice;
+      priceUsd = wethMultiplier.correctedUsdPrice;
+    }
+    
     const blockTimestamp = sale.blockTime || this.formatBlockTimestamp(sale.blockNumber);
+
+    // Use Moralis data initially
+    let nftName = sale.nftName;
+    let nftImage = sale.nftImage;
+    let nftDescription = sale.nftDescription;
+
+    // If missing name or image, try ENS metadata API as fallback
+    if (!nftName || !nftImage) {
+      logger.debug(`Missing metadata from Moralis - name: ${!!nftName}, image: ${!!nftImage}. Trying ENS API...`);
+      
+      const ensMetadata = await this.fetchENSMetadata(sale.contractAddress, sale.tokenId);
+      if (ensMetadata) {
+        nftName = nftName || ensMetadata.name;
+        nftImage = nftImage || ensMetadata.image;
+        nftDescription = nftDescription || ensMetadata.description;
+        
+        logger.info(`ENS metadata enriched: ${ensMetadata.name} (${sale.transactionHash})`);
+      }
+    }
 
     return {
       transactionHash: sale.transactionHash,
@@ -101,17 +247,17 @@ export class SalesProcessingService {
       buyerAddress: sale.buyerAddress.toLowerCase(),
       sellerAddress: sale.sellerAddress.toLowerCase(),
       priceEth,
-      priceUsd: sale.currentUsdValue || undefined, // Use Moralis USD value if available
+      priceUsd: priceUsd || undefined, // Use corrected USD value if WETH was applied
       blockNumber: sale.blockNumber,
       blockTimestamp,
       processedAt: new Date().toISOString(),
       posted: false,
-      // Enhanced metadata from Moralis
-      collectionName: sale.collectionName,
+      // Enhanced metadata (from Moralis + ENS API fallback, override collection name with our config)
+      collectionName: this.getCollectionName(sale.contractAddress, sale.collectionName),
       collectionLogo: sale.collectionLogo,
-      nftName: sale.nftName,
-      nftImage: sale.nftImage,
-      nftDescription: sale.nftDescription,
+      nftName,
+      nftImage,
+      nftDescription,
       marketplaceLogo: sale.marketplaceLogo,
       currentUsdValue: sale.currentUsdValue,
       verifiedCollection: sale.verifiedCollection,
@@ -128,6 +274,7 @@ export class SalesProcessingService {
     duplicates: number;
     filtered: number;
     errors: number;
+    processedSales: ProcessedSale[];
   }> {
     const stats = {
       fetched: 0,
@@ -135,6 +282,7 @@ export class SalesProcessingService {
       duplicates: 0,
       filtered: 0,
       errors: 0,
+      processedSales: [] as ProcessedSale[],
     };
 
     try {
@@ -177,7 +325,7 @@ export class SalesProcessingService {
       for (const sale of recentSales) {
         try {
           // Check if already processed
-          const isAlreadyProcessed = await this.databaseService.isSaleProcessed(sale.transactionHash);
+          const isAlreadyProcessed = await this.databaseService.isSaleProcessed(sale.tokenId);
           
           if (isAlreadyProcessed) {
             stats.duplicates++;
@@ -193,8 +341,12 @@ export class SalesProcessingService {
           }
 
           // Convert and store the sale
-          const processedSale = this.convertToProcessedSale(sale);
-          await this.databaseService.insertSale(processedSale);
+          const processedSale = await this.convertToProcessedSale(sale);
+          const saleId = await this.databaseService.insertSale(processedSale);
+          
+          // Create sale with ID and add to results
+          const saleWithId: ProcessedSale = { ...processedSale, id: saleId };
+          stats.processedSales.push(saleWithId);
           
           stats.newSales++;
           highestBlockNumber = Math.max(highestBlockNumber, sale.blockNumber);
@@ -236,8 +388,8 @@ export class SalesProcessingService {
   /**
    * Public method to convert sale to processed format
    */
-  public convertToProcessedSalePublic(sale: EnhancedNFTSale): Omit<ProcessedSale, 'id'> {
-    return this.convertToProcessedSale(sale);
+  public async convertToProcessedSalePublic(sale: EnhancedNFTSale): Promise<Omit<ProcessedSale, 'id'>> {
+    return await this.convertToProcessedSale(sale);
   }
 
   /**
@@ -311,6 +463,7 @@ export class SalesProcessingService {
       newSales: number;
       duplicates: number;
       errors: number;
+      processedSales: ProcessedSale[];
     };
     error?: string;
   }> {

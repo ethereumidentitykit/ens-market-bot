@@ -2,11 +2,18 @@ const OAuth = require('oauth-1.0a');
 const crypto = require('crypto-js');
 const https = require('https');
 const querystring = require('querystring');
+require('dotenv').config();
 
-// Your Twitter App Credentials
-const API_KEY = 'GudeJtnGb3Ng5eK6Rgp8lqm9v';
-const API_SECRET = '7ZH4wsbK1uGsMBhxjXqTwTYmZfT16kS37ZfkofhCBhBcXFIU2l';
-const CALLBACK_URL = 'https://twitterbot-three.vercel.app/auth/twitter/callback';
+// Your Twitter App Credentials (loaded from environment variables)
+const API_KEY = process.env.TWITTER_API_KEY;
+const API_SECRET = process.env.TWITTER_API_SECRET;
+const CALLBACK_URL = process.env.TWITTER_CALLBACK_URL;
+
+if (!API_KEY || !API_SECRET || !CALLBACK_URL) {
+  console.error('❌ Missing required environment variables.');
+  console.error('   Please set TWITTER_API_KEY, TWITTER_API_SECRET, and TWITTER_CALLBACK_URL');
+  process.exit(1);
+}
 
 // Initialize OAuth 1.0a
 const oauth = OAuth({
@@ -85,9 +92,9 @@ function getAuthorizationURL(oauthToken) {
   console.log('1. Open this URL in your browser:');
   console.log(`   ${authURL}`);
   console.log('');
-  console.log('2. Log in as @BotMarket66066 (your bot account)');
+  console.log('2. Log in with your bot account');
   console.log('3. Click "Authorize app"');
-  console.log('4. You will be redirected to your callback URL with oauth_verifier');
+  console.log(`4. You will be redirected to your callback URL (${CALLBACK_URL}) with oauth_verifier`);
   console.log('5. Copy the oauth_verifier from the URL and run Step 3');
   console.log('');
   console.log('🔗 Authorization URL:');
@@ -138,12 +145,12 @@ async function getAccessToken(oauthToken, oauthTokenSecret, oauthVerifier) {
       res.on('end', () => {
         if (res.statusCode === 200) {
           const params = querystring.parse(data);
-          console.log('🎉 SUCCESS! Access tokens obtained for @BotMarket66066!');
+          console.log('🎉 SUCCESS! Access tokens obtained!');
           console.log('');
-          console.log('📋 ADD THESE TO YOUR VERCEL ENVIRONMENT VARIABLES:');
+          console.log('📋 ADD THESE TO YOUR ENVIRONMENT VARIABLES:');
           console.log('');
-          console.log(`TWITTER_API_KEY=${API_KEY}`);
-          console.log(`TWITTER_API_SECRET=${API_SECRET}`);
+          console.log('TWITTER_API_KEY=(already set)');
+          console.log('TWITTER_API_SECRET=(already set)');
           console.log(`TWITTER_ACCESS_TOKEN=${params.oauth_token}`);
           console.log(`TWITTER_ACCESS_TOKEN_SECRET=${params.oauth_token_secret}`);
           console.log('');

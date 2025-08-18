@@ -1,10 +1,14 @@
 import { CronJob } from 'cron';
 import { SalesProcessingService } from './salesProcessingService';
+import { AutoTweetService, AutoPostSettings, PostResult } from './autoTweetService';
+import { APIToggleService } from './apiToggleService';
 import { logger } from '../utils/logger';
 import { IDatabaseService } from '../types';
 
 export class SchedulerService {
   private salesProcessingService: SalesProcessingService;
+  private autoTweetService: AutoTweetService;
+  private apiToggleService: APIToggleService;
   private databaseService: IDatabaseService;
   private syncJob: CronJob | null = null;
   private isRunning: boolean = false;
@@ -13,8 +17,14 @@ export class SchedulerService {
   private consecutiveErrors: number = 0;
   private maxConsecutiveErrors: number = 5;
 
-  constructor(salesProcessingService: SalesProcessingService, databaseService: IDatabaseService) {
+  constructor(
+    salesProcessingService: SalesProcessingService, 
+    autoTweetService: AutoTweetService,
+    databaseService: IDatabaseService
+  ) {
     this.salesProcessingService = salesProcessingService;
+    this.autoTweetService = autoTweetService;
+    this.apiToggleService = APIToggleService.getInstance();
     this.databaseService = databaseService;
   }
 
@@ -127,11 +137,30 @@ export class SchedulerService {
     logger.info('Starting scheduled sales sync...');
 
     try {
+      // Refresh NTP time cache before processing
+      await this.autoTweetService.refreshTimeCache();
+      
       // Process new sales
       const result = await this.salesProcessingService.processNewSales();
       
+      // Auto-post new sales if enabled
+      let autoPostResults: PostResult[] = [];
+      if (result.newSales > 0 && result.processedSales.length > 0) {
+        const autoPostSettings = await this.autoTweetService.getSettings();
+        if (autoPostSettings.enabled && this.apiToggleService.isAutoPostingEnabled()) {
+          logger.info(`🤖 Auto-posting ${result.processedSales.length} new sales...`);
+          autoPostResults = await this.autoTweetService.processNewSales(result.processedSales, autoPostSettings);
+          
+          const posted = autoPostResults.filter(r => r.success).length;
+          const skipped = autoPostResults.filter(r => r.skipped).length;
+          const failed = autoPostResults.filter(r => !r.success && !r.skipped).length;
+          
+          logger.info(`🐦 Auto-posting results: ${posted} posted, ${skipped} skipped, ${failed} failed`);
+        }
+      }
+      
       this.lastRunTime = startTime;
-      this.lastRunStats = result;
+      this.lastRunStats = { ...result, autoPostResults };
       this.consecutiveErrors = 0; // Reset error counter on success
 
       const duration = Date.now() - startTime.getTime();
@@ -140,7 +169,8 @@ export class SchedulerService {
         fetched: result.fetched,
         newSales: result.newSales,
         duplicates: result.duplicates,
-        errors: result.errors
+        errors: result.errors,
+        autoPosted: autoPostResults.filter(r => r.success).length
       });
 
       // Log notable events
@@ -264,4 +294,6 @@ export class SchedulerService {
   isHealthy(): boolean {
     return this.isRunning && this.consecutiveErrors < this.maxConsecutiveErrors;
   }
+
+
 }

@@ -44,9 +44,9 @@ export class VercelDatabaseService implements IDatabaseService {
       await this.pool.query(`
         CREATE TABLE IF NOT EXISTS processed_sales (
           id SERIAL PRIMARY KEY,
-          transaction_hash VARCHAR(66) NOT NULL UNIQUE,
+          transaction_hash VARCHAR(66) NOT NULL,
           contract_address VARCHAR(42) NOT NULL,
-          token_id VARCHAR(255) NOT NULL,
+          token_id VARCHAR(255) NOT NULL UNIQUE,
           marketplace VARCHAR(50) NOT NULL,
           buyer_address VARCHAR(42) NOT NULL,
           seller_address VARCHAR(42) NOT NULL,
@@ -175,13 +175,13 @@ export class VercelDatabaseService implements IDatabaseService {
   /**
    * Check if a sale has already been processed
    */
-  async isSaleProcessed(transactionHash: string): Promise<boolean> {
+  async isSaleProcessed(tokenId: string): Promise<boolean> {
     if (!this.pool) throw new Error('Database not initialized');
 
     try {
       const result = await this.pool.query(
-        'SELECT id FROM processed_sales WHERE transaction_hash = $1',
-        [transactionHash]
+        'SELECT id FROM processed_sales WHERE token_id = $1',
+        [tokenId]
       );
 
       return result.rows.length > 0;
@@ -455,6 +455,54 @@ export class VercelDatabaseService implements IDatabaseService {
       logger.info('Database reset completed successfully');
     } catch (error: any) {
       logger.error('Failed to reset database:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Migrate database schema - drop and recreate tables with new schema
+   * This is needed to apply schema changes like unique constraint modifications
+   */
+  async migrateSchema(): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      logger.info('Starting database schema migration...');
+
+      // Drop existing tables (order matters due to foreign keys)
+      await this.pool.query('DROP TABLE IF EXISTS generated_images');
+      await this.pool.query('DROP TABLE IF EXISTS twitter_posts');
+      await this.pool.query('DROP TABLE IF EXISTS processed_sales');
+      await this.pool.query('DROP TABLE IF EXISTS system_state');
+
+      // Recreate tables with new schema
+      await this.createTables();
+
+      logger.info('Database schema migration completed successfully');
+    } catch (error: any) {
+      logger.error('Failed to migrate database schema:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Clear only sales table - keep tweets, settings, and system state
+   */
+  async clearSalesTable(): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      logger.info('Starting sales table clear...');
+
+      // Delete only sales data
+      await this.pool.query('DELETE FROM processed_sales');
+
+      // Reset sequence for sales table only
+      await this.pool.query('ALTER SEQUENCE processed_sales_id_seq RESTART WITH 1');
+
+      logger.info('Sales table cleared successfully');
+    } catch (error: any) {
+      logger.error('Failed to clear sales table:', error.message);
       throw error;
     }
   }

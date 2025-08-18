@@ -93,6 +93,7 @@ export interface Config {
   port: number;
   nodeEnv: string;
   logLevel: string;
+  wethPriceMultiplier: number;
 }
 
 // Twitter Post Record
@@ -110,7 +111,7 @@ export interface TwitterPost {
 export interface IDatabaseService {
   initialize(): Promise<void>;
   insertSale(sale: Omit<ProcessedSale, 'id'>): Promise<number>;
-  isSaleProcessed(transactionHash: string): Promise<boolean>;
+  isSaleProcessed(tokenId: string): Promise<boolean>;
   getRecentSales(limit?: number): Promise<ProcessedSale[]>;
   getUnpostedSales(limit?: number): Promise<ProcessedSale[]>;
   markAsPosted(id: number, tweetId: string): Promise<void>;
@@ -128,6 +129,8 @@ export interface IDatabaseService {
   getTweetPostsInLast24Hours(): Promise<number>;
   // Database management methods
   resetDatabase(): Promise<void>;
+  migrateSchema(): Promise<void>;
+  clearSalesTable(): Promise<void>;
   close(): Promise<void>;
   // Image storage methods
   storeGeneratedImage(filename: string, imageBuffer: Buffer, contentType?: string): Promise<void>;

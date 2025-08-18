@@ -14,6 +14,9 @@ import { TweetFormatter } from './services/tweetFormatter';
 import { NewTweetFormatter } from './services/newTweetFormatter';
 import { RateLimitService } from './services/rateLimitService';
 import { EthIdentityService } from './services/ethIdentityService';
+import { APIToggleService } from './services/apiToggleService';
+import { AutoTweetService } from './services/autoTweetService';
+import { WorldTimeService } from './services/worldTimeService';
 
 async function startApplication(): Promise<void> {
   try {
@@ -30,12 +33,14 @@ async function startApplication(): Promise<void> {
       : new DatabaseService();       // SQLite for local development
     
     const salesProcessingService = new SalesProcessingService(moralisService, databaseService);
-    const schedulerService = new SchedulerService(salesProcessingService, databaseService);
     const twitterService = new TwitterService();
     const tweetFormatter = new TweetFormatter();
     const newTweetFormatter = new NewTweetFormatter(databaseService);
     const rateLimitService = new RateLimitService(databaseService);
     const ethIdentityService = new EthIdentityService();
+    const worldTimeService = new WorldTimeService();
+    const autoTweetService = new AutoTweetService(newTweetFormatter, twitterService, rateLimitService, databaseService, worldTimeService);
+    const schedulerService = new SchedulerService(salesProcessingService, autoTweetService, databaseService);
 
     // Initialize database
     await databaseService.initialize();
@@ -206,7 +211,7 @@ async function startApplication(): Promise<void> {
           for (const trade of fetchResults.trades) {
             try {
               // Check if already processed (duplicate detection)
-              const isAlreadyProcessed = await databaseService.isSaleProcessed(trade.transactionHash);
+              const isAlreadyProcessed = await databaseService.isSaleProcessed(trade.tokenId);
               
               if (isAlreadyProcessed) {
                 duplicateSales++;
@@ -223,7 +228,7 @@ async function startApplication(): Promise<void> {
               }
 
               // Convert and store the sale using SalesProcessingService logic
-              const processedSale = salesProcessingService.convertToProcessedSalePublic(trade);
+              const processedSale = await salesProcessingService.convertToProcessedSalePublic(trade);
               await databaseService.insertSale(processedSale);
               
               processedSales++;
@@ -361,6 +366,184 @@ async function startApplication(): Promise<void> {
           message: 'Error counter reset'
         });
       } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    // Initialize API Toggle Service with database
+    const apiToggleService = APIToggleService.getInstance();
+    await apiToggleService.initialize(databaseService);
+
+    // Admin API Toggle endpoints
+    app.post('/api/admin/toggle-twitter', async (req, res) => {
+      try {
+        const { enabled } = req.body;
+        if (typeof enabled !== 'boolean') {
+          return res.status(400).json({
+            success: false,
+            error: 'enabled must be a boolean'
+          });
+        }
+
+        await apiToggleService.setTwitterEnabled(enabled);
+        
+        logger.info(`Twitter API ${enabled ? 'enabled' : 'disabled'} via admin toggle`);
+        
+        const state = apiToggleService.getState();
+        res.json({
+          success: true,
+          twitterEnabled: state.twitterEnabled,
+          autoPostingEnabled: state.autoPostingEnabled
+        });
+      } catch (error: any) {
+        logger.error('Toggle Twitter API error:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.post('/api/admin/toggle-moralis', async (req, res) => {
+      try {
+        const { enabled } = req.body;
+        if (typeof enabled !== 'boolean') {
+          return res.status(400).json({
+            success: false,
+            error: 'enabled must be a boolean'
+          });
+        }
+
+        await apiToggleService.setMoralisEnabled(enabled);
+        logger.info(`Moralis API ${enabled ? 'enabled' : 'disabled'} via admin toggle`);
+        
+        const state = apiToggleService.getState();
+        res.json({
+          success: true,
+          moralisEnabled: state.moralisEnabled
+        });
+      } catch (error: any) {
+        logger.error('Toggle Moralis API error:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.post('/api/admin/toggle-auto-posting', async (req, res) => {
+      try {
+        const { enabled } = req.body;
+        if (typeof enabled !== 'boolean') {
+          return res.status(400).json({
+            success: false,
+            error: 'enabled must be a boolean'
+          });
+        }
+
+        await apiToggleService.setAutoPostingEnabled(enabled);
+        logger.info(`Auto-posting ${enabled ? 'enabled' : 'disabled'} via admin toggle`);
+        
+        const state = apiToggleService.getState();
+        res.json({
+          success: true,
+          autoPostingEnabled: state.autoPostingEnabled
+        });
+      } catch (error: any) {
+        logger.error('Toggle auto-posting error:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.get('/api/admin/toggle-status', (req, res) => {
+      const state = apiToggleService.getState();
+      res.json({
+        success: true,
+        ...state
+      });
+    });
+
+    // Auto-post settings endpoints
+    app.get('/api/admin/autopost-settings', async (req, res) => {
+      try {
+        // Load settings from database
+        const minEthDefault = await databaseService.getSystemState('autopost_min_eth_default') || '0.1';
+        const minEth10kClub = await databaseService.getSystemState('autopost_min_eth_10k') || '0.5';
+        const minEth999Club = await databaseService.getSystemState('autopost_min_eth_999') || '0.3';
+        const maxAgeHours = await databaseService.getSystemState('autopost_max_age_hours') || '1';
+        
+        res.json({
+          success: true,
+          settings: {
+            minEthDefault: parseFloat(minEthDefault),
+            minEth10kClub: parseFloat(minEth10kClub),
+            minEth999Club: parseFloat(minEth999Club),
+            maxAgeHours: parseInt(maxAgeHours)
+          }
+        });
+      } catch (error: any) {
+        logger.error('Failed to load auto-post settings:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.post('/api/admin/autopost-settings', async (req, res) => {
+      try {
+        const { minEthDefault, minEth10kClub, minEth999Club, maxAgeHours } = req.body;
+        
+        // Validate inputs
+        if (typeof minEthDefault !== 'number' || minEthDefault < 0) {
+          return res.status(400).json({
+            success: false,
+            error: 'minEthDefault must be a positive number'
+          });
+        }
+        
+        if (typeof minEth10kClub !== 'number' || minEth10kClub < 0) {
+          return res.status(400).json({
+            success: false,
+            error: 'minEth10kClub must be a positive number'
+          });
+        }
+        
+        if (typeof minEth999Club !== 'number' || minEth999Club < 0) {
+          return res.status(400).json({
+            success: false,
+            error: 'minEth999Club must be a positive number'
+          });
+        }
+        
+        if (typeof maxAgeHours !== 'number' || maxAgeHours < 1 || maxAgeHours > 24) {
+          return res.status(400).json({
+            success: false,
+            error: 'maxAgeHours must be between 1 and 24'
+          });
+        }
+        
+        // Save to database
+        await databaseService.setSystemState('autopost_min_eth_default', minEthDefault.toString());
+        await databaseService.setSystemState('autopost_min_eth_10k', minEth10kClub.toString());
+        await databaseService.setSystemState('autopost_min_eth_999', minEth999Club.toString());
+        await databaseService.setSystemState('autopost_max_age_hours', maxAgeHours.toString());
+        
+        logger.info('Auto-post settings updated:', { minEthDefault, minEth10kClub, minEth999Club, maxAgeHours });
+        
+        res.json({
+          success: true,
+          message: 'Auto-post settings saved successfully',
+          settings: { minEthDefault, minEth10kClub, minEth999Club, maxAgeHours }
+        });
+      } catch (error: any) {
+        logger.error('Failed to save auto-post settings:', error.message);
         res.status(500).json({
           success: false,
           error: error.message
@@ -835,6 +1018,29 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    // Twitter History API endpoint
+    app.get('/api/twitter/history', async (req, res) => {
+      try {
+        const hoursBack = parseInt(req.query.hours as string) || 24;
+        const tweetHistory = await databaseService.getRecentTweetPosts(hoursBack);
+        
+        res.json({
+          success: true,
+          data: {
+            tweets: tweetHistory,
+            count: tweetHistory.length,
+            hoursBack: hoursBack
+          }
+        });
+      } catch (error: any) {
+        logger.error('Failed to fetch tweet history:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     // Image Generation API endpoints
     app.post('/api/image/generate-test', async (req, res) => {
       const { ImageController } = await import('./controllers/imageController');
@@ -952,6 +1158,44 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    app.post('/api/database/migrate-schema', async (req, res) => {
+      try {
+        logger.warn('Database schema migration requested - this will DROP and RECREATE tables!');
+        
+        await databaseService.migrateSchema();
+        
+        res.json({
+          success: true,
+          message: 'Database schema migration completed successfully. Tables recreated with new schema.'
+        });
+      } catch (error: any) {
+        logger.error('Database schema migration failed:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.post('/api/database/clear-sales', async (req, res) => {
+      try {
+        logger.warn('Sales table clear requested - this will delete all sales data!');
+        
+        await databaseService.clearSalesTable();
+        
+        res.json({
+          success: true,
+          message: 'Sales table cleared successfully. All sales data deleted, ready for fresh data.'
+        });
+      } catch (error: any) {
+        logger.error('Sales table clear failed:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     // Reset processing to start from recent blocks
     app.post('/api/processing/reset-to-recent', async (req, res) => {
       try {
@@ -1034,6 +1278,9 @@ async function startApplication(): Promise<void> {
       
       // Stop scheduler first
       schedulerService.stop();
+      
+      // Stop world time service
+      worldTimeService.stop();
       
       server.close(() => {
         logger.info('HTTP server closed');

@@ -49,9 +49,9 @@ export class DatabaseService implements IDatabaseService {
     await this.db.exec(`
       CREATE TABLE IF NOT EXISTS processed_sales (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        transaction_hash TEXT NOT NULL UNIQUE,
+        transaction_hash TEXT NOT NULL,
         contract_address TEXT NOT NULL,
-        token_id TEXT NOT NULL,
+        token_id TEXT NOT NULL UNIQUE,
         marketplace TEXT NOT NULL,
         buyer_address TEXT NOT NULL,
         seller_address TEXT NOT NULL,
@@ -170,13 +170,13 @@ export class DatabaseService implements IDatabaseService {
   /**
    * Check if a sale has already been processed
    */
-  async isSaleProcessed(transactionHash: string): Promise<boolean> {
+  async isSaleProcessed(tokenId: string): Promise<boolean> {
     if (!this.db) throw new Error('Database not initialized');
 
     try {
       const result = await this.db.get(
-        'SELECT id FROM processed_sales WHERE transaction_hash = ?',
-        [transactionHash]
+        'SELECT id FROM processed_sales WHERE token_id = ?',
+        [tokenId]
       );
 
       return !!result;
@@ -442,6 +442,54 @@ export class DatabaseService implements IDatabaseService {
       logger.info('Database reset completed successfully');
     } catch (error: any) {
       logger.error('Failed to reset database:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Migrate database schema - drop and recreate tables with new schema
+   * This is needed to apply schema changes like unique constraint modifications
+   */
+  async migrateSchema(): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    try {
+      logger.info('Starting database schema migration...');
+
+      // Drop existing tables
+      await this.db.exec('DROP TABLE IF EXISTS processed_sales');
+      await this.db.exec('DROP TABLE IF EXISTS twitter_posts');
+      await this.db.exec('DROP TABLE IF EXISTS system_state');
+      await this.db.exec('DROP TABLE IF EXISTS generated_images');
+
+      // Recreate tables with new schema
+      await this.createTables();
+
+      logger.info('Database schema migration completed successfully');
+    } catch (error: any) {
+      logger.error('Failed to migrate database schema:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Clear only sales table - keep tweets, settings, and system state
+   */
+  async clearSalesTable(): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    try {
+      logger.info('Starting sales table clear...');
+
+      // Delete only sales data
+      await this.db.exec('DELETE FROM processed_sales');
+
+      // Reset auto-increment counter for sales table only
+      await this.db.exec('DELETE FROM sqlite_sequence WHERE name = "processed_sales"');
+
+      logger.info('Sales table cleared successfully');
+    } catch (error: any) {
+      logger.error('Failed to clear sales table:', error.message);
       throw error;
     }
   }
