@@ -5,7 +5,7 @@
  * 
  * This script will trigger the database schema migration to fix the 
  * duplicate sales bug by changing the unique constraint from 
- * transaction_hash to token_id.
+ * transaction_hash to token_id..
  * 
  * Usage: node migrate-schema.js
  */
