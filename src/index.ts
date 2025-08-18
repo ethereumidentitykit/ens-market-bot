@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import CryptoJS from 'crypto-js';
+import axios from 'axios';
 import { config, validateConfig } from './utils/config';
 import { logger } from './utils/logger';
 import { MONITORED_CONTRACTS } from './config/contracts';
@@ -1249,6 +1250,70 @@ async function startApplication(): Promise<void> {
       res.sendFile(path.join(__dirname, '../public/index.html'));
     });
 
+    // ENS Metadata interface
+    interface ENSMetadata {
+      name: string;
+      description: string;
+      image: string;
+      image_url: string;
+      attributes: any[];
+    }
+
+    // Fetch ENS metadata from official ENS metadata API
+    async function fetchENSMetadata(contractAddress: string, tokenId: string): Promise<ENSMetadata | null> {
+      try {
+        const url = `https://metadata.ens.domains/mainnet/${contractAddress}/${tokenId}`;
+        logger.debug(`Fetching ENS metadata from: ${url}`);
+        
+        const response = await axios.get<ENSMetadata>(url, {
+          timeout: 5000, // 5 second timeout
+        });
+        
+        logger.debug(`Successfully fetched ENS metadata: ${response.data.name}`);
+        return response.data;
+        
+      } catch (error: any) {
+        logger.warn(`Failed to fetch ENS metadata for ${contractAddress}/${tokenId}:`, error.message);
+        return null;
+      }
+    }
+
+    // Helper functions for decoding ENS registration data
+    function extractEnsNameFromData(data: string): string {
+      try {
+        // Remove 0x prefix
+        const cleanData = data.slice(2);
+        
+        // The name is at offset 0x60 (96 bytes from start)
+        // First get the length of the string (next 32 bytes after offset)
+        const lengthHex = cleanData.slice(192, 256); // 96*2 to get to offset, then next 32 bytes
+        const length = parseInt(lengthHex, 16);
+        
+        // Then get the actual string data
+        const nameHex = cleanData.slice(256, 256 + (length * 2));
+        const nameBuffer = Buffer.from(nameHex, 'hex');
+        return nameBuffer.toString('utf8');
+      } catch (error) {
+        logger.error('Error extracting ENS name from data:', error);
+        return 'unknown';
+      }
+    }
+
+    function extractCostFromData(data: string): string {
+      try {
+        // Remove 0x prefix
+        const cleanData = data.slice(2);
+        
+        // Cost is in the second 32-byte slot (bytes 32-64)
+        const costHex = cleanData.slice(64, 128);
+        const costBigInt = BigInt('0x' + costHex);
+        return costBigInt.toString();
+      } catch (error) {
+        logger.error('Error extracting cost from data:', error);
+        return '0';
+      }
+    }
+
     // ENS Registration Webhook from Moralis Streams
     app.post('/webhook/ens-registrations', async (req, res) => {
       try {
@@ -1310,9 +1375,36 @@ async function startApplication(): Promise<void> {
                 data: log.data
               });
               
-              // TODO: Implement ENS name extraction from decoded data
-              // TODO: Implement token ID generation using keccak256
-              // TODO: Implement registration data persistence
+              // Extract ENS data from webhook
+              const ensName = extractEnsNameFromData(log.data);
+              const tokenId = log.topic1; // This is the keccak256 hash of the ENS name
+              const ownerAddress = log.topic2?.replace('0x000000000000000000000000', '0x'); // Remove leading zeros padding
+              const cost = extractCostFromData(log.data);
+              
+              logger.info('📝 Extracted ENS registration data:', {
+                ensName,
+                tokenId,
+                ownerAddress,
+                cost: cost ? `${cost} wei` : 'unknown',
+                transactionHash: eventData.transactionHash
+              });
+
+              // Fetch ENS metadata (image, description, etc.)
+              // Note: Use ENS Base Registrar contract address for metadata API, not the Controller contract
+              const ensBaseRegistrarAddress = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
+              const ensMetadata = await fetchENSMetadata(ensBaseRegistrarAddress, tokenId);
+              if (ensMetadata) {
+                logger.info('🖼️ ENS metadata fetched:', {
+                  name: ensMetadata.name,
+                  image: ensMetadata.image,
+                  description: ensMetadata.description
+                });
+              } else {
+                logger.warn('⚠️ Failed to fetch ENS metadata for', ensName);
+              }
+              
+              // TODO: Store registration in database (include metadata)
+              // TODO: Format and send tweet
               
               logger.info('✅ ENS registration event processed successfully');
             }
