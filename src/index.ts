@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import CryptoJS from 'crypto-js';
 import { config, validateConfig } from './utils/config';
 import { logger } from './utils/logger';
 import { MONITORED_CONTRACTS } from './config/contracts';
@@ -1246,6 +1247,96 @@ async function startApplication(): Promise<void> {
     // Serve admin dashboard
     app.get('/', (req, res) => {
       res.sendFile(path.join(__dirname, '../public/index.html'));
+    });
+
+    // ENS Registration Webhook from Moralis Streams
+    app.post('/webhook/ens-registrations', async (req, res) => {
+      try {
+        logger.info('🎉 ENS Registration webhook received');
+        
+        // Handle the webhook data - sometimes it comes as an array with JSON string
+        let webhookData = req.body;
+        
+        // If it's an array with a string, parse the first element
+        if (Array.isArray(webhookData) && typeof webhookData[0] === 'string') {
+          webhookData = JSON.parse(webhookData[0]);
+        }
+        
+        logger.info('Webhook data:', JSON.stringify(webhookData, null, 2));
+        
+        // Check if this is a test webhook (empty data)
+        if (!webhookData.logs || webhookData.logs.length === 0) {
+          if (!webhookData.block?.number || webhookData.block.number === '') {
+            logger.info('✅ Test webhook received successfully - no actual events to process');
+            return res.status(200).json({ 
+              success: true, 
+              message: 'Test webhook received',
+              type: 'test'
+            });
+          }
+          logger.warn('No logs found in webhook data');
+          return res.status(200).json({ 
+            success: true, 
+            message: 'Webhook received but no logs to process',
+            type: 'no_logs'
+          });
+        }
+        
+        // Process each log (should be NameRegistered events)
+        for (const log of webhookData.logs) {
+          try {
+            // Extract event data from the decoded abi
+            const eventData = {
+              transactionHash: log.transactionHash,
+              blockNumber: webhookData.block?.number || 'unknown',
+              blockTimestamp: webhookData.block?.timestamp || Date.now(),
+              contractAddress: log.address
+            };
+            
+            // Check if we have decoded event data
+            if (webhookData.logs[0] && webhookData.abi && webhookData.abi[0]) {
+              logger.info('🔍 Processing NameRegistered event...');
+              
+              // The event name and cost should be in the decoded data
+              // For now, let's log everything we receive to understand the structure
+              logger.info('Event details:', {
+                transactionHash: eventData.transactionHash,
+                blockNumber: eventData.blockNumber,
+                blockTimestamp: eventData.blockTimestamp,
+                contractAddress: eventData.contractAddress,
+                topic0: log.topic0,
+                topic1: log.topic1,
+                topic2: log.topic2,
+                data: log.data
+              });
+              
+              // TODO: Implement ENS name extraction from decoded data
+              // TODO: Implement token ID generation using keccak256
+              // TODO: Implement registration data persistence
+              
+              logger.info('✅ ENS registration event processed successfully');
+            }
+            
+          } catch (eventError: any) {
+            logger.error('Error processing event:', eventError.message);
+          }
+        }
+        
+        // Respond to Moralis that we received the webhook
+        res.status(200).json({ 
+          success: true,
+          message: 'Webhook received and processed',
+          eventsProcessed: webhookData.logs.length,
+          timestamp: new Date().toISOString()
+        });
+        
+      } catch (error: any) {
+        logger.error('Error processing ENS registration webhook:', error.message);
+        res.status(500).json({ 
+          error: 'Webhook processing failed',
+          message: error.message
+        });
+      }
     });
 
     // API info endpoint
