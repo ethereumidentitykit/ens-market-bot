@@ -130,23 +130,30 @@ export class NewTweetFormatter {
     buyerAccount: EthIdentityAccount | null, 
     sellerAccount: EthIdentityAccount | null
   ): string {
-    // Line 1: ENS name + sale price (ETH + USD)
+    // Header: Emoji + SOLD
+    const header = '💰 SOLD';
+    
+    // Line 1: ENS name
     const ensName = sale.nftName || 'Unknown ENS';
+    
+    // Line 2: Price in ETH and USD
     const priceEth = parseFloat(sale.priceEth).toFixed(2);
     const priceUsd = sale.priceUsd ? `($${parseFloat(sale.priceUsd).toLocaleString()})` : '';
-    const line1 = `${ensName} sold for ${priceEth} ETH ${priceUsd}`.trim();
-
-    // Line 2: Seller handle + "sold to" + buyer handle
+    const priceLine = `Price: ${priceEth} ETH ${priceUsd}`.trim();
+    
+    // Line 3: Seller
     const sellerHandle = this.getDisplayHandle(sellerAccount, sale.sellerAddress);
+    const sellerLine = `Seller: ${sellerHandle}`;
+    
+    // Line 4: Buyer
     const buyerHandle = this.getDisplayHandle(buyerAccount, sale.buyerAddress);
-    const line2 = `${sellerHandle} -> ${buyerHandle}`;
-
-    // Line 3: Vision.io marketplace link
+    const buyerLine = `Buyer: ${buyerHandle}`;
+    
+    // Line 5: Vision.io marketplace link
     const visionUrl = this.buildVisionioUrl(ensName);
-    const line3 = visionUrl;
-
-    // Combine with double line breaks
-    return `${line1}\n\n${line2}\n\n${line3}`;
+    
+    // Combine all lines with double line breaks
+    return `${header}\n\n${ensName}\n\n${priceLine}\n${sellerLine}\n${buyerLine}\n\n${visionUrl}`;
   }
 
   /**
@@ -169,30 +176,63 @@ export class NewTweetFormatter {
   }
 
   /**
-   * Get the best display handle for an account based on priority:
-   * 1. @twitterhandle (if com.twitter record exists)
-   * 2. ensname.eth (if ENS exists but no Twitter)
-   * 3. 0xabcd...efg1 (truncated address fallback)
+   * Clean and format a Twitter handle from ENS records
+   * Handles various formats like:
+   * - "twitter.com/james" → "james"
+   * - "x.com/james" → "james"
+   * - "https://twitter.com/james" → "james"
+   * - "https://x.com/james" → "james"
+   * - "@james" → "james"
+   * - "james" → "james"
+   */
+  private cleanTwitterHandle(handle: string): string {
+    if (!handle) return '';
+    
+    // Remove any URL parts (twitter.com/, x.com/, https://twitter.com/, https://x.com/, etc.)
+    let cleaned = handle.replace(/^(?:https?:\/\/)?(?:www\.)?(?:(?:twitter|x)\.com\/)?/i, '');
+    
+    // Remove @ if it's at the beginning
+    cleaned = cleaned.replace(/^@/, '');
+    
+    // Remove any trailing slashes or spaces
+    cleaned = cleaned.trim().replace(/\/$/, '');
+    
+    return cleaned;
+  }
+
+  /**
+   * Get the best display handle for an account
+   * Shows both ENS name and Twitter handle when available:
+   * - "ensname.eth @twitterhandle" (if both exist)
+   * - "ensname.eth" (if only ENS exists)
+   * - "@twitterhandle" (if only Twitter exists - shouldn't happen but handled)
+   * - "0xabcd...efg1" (truncated address fallback)
    */
   private getDisplayHandle(account: EthIdentityAccount | null, fallbackAddress: string): string {
     if (!account) {
       return this.shortenAddress(fallbackAddress);
     }
 
-    // Check for Twitter handle first
-    const twitterHandle = account.ens?.records?.['com.twitter'];
-    if (twitterHandle) {
-      return `${twitterHandle}`;
-    }
-
-    // Check for ENS name
     const ensName = account.ens?.name;
-    if (ensName) {
+    const twitterRecord = account.ens?.records?.['com.twitter'];
+    
+    // Clean the Twitter handle if it exists
+    const cleanedTwitter = twitterRecord ? this.cleanTwitterHandle(twitterRecord) : null;
+    
+    // Build the display string based on what's available
+    if (ensName && cleanedTwitter) {
+      // Both ENS and Twitter: show both
+      return `${ensName} @${cleanedTwitter}`;
+    } else if (ensName) {
+      // Only ENS name
       return ensName;
+    } else if (cleanedTwitter) {
+      // Only Twitter (edge case, but handle it)
+      return `@${cleanedTwitter}`;
     }
 
     // Fallback to shortened address
-    return this.shortenAddress(account.address);
+    return this.shortenAddress(account.address || fallbackAddress);
   }
 
   /**
@@ -237,17 +277,29 @@ export class NewTweetFormatter {
       errors.push(`Tweet too long: ${content.length} characters (max ${this.MAX_TWEET_LENGTH})`);
     }
 
-    // Check for required elements
+    // Check for required elements in new format
+    if (!content.includes('💰 SOLD')) {
+      errors.push('Tweet should include "💰 SOLD" header');
+    }
+
+    if (!content.includes('Price:')) {
+      errors.push('Tweet should include "Price:" label');
+    }
+
     if (!content.includes('ETH')) {
       errors.push('Tweet should include price in ETH');
     }
 
-    if (!content.includes('#ENS')) {
-      errors.push('Tweet should include #ENS hashtag');
+    if (!content.includes('Seller:')) {
+      errors.push('Tweet should include "Seller:" label');
     }
 
-    if (!content.includes('sold')) {
-      errors.push('Tweet should include "sold" text');
+    if (!content.includes('Buyer:')) {
+      errors.push('Tweet should include "Buyer:" label');
+    }
+
+    if (!content.includes('vision.io')) {
+      errors.push('Tweet should include Vision.io link');
     }
 
     return {
@@ -263,9 +315,12 @@ export class NewTweetFormatter {
     tweet: GeneratedTweet;
     validation: { valid: boolean; errors: string[] };
     breakdown: {
-      line1: string;
-      line2: string;
-      line3: string;
+      header: string;
+      ensName: string;
+      priceLine: string;
+      sellerLine: string;
+      buyerLine: string;
+      visionUrl: string;
       buyerHandle: string;
       sellerHandle: string;
     };
@@ -282,13 +337,18 @@ export class NewTweetFormatter {
     const ensName = sale.nftName || 'Unknown ENS';
     const priceEth = parseFloat(sale.priceEth).toFixed(2);
     const priceUsd = sale.priceUsd ? `($${parseFloat(sale.priceUsd).toLocaleString()})` : '';
+    const buyerHandle = this.getDisplayHandle(buyerAccount, sale.buyerAddress);
+    const sellerHandle = this.getDisplayHandle(sellerAccount, sale.sellerAddress);
     
     const breakdown = {
-      line1: `${ensName} sold for ${priceEth} ETH ${priceUsd}`.trim(),
-      line2: `${this.getDisplayHandle(sellerAccount, sale.sellerAddress)} sold to ${this.getDisplayHandle(buyerAccount, sale.buyerAddress)}`,
-      line3: '#ENS #ENSDomains #Ethereum',
-      buyerHandle: this.getDisplayHandle(buyerAccount, sale.buyerAddress),
-      sellerHandle: this.getDisplayHandle(sellerAccount, sale.sellerAddress)
+      header: '💰 SOLD',
+      ensName: ensName,
+      priceLine: `Price: ${priceEth} ETH ${priceUsd}`.trim(),
+      sellerLine: `Seller: ${sellerHandle}`,
+      buyerLine: `Buyer: ${buyerHandle}`,
+      visionUrl: this.buildVisionioUrl(ensName),
+      buyerHandle: buyerHandle,
+      sellerHandle: sellerHandle
     };
 
     return { tweet, validation, breakdown };
