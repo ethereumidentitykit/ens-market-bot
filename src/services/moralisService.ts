@@ -179,7 +179,7 @@ export class MoralisService {
    * @param lastProcessedBlock - Block number to start from (fetch trades newer than this)
    * @param batchSize - Number of trades to fetch per API call (default: 10)
    */
-  async getIncrementalTrades(lastProcessedBlock: number, batchSize: number = 10): Promise<EnhancedNFTSale[]> {
+  async getIncrementalTrades(lastProcessedBlock: number, batchSize: number = 5): Promise<EnhancedNFTSale[]> {
     const allNewTrades: EnhancedNFTSale[] = [];
     
     logger.info(`Starting incremental fetch from block ${lastProcessedBlock} with batch size ${batchSize}`);
