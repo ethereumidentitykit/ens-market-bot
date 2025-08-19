@@ -357,9 +357,9 @@ export class NewTweetFormatter {
       priceUsd,
       ensName,
       buyerEns: ownerHandle, // New owner is the "buyer"
-      sellerEns: '🏛️ ENS', // ENS DAO is the "seller"
+      sellerEns: 'ENS DAO', // ENS DAO is the "seller"
       buyerAvatar: ownerAvatar,
-      sellerAvatar: undefined, // No avatar for ENS DAO
+      sellerAvatar: undefined, // Will be handled by PuppeteerImageService with dao-profile.png
       nftImageUrl: registration.image, // Use ENS NFT image if available
       saleId: registration.id,
       transactionHash: registration.transactionHash

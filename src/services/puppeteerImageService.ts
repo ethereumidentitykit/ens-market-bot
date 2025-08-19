@@ -24,8 +24,8 @@ export class PuppeteerImageService {
       buyerEns: data.buyerEns, // New owner
       buyerAvatar: data.buyerAvatar,
       sellerAddress: '0x0000000000000000000000000000000000000000', // Placeholder
-      sellerEns: data.sellerEns, // "🏛️ ENS"
-      sellerAvatar: data.sellerAvatar,
+      sellerEns: data.sellerEns, // "ENS DAO"
+      sellerAvatar: this.getDaoProfileBase64(), // Use DAO avatar for registrations
       transactionHash: data.transactionHash || '0x0000',
       timestamp: new Date()
     };
@@ -440,6 +440,26 @@ export class PuppeteerImageService {
       logger.warn('Failed to load user placeholder image for base64 conversion:', error);
     }
     return null;
+  }
+
+  /**
+   * Get DAO profile image as base64 data URL
+   */
+  private static getDaoProfileBase64(): string | undefined {
+    try {
+      const daoProfilePath = path.join(__dirname, '../../assets/dao-profile.png');
+      if (fs.existsSync(daoProfilePath)) {
+        const imageBuffer = fs.readFileSync(daoProfilePath);
+        const base64Image = imageBuffer.toString('base64');
+        return `data:image/png;base64,${base64Image}`;
+      }
+    } catch (error) {
+      logger.warn('Failed to load DAO profile image for base64 conversion:', error);
+      // Fallback to user placeholder
+      const fallback = this.getUserPlaceholderBase64();
+      return fallback || undefined;
+    }
+    return undefined;
   }
 
   /**
