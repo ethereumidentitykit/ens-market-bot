@@ -218,8 +218,8 @@ export class NewTweetFormatter {
     // Line 4: Vision.io marketplace link
     const visionUrl = this.buildVisionioUrl(ensName);
     
-    // Combine all lines with double line breaks
-    return `${header}\n\n${ensName}\n\n${priceLine}\n\n${ownerLine}\n\n${visionUrl}`;
+    // Combine all lines with double line breaks (except between price and owner)
+    return `${header}\n\n${ensName}\n\n${priceLine}\n${ownerLine}\n\n${visionUrl}`;
   }
 
   /**
