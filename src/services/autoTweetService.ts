@@ -290,13 +290,14 @@ export class AutoTweetService {
 
     // Check if registration meets ETH minimum requirements
     const registrationEthValue = parseFloat(registration.costEth || '0');
+    const ethMinimum = this.getEthMinimumForRegistration(registration, settings);
     
-    if (registrationEthValue < settings.minEthRegistrations) {
+    if (registrationEthValue < ethMinimum) {
       return {
         success: false,
         registrationId,
         skipped: true,
-        reason: `${registration.costEth} ETH below minimum ${settings.minEthRegistrations} ETH for registrations`,
+        reason: `${registration.costEth} ETH below minimum ${ethMinimum} ETH for ${this.getRegistrationCategoryName(registration)}`,
         type: 'registration'
       };
     }
@@ -433,6 +434,36 @@ export class AutoTweetService {
       return '10k Club';
     } else {
       return 'Standard';
+    }
+  }
+
+  /**
+   * Get ETH minimum requirement for a registration based on category
+   */
+  private getEthMinimumForRegistration(registration: ENSRegistration, settings: AutoPostSettings): number {
+    const ensName = registration.fullName || registration.ensName || '';
+    
+    if (this.CLUB_999_PATTERN.test(ensName)) {
+      return settings.minEth999Club;
+    } else if (this.CLUB_10K_PATTERN.test(ensName)) {
+      return settings.minEth10kClub;
+    } else {
+      return settings.minEthRegistrations; // Use registration-specific default
+    }
+  }
+
+  /**
+   * Get registration category name for logging/debugging
+   */
+  private getRegistrationCategoryName(registration: ENSRegistration): string {
+    const ensName = registration.fullName || registration.ensName || '';
+    
+    if (this.CLUB_999_PATTERN.test(ensName)) {
+      return '999 Club registration';
+    } else if (this.CLUB_10K_PATTERN.test(ensName)) {
+      return '10k Club registration';
+    } else {
+      return 'Standard registration';
     }
   }
 
