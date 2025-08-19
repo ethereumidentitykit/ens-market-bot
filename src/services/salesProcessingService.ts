@@ -308,8 +308,8 @@ export class SalesProcessingService {
         }
       }
 
-      // Fetch only new sales using cursor pagination with limit=10
-      const recentSales = await this.moralisService.getIncrementalTrades(lastProcessedBlock, 10);
+      // Fetch only new sales using cursor pagination with limit=5
+      const recentSales = await this.moralisService.getIncrementalTrades(lastProcessedBlock, 5);
       stats.fetched = recentSales.length;
 
       logger.info(`Fetched ${recentSales.length} new sales from incremental fetch`);

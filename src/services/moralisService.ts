@@ -206,7 +206,7 @@ export class MoralisService {
    * Get incremental NFT trades since last processed block using cursor pagination
    * Optimized for scheduler use - fetches only new trades since lastProcessedBlock
    * @param lastProcessedBlock - Block number to start from (fetch trades newer than this)
-   * @param batchSize - Number of trades to fetch per API call (default: 10)
+   * @param batchSize - Number of trades to fetch per API call (default: 5)
    */
   async getIncrementalTrades(lastProcessedBlock: number, batchSize: number = 5): Promise<EnhancedNFTSale[]> {
     const allNewTrades: EnhancedNFTSale[] = [];
