@@ -2,6 +2,7 @@ import { logger } from '../utils/logger';
 import { MockImageData } from '../types/imageTypes';
 import { IDatabaseService } from '../types';
 import { emojiMappingService } from './emojiMappingService';
+import { RealImageData } from './realDataImageService';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -10,9 +11,39 @@ export class PuppeteerImageService {
   private static readonly IMAGE_HEIGHT = 666;
 
   /**
+   * Generate ENS registration image using Puppeteer
+   */
+  public static async generateRegistrationImage(data: RealImageData): Promise<Buffer> {
+    // Convert RealImageData to MockImageData format for compatibility
+    const mockData: MockImageData = {
+      priceEth: data.priceEth,
+      priceUsd: data.priceUsd,
+      ensName: data.ensName,
+      nftImageUrl: data.nftImageUrl,
+      buyerAddress: '0x0000000000000000000000000000000000000000', // Placeholder
+      buyerEns: data.buyerEns, // New owner
+      buyerAvatar: data.buyerAvatar,
+      sellerAddress: '0x0000000000000000000000000000000000000000', // Placeholder
+      sellerEns: data.sellerEns, // "🏛️ ENS"
+      sellerAvatar: data.sellerAvatar,
+      transactionHash: data.transactionHash || '0x0000',
+      timestamp: new Date()
+    };
+
+    return await this.generateImageWithBackground(mockData, 'registration');
+  }
+
+  /**
    * Generate ENS sale image using Puppeteer
    */
   public static async generateSaleImage(data: MockImageData): Promise<Buffer> {
+    return await this.generateImageWithBackground(data, 'sale');
+  }
+
+  /**
+   * Generate image with specified background type
+   */
+  private static async generateImageWithBackground(data: MockImageData, imageType: 'sale' | 'registration'): Promise<Buffer> {
     // Environment-aware Puppeteer setup
     const isVercel = process.env.VERCEL === '1';
     
@@ -58,8 +89,8 @@ export class PuppeteerImageService {
         deviceScaleFactor: 1
       });
 
-      // Generate HTML content with emoji replacement
-      const htmlContent = await this.generateHTML(data);
+      // Generate HTML content with emoji replacement and background type
+      const htmlContent = await this.generateHTML(data, imageType);
       
       // Set the HTML content
       await page.setContent(htmlContent, { 
@@ -100,9 +131,11 @@ export class PuppeteerImageService {
   /**
    * Generate HTML template with embedded CSS
    */
-  private static async generateHTML(data: MockImageData): Promise<string> {
-    // Get background image as base64 if it exists
-    const backgroundImageBase64 = this.getBackgroundImageBase64();
+  private static async generateHTML(data: MockImageData, imageType: 'sale' | 'registration' = 'sale'): Promise<string> {
+    // Get background image as base64 based on image type
+    const backgroundImageBase64 = imageType === 'registration' 
+      ? this.getRegistrationBackgroundImageBase64()
+      : this.getBackgroundImageBase64();
     const userPlaceholderBase64 = this.getUserPlaceholderBase64();
     
     // Replace emojis in text fields with SVG elements
@@ -369,6 +402,25 @@ export class PuppeteerImageService {
       }
     } catch (error) {
       logger.warn('Failed to load background image for base64 conversion:', error);
+    }
+    return null;
+  }
+
+  /**
+   * Get registration background image as base64 data URL
+   */
+  private static getRegistrationBackgroundImageBase64(): string | null {
+    try {
+      const backgroundPath = path.join(__dirname, '../../assets/background-reg.png');
+      if (fs.existsSync(backgroundPath)) {
+        const imageBuffer = fs.readFileSync(backgroundPath);
+        const base64Image = imageBuffer.toString('base64');
+        return `data:image/png;base64,${base64Image}`;
+      }
+    } catch (error) {
+      logger.warn('Failed to load registration background image for base64 conversion:', error);
+      // Fallback to regular background
+      return this.getBackgroundImageBase64();
     }
     return null;
   }

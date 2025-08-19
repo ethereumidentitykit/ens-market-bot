@@ -145,6 +145,8 @@ export class SchedulerService {
       
       // Auto-post new sales if enabled
       let autoPostResults: PostResult[] = [];
+      let registrationAutoPostResults: PostResult[] = [];
+      
       if (result.newSales > 0 && result.processedSales.length > 0) {
         const autoPostSettings = await this.autoTweetService.getSettings();
         if (autoPostSettings.enabled && this.apiToggleService.isAutoPostingEnabled()) {
@@ -155,27 +157,56 @@ export class SchedulerService {
           const skipped = autoPostResults.filter(r => r.skipped).length;
           const failed = autoPostResults.filter(r => !r.success && !r.skipped).length;
           
-          logger.info(`🐦 Auto-posting results: ${posted} posted, ${skipped} skipped, ${failed} failed`);
+          logger.info(`🐦 Sales auto-posting results: ${posted} posted, ${skipped} skipped, ${failed} failed`);
+        }
+      }
+
+      // Auto-post new registrations if enabled
+      const unpostedRegistrations = await this.databaseService.getUnpostedRegistrations(10);
+      if (unpostedRegistrations.length > 0) {
+        const autoPostSettings = await this.autoTweetService.getSettings();
+        if (autoPostSettings.enabled && autoPostSettings.registrationsEnabled && this.apiToggleService.isAutoPostingEnabled()) {
+          logger.info(`🏛️ Auto-posting ${unpostedRegistrations.length} new registrations...`);
+          registrationAutoPostResults = await this.autoTweetService.processNewRegistrations(unpostedRegistrations, autoPostSettings);
+          
+          const posted = registrationAutoPostResults.filter(r => r.success).length;
+          const skipped = registrationAutoPostResults.filter(r => r.skipped).length;
+          const failed = registrationAutoPostResults.filter(r => !r.success && !r.skipped).length;
+          
+          logger.info(`🏛️ Registration auto-posting results: ${posted} posted, ${skipped} skipped, ${failed} failed`);
         }
       }
       
       this.lastRunTime = startTime;
-      this.lastRunStats = { ...result, autoPostResults };
+      this.lastRunStats = { ...result, autoPostResults, registrationAutoPostResults };
       this.consecutiveErrors = 0; // Reset error counter on success
 
       const duration = Date.now() - startTime.getTime();
+      
+      const salesPosted = autoPostResults.filter(r => r.success).length;
+      const registrationsPosted = registrationAutoPostResults.filter(r => r.success).length;
       
       logger.info(`Scheduled sync completed in ${duration}ms:`, {
         fetched: result.fetched,
         newSales: result.newSales,
         duplicates: result.duplicates,
         errors: result.errors,
-        autoPosted: autoPostResults.filter(r => r.success).length
+        salesAutoPosted: salesPosted,
+        registrationsAutoPosted: registrationsPosted,
+        totalAutoPosted: salesPosted + registrationsPosted
       });
 
       // Log notable events
       if (result.newSales > 0) {
         logger.info(`📈 Found ${result.newSales} new sales to process`);
+      }
+      
+      if (unpostedRegistrations.length > 0) {
+        logger.info(`🏛️ Found ${unpostedRegistrations.length} unposted registrations to process`);
+      }
+      
+      if (salesPosted > 0 || registrationsPosted > 0) {
+        logger.info(`🐦 Posted ${salesPosted} sale tweets and ${registrationsPosted} registration tweets`);
       }
       
       if (result.errors > 0) {

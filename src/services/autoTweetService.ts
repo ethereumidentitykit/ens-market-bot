@@ -4,7 +4,7 @@
  */
 
 import { logger } from '../utils/logger';
-import { ProcessedSale, IDatabaseService } from '../types';
+import { ProcessedSale, IDatabaseService, ENSRegistration } from '../types';
 import { APIToggleService } from './apiToggleService';
 import { NewTweetFormatter } from './newTweetFormatter';
 import { TwitterService } from './twitterService';
@@ -17,15 +17,21 @@ export interface AutoPostSettings {
   minEth10kClub: number;
   minEth999Club: number;
   maxAgeHours: number;
+  // Registration-specific settings
+  registrationsEnabled: boolean;
+  minEthRegistrations: number;
+  maxAgeHoursRegistrations: number;
 }
 
 export interface PostResult {
   success: boolean;
-  saleId: number;
+  saleId?: number; // For sales
+  registrationId?: number; // For registrations
   tweetId?: string;
   error?: string;
   skipped?: boolean;
   reason?: string;
+  type?: 'sale' | 'registration'; // To distinguish between types
 }
 
 export class AutoTweetService {
@@ -108,6 +114,59 @@ export class AutoTweetService {
   }
 
   /**
+   * Process new registrations for automated posting
+   */
+  async processNewRegistrations(registrations: ENSRegistration[], settings: AutoPostSettings): Promise<PostResult[]> {
+    if (!settings.enabled || !settings.registrationsEnabled) {
+      logger.debug('Registration auto-posting is disabled');
+      return [];
+    }
+
+    if (!this.apiToggleService.isTwitterEnabled()) {
+      logger.warn('Cannot auto-post registrations: Twitter API is disabled');
+      return [];
+    }
+
+    if (!this.apiToggleService.isAutoPostingEnabled()) {
+      logger.debug('Auto-posting is disabled via toggle');
+      return [];
+    }
+
+    logger.info(`Processing ${registrations.length} registrations for auto-posting...`);
+    
+    const results: PostResult[] = [];
+    
+    for (const registration of registrations) {
+      try {
+        const result = await this.processSingleRegistration(registration, settings);
+        results.push(result);
+        
+        // Rate limiting: delay between posts to allow for image generation
+        if (result.success) {
+          logger.info('Registration tweet posted successfully, waiting 20 seconds before next post...');
+          await this.delay(20000); // 20 second delay between successful posts
+        }
+      } catch (error: any) {
+        logger.error(`Error processing registration ${registration.id}:`, error.message);
+        results.push({
+          success: false,
+          registrationId: registration.id!,
+          error: error.message,
+          type: 'registration'
+        });
+      }
+    }
+
+    const successful = results.filter(r => r.success).length;
+    const skipped = results.filter(r => r.skipped).length;
+    const failed = results.filter(r => !r.success && !r.skipped).length;
+
+    logger.info(`Registration auto-posting results: ${successful} posted, ${skipped} skipped, ${failed} failed`);
+    
+    return results;
+  }
+
+  /**
    * Process a single sale for posting
    */
   private async processSingleSale(sale: ProcessedSale, settings: AutoPostSettings): Promise<PostResult> {
@@ -119,7 +178,8 @@ export class AutoTweetService {
         success: false,
         saleId,
         skipped: true,
-        reason: `Sale is older than ${settings.maxAgeHours} hours`
+        reason: `Sale is older than ${settings.maxAgeHours} hours`,
+        type: 'sale'
       };
     }
 
@@ -132,7 +192,8 @@ export class AutoTweetService {
         success: false,
         saleId,
         skipped: true,
-        reason: `${sale.priceEth} ETH below minimum ${ethMinimum} ETH for ${this.getCategoryName(sale)}`
+        reason: `${sale.priceEth} ETH below minimum ${ethMinimum} ETH for ${this.getCategoryName(sale)}`,
+        type: 'sale'
       };
     }
 
@@ -143,7 +204,8 @@ export class AutoTweetService {
         success: false,
         saleId,
         skipped: true,
-        reason: `Rate limit exceeded: ${rateLimitCheck.postsInLast24Hours}/15 posts used`
+        reason: `Rate limit exceeded: ${rateLimitCheck.postsInLast24Hours}/15 posts used`,
+        type: 'sale'
       };
     }
 
@@ -158,7 +220,8 @@ export class AutoTweetService {
         return {
           success: false,
           saleId,
-          error: 'Failed to generate valid tweet content'
+          error: 'Failed to generate valid tweet content',
+          type: 'sale'
         };
       }
 
@@ -181,7 +244,8 @@ export class AutoTweetService {
         return {
           success: true,
           saleId,
-          tweetId: postResult.tweetId
+          tweetId: postResult.tweetId,
+          type: 'sale'
         };
       } else {
         // Record failed post
@@ -208,6 +272,113 @@ export class AutoTweetService {
   }
 
   /**
+   * Process a single registration for posting
+   */
+  private async processSingleRegistration(registration: ENSRegistration, settings: AutoPostSettings): Promise<PostResult> {
+    const registrationId = registration.id!;
+
+    // Check if registration is too old
+    if (!(await this.isWithinRegistrationTimeLimit(registration, settings.maxAgeHoursRegistrations))) {
+      return {
+        success: false,
+        registrationId,
+        skipped: true,
+        reason: `Registration is older than ${settings.maxAgeHoursRegistrations} hours`,
+        type: 'registration'
+      };
+    }
+
+    // Check if registration meets ETH minimum requirements
+    const registrationEthValue = parseFloat(registration.costEth || '0');
+    
+    if (registrationEthValue < settings.minEthRegistrations) {
+      return {
+        success: false,
+        registrationId,
+        skipped: true,
+        reason: `${registration.costEth} ETH below minimum ${settings.minEthRegistrations} ETH for registrations`,
+        type: 'registration'
+      };
+    }
+
+    // Check rate limits
+    const rateLimitCheck = await this.rateLimitService.canPostTweet();
+    if (!rateLimitCheck.canPost) {
+      return {
+        success: false,
+        registrationId,
+        skipped: true,
+        reason: `Rate limit exceeded: ${rateLimitCheck.postsInLast24Hours}/15 posts used`,
+        type: 'registration'
+      };
+    }
+
+    // Generate and post tweet
+    logger.info(`Auto-posting registration: ${registration.ensName || registration.fullName} for ${registration.costEth} ETH`);
+    
+    try {
+      // Generate tweet content and image
+      const tweetData = await this.newTweetFormatter.generateRegistrationTweet(registration);
+      
+      if (!tweetData.isValid) {
+        return {
+          success: false,
+          registrationId,
+          error: 'Failed to generate valid registration tweet content',
+          type: 'registration'
+        };
+      }
+
+      // Post to Twitter
+      const postResult = await this.twitterService.postTweet(
+        tweetData.text, 
+        tweetData.imageBuffer
+      );
+
+      if (postResult.success && postResult.tweetId) {
+        // Record successful post
+        await this.rateLimitService.recordTweetPost(
+          postResult.tweetId,
+          tweetData.text
+        );
+
+        // Mark registration as posted
+        await this.databaseService.markRegistrationAsPosted(registrationId, postResult.tweetId);
+
+        logger.info(`Successfully auto-posted registration ${registrationId} - Tweet ID: ${postResult.tweetId}`);
+        
+        return {
+          success: true,
+          registrationId,
+          tweetId: postResult.tweetId,
+          type: 'registration'
+        };
+      } else {
+        // Record failed post
+        await this.rateLimitService.recordFailedTweetPost(
+          tweetData.text,
+          postResult.error || 'Unknown error'
+        );
+
+        return {
+          success: false,
+          registrationId,
+          error: postResult.error || 'Failed to post registration tweet',
+          type: 'registration'
+        };
+      }
+    } catch (error: any) {
+      logger.error(`Error posting tweet for registration ${registrationId}:`, error.message);
+      return {
+        success: false,
+        registrationId,
+        error: error.message,
+        type: 'registration'
+      };
+    }
+  }
+
+  /**
    * Check if sale is within the time limit using accurate UTC time
    */
   private async isWithinTimeLimit(sale: ProcessedSale, maxAgeHours: number): Promise<boolean> {
@@ -217,6 +388,20 @@ export class AutoTweetService {
     const ageMs = currentTime.getTime() - saleTimestamp.getTime();
     
     logger.debug(`Time check for sale ${sale.nftName || sale.tokenId}: sale=${saleTimestamp.toISOString()}, current=${currentTime.toISOString()}, age=${Math.round(ageMs/1000/60)}min, limit=${maxAgeHours}h`);
+    
+    return ageMs <= maxAgeMs;
+  }
+
+  /**
+   * Check if registration is within the time limit using accurate UTC time
+   */
+  private async isWithinRegistrationTimeLimit(registration: ENSRegistration, maxAgeHours: number): Promise<boolean> {
+    const registrationTimestamp = new Date(registration.blockTimestamp);
+    const currentTime = await this.worldTimeService.getCurrentTime();
+    const maxAgeMs = maxAgeHours * 60 * 60 * 1000;
+    const ageMs = currentTime.getTime() - registrationTimestamp.getTime();
+    
+    logger.debug(`Time check for registration ${registration.ensName || registration.fullName}: registration=${registrationTimestamp.toISOString()}, current=${currentTime.toISOString()}, age=${Math.round(ageMs/1000/60)}min, limit=${maxAgeHours}h`);
     
     return ageMs <= maxAgeMs;
   }
@@ -265,15 +450,24 @@ export class AutoTweetService {
     try {
       const minEthDefault = await this.databaseService.getSystemState('autopost_min_eth_default') || '0.1';
       const minEth10kClub = await this.databaseService.getSystemState('autopost_min_eth_10k') || '0.5';
-      const minEth999Club = await this.databaseService.getSystemState('autopost_min_eth_999') || '0.3';
+      const minEth999Club = await this.databaseService.getSystemState('autopost_min_eth_999') || '5';
       const maxAgeHours = await this.databaseService.getSystemState('autopost_max_age_hours') || '1';
+      
+      // Registration-specific settings
+      const registrationsEnabled = await this.databaseService.getSystemState('autopost_registrations_enabled') || 'true';
+      const minEthRegistrations = await this.databaseService.getSystemState('autopost_min_eth_registrations') || '0.1';
+      const maxAgeHoursRegistrations = await this.databaseService.getSystemState('autopost_max_age_hours_registrations') || '2';
       
       return {
         enabled: this.apiToggleService.isAutoPostingEnabled(),
         minEthDefault: parseFloat(minEthDefault),
         minEth10kClub: parseFloat(minEth10kClub),
         minEth999Club: parseFloat(minEth999Club),
-        maxAgeHours: parseInt(maxAgeHours)
+        maxAgeHours: parseInt(maxAgeHours),
+        // Registration settings
+        registrationsEnabled: registrationsEnabled === 'true',
+        minEthRegistrations: parseFloat(minEthRegistrations),
+        maxAgeHoursRegistrations: parseInt(maxAgeHoursRegistrations)
       };
     } catch (error: any) {
       logger.warn('Failed to load auto-post settings from database, using defaults:', error.message);
@@ -282,7 +476,11 @@ export class AutoTweetService {
         minEthDefault: 0.1,
         minEth10kClub: 0.5,
         minEth999Club: 0.3,
-        maxAgeHours: 1
+        maxAgeHours: 1,
+        // Registration defaults
+        registrationsEnabled: true,
+        minEthRegistrations: 0.01,
+        maxAgeHoursRegistrations: 2
       };
     }
   }
@@ -296,7 +494,10 @@ export class AutoTweetService {
       minEthDefault: 0.1,
       minEth10kClub: 0.5,
       minEth999Club: 0.3,
-      maxAgeHours: 1
+      maxAgeHours: 1,
+      registrationsEnabled: true,
+      minEthRegistrations: 0.01,
+      maxAgeHoursRegistrations: 2
     };
   }
 

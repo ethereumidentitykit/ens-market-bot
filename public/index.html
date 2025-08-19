@@ -437,8 +437,23 @@
                             Enhanced Tweet Generation
                         </h4>
                         
-                        <!-- Sale Selection -->
+                        <!-- Tweet Type Selection -->
                         <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Tweet Type</label>
+                            <div class="flex items-center space-x-4">
+                                <label class="inline-flex items-center">
+                                    <input type="radio" x-model="tweetType" value="sale" class="form-radio h-4 w-4 text-blue-600" @change="clearTweetPreview(); clearSelection();">
+                                    <span class="ml-2 text-sm text-gray-700">💰 Sales</span>
+                                </label>
+                                <label class="inline-flex items-center">
+                                    <input type="radio" x-model="tweetType" value="registration" class="form-radio h-4 w-4 text-purple-600" @change="clearTweetPreview(); clearSelection();">
+                                    <span class="ml-2 text-sm text-gray-700">🏛️ Registrations</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Sale Selection -->
+                        <div x-show="tweetType === 'sale'" class="mb-4">
                             <label class="block text-sm font-medium text-gray-700 mb-2">Select Sale to Tweet</label>
                             <div class="flex items-center space-x-3">
                                 <select 
@@ -462,11 +477,36 @@
                             </div>
                         </div>
 
+                        <!-- Registration Selection -->
+                        <div x-show="tweetType === 'registration'" class="mb-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Select Registration to Tweet</label>
+                            <div class="flex items-center space-x-3">
+                                <select 
+                                    x-model="selectedRegistrationId"
+                                    @change="clearTweetPreview()"
+                                    class="flex-1 block px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                                >
+                                    <option value="">Select a registration...</option>
+                                    <template x-for="registration in unpostedRegistrations" :key="registration.id">
+                                        <option :value="registration.id" x-text="`${registration.fullName || registration.ensName || 'Unknown'} - ${parseFloat(registration.costEth || '0').toFixed(2)} ETH`"></option>
+                                    </template>
+                                </select>
+                                <button 
+                                    @click="refreshUnpostedRegistrations()" 
+                                    :disabled="loading"
+                                    class="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50"
+                                >
+                                    <i class="fas fa-sync-alt mr-1" :class="{'loading': loading}"></i>
+                                    Refresh
+                                </button>
+                            </div>
+                        </div>
+
                         <!-- Generate Post Button -->
                         <div class="mb-4">
                             <button 
                                 @click="generateTweetPost()" 
-                                :disabled="!selectedSaleId || tweetGenerating"
+                                :disabled="(!selectedSaleId && !selectedRegistrationId) || tweetGenerating"
                                 class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 <i class="fas fa-magic mr-2" :class="{'loading': tweetGenerating}"></i>
@@ -521,13 +561,29 @@
                             <div x-show="tweetBreakdown" class="bg-blue-50 border border-blue-200 rounded-lg p-4">
                                 <h5 class="text-sm font-medium text-blue-900 mb-2">Tweet Breakdown</h5>
                                 <div class="space-y-1 text-sm">
-                                    <div><span class="font-medium text-blue-800">Line 1:</span> <span x-text="tweetBreakdown?.line1"></span></div>
-                                    <div><span class="font-medium text-blue-800">Line 2:</span> <span x-text="tweetBreakdown?.line2"></span></div>
-                                    <div><span class="font-medium text-blue-800">Line 3:</span> <span x-text="tweetBreakdown?.line3"></span></div>
+                                    <div><span class="font-medium text-blue-800">Header:</span> <span x-text="tweetBreakdown?.header"></span></div>
+                                    <div><span class="font-medium text-blue-800">ENS Name:</span> <span x-text="tweetBreakdown?.ensName"></span></div>
+                                    <div><span class="font-medium text-blue-800">Price:</span> <span x-text="tweetBreakdown?.priceLine"></span></div>
+                                    <!-- Sales Breakdown -->
+                                    <div x-show="tweetType === 'sale'" class="space-y-1">
+                                        <div><span class="font-medium text-blue-800">Seller:</span> <span x-text="tweetBreakdown?.sellerLine"></span></div>
+                                        <div><span class="font-medium text-blue-800">Buyer:</span> <span x-text="tweetBreakdown?.buyerLine"></span></div>
+                                    </div>
+                                    <!-- Registration Breakdown -->
+                                    <div x-show="tweetType === 'registration'">
+                                        <div><span class="font-medium text-blue-800">New Owner:</span> <span x-text="tweetBreakdown?.ownerLine"></span></div>
+                                    </div>
+                                    <div><span class="font-medium text-blue-800">Link:</span> <span x-text="tweetBreakdown?.visionUrl"></span></div>
+                                    <!-- Handles Info -->
                                     <div class="pt-2 border-t border-blue-200">
                                         <span class="font-medium text-blue-800">Handles:</span>
-                                        <span class="ml-2">Buyer: <code x-text="tweetBreakdown?.buyerHandle"></code></span>
-                                        <span class="ml-4">Seller: <code x-text="tweetBreakdown?.sellerHandle"></code></span>
+                                        <div x-show="tweetType === 'sale'">
+                                            <span class="ml-2">Buyer: <code x-text="tweetBreakdown?.buyerHandle"></code></span>
+                                            <span class="ml-4">Seller: <code x-text="tweetBreakdown?.sellerHandle"></code></span>
+                                        </div>
+                                        <div x-show="tweetType === 'registration'">
+                                            <span class="ml-2">Owner: <code x-text="tweetBreakdown?.ownerHandle"></code></span>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

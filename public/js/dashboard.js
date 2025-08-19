@@ -48,8 +48,11 @@ function dashboard() {
         testImageToken: '',
 
         // New tweet generation state
+        tweetType: 'sale', // 'sale' or 'registration'
         unpostedSales: [],
         selectedSaleId: '',
+        unpostedRegistrations: [],
+        selectedRegistrationId: '',
         generatedTweet: null,
         tweetBreakdown: null,
         tweetImageUrl: null,
@@ -274,6 +277,7 @@ function dashboard() {
             await this.loadAutoPostSettings();
             await this.refreshData();
             await this.loadUnpostedSales();
+            await this.loadUnpostedRegistrations();
             await this.loadContracts();
             await this.loadTweetHistory();
             await this.databaseView.loadPage(1);
@@ -795,6 +799,23 @@ function dashboard() {
             }
         },
 
+        async loadUnpostedRegistrations() {
+            try {
+                const response = await fetch('/api/unposted-registrations?limit=20');
+                const data = await response.json();
+                
+                if (data.success) {
+                    this.unpostedRegistrations = data.data;
+                } else {
+                    console.error('Failed to load unposted registrations:', data.error);
+                    this.unpostedRegistrations = [];
+                }
+            } catch (error) {
+                console.error('Failed to load unposted registrations:', error);
+                this.unpostedRegistrations = [];
+            }
+        },
+
         async refreshUnpostedSales() {
             this.loading = true;
             try {
@@ -808,6 +829,24 @@ function dashboard() {
             }
         },
 
+        async refreshUnpostedRegistrations() {
+            this.loading = true;
+            try {
+                await this.loadUnpostedRegistrations();
+                this.showTwitterMessage('Unposted registrations refreshed', 'success');
+            } catch (error) {
+                console.error('Failed to refresh unposted registrations:', error);
+                this.showTwitterMessage('Failed to refresh registrations list', 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        clearSelection() {
+            this.selectedSaleId = '';
+            this.selectedRegistrationId = '';
+        },
+
         clearTweetPreview() {
             this.generatedTweet = null;
             this.tweetBreakdown = null;
@@ -815,8 +854,11 @@ function dashboard() {
         },
 
         async generateTweetPost() {
-            if (!this.selectedSaleId) {
-                this.showTwitterMessage('Please select a sale first', 'error');
+            const selectedId = this.tweetType === 'sale' ? this.selectedSaleId : this.selectedRegistrationId;
+            const itemType = this.tweetType === 'sale' ? 'sale' : 'registration';
+            
+            if (!selectedId) {
+                this.showTwitterMessage(`Please select a ${itemType} first`, 'error');
                 return;
             }
 
@@ -825,7 +867,11 @@ function dashboard() {
             this.clearTweetPreview();
 
             try {
-                const response = await fetch(`/api/tweet/generate/${this.selectedSaleId}`);
+                const endpoint = this.tweetType === 'sale' 
+                    ? `/api/tweet/generate/${selectedId}`
+                    : `/api/registration/tweet/generate/${selectedId}`;
+                    
+                const response = await fetch(endpoint);
                 const data = await response.json();
 
                 if (data.success) {
@@ -835,24 +881,27 @@ function dashboard() {
                     
                     if (data.data.tweet.isValid) {
                         const imageMsg = data.data.hasImage ? ' with image' : '';
-                        this.showTwitterMessage(`Tweet generated successfully${imageMsg}!`, 'success');
+                        this.showTwitterMessage(`${itemType} tweet generated successfully${imageMsg}!`, 'success');
                     } else {
-                        this.showTwitterMessage('Tweet generated but has validation issues', 'warning');
+                        this.showTwitterMessage(`${itemType} tweet generated but has validation issues`, 'warning');
                     }
                 } else {
-                    this.showTwitterMessage(`Failed to generate tweet: ${data.error}`, 'error');
+                    this.showTwitterMessage(`Failed to generate ${itemType} tweet: ${data.error}`, 'error');
                 }
             } catch (error) {
-                console.error('Failed to generate tweet:', error);
-                this.showTwitterMessage('Network error while generating tweet', 'error');
+                console.error(`Failed to generate ${itemType} tweet:`, error);
+                this.showTwitterMessage(`Network error while generating ${itemType} tweet`, 'error');
             } finally {
                 this.tweetGenerating = false;
             }
         },
 
         async sendTweetPost() {
-            if (!this.selectedSaleId) {
-                this.showTwitterMessage('No sale selected', 'error');
+            const selectedId = this.tweetType === 'sale' ? this.selectedSaleId : this.selectedRegistrationId;
+            const itemType = this.tweetType === 'sale' ? 'sale' : 'registration';
+            
+            if (!selectedId) {
+                this.showTwitterMessage(`No ${itemType} selected`, 'error');
                 return;
             }
 
@@ -861,7 +910,7 @@ function dashboard() {
                 return;
             }
 
-            if (!confirm('Send this tweet? This will consume one API call from your daily limit.')) {
+            if (!confirm(`Send this ${itemType} tweet? This will consume one API call from your daily limit.`)) {
                 return;
             }
 
@@ -869,33 +918,37 @@ function dashboard() {
             this.clearTwitterMessage();
 
             try {
-                const response = await fetch(`/api/tweet/send/${this.selectedSaleId}`, {
+                const endpoint = this.tweetType === 'sale' 
+                    ? `/api/tweet/send/${selectedId}`
+                    : `/api/registration/tweet/send/${selectedId}`;
+                    
+                const response = await fetch(endpoint, {
                     method: 'POST'
                 });
                 const data = await response.json();
 
                 if (data.success) {
                     this.showTwitterMessage(
-                        `✅ Tweet posted successfully! Tweet ID: ${data.data.tweetId}`, 
+                        `✅ ${itemType} tweet posted successfully! Tweet ID: ${data.data.tweetId}`, 
                         'success'
                     );
                     
                     // Clear the preview and refresh data
                     this.clearTweetPreview();
-                    this.selectedSaleId = '';
+                    this.clearSelection();
                     await Promise.all([
                         this.refreshData(),
-                        this.loadUnpostedSales()
+                        this.tweetType === 'sale' ? this.loadUnpostedSales() : this.loadUnpostedRegistrations()
                     ]);
                 } else {
                     this.showTwitterMessage(
-                        `❌ Failed to post tweet: ${data.error}`, 
+                        `❌ Failed to post ${itemType} tweet: ${data.error}`, 
                         'error'
                     );
                 }
             } catch (error) {
-                console.error('Failed to send tweet:', error);
-                this.showTwitterMessage('Network error while sending tweet', 'error');
+                console.error(`Failed to send ${itemType} tweet:`, error);
+                this.showTwitterMessage(`Network error while sending ${itemType} tweet`, 'error');
             } finally {
                 this.tweetSending = false;
             }

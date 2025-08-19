@@ -299,6 +299,23 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    app.get('/api/unposted-registrations', async (req, res) => {
+      try {
+        const limit = parseInt(req.query.limit as string) || 10;
+        const unpostedRegistrations = await databaseService.getUnpostedRegistrations(limit);
+        res.json({
+          success: true,
+          data: unpostedRegistrations,
+          count: unpostedRegistrations.length
+        });
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     // Scheduler endpoints
     app.get('/api/scheduler/status', (req, res) => {
       try {
@@ -1008,6 +1025,155 @@ async function startApplication(): Promise<void> {
           res.status(500).json({
             success: false,
             error: 'Failed to post tweet',
+            twitterError: tweetResult.error,
+            tweetContent: generatedTweet.text
+          });
+        }
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    // Registration Tweet Generation API endpoints
+    app.get('/api/registration/tweet/generate/:registrationId', async (req, res) => {
+      try {
+        const registrationId = parseInt(req.params.registrationId);
+        if (isNaN(registrationId)) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid registration ID'
+          });
+        }
+
+        // Get the registration from database
+        const unpostedRegistrations = await databaseService.getUnpostedRegistrations(100);
+        const registration = unpostedRegistrations.find(r => r.id === registrationId);
+        
+        if (!registration) {
+          return res.status(404).json({
+            success: false,
+            error: 'Registration not found'
+          });
+        }
+
+        // Generate registration tweet with preview
+        const preview = await newTweetFormatter.previewRegistrationTweet(registration);
+        
+        res.json({
+          success: true,
+          data: {
+            registration: {
+              id: registration.id,
+              transactionHash: registration.transactionHash,
+              ensName: registration.ensName,
+              fullName: registration.fullName,
+              costEth: registration.costEth,
+              costUsd: registration.costUsd,
+              ownerAddress: registration.ownerAddress
+            },
+            tweet: preview.tweet,
+            validation: preview.validation,
+            breakdown: preview.breakdown,
+            imageUrl: preview.tweet.imageUrl,
+            hasImage: !!preview.tweet.imageBuffer
+          }
+        });
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.post('/api/registration/tweet/send/:registrationId', async (req, res) => {
+      try {
+        const configValidation = twitterService.validateConfig();
+        if (!configValidation.valid) {
+          return res.status(400).json({
+            success: false,
+            error: 'Twitter API configuration incomplete',
+            missingFields: configValidation.missingFields
+          });
+        }
+
+        const registrationId = parseInt(req.params.registrationId);
+        if (isNaN(registrationId)) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid registration ID'
+          });
+        }
+
+        // Get the registration from database
+        const unpostedRegistrations = await databaseService.getUnpostedRegistrations(100);
+        const registration = unpostedRegistrations.find(r => r.id === registrationId);
+        
+        if (!registration) {
+          return res.status(404).json({
+            success: false,
+            error: 'Registration not found'
+          });
+        }
+
+        if (registration.posted) {
+          return res.status(400).json({
+            success: false,
+            error: 'Registration has already been posted to Twitter'
+          });
+        }
+
+        // Check rate limit first
+        await rateLimitService.validateTweetPost();
+
+        // Generate registration tweet
+        const generatedTweet = await newTweetFormatter.generateRegistrationTweet(registration);
+        
+        if (!generatedTweet.isValid) {
+          return res.status(400).json({
+            success: false,
+            error: 'Unable to generate valid registration tweet',
+            details: generatedTweet
+          });
+        }
+
+        // Post to Twitter with image
+        const tweetResult = await twitterService.postTweet(generatedTweet.text, generatedTweet.imageBuffer);
+        
+        if (tweetResult.success && tweetResult.tweetId) {
+          // Record successful post in rate limiter
+          await rateLimitService.recordTweetPost(tweetResult.tweetId, generatedTweet.text);
+          
+          // Mark registration as posted in database
+          await databaseService.markRegistrationAsPosted(registrationId, tweetResult.tweetId);
+          
+          // Get updated rate limit status
+          const rateLimitStatus = await rateLimitService.canPostTweet();
+          
+          res.json({
+            success: true,
+            data: {
+              tweetId: tweetResult.tweetId,
+              tweetContent: generatedTweet.text,
+              characterCount: generatedTweet.characterCount,
+              registrationId: registrationId,
+              rateLimitStatus,
+              hasImage: !!generatedTweet.imageBuffer
+            }
+          });
+        } else {
+          // Record failed post
+          await rateLimitService.recordFailedTweetPost(
+            generatedTweet.text, 
+            tweetResult.error || 'Unknown error'
+          );
+          
+          res.status(500).json({
+            success: false,
+            error: 'Failed to post registration tweet',
             twitterError: tweetResult.error,
             tweetContent: generatedTweet.text
           });

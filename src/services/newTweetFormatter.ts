@@ -1,4 +1,4 @@
-import { ProcessedSale } from '../types';
+import { ProcessedSale, ENSRegistration } from '../types';
 import { logger } from '../utils/logger';
 import { EthIdentityService, EthIdentityAccount } from './ethIdentityService';
 import { RealDataImageService, RealImageData } from './realDataImageService';
@@ -29,6 +29,77 @@ export class NewTweetFormatter {
   private readonly ethIdentityService = new EthIdentityService();
 
   constructor(private databaseService?: IDatabaseService) {}
+
+  /**
+   * Generate a complete tweet with text and image for an ENS registration
+   */
+  async generateRegistrationTweet(registration: ENSRegistration): Promise<GeneratedTweet> {
+    try {
+      logger.info(`Generating registration tweet for: ${registration.transactionHash}`);
+
+      // Get account data for the new owner
+      const ownerAccount = await this.getAccountData(registration.ownerAddress);
+
+      // Generate the tweet text
+      const tweetText = this.formatRegistrationTweetText(registration, ownerAccount);
+      
+      // Generate image if database service is available
+      let imageBuffer: Buffer | undefined;
+      let imageUrl: string | undefined;
+      let imageData: RealImageData | undefined;
+
+      if (this.databaseService) {
+        try {
+          logger.info(`Generating registration image for: ${registration.transactionHash}`);
+          
+          // Convert registration to image data format
+          const registrationImageData = await this.convertRegistrationToImageData(registration, ownerAccount);
+          
+          // Generate image buffer using Puppeteer (registration-specific)
+          imageBuffer = await PuppeteerImageService.generateRegistrationImage(registrationImageData);
+          
+          if (imageBuffer) {
+            // Save image for preview
+            const filename = `registration-tweet-image-${registration.id}-${Date.now()}.png`;
+            const savedPath = await PuppeteerImageService.saveImageToFile(imageBuffer, filename, this.databaseService);
+            
+            // Set image URL based on storage location
+            if (savedPath.startsWith('/api/images/')) {
+              imageUrl = savedPath; // Database storage (Vercel)
+            } else {
+              imageUrl = `/generated-images/${filename}`; // File storage (local)
+            }
+            imageData = registrationImageData;
+            
+            logger.info(`Generated registration image: ${filename}`);
+          }
+        } catch (imageError: any) {
+          logger.error('Error generating image for registration tweet:', imageError.message);
+          // Continue without image - tweet text is still valid
+        }
+      }
+      
+      const result: GeneratedTweet = {
+        text: tweetText,
+        characterCount: tweetText.length,
+        isValid: tweetText.length <= this.MAX_TWEET_LENGTH && tweetText.length > 0,
+        imageBuffer,
+        imageUrl,
+        imageData
+      };
+
+      logger.info(`Generated registration tweet: ${result.characterCount} chars, valid: ${result.isValid}, hasImage: ${!!result.imageBuffer}`);
+      return result;
+
+    } catch (error: any) {
+      logger.error('Error generating registration tweet:', error.message);
+      return {
+        text: '',
+        characterCount: 0,
+        isValid: false
+      };
+    }
+  }
 
   /**
    * Generate a complete tweet with text and image for a sale
@@ -120,6 +191,35 @@ export class NewTweetFormatter {
       logger.warn(`Failed to get account data for ${address}:`, error);
       return null;
     }
+  }
+
+  /**
+   * Format the tweet text for ENS registrations
+   */
+  private formatRegistrationTweetText(
+    registration: ENSRegistration, 
+    ownerAccount: EthIdentityAccount | null
+  ): string {
+    // Header: Emoji + Registered
+    const header = '🏛️ Registered';
+    
+    // Line 1: ENS name (use fullName if available, otherwise ensName)
+    const ensName = registration.fullName || registration.ensName || 'Unknown ENS';
+    
+    // Line 2: Price in ETH and USD
+    const priceEth = parseFloat(registration.costEth || '0').toFixed(2);
+    const priceUsd = registration.costUsd ? `($${parseFloat(registration.costUsd).toLocaleString()})` : '';
+    const priceLine = `Price: ${priceEth} ETH ${priceUsd}`.trim();
+    
+    // Line 3: New Owner
+    const ownerHandle = this.getDisplayHandle(ownerAccount, registration.ownerAddress);
+    const ownerLine = `New Owner: ${ownerHandle}`;
+    
+    // Line 4: Vision.io marketplace link
+    const visionUrl = this.buildVisionioUrl(ensName);
+    
+    // Combine all lines with double line breaks
+    return `${header}\n\n${ensName}\n\n${priceLine}\n\n${ownerLine}\n\n${visionUrl}`;
   }
 
   /**
@@ -236,6 +336,48 @@ export class NewTweetFormatter {
   }
 
   /**
+   * Convert ENS registration to image data format for image generation
+   */
+  private async convertRegistrationToImageData(registration: ENSRegistration, ownerAccount: EthIdentityAccount | null): Promise<RealImageData> {
+    logger.info(`Converting registration to image data: ${registration.transactionHash}`);
+    
+    // Parse prices
+    const priceEth = parseFloat(registration.costEth || '0');
+    const priceUsd = registration.costUsd ? parseFloat(registration.costUsd) : 0;
+    
+    // Get ENS name for display
+    const ensName = registration.fullName || registration.ensName || 'Unknown ENS';
+    
+    // Get owner display info
+    const ownerHandle = this.getDisplayHandle(ownerAccount, registration.ownerAddress);
+    const ownerAvatar = ownerAccount?.ens?.records?.avatar;
+    
+    const imageData: RealImageData = {
+      priceEth,
+      priceUsd,
+      ensName,
+      buyerEns: ownerHandle, // New owner is the "buyer"
+      sellerEns: '🏛️ ENS', // ENS DAO is the "seller"
+      buyerAvatar: ownerAvatar,
+      sellerAvatar: undefined, // No avatar for ENS DAO
+      nftImageUrl: registration.image, // Use ENS NFT image if available
+      saleId: registration.id,
+      transactionHash: registration.transactionHash
+    };
+
+    logger.info('Converted registration to image data:', {
+      ensName: imageData.ensName,
+      ownerEns: imageData.buyerEns,
+      priceEth: imageData.priceEth,
+      priceUsd: imageData.priceUsd,
+      hasNftImage: !!imageData.nftImageUrl,
+      hasOwnerAvatar: !!imageData.buyerAvatar
+    });
+
+    return imageData;
+  }
+
+  /**
    * Convert RealImageData to MockImageData for image generation
    */
   private convertRealToMockImageData(realData: RealImageData, sale: ProcessedSale): MockImageData {
@@ -261,6 +403,47 @@ export class NewTweetFormatter {
   private shortenAddress(address: string): string {
     if (!address || address.length < 10) return address;
     return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
+  }
+
+  /**
+   * Validate registration tweet content
+   */
+  validateRegistrationTweet(content: string): { valid: boolean; errors: string[] } {
+    const errors: string[] = [];
+
+    if (!content || content.trim().length === 0) {
+      errors.push('Registration tweet content cannot be empty');
+    }
+
+    if (content.length > this.MAX_TWEET_LENGTH) {
+      errors.push(`Registration tweet too long: ${content.length} characters (max ${this.MAX_TWEET_LENGTH})`);
+    }
+
+    // Check for required elements in registration format
+    if (!content.includes('🏛️ Registered')) {
+      errors.push('Registration tweet should include "🏛️ Registered" header');
+    }
+
+    if (!content.includes('Price:')) {
+      errors.push('Registration tweet should include "Price:" label');
+    }
+
+    if (!content.includes('ETH')) {
+      errors.push('Registration tweet should include price in ETH');
+    }
+
+    if (!content.includes('New Owner:')) {
+      errors.push('Registration tweet should include "New Owner:" label');
+    }
+
+    if (!content.includes('vision.io')) {
+      errors.push('Registration tweet should include Vision.io link');
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors
+    };
   }
 
   /**
@@ -349,6 +532,44 @@ export class NewTweetFormatter {
       visionUrl: this.buildVisionioUrl(ensName),
       buyerHandle: buyerHandle,
       sellerHandle: sellerHandle
+    };
+
+    return { tweet, validation, breakdown };
+  }
+
+  /**
+   * Preview registration tweet format
+   */
+  async previewRegistrationTweet(registration: ENSRegistration): Promise<{
+    tweet: GeneratedTweet;
+    validation: { valid: boolean; errors: string[] };
+    breakdown: {
+      header: string;
+      ensName: string;
+      priceLine: string;
+      ownerLine: string;
+      visionUrl: string;
+      ownerHandle: string;
+    };
+  }> {
+    const tweet = await this.generateRegistrationTweet(registration);
+    const validation = this.validateRegistrationTweet(tweet.text);
+    
+    // Get account data for breakdown
+    const ownerAccount = await this.getAccountData(registration.ownerAddress);
+
+    const ensName = registration.fullName || registration.ensName || 'Unknown ENS';
+    const priceEth = parseFloat(registration.costEth || '0').toFixed(2);
+    const priceUsd = registration.costUsd ? `($${parseFloat(registration.costUsd).toLocaleString()})` : '';
+    const ownerHandle = this.getDisplayHandle(ownerAccount, registration.ownerAddress);
+    
+    const breakdown = {
+      header: '🏛️ Registered',
+      ensName: ensName,
+      priceLine: `Price: ${priceEth} ETH ${priceUsd}`.trim(),
+      ownerLine: `New Owner: ${ownerHandle}`,
+      visionUrl: this.buildVisionioUrl(ensName),
+      ownerHandle: ownerHandle
     };
 
     return { tweet, validation, breakdown };
