@@ -314,13 +314,21 @@ export class SalesProcessingService {
 
       logger.info(`Fetched ${recentSales.length} new sales from incremental fetch`);
 
+      // Calculate highest block number from ALL fetched sales (regardless of processing outcome)
+      let highestFetchedBlockNumber = lastProcessedBlock;
+      if (recentSales.length > 0) {
+        highestFetchedBlockNumber = Math.max(...recentSales.map(sale => sale.blockNumber));
+      }
+
       if (recentSales.length === 0) {
-        logger.info('No new sales found');
+        logger.info('No new sales found - but still updating block position to avoid re-fetching empty ranges');
+        // Update last processed block even when no sales found to avoid re-fetching same empty range
+        await this.databaseService.setSystemState('last_processed_block', highestFetchedBlockNumber.toString());
         return stats;
       }
 
       // Process each sale
-      let highestBlockNumber = 0;
+      let highestProcessedBlockNumber = 0;
 
       for (const sale of recentSales) {
         try {
@@ -349,7 +357,7 @@ export class SalesProcessingService {
           stats.processedSales.push(saleWithId);
           
           stats.newSales++;
-          highestBlockNumber = Math.max(highestBlockNumber, sale.blockNumber);
+          highestProcessedBlockNumber = Math.max(highestProcessedBlockNumber, sale.blockNumber);
 
           logger.debug(`Processed new sale: ${sale.transactionHash} for ${processedSale.priceEth} ETH`);
 
@@ -359,11 +367,10 @@ export class SalesProcessingService {
         }
       }
 
-      // Update last processed block
-      if (highestBlockNumber > 0) {
-        await this.databaseService.setSystemState('last_processed_block', highestBlockNumber.toString());
-        logger.info(`Updated last processed block to: ${highestBlockNumber}`);
-      }
+      // Update last processed block based on highest fetched block (not just processed)
+      // This prevents re-fetching the same blocks even if all sales were filtered out
+      await this.databaseService.setSystemState('last_processed_block', highestFetchedBlockNumber.toString());
+      logger.info(`Updated last processed block to: ${highestFetchedBlockNumber} (processed: ${stats.newSales}, filtered: ${stats.filtered})`);
 
       const filteringRate = stats.fetched > 0 ? (stats.filtered / stats.fetched * 100).toFixed(1) : '0';
       logger.info(`Sales processing completed:`, {
