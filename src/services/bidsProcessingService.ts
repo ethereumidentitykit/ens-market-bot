@@ -133,7 +133,7 @@ export class BidsProcessingService {
       const transformedBid = this.magicEdenService.transformBid(magicEdenBid);
 
       // Apply filtering logic
-      if (!this.shouldProcessBid(transformedBid)) {
+      if (!(await this.shouldProcessBid(transformedBid))) {
         logger.debug(`🚫 Bid ${magicEdenBid.id} filtered out (${transformedBid.priceDecimal} ${transformedBid.currencySymbol})`);
         stats.filtered++;
         return;
@@ -236,9 +236,9 @@ export class BidsProcessingService {
 
   /**
    * Filtering logic for ENS bids
-   * Applies minimum thresholds and age limits
+   * Applies club-aware minimum thresholds and age limits
    */
-  private shouldProcessBid(bid: any): boolean {
+  private async shouldProcessBid(bid: any): Promise<boolean> {
     try {
       // Only process active bids
       if (bid.status !== 'active') {
@@ -252,15 +252,16 @@ export class BidsProcessingService {
         return false;
       }
 
-      // Price filtering (minimum thresholds)
+      // Price filtering with club-aware thresholds
       const priceEth = parseFloat(bid.priceDecimal);
       
-      // Currency-specific minimums
+      // For ETH/WETH bids, apply club-aware filtering
       if (bid.currencySymbol === 'WETH' || bid.currencySymbol === 'ETH') {
-        // Club-aware filtering would go here (similar to sales/registrations)
-        return priceEth >= 0.05; // Minimum 0.05 ETH
+        const ethMinimum = await this.getEthMinimumForBid(bid);
+        return priceEth >= ethMinimum;
       }
       
+      // For stablecoins, use fixed USD minimums
       if (bid.currencySymbol === 'USDC' || bid.currencySymbol === 'USDT') {
         return priceEth >= 100; // Minimum $100 for stablecoins
       }
@@ -272,6 +273,71 @@ export class BidsProcessingService {
       logger.error(`Error in bid filtering:`, error.message);
       return false;
     }
+  }
+
+  /**
+   * Get ETH minimum requirement for a bid based on ENS name category
+   */
+  private async getEthMinimumForBid(bid: any): Promise<number> {
+    try {
+      // We need the ENS name to determine the category
+      // If we don't have it cached, resolve it temporarily for filtering
+      let ensName = '';
+      
+      if (bid.tokenId) {
+        try {
+          // Temporary ENS name resolution for filtering  
+          const ensContract = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
+          const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
+          
+          const response = await fetch(metadataUrl);
+          if (response.ok) {
+            const metadata = await response.json();
+            ensName = metadata.name || '';
+          }
+        } catch (error) {
+          // If resolution fails, use default threshold
+          return this.getDefaultBidMinimums().minEthDefault;
+        }
+      }
+
+      // Apply club-aware logic
+      const patterns = this.getClubPatterns();
+      const minimums = this.getDefaultBidMinimums();
+
+      if (patterns.CLUB_999_PATTERN.test(ensName)) {
+        return minimums.minEth999Club;
+      } else if (patterns.CLUB_10K_PATTERN.test(ensName)) {
+        return minimums.minEth10kClub;
+      } else {
+        return minimums.minEthDefault;
+      }
+
+    } catch (error: any) {
+      logger.warn(`Error determining ETH minimum for bid:`, error.message);
+      return this.getDefaultBidMinimums().minEthDefault;
+    }
+  }
+
+  /**
+   * Get club detection patterns (same as AutoTweetService)
+   */
+  private getClubPatterns() {
+    return {
+      CLUB_10K_PATTERN: /^\d{4}\.eth$/, // e.g., 1234.eth
+      CLUB_999_PATTERN: /^\d{3}\.eth$/  // e.g., 123.eth
+    };
+  }
+
+  /**
+   * Get default bid minimums (should match or be similar to sales/registrations)
+   */
+  private getDefaultBidMinimums() {
+    return {
+      minEthDefault: 0.05,    // Standard ENS bids 
+      minEth10kClub: 0.5,     // 4-digit ENS bids
+      minEth999Club: 3.0      // 3-digit ENS bids (higher than sales due to speculation)
+    };
   }
 
   /**

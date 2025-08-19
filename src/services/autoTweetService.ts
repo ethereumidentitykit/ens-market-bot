@@ -4,7 +4,7 @@
  */
 
 import { logger } from '../utils/logger';
-import { ProcessedSale, IDatabaseService, ENSRegistration } from '../types';
+import { ProcessedSale, IDatabaseService, ENSRegistration, ENSBid } from '../types';
 import { APIToggleService } from './apiToggleService';
 import { NewTweetFormatter } from './newTweetFormatter';
 import { TwitterService } from './twitterService';
@@ -27,11 +27,12 @@ export interface PostResult {
   success: boolean;
   saleId?: number; // For sales
   registrationId?: number; // For registrations
+  bidId?: number; // For bids
   tweetId?: string;
   error?: string;
   skipped?: boolean;
   reason?: string;
-  type?: 'sale' | 'registration'; // To distinguish between types
+  type?: 'sale' | 'registration' | 'bid'; // To distinguish between types
 }
 
 export class AutoTweetService {
@@ -464,6 +465,232 @@ export class AutoTweetService {
       return '10k Club registration';
     } else {
       return 'Standard registration';
+    }
+  }
+
+  /**
+   * Process array of ENS bids for auto-posting
+   */
+  async processNewBids(bids: ENSBid[], settings: AutoPostSettings): Promise<PostResult[]> {
+    if (!settings.enabled) {
+      logger.debug('Auto-posting is disabled');
+      return [];
+    }
+
+    if (bids.length === 0) {
+      logger.debug('No bids to process');
+      return [];
+    }
+
+    logger.info(`🔄 Processing ${bids.length} new bids for auto-posting...`);
+    const results: PostResult[] = [];
+
+    for (const bid of bids) {
+      if (!bid.id) {
+        logger.warn('Skipping bid without ID:', bid);
+        continue;
+      }
+
+      try {
+        const result = await this.processSingleBid(bid, settings);
+        results.push(result);
+        
+        // Rate limiting: delay between posts to allow for image generation
+        if (result.success) {
+          logger.info('Bid tweet posted successfully, waiting 20 seconds before next post...');
+          await this.delay(20000);
+        } else {
+          // Still add a shorter delay for failed posts
+          await this.delay(2000);
+        }
+
+      } catch (error: any) {
+        logger.error(`Error processing bid ${bid.id}:`, error.message);
+        results.push({
+          success: false,
+          bidId: bid.id,
+          error: error.message,
+          type: 'bid'
+        });
+      }
+    }
+
+    const successful = results.filter(r => r.success).length;
+    const failed = results.filter(r => !r.success && !r.skipped).length;
+    const skipped = results.filter(r => r.skipped).length;
+
+    logger.info(`✅ Processed ${bids.length} bids: ${successful} posted, ${skipped} skipped, ${failed} failed`);
+    return results;
+  }
+
+  /**
+   * Process a single ENS bid for tweeting
+   */
+  private async processSingleBid(bid: ENSBid, settings: AutoPostSettings): Promise<PostResult> {
+    const bidId = bid.id!;
+
+    // Check if bid is too old (24 hours for bids - they're time-sensitive)
+    if (!(await this.isWithinBidTimeLimit(bid, 24))) {
+      return {
+        success: false,
+        bidId,
+        skipped: true,
+        reason: `Bid is older than 24 hours`,
+        type: 'bid'
+      };
+    }
+
+    // Check if bid meets ETH minimum requirements
+    const bidEthValue = parseFloat(bid.priceDecimal);
+    const ethMinimum = await this.getEthMinimumForBid(bid, settings);
+    
+    if (bidEthValue < ethMinimum) {
+      return {
+        success: false,
+        bidId,
+        skipped: true,
+        reason: `Bid ETH value ${bidEthValue} below minimum ${ethMinimum} for ${await this.getBidCategoryName(bid)}`,
+        type: 'bid'
+      };
+    }
+
+    try {
+      // Generate tweet content and image
+      logger.info(`🔄 Generating tweet for bid ${bid.bidId}`);
+      const tweetData = await this.newTweetFormatter.generateBidTweet(bid);
+
+      if (!tweetData.isValid) {
+        logger.error(`Invalid tweet generated for bid ${bidId}:`, tweetData.text);
+        return {
+          success: false,
+          bidId,
+          error: 'Generated tweet failed validation',
+          type: 'bid'
+        };
+      }
+
+      // Post to Twitter
+      const postResult = await this.twitterService.postTweet(
+        tweetData.text, 
+        tweetData.imageBuffer
+      );
+
+      if (postResult.success && postResult.tweetId) {
+        // Mark bid as posted
+        await this.databaseService.markBidAsPosted(bidId, postResult.tweetId);
+
+        logger.info(`✅ Successfully posted bid tweet: ${postResult.tweetId}`);
+        
+        return {
+          success: true,
+          bidId,
+          tweetId: postResult.tweetId,
+          type: 'bid'
+        };
+      } else {
+        return {
+          success: false,
+          bidId,
+          error: postResult.error || 'Failed to post bid tweet',
+          type: 'bid'
+        };
+      }
+    } catch (error: any) {
+      logger.error(`Error posting tweet for bid ${bidId}:`, error.message);
+      return {
+        success: false,
+        bidId,
+        error: error.message,
+        type: 'bid'
+      };
+    }
+  }
+
+  /**
+   * Check if bid is within time limit (bids are time-sensitive)
+   */
+  private async isWithinBidTimeLimit(bid: ENSBid, maxAgeHours: number): Promise<boolean> {
+    const bidTimestamp = new Date(bid.createdAtApi);
+    const currentTime = await this.worldTimeService.getCurrentTime();
+    const maxAgeMs = maxAgeHours * 60 * 60 * 1000;
+    const ageMs = currentTime.getTime() - bidTimestamp.getTime();
+    
+    logger.debug(`Time check for bid ${bid.bidId}: created=${bidTimestamp.toISOString()}, current=${currentTime.toISOString()}, age=${Math.round(ageMs/1000/60)}min, limit=${maxAgeHours}h`);
+    
+    return ageMs <= maxAgeMs;
+  }
+
+  /**
+   * Get ETH minimum requirement for a bid based on ENS name category
+   */
+  private async getEthMinimumForBid(bid: ENSBid, settings: AutoPostSettings): Promise<number> {
+    try {
+      // Get ENS name from bid (requires live lookup)
+      let ensName = '';
+      
+      if (bid.tokenId) {
+        try {
+          const ensContract = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
+          const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
+          
+          const response = await fetch(metadataUrl);
+          if (response.ok) {
+            const metadata = await response.json();
+            ensName = metadata.name || '';
+          }
+        } catch (error) {
+          // If resolution fails, use default threshold
+          return settings.minEthDefault;
+        }
+      }
+
+      // Apply club-aware logic (same patterns as sales/registrations)
+      if (this.CLUB_999_PATTERN.test(ensName)) {
+        return settings.minEth999Club;
+      } else if (this.CLUB_10K_PATTERN.test(ensName)) {
+        return settings.minEth10kClub;
+      } else {
+        return settings.minEthDefault; // Use general default for bids
+      }
+
+    } catch (error: any) {
+      logger.warn(`Error determining ETH minimum for bid:`, error.message);
+      return settings.minEthDefault;
+    }
+  }
+
+  /**
+   * Get bid category name for logging/debugging
+   */
+  private async getBidCategoryName(bid: ENSBid): Promise<string> {
+    try {
+      let ensName = '';
+      
+      if (bid.tokenId) {
+        try {
+          const ensContract = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
+          const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
+          
+          const response = await fetch(metadataUrl);
+          if (response.ok) {
+            const metadata = await response.json();
+            ensName = metadata.name || '';
+          }
+        } catch (error) {
+          return 'Standard bid';
+        }
+      }
+
+      if (this.CLUB_999_PATTERN.test(ensName)) {
+        return '999 Club bid';
+      } else if (this.CLUB_10K_PATTERN.test(ensName)) {
+        return '10k Club bid';
+      } else {
+        return 'Standard bid';
+      }
+
+    } catch (error: any) {
+      return 'Standard bid';
     }
   }
 
