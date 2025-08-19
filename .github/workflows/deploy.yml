@@ -60,7 +60,7 @@ jobs:
             
             # Restart the application with PM2
             echo "🔄 Restarting application..."
-            pm2 reload ens-twitter-bot --update-env || pm2 start dist/index.js --name ens-twitter-bot
+            pm2 reload xbot --update-env || pm2 start dist/index.js --name xbot
             
             # Show PM2 status
             pm2 status
