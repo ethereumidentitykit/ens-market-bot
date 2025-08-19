@@ -169,6 +169,131 @@ export interface IDatabaseService {
   getRecentRegistrations(limit?: number): Promise<ENSRegistration[]>;
   getUnpostedRegistrations(limit?: number): Promise<ENSRegistration[]>;
   markRegistrationAsPosted(id: number, tweetId: string): Promise<void>;
+  
+  // ENS bids methods
+  insertBid(bid: Omit<ENSBid, 'id'>): Promise<number>;
+  isBidProcessed(bidId: string): Promise<boolean>;
+  getRecentBids(limit?: number): Promise<ENSBid[]>;
+  getUnpostedBids(limit?: number): Promise<ENSBid[]>;
+  markBidAsPosted(id: number, tweetId: string): Promise<void>;
+  getLastProcessedBidTimestamp(): Promise<number>;
+  setLastProcessedBidTimestamp(timestamp: number): Promise<void>;
+}
+
+// ENS Bids Types
+export interface ENSBid {
+  id?: number;
+  bidId: string;           // Magic Eden order ID
+  contractAddress: string; // ENS contract address
+  tokenId?: string;        // ENS token ID (extracted from tokenSetId)
+  
+  // Bid Details (hex addresses only - live lookup ENS names)
+  makerAddress: string;    // Bidder address (hex only)
+  takerAddress?: string;   // Usually 0x000... for active bids
+  status: string;          // active, filled, cancelled, expired
+  
+  // Pricing  
+  priceRaw: string;        // Raw wei/token amount
+  priceDecimal: string;    // Decimal amount (e.g., "0.05")
+  priceUsd?: string;       // USD value
+  currencyContract: string; // Token contract address
+  currencySymbol: string;  // WETH, USDC, etc.
+  
+  // Marketplace
+  sourceDomain?: string;   // e.g., "opensea.io"
+  sourceName?: string;     // e.g., "OpenSea"
+  marketplaceFee?: number; // Fee basis points
+  
+  // Timestamps & Duration
+  createdAtApi: string;    // API createdAt
+  updatedAtApi: string;    // API updatedAt  
+  validFrom: number;       // Unix timestamp bid becomes valid
+  validUntil: number;      // Unix timestamp bid expires
+  processedAt: string;     // When we processed this bid
+  
+  // ENS Metadata (from ENS service - for images only)
+  nftImage?: string;
+  nftDescription?: string;
+  
+  // Tweet Tracking
+  tweetId?: string;
+  posted: boolean;
+  
+  // Audit
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+// Magic Eden API Response Types
+export interface MagicEdenBidResponse {
+  orders: MagicEdenBid[];
+  continuation?: string;
+}
+
+export interface MagicEdenBid {
+  id: string;
+  kind: string;
+  side: string;
+  status: string;
+  tokenSetId: string;
+  tokenSetSchemaHash: string;
+  contract: string;
+  maker: string;
+  taker: string;
+  price: {
+    currency: {
+      contract: string;
+      name: string;
+      symbol: string;
+      decimals: number;
+    };
+    amount: {
+      raw: string;
+      decimal: number;
+      usd: number;
+      native: number;
+    };
+  };
+  validFrom: number;
+  validUntil: number;
+  quantityFilled: string;
+  quantityRemaining: string;
+  criteria: {
+    kind: string;
+    data: {
+      token: {
+        tokenId: string;
+        name?: string;
+        image?: string;
+      };
+    };
+  };
+  source: {
+    id: string;
+    domain: string;
+    name: string;
+    icon: string;
+    url: string;
+  };
+  feeBps: number;
+  feeBreakdown: Array<{
+    kind: string;
+    recipient: string;
+    bps: number;
+  }>;
+  expiration: number;
+  isReservoir: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Bid Processing Stats
+export interface BidProcessingStats {
+  newBids: number;
+  duplicates: number;
+  filtered: number;
+  errors: number;
+  processedCount: number;
 }
 
 // API Response Types

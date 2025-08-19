@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
-import { ProcessedSale, IDatabaseService, TwitterPost, ENSRegistration } from '../types';
+import { ProcessedSale, IDatabaseService, TwitterPost, ENSRegistration, ENSBid } from '../types';
 
 /**
  * PostgreSQL database service for Vercel deployment
@@ -136,6 +136,69 @@ export class VercelDatabaseService implements IDatabaseService {
       `);
       await this.pool.query(`
         CREATE INDEX IF NOT EXISTS idx_ens_posted ON ens_registrations(posted)
+      `);
+
+      // Create ens_bids table
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS ens_bids (
+          id SERIAL PRIMARY KEY,
+          bid_id VARCHAR(255) NOT NULL UNIQUE,
+          contract_address VARCHAR(42) NOT NULL,
+          token_id VARCHAR(255),
+          
+          -- Bid Details (hex addresses only - live lookup ENS names)
+          maker_address VARCHAR(42) NOT NULL,
+          taker_address VARCHAR(42),
+          status VARCHAR(50) NOT NULL,
+          
+          -- Pricing
+          price_raw VARCHAR(100) NOT NULL,
+          price_decimal DECIMAL(18,8) NOT NULL,
+          price_usd DECIMAL(12,2),
+          currency_contract VARCHAR(42) NOT NULL,
+          currency_symbol VARCHAR(20) NOT NULL,
+          
+          -- Marketplace
+          source_domain VARCHAR(255),
+          source_name VARCHAR(100),
+          marketplace_fee INTEGER,
+          
+          -- Timestamps & Duration
+          created_at_api TIMESTAMP NOT NULL,
+          updated_at_api TIMESTAMP NOT NULL,
+          valid_from INTEGER NOT NULL,
+          valid_until INTEGER NOT NULL,
+          processed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          
+          -- ENS Metadata
+          nft_image TEXT,
+          nft_description TEXT,
+          
+          -- Tweet Tracking
+          tweet_id VARCHAR(255),
+          posted BOOLEAN DEFAULT FALSE,
+          
+          -- Audit
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // Create indexes for faster lookups on ens_bids
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_bids_bid_id ON ens_bids(bid_id)
+      `);
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_bids_status ON ens_bids(status)
+      `);
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_bids_posted ON ens_bids(posted)
+      `);
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_bids_contract ON ens_bids(contract_address)
+      `);
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_bids_created_at ON ens_bids(created_at_api)
       `);
 
       // Create generated_images table for storing images in serverless environment
@@ -737,6 +800,194 @@ export class VercelDatabaseService implements IDatabaseService {
       tweetId: row.tweet_id,
       posted: row.posted,
       expiresAt: row.expires_at,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    }));
+  }
+
+  // ENS Bids Methods
+
+  /**
+   * Insert a new ENS bid into the database
+   */
+  async insertBid(bid: Omit<ENSBid, 'id'>): Promise<number> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        INSERT INTO ens_bids (
+          bid_id, contract_address, token_id, maker_address, taker_address,
+          status, price_raw, price_decimal, price_usd, currency_contract,
+          currency_symbol, source_domain, source_name, marketplace_fee,
+          created_at_api, updated_at_api, valid_from, valid_until,
+          processed_at, nft_image, nft_description
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+        RETURNING id
+      `, [
+        bid.bidId,
+        bid.contractAddress,
+        bid.tokenId,
+        bid.makerAddress,
+        bid.takerAddress,
+        bid.status,
+        bid.priceRaw,
+        bid.priceDecimal,
+        bid.priceUsd,
+        bid.currencyContract,
+        bid.currencySymbol,
+        bid.sourceDomain,
+        bid.sourceName,
+        bid.marketplaceFee,
+        bid.createdAtApi,
+        bid.updatedAtApi,
+        bid.validFrom,
+        bid.validUntil,
+        bid.processedAt,
+        bid.nftImage,
+        bid.nftDescription
+      ]);
+
+      const insertedId = result.rows[0].id;
+      logger.debug(`Inserted ENS bid ${bid.bidId} with ID: ${insertedId}`);
+      return insertedId;
+    } catch (error: any) {
+      if (error.code === '23505') { // PostgreSQL unique constraint violation
+        logger.debug(`ENS bid ${bid.bidId} already exists, skipping`);
+        throw new Error(`Bid ${bid.bidId} already processed`);
+      }
+      logger.error('Failed to insert ENS bid:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Check if a bid has already been processed
+   */
+  async isBidProcessed(bidId: string): Promise<boolean> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(
+        'SELECT COUNT(*) as count FROM ens_bids WHERE bid_id = $1',
+        [bidId]
+      );
+      return parseInt(result.rows[0].count, 10) > 0;
+    } catch (error: any) {
+      logger.error('Failed to check if bid is processed:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get recent ENS bids with optional limit
+   */
+  async getRecentBids(limit: number = 10): Promise<ENSBid[]> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        SELECT * FROM ens_bids 
+        ORDER BY created_at_api DESC 
+        LIMIT $1
+      `, [limit]);
+
+      return this.mapBidRows(result.rows);
+    } catch (error: any) {
+      logger.error('Failed to get recent bids:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get unposted ENS bids for tweet generation
+   */
+  async getUnpostedBids(limit: number = 10): Promise<ENSBid[]> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        SELECT * FROM ens_bids 
+        WHERE posted = FALSE
+        ORDER BY created_at_api DESC 
+        LIMIT $1
+      `, [limit]);
+
+      return this.mapBidRows(result.rows);
+    } catch (error: any) {
+      logger.error('Failed to get unposted bids:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Mark a bid as posted to Twitter
+   */
+  async markBidAsPosted(id: number, tweetId: string): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      await this.pool.query(`
+        UPDATE ens_bids 
+        SET posted = TRUE, tweet_id = $1, updated_at = CURRENT_TIMESTAMP 
+        WHERE id = $2
+      `, [tweetId, id]);
+
+      logger.debug(`Marked ENS bid ${id} as posted with tweet ID: ${tweetId}`);
+    } catch (error: any) {
+      logger.error('Failed to mark ENS bid as posted:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get last processed bid timestamp for incremental fetching
+   */
+  async getLastProcessedBidTimestamp(): Promise<number> {
+    const result = await this.getSystemState('last_processed_bid_timestamp');
+    if (!result) {
+      // Default to 7 days ago if no timestamp is set
+      const defaultTimestamp = Date.now() - (7 * 24 * 60 * 60 * 1000);
+      return defaultTimestamp;
+    }
+    return parseInt(result, 10);
+  }
+
+  /**
+   * Set last processed bid timestamp
+   */
+  async setLastProcessedBidTimestamp(timestamp: number): Promise<void> {
+    await this.setSystemState('last_processed_bid_timestamp', timestamp.toString());
+  }
+
+  /**
+   * Map database rows to ENSBid objects
+   */
+  private mapBidRows(rows: any[]): ENSBid[] {
+    return rows.map((row: any) => ({
+      id: row.id,
+      bidId: row.bid_id,
+      contractAddress: row.contract_address,
+      tokenId: row.token_id,
+      makerAddress: row.maker_address,
+      takerAddress: row.taker_address,
+      status: row.status,
+      priceRaw: row.price_raw,
+      priceDecimal: row.price_decimal,
+      priceUsd: row.price_usd,
+      currencyContract: row.currency_contract,
+      currencySymbol: row.currency_symbol,
+      sourceDomain: row.source_domain,
+      sourceName: row.source_name,
+      marketplaceFee: row.marketplace_fee,
+      createdAtApi: row.created_at_api,
+      updatedAtApi: row.updated_at_api,
+      validFrom: row.valid_from,
+      validUntil: row.valid_until,
+      processedAt: row.processed_at,
+      nftImage: row.nft_image,
+      nftDescription: row.nft_description,
+      tweetId: row.tweet_id,
+      posted: row.posted,
       createdAt: row.created_at,
       updatedAt: row.updated_at
     }));
