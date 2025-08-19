@@ -161,12 +161,12 @@ export class SchedulerService {
         }
       }
 
-      // Auto-post new registrations if enabled
+      // Auto-post unposted registrations if enabled
       const unpostedRegistrations = await this.databaseService.getUnpostedRegistrations(10);
       if (unpostedRegistrations.length > 0) {
         const autoPostSettings = await this.autoTweetService.getSettings();
         if (autoPostSettings.enabled && autoPostSettings.registrationsEnabled && this.apiToggleService.isAutoPostingEnabled()) {
-          logger.info(`🏛️ Auto-posting ${unpostedRegistrations.length} new registrations...`);
+          logger.info(`🏛️ Auto-posting ${unpostedRegistrations.length} unposted registrations...`);
           registrationAutoPostResults = await this.autoTweetService.processNewRegistrations(unpostedRegistrations, autoPostSettings);
           
           const posted = registrationAutoPostResults.filter(r => r.success).length;
@@ -201,8 +201,9 @@ export class SchedulerService {
         logger.info(`📈 Found ${result.newSales} new sales to process`);
       }
       
+      // Log registration processing summary (moved to after processing for accuracy)
       if (unpostedRegistrations.length > 0) {
-        logger.info(`🏛️ Found ${unpostedRegistrations.length} unposted registrations to process`);
+        logger.info(`🏛️ Processed ${unpostedRegistrations.length} registrations: ${registrationsPosted} posted, ${unpostedRegistrations.length - registrationsPosted} skipped/failed`);
       }
       
       if (salesPosted > 0 || registrationsPosted > 0) {
