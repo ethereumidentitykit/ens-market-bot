@@ -731,8 +731,12 @@
                             </span>
                         </div>
                         <div class="flex items-center">
-                            <span class="text-sm font-medium text-gray-500 mr-2">Next Run:</span>
-                            <span class="text-sm text-gray-900" x-text="schedulerStatus?.nextRunTime ? formatTimestamp(schedulerStatus.nextRunTime) : 'N/A'"></span>
+                            <span class="text-sm font-medium text-gray-500 mr-2">Sales (5min):</span>
+                            <span class="text-sm text-gray-900" x-text="schedulerStatus?.nextSalesRunTime ? formatTimestamp(schedulerStatus.nextSalesRunTime) : 'N/A'"></span>
+                        </div>
+                        <div class="flex items-center">
+                            <span class="text-sm font-medium text-gray-500 mr-2">Registrations (1min):</span>
+                            <span class="text-sm text-green-600 font-medium" x-text="schedulerStatus?.nextRegistrationRunTime ? formatTimestamp(schedulerStatus.nextRegistrationRunTime) : 'N/A'"></span>
                         </div>
                         <div class="flex items-center">
                             <span class="text-sm font-medium text-gray-500 mr-2">Errors:</span>

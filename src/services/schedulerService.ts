@@ -10,7 +10,8 @@ export class SchedulerService {
   private autoTweetService: AutoTweetService;
   private apiToggleService: APIToggleService;
   private databaseService: IDatabaseService;
-  private syncJob: CronJob | null = null;
+  private salesSyncJob: CronJob | null = null;
+  private registrationSyncJob: CronJob | null = null;
   private isRunning: boolean = false;
   private lastRunTime: Date | null = null;
   private lastRunStats: any = null;
@@ -48,49 +49,74 @@ export class SchedulerService {
 
   /**
    * Start the automated scheduling
-   * Runs every 5 minutes for more responsive data collection
+   * Sales processing: every 5 minutes, Registration processing: every 1 minute
    */
   start(): void {
-    // Stop existing job if running
-    if (this.syncJob) {
-      logger.warn('Scheduler already running, stopping existing job first');
+    // Stop existing jobs if running
+    if (this.salesSyncJob || this.registrationSyncJob) {
+      logger.warn('Scheduler already running, stopping existing jobs first');
       this.stop();
     }
 
-    // Create cron job for every 5 minutes
-    this.syncJob = new CronJob(
+    // Create cron job for sales processing (every 5 minutes)
+    this.salesSyncJob = new CronJob(
       '0 */5 * * * *', // Every 5 minutes at :00 seconds
       () => {
-        this.runScheduledSync();
+        this.runSalesSync();
       },
       null,
       false, // Don't start automatically
       'America/New_York' // Timezone
     );
 
-    this.syncJob.start();
+    // Create cron job for registration processing (every 1 minute)
+    this.registrationSyncJob = new CronJob(
+      '0 * * * * *', // Every 1 minute at :00 seconds
+      () => {
+        this.runRegistrationSync();
+      },
+      null,
+      false, // Don't start automatically
+      'America/New_York' // Timezone
+    );
+
+    this.salesSyncJob.start();
+    this.registrationSyncJob.start();
     this.isRunning = true;
     
     // Save enabled state to database
     this.saveSchedulerState(true);
     
-    logger.info('Scheduler started - will run every 5 minutes');
-    logger.info(`Next run scheduled for: ${this.syncJob.nextDate().toString()}`);
+    logger.info('Scheduler started - Sales: every 5 minutes, Registrations: every 1 minute');
+    logger.info(`Next sales run: ${this.salesSyncJob.nextDate().toString()}`);
+    logger.info(`Next registration run: ${this.registrationSyncJob.nextDate().toString()}`);
   }
 
   /**
    * Stop the automated scheduling
    */
   stop(): void {
-    if (this.syncJob) {
-      this.syncJob.stop();
-      this.syncJob = null;
+    let wasRunning = false;
+    
+    if (this.salesSyncJob) {
+      this.salesSyncJob.stop();
+      this.salesSyncJob = null;
+      wasRunning = true;
+    }
+    
+    if (this.registrationSyncJob) {
+      this.registrationSyncJob.stop();
+      this.registrationSyncJob = null;
+      wasRunning = true;
+    }
+    
+    if (wasRunning) {
       this.isRunning = false;
       
       // Save disabled state to database
       this.saveSchedulerState(false);
       
-      logger.info('Scheduler stopped');
+      logger.info('Scheduler stopped - both sales and registration processing halted');
     } else {
       logger.info('Scheduler was not running');
     }
@@ -101,9 +127,15 @@ export class SchedulerService {
    */
   forceStop(): void {
     this.isRunning = false;
-    if (this.syncJob) {
-      this.syncJob.stop();
-      this.syncJob = null;
+    
+    if (this.salesSyncJob) {
+      this.salesSyncJob.stop();
+      this.salesSyncJob = null;
+    }
+    
+    if (this.registrationSyncJob) {
+      this.registrationSyncJob.stop();
+      this.registrationSyncJob = null;
     }
     
     // Save disabled state to database
@@ -125,16 +157,16 @@ export class SchedulerService {
   }
 
   /**
-   * Execute the scheduled sync process
+   * Execute the sales sync process (runs every 5 minutes)
    */
-  private async runScheduledSync(): Promise<void> {
+  private async runSalesSync(): Promise<void> {
     if (!this.isRunning) {
-      logger.debug('Skipping scheduled sync - scheduler is stopped');
+      logger.debug('Skipping sales sync - scheduler is stopped');
       return;
     }
 
     const startTime = new Date();
-    logger.info('Starting scheduled sales sync...');
+    logger.info('Starting sales sync...');
 
     try {
       // Refresh NTP time cache before processing
@@ -145,7 +177,6 @@ export class SchedulerService {
       
       // Auto-post new sales if enabled
       let autoPostResults: PostResult[] = [];
-      let registrationAutoPostResults: PostResult[] = [];
       
       if (result.newSales > 0 && result.processedSales.length > 0) {
         const autoPostSettings = await this.autoTweetService.getSettings();
@@ -160,40 +191,20 @@ export class SchedulerService {
           logger.info(`🐦 Sales auto-posting results: ${posted} posted, ${skipped} skipped, ${failed} failed`);
         }
       }
-
-      // Auto-post unposted registrations if enabled
-      const unpostedRegistrations = await this.databaseService.getUnpostedRegistrations(10);
-      if (unpostedRegistrations.length > 0) {
-        const autoPostSettings = await this.autoTweetService.getSettings();
-        if (autoPostSettings.enabled && autoPostSettings.registrationsEnabled && this.apiToggleService.isAutoPostingEnabled()) {
-          logger.info(`🏛️ Auto-posting ${unpostedRegistrations.length} unposted registrations...`);
-          registrationAutoPostResults = await this.autoTweetService.processNewRegistrations(unpostedRegistrations, autoPostSettings);
-          
-          const posted = registrationAutoPostResults.filter(r => r.success).length;
-          const skipped = registrationAutoPostResults.filter(r => r.skipped).length;
-          const failed = registrationAutoPostResults.filter(r => !r.success && !r.skipped).length;
-          
-          logger.info(`🏛️ Registration auto-posting results: ${posted} posted, ${skipped} skipped, ${failed} failed`);
-        }
-      }
       
       this.lastRunTime = startTime;
-      this.lastRunStats = { ...result, autoPostResults, registrationAutoPostResults };
+      this.lastRunStats = { ...result, autoPostResults };
       this.consecutiveErrors = 0; // Reset error counter on success
 
       const duration = Date.now() - startTime.getTime();
-      
       const salesPosted = autoPostResults.filter(r => r.success).length;
-      const registrationsPosted = registrationAutoPostResults.filter(r => r.success).length;
       
-      logger.info(`Scheduled sync completed in ${duration}ms:`, {
+      logger.info(`Sales sync completed in ${duration}ms:`, {
         fetched: result.fetched,
         newSales: result.newSales,
         duplicates: result.duplicates,
         errors: result.errors,
-        salesAutoPosted: salesPosted,
-        registrationsAutoPosted: registrationsPosted,
-        totalAutoPosted: salesPosted + registrationsPosted
+        salesAutoPosted: salesPosted
       });
 
       // Log notable events
@@ -201,13 +212,8 @@ export class SchedulerService {
         logger.info(`📈 Found ${result.newSales} new sales to process`);
       }
       
-      // Log registration processing summary (moved to after processing for accuracy)
-      if (unpostedRegistrations.length > 0) {
-        logger.info(`🏛️ Processed ${unpostedRegistrations.length} registrations: ${registrationsPosted} posted, ${unpostedRegistrations.length - registrationsPosted} skipped/failed`);
-      }
-      
-      if (salesPosted > 0 || registrationsPosted > 0) {
-        logger.info(`🐦 Posted ${salesPosted} sale tweets and ${registrationsPosted} registration tweets`);
+      if (salesPosted > 0) {
+        logger.info(`🐦 Posted ${salesPosted} sale tweets`);
       }
       
       if (result.errors > 0) {
@@ -238,20 +244,90 @@ export class SchedulerService {
   }
 
   /**
+   * Execute the registration sync process (runs every 1 minute)
+   */
+  private async runRegistrationSync(): Promise<void> {
+    if (!this.isRunning) {
+      logger.debug('Skipping registration sync - scheduler is stopped');
+      return;
+    }
+
+    const startTime = new Date();
+    logger.info('Starting registration sync...');
+
+    try {
+      // Auto-post unposted registrations if enabled
+      const unpostedRegistrations = await this.databaseService.getUnpostedRegistrations(10);
+      let registrationAutoPostResults: PostResult[] = [];
+      
+      if (unpostedRegistrations.length > 0) {
+        const autoPostSettings = await this.autoTweetService.getSettings();
+        if (autoPostSettings.enabled && autoPostSettings.registrationsEnabled && this.apiToggleService.isAutoPostingEnabled()) {
+          logger.info(`🏛️ Auto-posting ${unpostedRegistrations.length} unposted registrations...`);
+          registrationAutoPostResults = await this.autoTweetService.processNewRegistrations(unpostedRegistrations, autoPostSettings);
+          
+          const posted = registrationAutoPostResults.filter(r => r.success).length;
+          const skipped = registrationAutoPostResults.filter(r => r.skipped).length;
+          const failed = registrationAutoPostResults.filter(r => !r.success && !r.skipped).length;
+          
+          logger.info(`🏛️ Registration auto-posting results: ${posted} posted, ${skipped} skipped, ${failed} failed`);
+        }
+      }
+
+      const duration = Date.now() - startTime.getTime();
+      const registrationsPosted = registrationAutoPostResults.filter(r => r.success).length;
+      
+      logger.info(`Registration sync completed in ${duration}ms:`, {
+        unpostedFound: unpostedRegistrations.length,
+        registrationsAutoPosted: registrationsPosted
+      });
+
+      // Log registration processing summary
+      if (unpostedRegistrations.length > 0) {
+        logger.info(`🏛️ Processed ${unpostedRegistrations.length} registrations: ${registrationsPosted} posted, ${unpostedRegistrations.length - registrationsPosted} skipped/failed`);
+      }
+      
+      if (registrationsPosted > 0) {
+        logger.info(`🐦 Posted ${registrationsPosted} registration tweets`);
+      }
+
+    } catch (error: any) {
+      logger.error(`Registration sync failed:`, error.message);
+    }
+  }
+
+  /**
    * Get scheduler status and statistics
    */
   getStatus(): {
     isRunning: boolean;
     lastRunTime: Date | null;
-    nextRunTime: Date | null;
+    nextRunTime: Date | null;  // Backward compatibility - shows nearest upcoming run
+    nextSalesRunTime: Date | null;
+    nextRegistrationRunTime: Date | null;
     lastRunStats: any;
     consecutiveErrors: number;
     uptime: number;
   } {
+    const nextSalesRunTime = this.salesSyncJob ? this.salesSyncJob.nextDate().toJSDate() : null;
+    const nextRegistrationRunTime = this.registrationSyncJob ? this.registrationSyncJob.nextDate().toJSDate() : null;
+    
+    // For backward compatibility, show the nearest upcoming run
+    let nextRunTime = null;
+    if (nextSalesRunTime && nextRegistrationRunTime) {
+      nextRunTime = nextSalesRunTime < nextRegistrationRunTime ? nextSalesRunTime : nextRegistrationRunTime;
+    } else if (nextSalesRunTime) {
+      nextRunTime = nextSalesRunTime;
+    } else if (nextRegistrationRunTime) {
+      nextRunTime = nextRegistrationRunTime;
+    }
+
     return {
       isRunning: this.isRunning,
       lastRunTime: this.lastRunTime,
-      nextRunTime: this.syncJob ? this.syncJob.nextDate().toJSDate() : null,
+      nextRunTime, // Backward compatibility
+      nextSalesRunTime,
+      nextRegistrationRunTime,
       lastRunStats: this.lastRunStats,
       consecutiveErrors: this.consecutiveErrors,
       uptime: this.lastRunTime ? Date.now() - this.lastRunTime.getTime() : 0
@@ -259,7 +335,7 @@ export class SchedulerService {
   }
 
   /**
-   * Manually trigger a sync (doesn't affect the schedule)
+   * Manually trigger both sales and registration sync (doesn't affect the schedule)
    */
   async triggerManualSync(): Promise<{
     success: boolean;
@@ -267,12 +343,15 @@ export class SchedulerService {
     error?: string;
   }> {
     try {
-      logger.info('Manual sync triggered via scheduler service');
-      const stats = await this.salesProcessingService.processNewSales();
+      logger.info('Manual sync triggered - running both sales and registration processing');
+      
+      // Run both sync methods manually
+      await this.runSalesSync();
+      await this.runRegistrationSync();
       
       return {
         success: true,
-        stats
+        stats: { message: 'Both sales and registration sync completed' }
       };
     } catch (error: any) {
       logger.error('Manual sync failed:', error.message);
@@ -294,30 +373,30 @@ export class SchedulerService {
   /**
    * Get next few scheduled run times for monitoring
    */
-  getUpcomingRuns(count: number = 5): Date[] {
-    if (!this.syncJob) {
-      return [];
+  getUpcomingRuns(count: number = 5): { sales: Date[], registrations: Date[] } {
+    if (!this.salesSyncJob || !this.registrationSyncJob) {
+      return { sales: [], registrations: [] };
     }
 
-    const runs: Date[] = [];
-    let currentTime = new Date();
+    const salesRuns: Date[] = [];
+    const registrationRuns: Date[] = [];
     
+    // Get next few sales runs (every 5 minutes)
+    let currentTime = new Date();
     for (let i = 0; i < count; i++) {
-      // Calculate next run time manually for multiple runs
-      const nextRunMinutes = Math.ceil((currentTime.getMinutes() + 1) / 5) * 5 + (i * 5);
-      const nextRun = new Date(currentTime);
-      nextRun.setMinutes(nextRunMinutes, 0, 0);
-      
-      // If we've gone past the hour, adjust accordingly
-      if (nextRun.getMinutes() >= 60) {
-        nextRun.setHours(nextRun.getHours() + Math.floor(nextRun.getMinutes() / 60));
-        nextRun.setMinutes(nextRun.getMinutes() % 60);
-      }
-      
-      runs.push(nextRun);
+      const nextSalesRun = new Date(this.salesSyncJob.nextDate().toJSDate());
+      nextSalesRun.setMinutes(nextSalesRun.getMinutes() + (i * 5));
+      salesRuns.push(nextSalesRun);
     }
     
-    return runs;
+    // Get next few registration runs (every 1 minute)  
+    for (let i = 0; i < count; i++) {
+      const nextRegRun = new Date(this.registrationSyncJob.nextDate().toJSDate());
+      nextRegRun.setMinutes(nextRegRun.getMinutes() + i);
+      registrationRuns.push(nextRegRun);
+    }
+    
+    return { sales: salesRuns, registrations: registrationRuns };
   }
 
   /**
