@@ -10,6 +10,8 @@ import { DatabaseService } from './services/databaseService';
 import { VercelDatabaseService } from './services/vercelDatabaseService';
 import { IDatabaseService, ENSRegistration } from './types';
 import { SalesProcessingService } from './services/salesProcessingService';
+import { BidsProcessingService } from './services/bidsProcessingService';
+import { MagicEdenService } from './services/magicEdenService';
 import { SchedulerService } from './services/schedulerService';
 import { TwitterService } from './services/twitterService';
 import { TweetFormatter } from './services/tweetFormatter';
@@ -35,6 +37,8 @@ async function startApplication(): Promise<void> {
       : new DatabaseService();       // SQLite for local development
     
     const salesProcessingService = new SalesProcessingService(moralisService, databaseService);
+    const magicEdenService = new MagicEdenService();
+    const bidsProcessingService = new BidsProcessingService(magicEdenService, databaseService, moralisService);
     const twitterService = new TwitterService();
     const tweetFormatter = new TweetFormatter();
     const newTweetFormatter = new NewTweetFormatter(databaseService);
@@ -42,7 +46,7 @@ async function startApplication(): Promise<void> {
     const ethIdentityService = new EthIdentityService();
     const worldTimeService = new WorldTimeService();
     const autoTweetService = new AutoTweetService(newTweetFormatter, twitterService, rateLimitService, databaseService, worldTimeService);
-    const schedulerService = new SchedulerService(salesProcessingService, autoTweetService, databaseService);
+    const schedulerService = new SchedulerService(salesProcessingService, bidsProcessingService, autoTweetService, databaseService);
 
     // Initialize database
     await databaseService.initialize();

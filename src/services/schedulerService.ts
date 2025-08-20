@@ -1,5 +1,6 @@
 import { CronJob } from 'cron';
 import { SalesProcessingService } from './salesProcessingService';
+import { BidsProcessingService } from './bidsProcessingService';
 import { AutoTweetService, AutoPostSettings, PostResult } from './autoTweetService';
 import { APIToggleService } from './apiToggleService';
 import { logger } from '../utils/logger';
@@ -7,11 +8,13 @@ import { IDatabaseService } from '../types';
 
 export class SchedulerService {
   private salesProcessingService: SalesProcessingService;
+  private bidsProcessingService: BidsProcessingService;
   private autoTweetService: AutoTweetService;
   private apiToggleService: APIToggleService;
   private databaseService: IDatabaseService;
   private salesSyncJob: CronJob | null = null;
   private registrationSyncJob: CronJob | null = null;
+  private bidsSyncJob: CronJob | null = null;
   private isRunning: boolean = false;
   private lastRunTime: Date | null = null;
   private lastRunStats: any = null;
@@ -19,11 +22,13 @@ export class SchedulerService {
   private maxConsecutiveErrors: number = 5;
 
   constructor(
-    salesProcessingService: SalesProcessingService, 
+    salesProcessingService: SalesProcessingService,
+    bidsProcessingService: BidsProcessingService,
     autoTweetService: AutoTweetService,
     databaseService: IDatabaseService
   ) {
     this.salesProcessingService = salesProcessingService;
+    this.bidsProcessingService = bidsProcessingService;
     this.autoTweetService = autoTweetService;
     this.apiToggleService = APIToggleService.getInstance();
     this.databaseService = databaseService;
@@ -49,11 +54,11 @@ export class SchedulerService {
 
   /**
    * Start the automated scheduling
-   * Sales processing: every 5 minutes, Registration processing: every 1 minute
+   * Sales: every 5 minutes, Registrations: every 1 minute, Bids: every 2 minutes
    */
   start(): void {
     // Stop existing jobs if running
-    if (this.salesSyncJob || this.registrationSyncJob) {
+    if (this.salesSyncJob || this.registrationSyncJob || this.bidsSyncJob) {
       logger.warn('Scheduler already running, stopping existing jobs first');
       this.stop();
     }
@@ -80,16 +85,29 @@ export class SchedulerService {
       'America/New_York' // Timezone
     );
 
+    // Create cron job for bid processing (every 2 minutes)
+    this.bidsSyncJob = new CronJob(
+      '0 */2 * * * *', // Every 2 minutes at :00 seconds
+      () => {
+        this.runBidsSync();
+      },
+      null,
+      false, // Don't start automatically
+      'America/New_York' // Timezone
+    );
+
     this.salesSyncJob.start();
     this.registrationSyncJob.start();
+    this.bidsSyncJob.start();
     this.isRunning = true;
     
     // Save enabled state to database
     this.saveSchedulerState(true);
     
-    logger.info('Scheduler started - Sales: every 5 minutes, Registrations: every 1 minute');
+    logger.info('Scheduler started - Sales: every 5 minutes, Registrations: every 1 minute, Bids: every 2 minutes');
     logger.info(`Next sales run: ${this.salesSyncJob.nextDate().toString()}`);
     logger.info(`Next registration run: ${this.registrationSyncJob.nextDate().toString()}`);
+    logger.info(`Next bid run: ${this.bidsSyncJob.nextDate().toString()}`);
   }
 
   /**
@@ -110,13 +128,19 @@ export class SchedulerService {
       wasRunning = true;
     }
     
+    if (this.bidsSyncJob) {
+      this.bidsSyncJob.stop();
+      this.bidsSyncJob = null;
+      wasRunning = true;
+    }
+    
     if (wasRunning) {
       this.isRunning = false;
       
       // Save disabled state to database
       this.saveSchedulerState(false);
       
-      logger.info('Scheduler stopped - both sales and registration processing halted');
+      logger.info('Scheduler stopped - sales, registration, and bid processing halted');
     } else {
       logger.info('Scheduler was not running');
     }
@@ -136,6 +160,11 @@ export class SchedulerService {
     if (this.registrationSyncJob) {
       this.registrationSyncJob.stop();
       this.registrationSyncJob = null;
+    }
+    
+    if (this.bidsSyncJob) {
+      this.bidsSyncJob.stop();
+      this.bidsSyncJob = null;
     }
     
     // Save disabled state to database
@@ -297,6 +326,74 @@ export class SchedulerService {
   }
 
   /**
+   * Execute the bid sync process (runs every 2 minutes)
+   */
+  private async runBidsSync(): Promise<void> {
+    if (!this.isRunning) {
+      logger.debug('Skipping bid sync - scheduler is stopped');
+      return;
+    }
+
+    const startTime = new Date();
+    logger.info('Starting bid sync...');
+
+    try {
+      // Step 1: Process new bids from Magic Eden API
+      const processingResult = await this.bidsProcessingService.processNewBids();
+      
+      // Step 2: Auto-post unposted bids if enabled
+      const unpostedBids = await this.databaseService.getUnpostedBids(10);
+      let bidAutoPostResults: PostResult[] = [];
+      
+      if (unpostedBids.length > 0) {
+        const autoPostSettings = await this.autoTweetService.getSettings();
+        if (autoPostSettings.enabled && this.apiToggleService.isAutoPostingEnabled()) {
+          logger.info(`✋ Auto-posting ${unpostedBids.length} unposted bids...`);
+          bidAutoPostResults = await this.autoTweetService.processNewBids(unpostedBids, autoPostSettings);
+          
+          const posted = bidAutoPostResults.filter(r => r.success).length;
+          const skipped = bidAutoPostResults.filter(r => r.skipped).length;
+          const failed = bidAutoPostResults.filter(r => !r.success && !r.skipped).length;
+          
+          logger.info(`✋ Bid auto-posting results: ${posted} posted, ${skipped} skipped, ${failed} failed`);
+        }
+      }
+
+      const duration = Date.now() - startTime.getTime();
+      const bidsPosted = bidAutoPostResults.filter(r => r.success).length;
+      
+      logger.info(`Bid sync completed in ${duration}ms:`, {
+        newBidsProcessed: processingResult.newBids || 0,
+        unpostedFound: unpostedBids.length,
+        bidsAutoPosted: bidsPosted
+      });
+
+      // Log bid processing summary
+      if (processingResult.newBids && processingResult.newBids > 0) {
+        logger.info(`📊 New bids processed: ${processingResult.newBids} (${processingResult.duplicates} duplicates, ${processingResult.filtered || 0} filtered)`);
+      }
+      
+      if (unpostedBids.length > 0) {
+        logger.info(`✋ Processed ${unpostedBids.length} bids: ${bidsPosted} posted, ${bidAutoPostResults.filter(r => r.skipped).length} skipped, ${bidAutoPostResults.filter(r => !r.success && !r.skipped).length} failed`);
+      }
+      
+      if (bidsPosted > 0) {
+        logger.info(`🐦 Posted ${bidsPosted} bid tweets`);
+      }
+
+    } catch (error: any) {
+      logger.error(`Bid sync failed:`, error.message);
+      this.consecutiveErrors++;
+      
+      // Auto-disable after too many consecutive errors
+      if (this.consecutiveErrors >= this.maxConsecutiveErrors) {
+        logger.error(`Maximum consecutive errors (${this.maxConsecutiveErrors}) reached. Stopping scheduler.`);
+        this.stop();
+      }
+    }
+  }
+
+  /**
    * Get scheduler status and statistics
    */
   getStatus(): {
@@ -305,21 +402,20 @@ export class SchedulerService {
     nextRunTime: Date | null;  // Backward compatibility - shows nearest upcoming run
     nextSalesRunTime: Date | null;
     nextRegistrationRunTime: Date | null;
+    nextBidsRunTime: Date | null;
     lastRunStats: any;
     consecutiveErrors: number;
     uptime: number;
   } {
     const nextSalesRunTime = this.salesSyncJob ? this.salesSyncJob.nextDate().toJSDate() : null;
     const nextRegistrationRunTime = this.registrationSyncJob ? this.registrationSyncJob.nextDate().toJSDate() : null;
+    const nextBidsRunTime = this.bidsSyncJob ? this.bidsSyncJob.nextDate().toJSDate() : null;
     
     // For backward compatibility, show the nearest upcoming run
     let nextRunTime = null;
-    if (nextSalesRunTime && nextRegistrationRunTime) {
-      nextRunTime = nextSalesRunTime < nextRegistrationRunTime ? nextSalesRunTime : nextRegistrationRunTime;
-    } else if (nextSalesRunTime) {
-      nextRunTime = nextSalesRunTime;
-    } else if (nextRegistrationRunTime) {
-      nextRunTime = nextRegistrationRunTime;
+    const allNextTimes = [nextSalesRunTime, nextRegistrationRunTime, nextBidsRunTime].filter(t => t !== null);
+    if (allNextTimes.length > 0) {
+      nextRunTime = new Date(Math.min(...allNextTimes.map(t => t!.getTime())));
     }
 
     return {
@@ -328,6 +424,7 @@ export class SchedulerService {
       nextRunTime, // Backward compatibility
       nextSalesRunTime,
       nextRegistrationRunTime,
+      nextBidsRunTime,
       lastRunStats: this.lastRunStats,
       consecutiveErrors: this.consecutiveErrors,
       uptime: this.lastRunTime ? Date.now() - this.lastRunTime.getTime() : 0
@@ -343,15 +440,16 @@ export class SchedulerService {
     error?: string;
   }> {
     try {
-      logger.info('Manual sync triggered - running both sales and registration processing');
+      logger.info('Manual sync triggered - running sales, registration, and bid processing');
       
-      // Run both sync methods manually
+      // Run all sync methods manually
       await this.runSalesSync();
       await this.runRegistrationSync();
+      await this.runBidsSync();
       
       return {
         success: true,
-        stats: { message: 'Both sales and registration sync completed' }
+        stats: { message: 'Sales, registration, and bid sync completed' }
       };
     } catch (error: any) {
       logger.error('Manual sync failed:', error.message);
@@ -373,13 +471,14 @@ export class SchedulerService {
   /**
    * Get next few scheduled run times for monitoring
    */
-  getUpcomingRuns(count: number = 5): { sales: Date[], registrations: Date[] } {
-    if (!this.salesSyncJob || !this.registrationSyncJob) {
-      return { sales: [], registrations: [] };
+  getUpcomingRuns(count: number = 5): { sales: Date[], registrations: Date[], bids: Date[] } {
+    if (!this.salesSyncJob || !this.registrationSyncJob || !this.bidsSyncJob) {
+      return { sales: [], registrations: [], bids: [] };
     }
 
     const salesRuns: Date[] = [];
     const registrationRuns: Date[] = [];
+    const bidRuns: Date[] = [];
     
     // Get next few sales runs (every 5 minutes)
     let currentTime = new Date();
@@ -396,7 +495,14 @@ export class SchedulerService {
       registrationRuns.push(nextRegRun);
     }
     
-    return { sales: salesRuns, registrations: registrationRuns };
+    // Get next few bid runs (every 2 minutes)
+    for (let i = 0; i < count; i++) {
+      const nextBidRun = new Date(this.bidsSyncJob.nextDate().toJSDate());
+      nextBidRun.setMinutes(nextBidRun.getMinutes() + (i * 2));
+      bidRuns.push(nextBidRun);
+    }
+    
+    return { sales: salesRuns, registrations: registrationRuns, bids: bidRuns };
   }
 
   /**

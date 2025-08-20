@@ -756,7 +756,7 @@
             <div class="mb-8">
                 <div class="bg-white shadow rounded-lg p-6">
                     <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">Scheduler Status</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
                         <div class="flex items-center">
                             <span class="text-sm font-medium text-gray-500 mr-2">Status:</span>
                             <span x-show="schedulerStatus?.isRunning" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
@@ -770,11 +770,15 @@
                         </div>
                         <div class="flex items-center">
                             <span class="text-sm font-medium text-gray-500 mr-2">Sales (5min):</span>
-                            <span class="text-sm text-gray-900" x-text="schedulerStatus?.nextSalesRunTime ? formatTimestamp(schedulerStatus.nextSalesRunTime) : 'N/A'"></span>
+                            <span class="text-sm text-blue-600 font-medium" x-text="schedulerStatus?.nextSalesRunTime ? formatTimestamp(schedulerStatus.nextSalesRunTime) : 'N/A'"></span>
                         </div>
                         <div class="flex items-center">
                             <span class="text-sm font-medium text-gray-500 mr-2">Registrations (1min):</span>
                             <span class="text-sm text-green-600 font-medium" x-text="schedulerStatus?.nextRegistrationRunTime ? formatTimestamp(schedulerStatus.nextRegistrationRunTime) : 'N/A'"></span>
+                        </div>
+                        <div class="flex items-center">
+                            <span class="text-sm font-medium text-gray-500 mr-2">Bids (2min):</span>
+                            <span class="text-sm text-orange-600 font-medium" x-text="schedulerStatus?.nextBidsRunTime ? formatTimestamp(schedulerStatus.nextBidsRunTime) : 'N/A'"></span>
                         </div>
                         <div class="flex items-center">
                             <span class="text-sm font-medium text-gray-500 mr-2">Errors:</span>
