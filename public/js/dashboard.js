@@ -8,7 +8,8 @@ function dashboard() {
         // Master API Toggles
         apiToggles: {
             twitterEnabled: true,
-            moralisEnabled: true
+            moralisEnabled: true,
+            magicEdenEnabled: true
         },
         
         // Auto-posting settings
@@ -1385,6 +1386,32 @@ function dashboard() {
             } catch (error) {
                 console.error('Toggle Moralis API error:', error);
                 this.showMessage('Failed to toggle Moralis API', 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async toggleMagicEdenAPI() {
+            try {
+                this.loading = true;
+                const response = await fetch('/api/admin/toggle-magic-eden', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: !this.apiToggles.magicEdenEnabled })
+                });
+                
+                if (response.ok) {
+                    this.apiToggles.magicEdenEnabled = !this.apiToggles.magicEdenEnabled;
+                    this.showMessage(
+                        `Magic Eden API ${this.apiToggles.magicEdenEnabled ? 'enabled' : 'disabled'}`,
+                        'success'
+                    );
+                } else {
+                    throw new Error('Failed to toggle Magic Eden API');
+                }
+            } catch (error) {
+                console.error('Toggle Magic Eden API error:', error);
+                this.showMessage('Failed to toggle Magic Eden API', 'error');
             } finally {
                 this.loading = false;
             }

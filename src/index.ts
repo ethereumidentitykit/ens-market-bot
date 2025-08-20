@@ -454,6 +454,33 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    app.post('/api/admin/toggle-magic-eden', async (req, res) => {
+      try {
+        const { enabled } = req.body;
+        if (typeof enabled !== 'boolean') {
+          return res.status(400).json({
+            success: false,
+            error: 'enabled must be a boolean'
+          });
+        }
+
+        await apiToggleService.setMagicEdenEnabled(enabled);
+        logger.info(`Magic Eden API ${enabled ? 'enabled' : 'disabled'} via admin toggle`);
+        
+        const state = apiToggleService.getState();
+        res.json({
+          success: true,
+          magicEdenEnabled: state.magicEdenEnabled
+        });
+      } catch (error: any) {
+        logger.error('Toggle Magic Eden API error:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     app.post('/api/admin/toggle-auto-posting', async (req, res) => {
       try {
         const { enabled } = req.body;

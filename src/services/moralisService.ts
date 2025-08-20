@@ -1,4 +1,4 @@
-import axios, { AxiosResponse } from 'axios';
+import axios, { AxiosResponse, AxiosInstance } from 'axios';
 import { logger } from '../utils/logger';
 import { NFTSale } from '../types';
 import { config } from '../utils/config';
@@ -112,6 +112,7 @@ export class MoralisService {
   private ethPriceCache: { price: number; timestamp: number } | null = null;
   private readonly CACHE_DURATION = 30 * 60 * 1000; // 30 minutes in milliseconds
   private apiToggleService: APIToggleService;
+  private axiosInstance: AxiosInstance;
 
   constructor() {
     this.apiToggleService = APIToggleService.getInstance();
@@ -121,17 +122,25 @@ export class MoralisService {
     
     this.baseUrl = config.moralis.baseUrl;
     this.apiKey = config.moralis.apiKey;
-  }
-
-  /**
-   * Check if Moralis API is enabled via admin toggle
-   */
-  private checkApiEnabled(): boolean {
-    if (!this.apiToggleService.isMoralisEnabled()) {
-      logger.warn('Moralis API call blocked - API disabled via admin toggle');
-      return false;
-    }
-    return true;
+    
+    // Create axios instance with interceptor for API toggle protection
+    this.axiosInstance = axios.create({
+      baseURL: this.baseUrl,
+      headers: {
+        'X-API-Key': this.apiKey,
+        'Content-Type': 'application/json'
+      },
+      timeout: 30000 // 30 second timeout
+    });
+    
+    // Intercept ALL Moralis API requests automatically  
+    this.axiosInstance.interceptors.request.use((config) => {
+      if (!this.apiToggleService.isMoralisEnabled()) {
+        logger.warn('Moralis API call blocked - API disabled via admin toggle');
+        throw new Error('Moralis API disabled via admin toggle');
+      }
+      return config;
+    });
   }
 
   /**
@@ -147,10 +156,6 @@ export class MoralisService {
     cursor?: string,
     fromBlock?: string
   ): Promise<{ trades: EnhancedNFTSale[], nextCursor?: string }> {
-    if (!this.checkApiEnabled()) {
-      return { trades: [] };
-    }
-
     try {
       logger.info(`Fetching NFT trades for contract: ${contractAddress} (limit: ${limit})`);
 
@@ -169,15 +174,10 @@ export class MoralisService {
         params.from_block = fromBlock;
       }
 
-      const response: AxiosResponse<MoralisNFTTradesResponse> = await axios.get(
-        `${this.baseUrl}/nft/${contractAddress}/trades`,
+      const response: AxiosResponse<MoralisNFTTradesResponse> = await this.axiosInstance.get(
+        `/nft/${contractAddress}/trades`,
         {
-          params,
-          headers: {
-            'X-API-Key': this.apiKey,
-            'Content-Type': 'application/json',
-          },
-          timeout: 30000, // 30 second timeout
+          params
         }
       );
 
@@ -490,10 +490,6 @@ export class MoralisService {
    * Test connection to Moralis API
    */
   async testConnection(): Promise<boolean> {
-    if (!this.checkApiEnabled()) {
-      return false;
-    }
-
     try {
       logger.info('Testing Moralis API connection...');
       
@@ -544,17 +540,6 @@ export class MoralisService {
     finalCursor?: string;
     trades?: EnhancedNFTSale[];
   }> {
-    if (!this.checkApiEnabled()) {
-      return {
-        totalFetched: 0,
-        totalProcessed: 0,
-        totalFiltered: 0,
-        totalDuplicates: 0,
-        oldestBlockReached: 0,
-        targetBlockReached: false
-      };
-    }
-
     const stats = {
       totalFetched: 0,
       totalProcessed: 0,
@@ -664,33 +649,17 @@ export class MoralisService {
         return cachedPrice;
       }
 
-      // Check if Moralis API is enabled via admin toggle
-      if (!this.checkApiEnabled()) {
-        // Use fallback price when API is disabled
-        const fallbackPrice = 4000;
-        logger.info(`💰 Using fallback ETH price: $${fallbackPrice} (API disabled)`);
-        
-        // Cache the fallback price to avoid repeated checks
-        await this.cacheETHPrice(fallbackPrice);
-        
-        return fallbackPrice;
-      }
-
       logger.debug('ETH price cache expired, fetching fresh price from Moralis API');
       const wethContractAddress = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'; // WETH contract
       
-      const response: AxiosResponse<MoralisTokenPriceResponse> = await axios.get(
-        `${this.baseUrl}/erc20/${wethContractAddress}/price`,
+      const response: AxiosResponse<MoralisTokenPriceResponse> = await this.axiosInstance.get(
+        `/erc20/${wethContractAddress}/price`,
         {
           params: {
             chain: 'eth',
             exchange: 'uniswapv3'
           },
-          headers: {
-            'X-API-Key': this.apiKey,
-            'accept': 'application/json',
-          },
-          timeout: 10000, // 10 second timeout
+          timeout: 10000 // 10 second timeout
         }
       );
 
