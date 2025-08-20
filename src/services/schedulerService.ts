@@ -370,7 +370,7 @@ export class SchedulerService {
 
       // Log bid processing summary
       if (processingResult.newBids && processingResult.newBids > 0) {
-        logger.info(`📊 New bids processed: ${processingResult.newBids} (${processingResult.duplicates} duplicates, ${processingResult.filtered || 0} filtered)`);
+        logger.info(`📊 New bids processed: ${processingResult.newBids} (${processingResult.duplicates || 0} duplicates, ${processingResult.filtered || 0} filtered)`);
       }
       
       if (unpostedBids.length > 0) {
