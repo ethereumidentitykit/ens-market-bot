@@ -108,7 +108,7 @@ export class MagicEdenService {
     let cursor: string | undefined;
     let allNewBids: MagicEdenBid[] = [];
     let totalPages = 0;
-    const maxPages = 20; // Safety limit to prevent runaway cursoring
+    const maxPages = 5; // Reduced limit to prevent scheduler overlap (250 bids max)
     
     do {
       totalPages++;
@@ -116,10 +116,17 @@ export class MagicEdenService {
       
       if (bids.length === 0) break;
       
-      // Filter bids to only those newer than our boundary
+      // Filter bids to only those newer than our boundary AND with >30min validity remaining
       const newBids = bids.filter(bid => {
         const bidTimestamp = new Date(bid.createdAt).getTime();
-        return bidTimestamp > boundaryTimestamp;
+        const validUntil = bid.validUntil * 1000; // Convert to milliseconds
+        const now = Date.now();
+        const thirtyMinutes = 30 * 60 * 1000; // 30 minutes in milliseconds
+        
+        const isNewerThanBoundary = bidTimestamp > boundaryTimestamp;
+        const hasValidityRemaining = validUntil > (now + thirtyMinutes);
+        
+        return isNewerThanBoundary && hasValidityRemaining;
       });
       
       allNewBids.push(...newBids);
