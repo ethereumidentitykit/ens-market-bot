@@ -1392,6 +1392,36 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    app.get('/api/admin/bids', async (req, res) => {
+      try {
+        const page = parseInt(req.query.page as string) || 1;
+        const limit = parseInt(req.query.limit as string) || 10;
+        const offset = (page - 1) * limit;
+
+        // Get recent bids with pagination
+        const allBids = await databaseService.getRecentBids(1000); // Get more for proper pagination
+        
+        // Apply pagination
+        const paginatedBids = allBids.slice(offset, offset + limit);
+        const total = allBids.length;
+        
+        res.json({
+          success: true,
+          bids: paginatedBids,
+          total: total,
+          totalPages: Math.ceil(total / limit),
+          currentPage: page,
+          hasNext: page * limit < total,
+          hasPrev: page > 1
+        });
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     app.post('/api/database/reset', async (req, res) => {
       try {
         logger.warn('Database reset requested - this will delete ALL data!');

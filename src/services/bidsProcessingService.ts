@@ -188,16 +188,21 @@ export class BidsProcessingService {
       }
 
       logger.debug(`🖼️  Fetching ENS metadata for token ID: ${bid.tokenId}`);
+      const metadataStartTime = Date.now();
       
       // Use ENS Base Registrar contract for metadata
       const ensContract = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
       const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
       
-      const response = await axios.get(metadataUrl, { timeout: 10000 });
+      const response = await axios.get(metadataUrl, { timeout: 3000 }); // Reduced from 10s to 3s
       const metadata: ENSMetadata = response.data;
+      
+      const metadataTime = Date.now() - metadataStartTime;
+      logger.debug(`✅ ENS metadata fetched in ${metadataTime}ms for: ${metadata.name}`);
       
       return {
         ...bid,
+        ensName: metadata.name, // Store the actual ENS name
         nftImage: metadata.image || metadata.image_url,
         nftDescription: metadata.description,
       };
@@ -218,9 +223,13 @@ export class BidsProcessingService {
         return bid;
       }
 
+      const pricingStartTime = Date.now();
       const ethPriceUSD = await this.moralisService.getETHPriceUSD();
+      const pricingTime = Date.now() - pricingStartTime;
+      
       if (ethPriceUSD) {
         const priceUsd = (parseFloat(bid.priceDecimal) * ethPriceUSD).toFixed(2);
+        logger.debug(`💰 USD pricing added in ${pricingTime}ms: ${bid.priceDecimal} ETH = $${priceUsd}`);
         return {
           ...bid,
           priceUsd

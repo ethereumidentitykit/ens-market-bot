@@ -3,7 +3,7 @@ function dashboard() {
     return {
         // View State
         currentView: 'classic', // 'classic' or 'database'
-        databaseSubView: 'sales', // 'sales' or 'registrations'
+        databaseSubView: 'sales', // 'sales', 'registrations', or 'bids'
         
         // Master API Toggles
         apiToggles: {
@@ -68,6 +68,9 @@ function dashboard() {
 
         // Sale modal state
         selectedSale: null,
+        
+        // Bid modal state
+        selectedBid: null,
 
         // Database viewer state
         databaseView: {
@@ -239,6 +242,45 @@ function dashboard() {
             }
         },
 
+        // ENS Bids viewer state
+        bidsView: {
+            data: null,
+            loading: false,
+            currentPage: 1,
+            error: null,
+            bids: [],
+            totalBids: 0,
+            totalPages: 1,
+
+            async loadPage(page) {
+                this.loading = true;
+                this.currentPage = page;
+                this.error = null;
+                
+                try {
+                    const response = await fetch(`/api/admin/bids?page=${page}&limit=10`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.bids = data.bids || [];
+                        this.totalBids = data.total || 0;
+                        this.totalPages = Math.ceil(this.totalBids / 10);
+                        
+                        // ENS names and images should already be resolved and stored during bid processing
+                        // No live resolution needed in frontend
+                        
+                        this.data = data;
+                    } else {
+                        const errorData = await response.json().catch(() => ({}));
+                        this.error = errorData.error || `HTTP ${response.status}: Failed to load bids`;
+                    }
+                } catch (error) {
+                    this.error = `Network error: ${error.message}`;
+                }
+                
+                this.loading = false;
+            }
+        },
+
         // Historical data population state
         historicalData: {
             targetBlock: '23100000',
@@ -282,6 +324,7 @@ function dashboard() {
             await this.loadTweetHistory();
             await this.databaseView.loadPage(1);
             await this.registrationsView.loadPage(1);
+            await this.bidsView.loadPage(1);
             // Auto-refresh every 30 seconds
             setInterval(() => {
                 if (!this.loading && !this.processing) {
@@ -1302,6 +1345,11 @@ function dashboard() {
 
 
 
+
+        // Select bid for modal display
+        selectBid(bid) {
+            this.selectedBid = bid;
+        },
 
         // Helper function to show messages
         showMessage(text, type = 'info') {

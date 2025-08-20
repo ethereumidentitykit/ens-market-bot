@@ -108,7 +108,7 @@ export class MagicEdenService {
     let cursor: string | undefined;
     let allNewBids: MagicEdenBid[] = [];
     let totalPages = 0;
-    const maxPages = 50; // Safety limit to prevent runaway cursoring
+    const maxPages = 20; // Safety limit to prevent runaway cursoring
     
     do {
       totalPages++;

@@ -187,7 +187,7 @@ export interface ENSBid {
   contractAddress: string; // ENS contract address
   tokenId?: string;        // ENS token ID (extracted from tokenSetId)
   
-  // Bid Details (hex addresses only - live lookup ENS names)
+  // Bid Details  
   makerAddress: string;    // Bidder address (hex only)
   takerAddress?: string;   // Usually 0x000... for active bids
   status: string;          // active, filled, cancelled, expired
@@ -211,7 +211,8 @@ export interface ENSBid {
   validUntil: number;      // Unix timestamp bid expires
   processedAt: string;     // When we processed this bid
   
-  // ENS Metadata (from ENS service - for images only)
+  // ENS Metadata (from ENS service - stored during processing)
+  ensName?: string;        // Resolved ENS name (e.g., "317.eth")
   nftImage?: string;
   nftDescription?: string;
   

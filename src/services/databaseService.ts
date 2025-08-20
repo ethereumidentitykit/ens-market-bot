@@ -177,6 +177,7 @@ export class DatabaseService implements IDatabaseService {
         processed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         
         -- ENS Metadata
+        ens_name TEXT, -- Resolved ENS name (e.g., "317.eth")
         nft_image TEXT,
         nft_description TEXT,
         
@@ -804,8 +805,8 @@ export class DatabaseService implements IDatabaseService {
           status, price_raw, price_decimal, price_usd, currency_contract,
           currency_symbol, source_domain, source_name, marketplace_fee,
           created_at_api, updated_at_api, valid_from, valid_until,
-          processed_at, nft_image, nft_description
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          processed_at, ens_name, nft_image, nft_description
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         bid.bidId,
         bid.contractAddress,
@@ -826,6 +827,7 @@ export class DatabaseService implements IDatabaseService {
         bid.validFrom,
         bid.validUntil,
         bid.processedAt,
+        bid.ensName,
         bid.nftImage,
         bid.nftDescription
       ]);
@@ -967,6 +969,7 @@ export class DatabaseService implements IDatabaseService {
       validFrom: row.valid_from,
       validUntil: row.valid_until,
       processedAt: row.processed_at,
+      ensName: row.ens_name,
       nftImage: row.nft_image,
       nftDescription: row.nft_description,
       tweetId: row.tweet_id,

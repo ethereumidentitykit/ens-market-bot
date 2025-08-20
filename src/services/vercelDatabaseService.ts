@@ -171,6 +171,7 @@ export class VercelDatabaseService implements IDatabaseService {
           processed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
           
           -- ENS Metadata
+          ens_name VARCHAR(255), -- Resolved ENS name (e.g., "317.eth")
           nft_image TEXT,
           nft_description TEXT,
           
@@ -820,8 +821,8 @@ export class VercelDatabaseService implements IDatabaseService {
           status, price_raw, price_decimal, price_usd, currency_contract,
           currency_symbol, source_domain, source_name, marketplace_fee,
           created_at_api, updated_at_api, valid_from, valid_until,
-          processed_at, nft_image, nft_description
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+          processed_at, ens_name, nft_image, nft_description
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
         RETURNING id
       `, [
         bid.bidId,
@@ -843,6 +844,7 @@ export class VercelDatabaseService implements IDatabaseService {
         bid.validFrom,
         bid.validUntil,
         bid.processedAt,
+        bid.ensName,
         bid.nftImage,
         bid.nftDescription
       ]);
@@ -984,6 +986,7 @@ export class VercelDatabaseService implements IDatabaseService {
       validFrom: row.valid_from,
       validUntil: row.valid_until,
       processedAt: row.processed_at,
+      ensName: row.ens_name,
       nftImage: row.nft_image,
       nftDescription: row.nft_description,
       tweetId: row.tweet_id,

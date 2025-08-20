@@ -1212,6 +1212,14 @@
                                 <i class="fas fa-plus-circle mr-2"></i>
                                 ENS Registrations
                             </button>
+                            <button
+                                @click="databaseSubView = 'bids'; bidsView.loadPage(1)"
+                                :class="databaseSubView === 'bids' ? 'border-green-500 text-green-400' : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-600'"
+                                class="py-2 px-1 border-b-2 font-medium text-sm transition-colors duration-200 flex items-center"
+                            >
+                                <i class="fas fa-hand-paper mr-2"></i>
+                                ENS Bids
+                            </button>
                         </nav>
                     </div>
                 </div>
@@ -1576,6 +1584,197 @@
                     </div>
                 </div>
                 <!-- End ENS Registrations Database View -->
+
+                <!-- ENS Bids Database View -->
+                <div x-show="databaseSubView === 'bids'" x-transition>
+                    <!-- Loading State -->
+                    <div x-show="bidsView.loading" class="text-center py-12">
+                        <i class="fas fa-spinner fa-spin text-3xl text-gray-400 mb-4"></i>
+                        <p class="text-gray-400">Loading ENS bids...</p>
+                    </div>
+
+                    <!-- Error State -->
+                    <div x-show="bidsView.error && !bidsView.loading" class="text-center py-12">
+                        <i class="fas fa-exclamation-triangle text-3xl text-red-400 mb-4"></i>
+                        <p class="text-red-400" x-text="bidsView.error"></p>
+                        <button 
+                            @click="bidsView.loadPage(1)" 
+                            class="mt-4 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition-colors duration-200"
+                        >
+                            <i class="fas fa-redo mr-2"></i>Retry
+                        </button>
+                    </div>
+
+                    <!-- Success State - Bids Table -->
+                    <div x-show="!bidsView.loading && !bidsView.error && bidsView.bids.length > 0" class="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
+                        <!-- Table Header -->
+                        <div class="bg-gray-700 px-6 py-3 border-b border-gray-600">
+                            <div class="flex items-center justify-between">
+                                <h3 class="text-lg font-medium text-white flex items-center">
+                                    <i class="fas fa-hand-paper text-green-400 mr-2"></i>
+                                    Recent ENS Bids
+                                    <span class="ml-2 px-2 py-1 bg-gray-600 text-gray-300 text-xs rounded-full" x-text="`${bidsView.bids.length} bids`"></span>
+                                </h3>
+                                <button 
+                                    @click="bidsView.loadPage(1)" 
+                                    class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-3 rounded text-sm transition-colors duration-200"
+                                >
+                                    <i class="fas fa-sync-alt mr-1"></i>Refresh
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Bids Table -->
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full">
+                                <thead class="bg-gray-700">
+                                    <tr>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">ENS Name</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Price</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Bidder</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Marketplace</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Expires</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Status</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Posted</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Created</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-700">
+                                    <template x-for="bid in bidsView.bids" :key="bid.id">
+                                        <tr class="hover:bg-gray-700 transition-colors duration-150 cursor-pointer" @click="selectBid(bid)">
+                                            <!-- ENS Name -->
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <div class="flex items-center">
+                                                    <img 
+                                                        :src="bid.nftImage || '/assets/nameplaceholder.png'" 
+                                                        :alt="bid.tokenId" 
+                                                        class="w-8 h-8 rounded-full mr-3 border border-gray-600"
+                                                        onerror="this.src='/assets/nameplaceholder.png'"
+                                                    >
+                                                    <div>
+                                                        <div class="text-sm font-medium text-white" x-text="bid.ensName || `Token: ${bid.tokenId?.slice(-6) || 'Unknown'}...`"></div>
+                                                        <div class="text-sm text-gray-400" x-text="bid.tokenId?.slice(0, 10) + '...'"></div>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            
+                                            <!-- Price -->
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <div class="text-sm font-medium text-white" x-text="`${parseFloat(bid.priceDecimal).toFixed(2)} ${bid.currencySymbol === 'WETH' ? 'ETH' : bid.currencySymbol}`"></div>
+                                                <div class="text-sm text-gray-400" x-show="bid.priceUsd" x-text="`$${parseFloat(bid.priceUsd || '0').toLocaleString()}`"></div>
+                                            </td>
+                                            
+                                            <!-- Bidder -->
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <div class="text-sm text-white" x-text="`${bid.makerAddress.slice(0, 6)}...${bid.makerAddress.slice(-4)}`"></div>
+                                            </td>
+                                            
+                                            <!-- Marketplace -->
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <div class="text-sm text-white" x-text="bid.sourceName || 'Unknown'"></div>
+                                                <div class="text-sm text-gray-400" x-text="bid.sourceDomain || ''"></div>
+                                            </td>
+                                            
+                                            <!-- Expires -->
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <div class="text-sm text-white" x-text="getRelativeTime(new Date(bid.validUntil * 1000))"></div>
+                                                <div class="text-sm text-gray-400" x-text="new Date(bid.validUntil * 1000).toLocaleDateString()"></div>
+                                            </td>
+                                            
+                                            <!-- Status -->
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <span 
+                                                    :class="{
+                                                        'bg-green-100 text-green-800': bid.status === 'active',
+                                                        'bg-gray-100 text-gray-800': bid.status === 'expired',
+                                                        'bg-red-100 text-red-800': bid.status === 'cancelled'
+                                                    }"
+                                                    class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full capitalize"
+                                                    x-text="bid.status"
+                                                ></span>
+                                            </td>
+                                            
+                                            <!-- Posted -->
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <div class="flex items-center">
+                                                    <div class="flex-shrink-0">
+                                                        <i :class="bid.posted ? 'fas fa-check-circle text-green-400' : 'fas fa-clock text-yellow-400'"></i>
+                                                    </div>
+                                                    <div class="ml-2">
+                                                        <div class="text-sm text-white" x-text="bid.posted ? 'Posted' : 'Pending'"></div>
+                                                        <div class="text-sm text-gray-400" x-show="bid.tweetId">
+                                                            <a :href="`https://twitter.com/i/web/status/${bid.tweetId}`" target="_blank" class="text-blue-400 hover:text-blue-300">
+                                                                Tweet <i class="fas fa-external-link-alt text-xs"></i>
+                                                            </a>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            
+                                            <!-- Created -->
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <div class="text-sm text-white" x-text="getRelativeTime(new Date(bid.createdAtApi))"></div>
+                                                <div class="text-sm text-gray-400" x-text="new Date(bid.createdAtApi).toLocaleString()"></div>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Empty State -->
+                    <div x-show="!bidsView.loading && !bidsView.error && bidsView.bids.length === 0" class="text-center py-12 bg-gray-800 border border-gray-700 rounded-lg">
+                        <i class="fas fa-hand-paper text-6xl text-gray-500 mb-4"></i>
+                        <h3 class="text-lg font-medium text-gray-300 mb-2">No ENS Bids Found</h3>
+                        <p class="text-gray-400 mb-4">No bids have been processed yet.</p>
+                        <button 
+                            @click="bidsView.loadPage(1)" 
+                            class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition-colors duration-200"
+                        >
+                            <i class="fas fa-sync-alt mr-2"></i>Refresh
+                        </button>
+                    </div>
+
+                    <!-- Pagination -->
+                    <div x-show="!bidsView.loading && !bidsView.error && bidsView.bids.length > 0" class="bg-gray-800 border border-gray-700 rounded-lg mt-4 px-6 py-4">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-2 text-sm text-gray-400">
+                                <span>Showing</span>
+                                <span class="font-medium text-white" x-text="((bidsView.currentPage - 1) * 10) + 1"></span>
+                                <span>to</span>
+                                <span class="font-medium text-white" x-text="Math.min(bidsView.currentPage * 10, bidsView.totalBids)"></span>
+                                <span>of</span>
+                                <span class="font-medium text-white" x-text="bidsView.totalBids"></span>
+                                <span>bids</span>
+                            </div>
+                            <nav class="flex items-center space-x-2">
+                                <button 
+                                    @click="bidsView.loadPage(bidsView.currentPage - 1)"
+                                    :disabled="bidsView.currentPage <= 1"
+                                    :class="bidsView.currentPage <= 1 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-700'"
+                                    class="px-3 py-2 text-sm text-gray-400 bg-gray-600 rounded transition-colors duration-200 flex items-center"
+                                >
+                                    <i class="fas fa-chevron-left"></i>
+                                </button>
+                                
+                                <span class="px-3 py-2 text-sm text-white bg-green-600 rounded">
+                                    Page <span x-text="bidsView.currentPage"></span>
+                                </span>
+                                
+                                <button 
+                                    @click="bidsView.loadPage(bidsView.currentPage + 1)"
+                                    :disabled="bidsView.currentPage >= bidsView.totalPages"
+                                    :class="bidsView.currentPage >= bidsView.totalPages ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-700'"
+                                    class="px-3 py-2 text-sm text-gray-400 bg-gray-600 rounded transition-colors duration-200 flex items-center"
+                                >
+                                    <i class="fas fa-chevron-right"></i>
+                                </button>
+                            </nav>
+                        </div>
+                    </div>
+                </div>
+                <!-- End ENS Bids Database View -->
 
             </main>
         </div>

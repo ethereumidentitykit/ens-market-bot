@@ -287,8 +287,8 @@ export class NewTweetFormatter {
     // Header: ✋ Offer
     const header = '✋ Offer';
     
-    // Line 1: ENS name - need to resolve from token ID
-    const ensName = await this.resolveENSNameFromBid(bid);
+    // Line 1: ENS name - use stored name from database
+    const ensName = bid.ensName || `Token: ${bid.tokenId?.slice(-6) || 'Unknown'}...`;
     
     // Line 2: Price with currency display
     const currencyDisplay = this.getCurrencyDisplayName(bid.currencySymbol);
@@ -314,43 +314,7 @@ export class NewTweetFormatter {
     return `${header}\n\n${ensName}\n\n${priceLine}\n${fromLine}\n\n${marketplaceLine}\n${validLine}\n\n${visionUrl}`;
   }
 
-  /**
-   * Resolve ENS name from bid data using ENS metadata API
-   * Makes live API call to get the actual ENS name
-   */
-  private async resolveENSNameFromBid(bid: ENSBid): Promise<string> {
-    try {
-      if (!bid.tokenId) {
-        return 'unknown.eth';
-      }
 
-      logger.debug(`🔍 Resolving ENS name for token ID: ${bid.tokenId}`);
-      
-      // Use ENS Base Registrar contract for metadata
-      const ensContract = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
-      const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
-      
-      const response = await fetch(metadataUrl);
-      if (!response.ok) {
-        throw new Error(`ENS API returned ${response.status}: ${response.statusText}`);
-      }
-
-      const metadata = await response.json();
-      
-      if (metadata && metadata.name) {
-        const ensName = metadata.name;
-        logger.debug(`✅ Resolved ENS name: ${ensName} for token ID: ${bid.tokenId}`);
-        return ensName;
-      } else {
-        logger.warn(`⚠️  ENS metadata found but no name field for token ID: ${bid.tokenId}`);
-        return `tokenid-${bid.tokenId.slice(-6)}.eth`; // Fallback format
-      }
-
-    } catch (error: any) {
-      logger.warn(`Failed to resolve ENS name for token ID ${bid.tokenId}:`, error.message);
-      return `tokenid-${bid.tokenId?.slice(-6) || 'unknown'}.eth`; // Fallback format
-    }
-  }
 
   /**
    * Get user-friendly currency display name
@@ -546,8 +510,8 @@ export class NewTweetFormatter {
     const priceEth = parseFloat(bid.priceDecimal);
     const priceUsd = bid.priceUsd ? parseFloat(bid.priceUsd) : 0;
     
-    // Get ENS name for display (live API call)
-    const ensName = await this.resolveENSNameFromBid(bid);
+    // Get ENS name for display (from database)
+    const ensName = bid.ensName || `Token: ${bid.tokenId?.slice(-6) || 'Unknown'}...`;
     
     // Get bidder display info
     const bidderHandle = this.getDisplayHandle(bidderAccount, bid.makerAddress);
@@ -846,7 +810,7 @@ export class NewTweetFormatter {
     // Get account data for breakdown
     const bidderAccount = await this.getAccountData(bid.makerAddress);
 
-    const ensName = await this.resolveENSNameFromBid(bid);
+    const ensName = bid.ensName || `Token: ${bid.tokenId?.slice(-6) || 'Unknown'}...`;
     const currencyDisplay = this.getCurrencyDisplayName(bid.currencySymbol);
     const priceDecimal = parseFloat(bid.priceDecimal).toFixed(2);
     const priceUsd = bid.priceUsd ? `($${parseFloat(bid.priceUsd).toLocaleString()})` : '';
