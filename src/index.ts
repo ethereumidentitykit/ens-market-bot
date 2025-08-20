@@ -1186,6 +1186,129 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    // Bid Tweet Generation API endpoints
+    app.get('/api/bid/tweet/generate/:bidId', async (req, res) => {
+      try {
+        const bidId = parseInt(req.params.bidId);
+        if (isNaN(bidId)) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid bid ID'
+          });
+        }
+
+        // Get the bid from database
+        const unpostedBids = await databaseService.getUnpostedBids(100);
+        const bid = unpostedBids.find(b => b.id === bidId);
+        
+        if (!bid) {
+          return res.status(404).json({
+            success: false,
+            error: 'Bid not found or already posted'
+          });
+        }
+
+        // Generate preview without posting
+        const preview = await newTweetFormatter.previewBidTweet(bid);
+        
+        res.json({
+          success: true,
+          data: {
+            tweet: preview.tweet,
+            breakdown: preview.breakdown,
+            imageUrl: preview.tweet.imageUrl,
+            hasImage: !!preview.tweet.imageBuffer
+          }
+        });
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.post('/api/bid/tweet/send/:bidId', async (req, res) => {
+      try {
+        const bidId = parseInt(req.params.bidId);
+        if (isNaN(bidId)) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid bid ID'
+          });
+        }
+
+        // Get the bid from database
+        const unpostedBids = await databaseService.getUnpostedBids(100);
+        const bid = unpostedBids.find(b => b.id === bidId);
+        
+        if (!bid) {
+          return res.status(404).json({
+            success: false,
+            error: 'Bid not found or already posted'
+          });
+        }
+
+        // Check rate limit first
+        await rateLimitService.validateTweetPost();
+
+        // Generate bid tweet
+        const generatedTweet = await newTweetFormatter.generateBidTweet(bid);
+        
+        if (!generatedTweet.isValid) {
+          return res.status(400).json({
+            success: false,
+            error: 'Unable to generate valid bid tweet',
+            details: generatedTweet
+          });
+        }
+
+        // Post to Twitter with image
+        const tweetResult = await twitterService.postTweet(generatedTweet.text, generatedTweet.imageBuffer);
+        
+        if (tweetResult.success && tweetResult.tweetId) {
+          // Record successful post in rate limiter
+          await rateLimitService.recordTweetPost(tweetResult.tweetId, generatedTweet.text);
+          
+          // Mark bid as posted in database
+          await databaseService.markBidAsPosted(bidId, tweetResult.tweetId);
+          
+          res.json({
+            success: true,
+            tweetId: tweetResult.tweetId,
+            message: `Bid tweet posted successfully: ${tweetResult.tweetId}`
+          });
+        } else {
+          res.status(500).json({
+            success: false,
+            error: tweetResult.error || 'Failed to post bid tweet'
+          });
+        }
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.get('/api/unposted-bids', async (req, res) => {
+      try {
+        const limit = parseInt(req.query.limit as string) || 10;
+        const unpostedBids = await databaseService.getUnpostedBids(limit);
+        res.json({
+          success: true,
+          data: unpostedBids,
+          count: unpostedBids.length
+        });
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     // Twitter History API endpoint
     app.get('/api/twitter/history', async (req, res) => {
       try {

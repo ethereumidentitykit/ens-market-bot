@@ -48,11 +48,13 @@ function dashboard() {
         testImageToken: '',
 
         // New tweet generation state
-        tweetType: 'sale', // 'sale' or 'registration'
+        tweetType: 'sale', // 'sale', 'registration', or 'bid'
         unpostedSales: [],
         selectedSaleId: '',
         unpostedRegistrations: [],
         selectedRegistrationId: '',
+        unpostedBids: [],
+        selectedBidId: '',
         generatedTweet: null,
         tweetBreakdown: null,
         tweetImageUrl: null,
@@ -361,6 +363,7 @@ function dashboard() {
             await this.refreshData();
             await this.loadUnpostedSales();
             await this.loadUnpostedRegistrations();
+            await this.loadUnpostedBids();
             await this.loadContracts();
             await this.loadTweetHistory();
             await this.databaseView.loadPage(1);
@@ -926,9 +929,40 @@ function dashboard() {
             }
         },
 
+        async loadUnpostedBids() {
+            try {
+                const response = await fetch('/api/unposted-bids?limit=20');
+                const data = await response.json();
+                
+                if (data.success) {
+                    this.unpostedBids = data.data;
+                } else {
+                    console.error('Failed to load unposted bids:', data.error);
+                    this.unpostedBids = [];
+                }
+            } catch (error) {
+                console.error('Failed to load unposted bids:', error);
+                this.unpostedBids = [];
+            }
+        },
+
+        async refreshUnpostedBids() {
+            this.loading = true;
+            try {
+                await this.loadUnpostedBids();
+                this.showTwitterMessage('Unposted bids refreshed', 'success');
+            } catch (error) {
+                console.error('Error refreshing unposted bids:', error);
+                this.showTwitterMessage('Failed to refresh unposted bids', 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
         clearSelection() {
             this.selectedSaleId = '';
             this.selectedRegistrationId = '';
+            this.selectedBidId = '';
         },
 
         clearTweetPreview() {
@@ -938,8 +972,21 @@ function dashboard() {
         },
 
         async generateTweetPost() {
-            const selectedId = this.tweetType === 'sale' ? this.selectedSaleId : this.selectedRegistrationId;
-            const itemType = this.tweetType === 'sale' ? 'sale' : 'registration';
+            let selectedId, itemType, endpoint;
+            
+            if (this.tweetType === 'sale') {
+                selectedId = this.selectedSaleId;
+                itemType = 'sale';
+                endpoint = `/api/tweet/generate/${selectedId}`;
+            } else if (this.tweetType === 'registration') {
+                selectedId = this.selectedRegistrationId;
+                itemType = 'registration';
+                endpoint = `/api/registration/tweet/generate/${selectedId}`;
+            } else if (this.tweetType === 'bid') {
+                selectedId = this.selectedBidId;
+                itemType = 'bid';
+                endpoint = `/api/bid/tweet/generate/${selectedId}`;
+            }
             
             if (!selectedId) {
                 this.showTwitterMessage(`Please select a ${itemType} first`, 'error');
@@ -951,9 +998,6 @@ function dashboard() {
             this.clearTweetPreview();
 
             try {
-                const endpoint = this.tweetType === 'sale' 
-                    ? `/api/tweet/generate/${selectedId}`
-                    : `/api/registration/tweet/generate/${selectedId}`;
                     
                 const response = await fetch(endpoint);
                 const data = await response.json();
@@ -981,8 +1025,21 @@ function dashboard() {
         },
 
         async sendTweetPost() {
-            const selectedId = this.tweetType === 'sale' ? this.selectedSaleId : this.selectedRegistrationId;
-            const itemType = this.tweetType === 'sale' ? 'sale' : 'registration';
+            let selectedId, itemType, endpoint;
+            
+            if (this.tweetType === 'sale') {
+                selectedId = this.selectedSaleId;
+                itemType = 'sale';
+                endpoint = `/api/tweet/send/${selectedId}`;
+            } else if (this.tweetType === 'registration') {
+                selectedId = this.selectedRegistrationId;
+                itemType = 'registration';
+                endpoint = `/api/registration/tweet/send/${selectedId}`;
+            } else if (this.tweetType === 'bid') {
+                selectedId = this.selectedBidId;
+                itemType = 'bid';
+                endpoint = `/api/bid/tweet/send/${selectedId}`;
+            }
             
             if (!selectedId) {
                 this.showTwitterMessage(`No ${itemType} selected`, 'error');
@@ -1002,9 +1059,6 @@ function dashboard() {
             this.clearTwitterMessage();
 
             try {
-                const endpoint = this.tweetType === 'sale' 
-                    ? `/api/tweet/send/${selectedId}`
-                    : `/api/registration/tweet/send/${selectedId}`;
                     
                 const response = await fetch(endpoint, {
                     method: 'POST'
@@ -1022,7 +1076,9 @@ function dashboard() {
                     this.clearSelection();
                     await Promise.all([
                         this.refreshData(),
-                        this.tweetType === 'sale' ? this.loadUnpostedSales() : this.loadUnpostedRegistrations()
+                        this.tweetType === 'sale' ? this.loadUnpostedSales() : 
+                        this.tweetType === 'registration' ? this.loadUnpostedRegistrations() :
+                        this.loadUnpostedBids()
                     ]);
                 } else {
                     this.showTwitterMessage(
