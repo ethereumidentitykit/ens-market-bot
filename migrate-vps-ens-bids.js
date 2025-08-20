@@ -10,48 +10,51 @@ async function migrateVPS() {
   console.log('🚀 VPS ENS Bids Database Migration\n');
 
   try {
-    // Auto-detect database type based on environment
-    const isPostgreSQL = process.env.DATABASE_URL && process.env.DATABASE_URL.startsWith('postgresql://');
+    // Debug environment variables
+    console.log('🔍 Environment Debug:');
+    console.log(`  NODE_ENV: ${process.env.NODE_ENV || 'not set'}`);
+    console.log(`  DATABASE_URL: ${process.env.DATABASE_URL ? 'Set (' + process.env.DATABASE_URL.substring(0, 20) + '...)' : 'Not set'}`);
+    
+    // Force PostgreSQL detection
+    const isPostgreSQL = process.env.DATABASE_URL && (
+      process.env.DATABASE_URL.startsWith('postgresql://') || 
+      process.env.DATABASE_URL.startsWith('postgres://')
+    );
     
     console.log(`📊 Database type: ${isPostgreSQL ? 'PostgreSQL' : 'SQLite'}`);
-    console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-
-    let db;
     
-    if (isPostgreSQL) {
-      const { VercelDatabaseService } = require('./dist/services/vercelDatabaseService');
-      db = new VercelDatabaseService();
-    } else {
-      const { DatabaseService } = require('./dist/services/databaseService');
-      db = new DatabaseService('./data/sales.db');
+    if (!isPostgreSQL) {
+      console.log('❌ ERROR: PostgreSQL DATABASE_URL not detected!');
+      console.log('💡 This script should only run on VPS with PostgreSQL');
+      console.log('💡 Make sure DATABASE_URL environment variable is set');
+      console.log('💡 Check: echo $DATABASE_URL');
+      console.log('❌ Exiting to prevent SQLite creation');
+      process.exit(1);
     }
+    
+    console.log('✅ PostgreSQL detected - proceeding with migration');
+
+    // Use PostgreSQL service (script only runs if PostgreSQL detected)
+    const { VercelDatabaseService } = require('./dist/services/vercelDatabaseService');
+    const db = new VercelDatabaseService();
 
     await db.initialize();
     console.log('✅ Database connected');
 
     // Check if ens_bids table exists at all
     try {
-      if (isPostgreSQL) {
-        const tableCheck = await db.pool.query(`
-          SELECT EXISTS (
-            SELECT FROM information_schema.tables 
-            WHERE table_schema = 'public' 
-            AND table_name = 'ens_bids'
-          );
-        `);
-        
-        if (!tableCheck.rows[0].exists) {
-          console.log('📝 ens_bids table does not exist - will be created by app initialization');
-          await db.close();
-          return;
-        }
-      } else {
-        const tableCheck = await db.db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='ens_bids';");
-        if (!tableCheck) {
-          console.log('📝 ens_bids table does not exist - will be created by app initialization');
-          await db.close();
-          return;
-        }
+      const tableCheck = await db.pool.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'ens_bids'
+        );
+      `);
+      
+      if (!tableCheck.rows[0].exists) {
+        console.log('📝 ens_bids table does not exist - will be created by app initialization');
+        await db.close();
+        return;
       }
       
       console.log('✅ ens_bids table exists');
@@ -65,48 +68,32 @@ async function migrateVPS() {
     console.log('🔍 Checking for ens_name column...');
     
     try {
-      if (isPostgreSQL) {
-        const columnCheck = await db.pool.query(`
-          SELECT column_name 
-          FROM information_schema.columns 
-          WHERE table_name = 'ens_bids' AND column_name = 'ens_name'
-        `);
-        
-        if (columnCheck.rows.length > 0) {
-          console.log('✅ ens_name column already exists - no migration needed');
-          await db.close();
-          return;
-        }
-      } else {
-        const columnCheck = await db.db.get("PRAGMA table_info(ens_bids)");
-        const columns = await db.db.all("PRAGMA table_info(ens_bids)");
-        const hasEnsName = columns.some(col => col.name === 'ens_name');
-        
-        if (hasEnsName) {
-          console.log('✅ ens_name column already exists - no migration needed');
-          await db.close();
-          return;
-        }
+      const columnCheck = await db.pool.query(`
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'ens_bids' AND column_name = 'ens_name'
+      `);
+      
+      if (columnCheck.rows.length > 0) {
+        console.log('✅ ens_name column already exists - no migration needed');
+        await db.close();
+        return;
       }
       
       console.log('📝 ens_name column missing - proceeding with migration');
     } catch (error) {
       console.log('⚠️  Could not check column existence, proceeding with migration attempt');
+      console.log(`⚠️  Error: ${error.message}`);
     }
 
     // Add ens_name column
     console.log('🔄 Adding ens_name column...');
     
     try {
-      if (isPostgreSQL) {
-        await db.pool.query('ALTER TABLE ens_bids ADD COLUMN ens_name VARCHAR(255)');
-      } else {
-        await db.db.run('ALTER TABLE ens_bids ADD COLUMN ens_name TEXT');
-      }
-      
+      await db.pool.query('ALTER TABLE ens_bids ADD COLUMN ens_name VARCHAR(255)');
       console.log('✅ ens_name column added successfully');
     } catch (error) {
-      if (error.message.includes('already exists') || error.message.includes('duplicate column')) {
+      if (error.message.includes('already exists') || error.message.includes('duplicate column') || error.code === '42701') {
         console.log('✅ ens_name column already exists (concurrent migration)');
       } else {
         throw error;
@@ -116,27 +103,16 @@ async function migrateVPS() {
     // Verify migration success
     console.log('🔍 Verifying migration...');
     
-    if (isPostgreSQL) {
-      const verifyResult = await db.pool.query(`
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_name = 'ens_bids' AND column_name = 'ens_name'
-      `);
-      
-      if (verifyResult.rows.length > 0) {
-        console.log('✅ Migration verified - ens_name column is present');
-      } else {
-        throw new Error('Migration verification failed');
-      }
+    const verifyResult = await db.pool.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'ens_bids' AND column_name = 'ens_name'
+    `);
+    
+    if (verifyResult.rows.length > 0) {
+      console.log('✅ Migration verified - ens_name column is present');
     } else {
-      const columns = await db.db.all("PRAGMA table_info(ens_bids)");
-      const hasEnsName = columns.some(col => col.name === 'ens_name');
-      
-      if (hasEnsName) {
-        console.log('✅ Migration verified - ens_name column is present');
-      } else {
-        throw new Error('Migration verification failed');
-      }
+      throw new Error('Migration verification failed - ens_name column not found after addition');
     }
 
     await db.close();
