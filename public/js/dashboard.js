@@ -1064,26 +1064,27 @@ function dashboard() {
             try {
                 const response = await fetch('/api/price-tiers');
                 if (response.ok) {
-                    const tiers = await response.json();
+                    const data = await response.json();
                     
-                    // Map database tiers to UI structure (all transaction types use same tiers)
-                    if (tiers && tiers.length >= 3) {
-                        const tier1 = tiers.find(t => t.tierLevel === 1);
-                        const tier2 = tiers.find(t => t.tierLevel === 2);
-                        const tier3 = tiers.find(t => t.tierLevel === 3);
-                        
-                        if (tier1 && tier2 && tier3) {
-                            // Apply same tiers to all transaction types initially
-                            const tierValues = {
-                                tier1: tier1.maxUsd || 5000,
-                                tier2: tier2.maxUsd || 10000,
-                                tier3: tier3.maxUsd || 40000
-                            };
-                            
-                            this.priceTiers.sales = { ...tierValues };
-                            this.priceTiers.registrations = { ...tierValues };
-                            this.priceTiers.bids = { ...tierValues };
-                        }
+                    if (data.success && data.tiers) {
+                        // Load tiers for each transaction type
+                        ['sales', 'registrations', 'bids'].forEach(type => {
+                            const typeTiers = data.tiers[type];
+                            if (typeTiers && typeTiers.length >= 3) {
+                                const tier1 = typeTiers.find(t => t.tierLevel === 1);
+                                const tier2 = typeTiers.find(t => t.tierLevel === 2);
+                                const tier3 = typeTiers.find(t => t.tierLevel === 3);
+                                
+                                if (tier1 && tier2 && tier3) {
+                                    // Use maxUsd as the tier threshold
+                                    this.priceTiers[type] = {
+                                        tier1: tier1.maxUsd || 10000,
+                                        tier2: tier2.maxUsd || 40000,
+                                        tier3: tier3.maxUsd || 100000
+                                    };
+                                }
+                            }
+                        });
                     }
                 }
             } catch (error) {
@@ -1193,7 +1194,7 @@ function dashboard() {
             try {
                 const tiers = this.priceTiers[type];
                 
-                // Update all 4 tiers in database
+                // Update all 4 tiers for this specific transaction type
                 const updates = [
                     { level: 1, min: 0, max: tiers.tier1 },
                     { level: 2, min: tiers.tier1, max: tiers.tier2 },
@@ -1201,11 +1202,14 @@ function dashboard() {
                     { level: 4, min: tiers.tier3, max: null }
                 ];
                 
-                // Send updates to server
+                // Send updates to server with transaction type
                 const response = await fetch('/api/price-tiers/update', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ tiers: updates })
+                    body: JSON.stringify({ 
+                        type: type,  // Include the transaction type
+                        tiers: updates 
+                    })
                 });
                 
                 if (response.ok) {

@@ -519,8 +519,17 @@ async function startApplication(): Promise<void> {
     // Price Tier API endpoints
     app.get('/api/price-tiers', async (req, res) => {
       try {
-        const tiers = await databaseService.getPriceTiers();
-        res.json(tiers);
+        // Get all tiers for all transaction types
+        const allTiers = await databaseService.getPriceTiers();
+        
+        // Group by transaction type
+        const tiersByType = {
+          sales: allTiers.filter(t => t.transactionType === 'sales'),
+          registrations: allTiers.filter(t => t.transactionType === 'registrations'),
+          bids: allTiers.filter(t => t.transactionType === 'bids')
+        };
+        
+        res.json({ success: true, tiers: tiersByType });
       } catch (error) {
         logger.error('Failed to get price tiers:', error);
         res.status(500).json({ success: false, error: 'Failed to get price tiers' });
@@ -529,18 +538,18 @@ async function startApplication(): Promise<void> {
     
     app.post('/api/price-tiers/update', async (req, res) => {
       try {
-        const { tiers } = req.body;
+        const { type, tiers } = req.body;
         
-        if (!tiers || !Array.isArray(tiers)) {
+        if (!type || !tiers || !Array.isArray(tiers)) {
           return res.status(400).json({ success: false, error: 'Invalid tier data' });
         }
         
-        // Update each tier
+        // Update each tier for the specified transaction type
         for (const tier of tiers) {
-          await databaseService.updatePriceTier(tier.level, tier.min, tier.max);
+          await databaseService.updatePriceTier(type, tier.level, tier.min, tier.max);
         }
         
-        res.json({ success: true, message: 'Price tiers updated successfully' });
+        res.json({ success: true, message: `${type} price tiers updated successfully` });
       } catch (error) {
         logger.error('Failed to update price tiers:', error);
         res.status(500).json({ success: false, error: 'Failed to update price tiers' });

@@ -42,7 +42,7 @@ export interface AlchemyNFTSalesResponse {
 // Price Tier Configuration
 export interface PriceTier {
   id?: number;
-  tierName: string;
+  transactionType?: string;
   tierLevel: number;
   minUsd: number;
   maxUsd: number | null;
@@ -188,9 +188,9 @@ export interface IDatabaseService {
   markBidAsPosted(id: number, tweetId: string): Promise<void>;
   
   // Price tier methods
-  getPriceTiers(): Promise<PriceTier[]>;
-  updatePriceTier(tierLevel: number, minUsd: number, maxUsd: number | null): Promise<void>;
-  getPriceTierForAmount(usdAmount: number): Promise<PriceTier | null>;
+  getPriceTiers(transactionType?: string): Promise<PriceTier[]>;
+  updatePriceTier(transactionType: string, tierLevel: number, minUsd: number, maxUsd: number | null): Promise<void>;
+  getPriceTierForAmount(transactionType: string, usdAmount: number): Promise<PriceTier | null>;
   getLastProcessedBidTimestamp(): Promise<number>;
   setLastProcessedBidTimestamp(timestamp: number): Promise<void>;
 }

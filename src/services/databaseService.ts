@@ -213,30 +213,47 @@ export class DatabaseService implements IDatabaseService {
         )
       `);
 
-      // Create price_tiers table for configurable image generation thresholds
+      // Drop old price_tiers table if it exists (migration)
+      await this.pool.query(`
+        DROP TABLE IF EXISTS price_tiers CASCADE
+      `);
+
+      // Create price_tiers table with transaction_type support
       await this.pool.query(`
         CREATE TABLE IF NOT EXISTS price_tiers (
           id SERIAL PRIMARY KEY,
-          tier_name VARCHAR(10) NOT NULL UNIQUE,
-          tier_level INTEGER NOT NULL UNIQUE CHECK (tier_level >= 1 AND tier_level <= 4),
+          transaction_type VARCHAR(20) NOT NULL CHECK (transaction_type IN ('sales', 'registrations', 'bids')),
+          tier_level INTEGER NOT NULL CHECK (tier_level >= 1 AND tier_level <= 4),
           min_usd DECIMAL(12,2) NOT NULL,
           max_usd DECIMAL(12,2),
           description VARCHAR(255),
           created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT unique_type_level UNIQUE (transaction_type, tier_level),
           CONSTRAINT check_min_max CHECK (max_usd IS NULL OR max_usd > min_usd)
         )
       `);
 
-      // Insert default price tiers if they don't exist
+      // Insert default price tiers for each transaction type
       await this.pool.query(`
-        INSERT INTO price_tiers (tier_name, tier_level, min_usd, max_usd, description)
+        INSERT INTO price_tiers (transaction_type, tier_level, min_usd, max_usd, description)
         VALUES 
-          ('tier1', 1, 5000, 10000, 'Grey border tier'),
-          ('tier2', 2, 10000, 40000, 'Blue border tier'),
-          ('tier3', 3, 40000, 100000, 'Purple border tier'),
-          ('tier4', 4, 100000, NULL, 'Red border tier (premium)')
-        ON CONFLICT (tier_name) DO NOTHING
+          -- Sales tiers
+          ('sales', 1, 5000, 10000, 'Sales Grey border tier'),
+          ('sales', 2, 10000, 40000, 'Sales Blue border tier'),
+          ('sales', 3, 40000, 100000, 'Sales Purple border tier'),
+          ('sales', 4, 100000, NULL, 'Sales Red border tier (premium)'),
+          -- Registrations tiers
+          ('registrations', 1, 5000, 10000, 'Registrations Grey border tier'),
+          ('registrations', 2, 10000, 40000, 'Registrations Blue border tier'),
+          ('registrations', 3, 40000, 100000, 'Registrations Purple border tier'),
+          ('registrations', 4, 100000, NULL, 'Registrations Red border tier (premium)'),
+          -- Bids tiers
+          ('bids', 1, 5000, 10000, 'Bids Grey border tier'),
+          ('bids', 2, 10000, 40000, 'Bids Blue border tier'),
+          ('bids', 3, 40000, 100000, 'Bids Purple border tier'),
+          ('bids', 4, 100000, NULL, 'Bids Red border tier (premium)')
+        ON CONFLICT (transaction_type, tier_level) DO NOTHING
       `);
 
       // Create index for rate limiting queries
@@ -701,17 +718,25 @@ export class DatabaseService implements IDatabaseService {
   }
 
   // Price Tier methods
-  async getPriceTiers(): Promise<PriceTier[]> {
+  async getPriceTiers(transactionType?: string): Promise<PriceTier[]> {
     if (!this.pool) throw new Error('Database not initialized');
     
     try {
-      const result = await this.pool.query(
-        'SELECT * FROM price_tiers ORDER BY tier_level ASC'
-      );
+      let query = 'SELECT * FROM price_tiers';
+      const params: any[] = [];
+      
+      if (transactionType) {
+        query += ' WHERE transaction_type = $1';
+        params.push(transactionType);
+      }
+      
+      query += ' ORDER BY transaction_type, tier_level ASC';
+      
+      const result = await this.pool.query(query, params);
       
       return result.rows.map(row => ({
         id: row.id,
-        tierName: row.tier_name,
+        transactionType: row.transaction_type,
         tierLevel: row.tier_level,
         minUsd: parseFloat(row.min_usd),
         maxUsd: row.max_usd ? parseFloat(row.max_usd) : null,
@@ -725,39 +750,40 @@ export class DatabaseService implements IDatabaseService {
     }
   }
 
-  async updatePriceTier(tierLevel: number, minUsd: number, maxUsd: number | null): Promise<void> {
+  async updatePriceTier(transactionType: string, tierLevel: number, minUsd: number, maxUsd: number | null): Promise<void> {
     if (!this.pool) throw new Error('Database not initialized');
     
     try {
       await this.pool.query(
         `UPDATE price_tiers 
-         SET min_usd = $2, max_usd = $3, updated_at = CURRENT_TIMESTAMP 
-         WHERE tier_level = $1`,
-        [tierLevel, minUsd, maxUsd]
+         SET min_usd = $3, max_usd = $4, updated_at = CURRENT_TIMESTAMP 
+         WHERE transaction_type = $1 AND tier_level = $2`,
+        [transactionType, tierLevel, minUsd, maxUsd]
       );
-      logger.info(`Updated price tier ${tierLevel}: $${minUsd} - ${maxUsd ? `$${maxUsd}` : 'unlimited'}`);
+      logger.info(`Updated ${transactionType} price tier ${tierLevel}: $${minUsd} - ${maxUsd ? `$${maxUsd}` : 'unlimited'}`);
     } catch (error: any) {
       logger.error('Failed to update price tier:', error.message);
       throw error;
     }
   }
 
-  async getPriceTierForAmount(usdAmount: number): Promise<PriceTier | null> {
+  async getPriceTierForAmount(transactionType: string, usdAmount: number): Promise<PriceTier | null> {
     if (!this.pool) throw new Error('Database not initialized');
     
     try {
       const result = await this.pool.query(
         `SELECT * FROM price_tiers 
-         WHERE $1 >= min_usd AND ($1 < max_usd OR max_usd IS NULL)
+         WHERE transaction_type = $1 AND $2 >= min_usd AND ($2 < max_usd OR max_usd IS NULL)
          ORDER BY tier_level ASC
          LIMIT 1`,
-        [usdAmount]
+        [transactionType, usdAmount]
       );
       
       if (result.rows.length === 0) {
         // If no tier matches, check if amount is below minimum tier
         const lowestTier = await this.pool.query(
-          'SELECT * FROM price_tiers ORDER BY min_usd ASC LIMIT 1'
+          'SELECT * FROM price_tiers WHERE transaction_type = $1 ORDER BY min_usd ASC LIMIT 1',
+          [transactionType]
         );
         
         if (lowestTier.rows.length > 0 && usdAmount < parseFloat(lowestTier.rows[0].min_usd)) {
@@ -767,14 +793,15 @@ export class DatabaseService implements IDatabaseService {
         
         // Return highest tier for amounts above all tiers
         const highestTier = await this.pool.query(
-          'SELECT * FROM price_tiers ORDER BY tier_level DESC LIMIT 1'
+          'SELECT * FROM price_tiers WHERE transaction_type = $1 ORDER BY tier_level DESC LIMIT 1',
+          [transactionType]
         );
         
         if (highestTier.rows.length > 0) {
           const row = highestTier.rows[0];
           return {
             id: row.id,
-            tierName: row.tier_name,
+            transactionType: row.transaction_type,
             tierLevel: row.tier_level,
             minUsd: parseFloat(row.min_usd),
             maxUsd: row.max_usd ? parseFloat(row.max_usd) : null,
@@ -790,7 +817,7 @@ export class DatabaseService implements IDatabaseService {
       const row = result.rows[0];
       return {
         id: row.id,
-        tierName: row.tier_name,
+        transactionType: row.transaction_type,
         tierLevel: row.tier_level,
         minUsd: parseFloat(row.min_usd),
         maxUsd: row.max_usd ? parseFloat(row.max_usd) : null,
