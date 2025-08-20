@@ -5,14 +5,53 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NFT Sales Bot - Admin Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.7.1/nouislider.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.7.1/nouislider.min.js"></script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
     <style>
         [x-cloak] { display: none !important; }
         .loading { animation: spin 1s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
         .fade-in { animation: fadeIn 0.5s ease-in; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        
+        /* NoUISlider custom styles */
+        .noUi-target {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            box-shadow: none;
+            height: 8px;
+        }
+        .noUi-connect {
+            background: #6b46c1;
+        }
+        .noUi-connect-0 { background: #6b7280; } /* Grey */
+        .noUi-connect-1 { background: #3b82f6; } /* Blue */
+        .noUi-connect-2 { background: #9333ea; } /* Purple */
+        .noUi-connect-3 { background: #ef4444; } /* Red */
+        .noUi-handle {
+            height: 20px;
+            width: 20px;
+            top: -6px;
+            right: -10px;
+            border-radius: 50%;
+            background: white;
+            border: 2px solid #6b46c1;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .noUi-handle:before,
+        .noUi-handle:after {
+            display: none;
+        }
+        .noUi-tooltip {
+            background: #1f2937;
+            border: none;
+            color: white;
+            font-size: 12px;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -74,6 +113,71 @@
                 </div>
             </div>
         </header>
+        <!-- Master API Toggles -->
+        <div class="bg-yellow-50 border-b border-yellow-200">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-2">
+                        <i class="fas fa-toggle-on text-orange-500"></i>
+                        <span class="text-sm font-medium text-gray-900">Master API Controls</span>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <!-- Twitter API Toggle -->
+                        <div class="flex items-center space-x-2">
+                            <span class="text-sm text-gray-700">Twitter API:</span>
+                            <button 
+                                @click="toggleTwitterAPI()"
+                                :disabled="loading"
+                                :class="apiToggles.twitterEnabled ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'"
+                                class="relative inline-flex items-center px-3 py-1 rounded-full text-xs font-medium text-white transition-colors disabled:opacity-50"
+                            >
+                                <i :class="apiToggles.twitterEnabled ? 'fas fa-check' : 'fas fa-times'" class="mr-1"></i>
+                                <span x-text="apiToggles.twitterEnabled ? 'Enabled' : 'Disabled'"></span>
+                            </button>
+                        </div>
+                        <!-- Moralis API Toggle -->
+                        <div class="flex items-center space-x-2">
+                            <span class="text-sm text-gray-700">Moralis API:</span>
+                            <button 
+                                @click="toggleMoralisAPI()"
+                                :disabled="loading"
+                                :class="apiToggles.moralisEnabled ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'"
+                                class="relative inline-flex items-center px-3 py-1 rounded-full text-xs font-medium text-white transition-colors disabled:opacity-50"
+                            >
+                                <i :class="apiToggles.moralisEnabled ? 'fas fa-check' : 'fas fa-times'" class="mr-1"></i>
+                                <span x-text="apiToggles.moralisEnabled ? 'Enabled' : 'Disabled'"></span>
+                            </button>
+                        </div>
+                        <!-- Magic Eden API Toggle -->
+                        <div class="flex items-center space-x-2">
+                            <span class="text-sm text-gray-700">Magic Eden API:</span>
+                            <button 
+                                @click="toggleMagicEdenAPI()"
+                                :disabled="loading"
+                                :class="apiToggles.magicEdenEnabled ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'"
+                                class="relative inline-flex items-center px-3 py-1 rounded-full text-xs font-medium text-white transition-colors disabled:opacity-50"
+                            >
+                                <i :class="apiToggles.magicEdenEnabled ? 'fas fa-check' : 'fas fa-times'" class="mr-1"></i>
+                                <span x-text="apiToggles.magicEdenEnabled ? 'Enabled' : 'Disabled'"></span>
+                            </button>
+                        </div>
+                        <!-- Auto-Posting Toggle -->
+                        <div class="flex items-center space-x-2">
+                            <span class="text-sm text-gray-700">Auto-Posting:</span>
+                            <button 
+                                @click="toggleAutoPosting()"
+                                :disabled="loading || !apiToggles.twitterEnabled"
+                                :class="autoPostSettings.enabled ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-600 hover:bg-gray-700'"
+                                class="relative inline-flex items-center px-3 py-1 rounded-full text-xs font-medium text-white transition-colors disabled:opacity-50"
+                            >
+                                <i :class="autoPostSettings.enabled ? 'fas fa-robot' : 'fas fa-pause'" class="mr-1"></i>
+                                <span x-text="autoPostSettings.enabled ? 'Global' : 'Manual'"></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <!-- Automatic Posting Controls -->
         <div class="bg-gradient-to-r from-blue-600 to-purple-600 border-b border-gray-200 text-white">
@@ -243,71 +347,123 @@
             </div>
         </div>
 
-        <!-- Master API Toggles -->
-        <div class="bg-yellow-50 border-b border-yellow-200">
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
-                <div class="flex items-center justify-between">
-                    <div class="flex items-center space-x-2">
-                        <i class="fas fa-toggle-on text-orange-500"></i>
-                        <span class="text-sm font-medium text-gray-900">Master API Controls</span>
+        <!-- Price Tier Configuration -->
+        <div class="bg-gradient-to-r from-purple-600 to-pink-600 border-b border-gray-200 text-white">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+                <h2 class="text-xl font-semibold mb-4 flex items-center">
+                    <i class="fas fa-sliders-h mr-2"></i>
+                    Image Generation Price Tiers
+                    <span class="ml-3 text-sm font-normal text-purple-200">(Drag markers to adjust thresholds)</span>
+                </h2>
+                
+                <div class="space-y-4">
+                    <!-- Sales Tier Slider -->
+                    <div class="bg-white/10 backdrop-blur rounded-lg p-3">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="font-medium flex items-center text-sm">
+                                <i class="fas fa-dollar-sign text-green-400 mr-2"></i>
+                                Sales Image Tiers
+                            </h3>
+                            <button 
+                                @click="savePriceTiers('sales')"
+                                :disabled="loading"
+                                class="px-3 py-1 bg-purple-500 hover:bg-purple-600 rounded text-xs font-medium transition-colors disabled:opacity-50"
+                            >
+                                Save
+                            </button>
+                        </div>
+                        
+                        <!-- NoUISlider Container -->
+                        <div class="px-4 py-2">
+                            <div id="sales-slider" class="mb-2"></div>
+                            <div class="flex justify-between text-xs text-gray-300 mt-2">
+                                <span>$0 - $<span x-text="(priceTiers.sales.tier1 / 1000).toFixed(0) + 'k'"></span></span>
+                                <span>$<span x-text="(priceTiers.sales.tier1 / 1000).toFixed(0) + 'k'"></span> - $<span x-text="(priceTiers.sales.tier2 / 1000).toFixed(0) + 'k'"></span></span>
+                                <span>$<span x-text="(priceTiers.sales.tier2 / 1000).toFixed(0) + 'k'"></span> - $<span x-text="(priceTiers.sales.tier3 / 1000).toFixed(0) + 'k'"></span></span>
+                                <span>$<span x-text="(priceTiers.sales.tier3 / 1000).toFixed(0) + 'k'"></span>+</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Value display -->
+                        <div class="grid grid-cols-4 gap-2 text-sm">
+                            <div class="text-center">
+                                <span class="text-purple-200 font-medium">Tier 1</span><br>
+                                <span class="text-xs">$0 - $<span x-text="priceTiers.sales.tier1.toLocaleString()"></span></span>
+                            </div>
+                            <div class="text-center">
+                                <span class="text-purple-200 font-medium">Tier 2</span><br>
+                                <span class="text-xs">$<span x-text="priceTiers.sales.tier1.toLocaleString()"></span> - $<span x-text="priceTiers.sales.tier2.toLocaleString()"></span></span>
+                            </div>
+                            <div class="text-center">
+                                <span class="text-purple-200 font-medium">Tier 3</span><br>
+                                <span class="text-xs">$<span x-text="priceTiers.sales.tier2.toLocaleString()"></span> - $<span x-text="priceTiers.sales.tier3.toLocaleString()"></span></span>
+                            </div>
+                            <div class="text-center">
+                                <span class="text-purple-200 font-medium">Tier 4</span><br>
+                                <span class="text-xs">$<span x-text="priceTiers.sales.tier3.toLocaleString()"></span>+</span>
+                            </div>
+                        </div>
                     </div>
-                    <div class="flex items-center space-x-4">
-                        <!-- Twitter API Toggle -->
-                        <div class="flex items-center space-x-2">
-                            <span class="text-sm text-gray-700">Twitter API:</span>
+                    
+                    <!-- Registrations Tier Slider -->
+                    <div class="bg-white/10 backdrop-blur rounded-lg p-3">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="font-medium flex items-center text-sm">
+                                <i class="fas fa-building text-blue-400 mr-2"></i>
+                                Registration Image Tiers
+                            </h3>
                             <button 
-                                @click="toggleTwitterAPI()"
+                                @click="savePriceTiers('registrations')"
                                 :disabled="loading"
-                                :class="apiToggles.twitterEnabled ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'"
-                                class="relative inline-flex items-center px-3 py-1 rounded-full text-xs font-medium text-white transition-colors disabled:opacity-50"
+                                class="px-3 py-1 bg-purple-500 hover:bg-purple-600 rounded text-xs font-medium transition-colors disabled:opacity-50"
                             >
-                                <i :class="apiToggles.twitterEnabled ? 'fas fa-check' : 'fas fa-times'" class="mr-1"></i>
-                                <span x-text="apiToggles.twitterEnabled ? 'Enabled' : 'Disabled'"></span>
+                                Save
                             </button>
                         </div>
-                        <!-- Moralis API Toggle -->
-                        <div class="flex items-center space-x-2">
-                            <span class="text-sm text-gray-700">Moralis API:</span>
+                        
+                        <!-- NoUISlider Container -->
+                        <div class="px-4 py-2">
+                            <div id="registrations-slider" class="mb-2"></div>
+                            <div class="flex justify-between text-xs text-gray-300 mt-2">
+                                <span>$0 - $<span x-text="(priceTiers.registrations.tier1 / 1000).toFixed(0) + 'k'"></span></span>
+                                <span>$<span x-text="(priceTiers.registrations.tier1 / 1000).toFixed(0) + 'k'"></span> - $<span x-text="(priceTiers.registrations.tier2 / 1000).toFixed(0) + 'k'"></span></span>
+                                <span>$<span x-text="(priceTiers.registrations.tier2 / 1000).toFixed(0) + 'k'"></span> - $<span x-text="(priceTiers.registrations.tier3 / 1000).toFixed(0) + 'k'"></span></span>
+                                <span>$<span x-text="(priceTiers.registrations.tier3 / 1000).toFixed(0) + 'k'"></span>+</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Bids Tier Slider -->
+                    <div class="bg-white/10 backdrop-blur rounded-lg p-3">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="font-medium flex items-center text-sm">
+                                <i class="fas fa-hand-paper text-orange-400 mr-2"></i>
+                                Bid/Offer Image Tiers
+                            </h3>
                             <button 
-                                @click="toggleMoralisAPI()"
+                                @click="savePriceTiers('bids')"
                                 :disabled="loading"
-                                :class="apiToggles.moralisEnabled ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'"
-                                class="relative inline-flex items-center px-3 py-1 rounded-full text-xs font-medium text-white transition-colors disabled:opacity-50"
+                                class="px-3 py-1 bg-purple-500 hover:bg-purple-600 rounded text-xs font-medium transition-colors disabled:opacity-50"
                             >
-                                <i :class="apiToggles.moralisEnabled ? 'fas fa-check' : 'fas fa-times'" class="mr-1"></i>
-                                <span x-text="apiToggles.moralisEnabled ? 'Enabled' : 'Disabled'"></span>
+                                Save
                             </button>
                         </div>
-                        <!-- Magic Eden API Toggle -->
-                        <div class="flex items-center space-x-2">
-                            <span class="text-sm text-gray-700">Magic Eden API:</span>
-                            <button 
-                                @click="toggleMagicEdenAPI()"
-                                :disabled="loading"
-                                :class="apiToggles.magicEdenEnabled ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'"
-                                class="relative inline-flex items-center px-3 py-1 rounded-full text-xs font-medium text-white transition-colors disabled:opacity-50"
-                            >
-                                <i :class="apiToggles.magicEdenEnabled ? 'fas fa-check' : 'fas fa-times'" class="mr-1"></i>
-                                <span x-text="apiToggles.magicEdenEnabled ? 'Enabled' : 'Disabled'"></span>
-                            </button>
-                        </div>
-                        <!-- Auto-Posting Toggle -->
-                        <div class="flex items-center space-x-2">
-                            <span class="text-sm text-gray-700">Auto-Posting:</span>
-                            <button 
-                                @click="toggleAutoPosting()"
-                                :disabled="loading || !apiToggles.twitterEnabled"
-                                :class="autoPostSettings.enabled ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-600 hover:bg-gray-700'"
-                                class="relative inline-flex items-center px-3 py-1 rounded-full text-xs font-medium text-white transition-colors disabled:opacity-50"
-                            >
-                                <i :class="autoPostSettings.enabled ? 'fas fa-robot' : 'fas fa-pause'" class="mr-1"></i>
-                                <span x-text="autoPostSettings.enabled ? 'Global' : 'Manual'"></span>
-                            </button>
+                        
+                        <!-- NoUISlider Container -->
+                        <div class="px-4 py-2">
+                            <div id="bids-slider" class="mb-2"></div>
+                            <div class="flex justify-between text-xs text-gray-300 mt-2">
+                                <span>$0 - $<span x-text="(priceTiers.bids.tier1 / 1000).toFixed(0) + 'k'"></span></span>
+                                <span>$<span x-text="(priceTiers.bids.tier1 / 1000).toFixed(0) + 'k'"></span> - $<span x-text="(priceTiers.bids.tier2 / 1000).toFixed(0) + 'k'"></span></span>
+                                <span>$<span x-text="(priceTiers.bids.tier2 / 1000).toFixed(0) + 'k'"></span> - $<span x-text="(priceTiers.bids.tier3 / 1000).toFixed(0) + 'k'"></span></span>
+                                <span>$<span x-text="(priceTiers.bids.tier3 / 1000).toFixed(0) + 'k'"></span>+</span>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
+
 
         <!-- Main Content -->
         <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">

@@ -12,6 +12,25 @@ function dashboard() {
             magicEdenEnabled: true
         },
         
+        // Price Tier Configuration
+        priceTiers: {
+            sales: {
+                tier1: 5000,
+                tier2: 10000,
+                tier3: 40000
+            },
+            registrations: {
+                tier1: 5000,
+                tier2: 10000,
+                tier3: 40000
+            },
+            bids: {
+                tier1: 5000,
+                tier2: 10000,
+                tier3: 40000
+            }
+        },
+        
         // Auto-posting settings (transaction-specific)
         autoPostSettings: {
             enabled: false, // Global toggle
@@ -430,6 +449,7 @@ function dashboard() {
         async init() {
             await this.loadToggleStates();
             await this.loadAutoPostSettings();
+            await this.loadPriceTiers();
             await this.refreshData();
             await this.loadUnpostedSales();
             await this.loadUnpostedRegistrations();
@@ -439,6 +459,10 @@ function dashboard() {
             await this.databaseView.loadPage(1);
             await this.registrationsView.loadPage(1);
             await this.bidsView.loadPage(1);
+            
+            // Initialize NoUISliders after data is loaded
+            this.initializeSliders();
+            
             // Auto-refresh every 30 seconds
             setInterval(() => {
                 if (!this.loading && !this.processing) {
@@ -1033,6 +1057,168 @@ function dashboard() {
             this.selectedSaleId = '';
             this.selectedRegistrationId = '';
             this.selectedBidId = '';
+        },
+        
+        // Price Tier Management
+        async loadPriceTiers() {
+            try {
+                const response = await fetch('/api/price-tiers');
+                if (response.ok) {
+                    const tiers = await response.json();
+                    
+                    // Map database tiers to UI structure (all transaction types use same tiers)
+                    if (tiers && tiers.length >= 3) {
+                        const tier1 = tiers.find(t => t.tierLevel === 1);
+                        const tier2 = tiers.find(t => t.tierLevel === 2);
+                        const tier3 = tiers.find(t => t.tierLevel === 3);
+                        
+                        if (tier1 && tier2 && tier3) {
+                            // Apply same tiers to all transaction types initially
+                            const tierValues = {
+                                tier1: tier1.maxUsd || 5000,
+                                tier2: tier2.maxUsd || 10000,
+                                tier3: tier3.maxUsd || 40000
+                            };
+                            
+                            this.priceTiers.sales = { ...tierValues };
+                            this.priceTiers.registrations = { ...tierValues };
+                            this.priceTiers.bids = { ...tierValues };
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to load price tiers:', error);
+            }
+        },
+        
+        initializeSliders() {
+            const self = this;
+            
+            // Initialize Sales Slider
+            const salesSlider = document.getElementById('sales-slider');
+            if (salesSlider && typeof noUiSlider !== 'undefined') {
+                noUiSlider.create(salesSlider, {
+                    start: [
+                        this.priceTiers.sales.tier1,
+                        this.priceTiers.sales.tier2,
+                        this.priceTiers.sales.tier3
+                    ],
+                    connect: [true, true, true, true],
+                    step: 500,
+                    margin: 500, // Minimum $500 between handles
+                    range: {
+                        'min': 0,
+                        'max': 200000
+                    },
+                    tooltips: [
+                        { to: (value) => '$' + (value/1000).toFixed(0) + 'k' },
+                        { to: (value) => '$' + (value/1000).toFixed(0) + 'k' },
+                        { to: (value) => '$' + (value/1000).toFixed(0) + 'k' }
+                    ]
+                });
+                
+                salesSlider.noUiSlider.on('update', function(values) {
+                    self.priceTiers.sales.tier1 = Math.round(values[0]);
+                    self.priceTiers.sales.tier2 = Math.round(values[1]);
+                    self.priceTiers.sales.tier3 = Math.round(values[2]);
+                    self.$nextTick();
+                });
+            }
+            
+            // Initialize Registrations Slider
+            const registrationsSlider = document.getElementById('registrations-slider');
+            if (registrationsSlider && typeof noUiSlider !== 'undefined') {
+                noUiSlider.create(registrationsSlider, {
+                    start: [
+                        this.priceTiers.registrations.tier1,
+                        this.priceTiers.registrations.tier2,
+                        this.priceTiers.registrations.tier3
+                    ],
+                    connect: [true, true, true, true],
+                    step: 500,
+                    margin: 500,
+                    range: {
+                        'min': 0,
+                        'max': 200000
+                    },
+                    tooltips: [
+                        { to: (value) => '$' + (value/1000).toFixed(0) + 'k' },
+                        { to: (value) => '$' + (value/1000).toFixed(0) + 'k' },
+                        { to: (value) => '$' + (value/1000).toFixed(0) + 'k' }
+                    ]
+                });
+                
+                registrationsSlider.noUiSlider.on('update', function(values) {
+                    self.priceTiers.registrations.tier1 = Math.round(values[0]);
+                    self.priceTiers.registrations.tier2 = Math.round(values[1]);
+                    self.priceTiers.registrations.tier3 = Math.round(values[2]);
+                    self.$nextTick();
+                });
+            }
+            
+            // Initialize Bids Slider
+            const bidsSlider = document.getElementById('bids-slider');
+            if (bidsSlider && typeof noUiSlider !== 'undefined') {
+                noUiSlider.create(bidsSlider, {
+                    start: [
+                        this.priceTiers.bids.tier1,
+                        this.priceTiers.bids.tier2,
+                        this.priceTiers.bids.tier3
+                    ],
+                    connect: [true, true, true, true],
+                    step: 500,
+                    margin: 500,
+                    range: {
+                        'min': 0,
+                        'max': 200000
+                    },
+                    tooltips: [
+                        { to: (value) => '$' + (value/1000).toFixed(0) + 'k' },
+                        { to: (value) => '$' + (value/1000).toFixed(0) + 'k' },
+                        { to: (value) => '$' + (value/1000).toFixed(0) + 'k' }
+                    ]
+                });
+                
+                bidsSlider.noUiSlider.on('update', function(values) {
+                    self.priceTiers.bids.tier1 = Math.round(values[0]);
+                    self.priceTiers.bids.tier2 = Math.round(values[1]);
+                    self.priceTiers.bids.tier3 = Math.round(values[2]);
+                    self.$nextTick();
+                });
+            }
+        },
+        
+        async savePriceTiers(type) {
+            this.loading = true;
+            try {
+                const tiers = this.priceTiers[type];
+                
+                // Update all 4 tiers in database
+                const updates = [
+                    { level: 1, min: 0, max: tiers.tier1 },
+                    { level: 2, min: tiers.tier1, max: tiers.tier2 },
+                    { level: 3, min: tiers.tier2, max: tiers.tier3 },
+                    { level: 4, min: tiers.tier3, max: null }
+                ];
+                
+                // Send updates to server
+                const response = await fetch('/api/price-tiers/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tiers: updates })
+                });
+                
+                if (response.ok) {
+                    this.showNotification(`${type.charAt(0).toUpperCase() + type.slice(1)} image tiers saved successfully!`, 'success');
+                } else {
+                    throw new Error('Failed to save price tiers');
+                }
+            } catch (error) {
+                console.error('Error saving price tiers:', error);
+                this.showNotification('Failed to save price tiers', 'error');
+            } finally {
+                this.loading = false;
+            }
         },
 
         clearTweetPreview() {
