@@ -24,9 +24,7 @@ export const config: Config = {
     accessToken: process.env.TWITTER_ACCESS_TOKEN || '',
     accessTokenSecret: process.env.TWITTER_ACCESS_TOKEN_SECRET || '',
   },
-  database: {
-    path: process.env.DATABASE_PATH || './data/sales.db',
-  },
+
   contracts: CONTRACT_ADDRESSES,
   port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',

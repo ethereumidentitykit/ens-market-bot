@@ -4,10 +4,10 @@ import { logger } from '../utils/logger';
 import { ProcessedSale, IDatabaseService, TwitterPost, ENSRegistration, ENSBid } from '../types';
 
 /**
- * PostgreSQL database service for Vercel deployment
- * Uses Vercel Postgres or any PostgreSQL connection string
+ * PostgreSQL database service 
+ * Uses any PostgreSQL connection string (local or production)
  */
-export class VercelDatabaseService implements IDatabaseService {
+export class DatabaseService implements IDatabaseService {
   private pool: Pool | null = null;
 
   /**

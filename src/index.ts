@@ -7,7 +7,6 @@ import { logger } from './utils/logger';
 import { MONITORED_CONTRACTS } from './config/contracts';
 import { MoralisService } from './services/moralisService';
 import { DatabaseService } from './services/databaseService';
-import { VercelDatabaseService } from './services/vercelDatabaseService';
 import { IDatabaseService, ENSRegistration } from './types';
 import { SalesProcessingService } from './services/salesProcessingService';
 import { BidsProcessingService } from './services/bidsProcessingService';
@@ -31,10 +30,8 @@ async function startApplication(): Promise<void> {
     // Initialize services
     const moralisService = new MoralisService();
     
-    // Use PostgreSQL if DATABASE_URL is provided, otherwise SQLite
-    const databaseService: IDatabaseService = process.env.DATABASE_URL?.startsWith('postgresql://') 
-      ? new VercelDatabaseService()  // Works for any PostgreSQL, not just Vercel
-      : new DatabaseService();       // SQLite for local development
+    // Initialize PostgreSQL database service
+    const databaseService: IDatabaseService = new DatabaseService();
     
     const salesProcessingService = new SalesProcessingService(moralisService, databaseService);
     const magicEdenService = new MagicEdenService();

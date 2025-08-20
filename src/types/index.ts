@@ -113,9 +113,7 @@ export interface Config {
     accessToken: string;
     accessTokenSecret: string;
   };
-  database: {
-    path: string;
-  };
+
   contracts: string[];
   port: number;
   nodeEnv: string;

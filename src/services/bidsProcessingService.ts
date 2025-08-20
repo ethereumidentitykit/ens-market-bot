@@ -51,10 +51,10 @@ export class BidsProcessingService {
       let boundaryTimestamp: number;
       
       if (isTestMode) {
-        // Testing: use 24h from current time as boundary (captures all current bids)
-        boundaryTimestamp = Date.now() + (24 * 60 * 60 * 1000); // 24h in future
+        // Testing: use 7 days ago as boundary (captures all recent bids for first run)
+        boundaryTimestamp = Date.now() - (7 * 24 * 60 * 60 * 1000); // 7 days ago
         logger.info(`📅 Boundary timestamp: ${boundaryTimestamp} (${new Date(boundaryTimestamp).toISOString()})`);
-        logger.info(`🧪 Testing mode: Using 24h future boundary to capture all current bids`);
+        logger.info(`🧪 Testing mode: Using 7-day lookback boundary to capture recent bids`);
       } else {
         // Production: use 1-day lookback cap to prevent runaway cursoring
         const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000); // 1 day cap
