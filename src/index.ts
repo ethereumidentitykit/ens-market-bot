@@ -1520,22 +1520,95 @@ async function startApplication(): Promise<void> {
         const page = parseInt(req.query.page as string) || 1;
         const limit = parseInt(req.query.limit as string) || 10;
         const offset = (page - 1) * limit;
+        const search = req.query.search as string || '';
+        const sortBy = req.query.sortBy as string || 'createdAtApi';
+        const sortOrder = req.query.sortOrder as string || 'desc';
+        const marketplaceFilter = req.query.marketplace as string || '';
+        const statusFilter = req.query.status as string || '';
 
-        // Get recent bids with pagination
-        const allBids = await databaseService.getRecentBids(1000); // Get more for proper pagination
+        // Get all bids for proper filtering and pagination
+        const allBids = await databaseService.getRecentBids(1000);
         
+        // Apply search filter if provided
+        let filteredBids = allBids;
+        if (search) {
+          const searchLower = search.toLowerCase();
+          filteredBids = allBids.filter(bid => 
+            (bid.ensName && bid.ensName.toLowerCase().includes(searchLower)) ||
+            bid.bidId.toLowerCase().includes(searchLower) ||
+            bid.makerAddress.toLowerCase().includes(searchLower) ||
+            (bid.sourceName && bid.sourceName.toLowerCase().includes(searchLower)) ||
+            (bid.sourceDomain && bid.sourceDomain.toLowerCase().includes(searchLower)) ||
+            (bid.tokenId && bid.tokenId.includes(search))
+          );
+        }
+
+        // Apply marketplace filter if provided
+        if (marketplaceFilter) {
+          filteredBids = filteredBids.filter(bid => 
+            bid.sourceDomain && bid.sourceDomain.toLowerCase().includes(marketplaceFilter.toLowerCase())
+          );
+        }
+
+        // Apply status filter if provided (check if bid is expired)
+        if (statusFilter) {
+          const now = Math.floor(Date.now() / 1000);
+          filteredBids = filteredBids.filter(bid => {
+            const isExpired = bid.validUntil < now;
+            if (statusFilter === 'active') {
+              return !isExpired;
+            } else if (statusFilter === 'expired') {
+              return isExpired;
+            }
+            return true; // 'all' case
+          });
+        }
+
+        // Apply sorting
+        filteredBids.sort((a, b) => {
+          let aVal: any = a[sortBy as keyof typeof a];
+          let bVal: any = b[sortBy as keyof typeof b];
+          
+          // Handle numeric fields
+          if (sortBy === 'priceDecimal') {
+            aVal = parseFloat(aVal || '0');
+            bVal = parseFloat(bVal || '0');
+          } else if (sortBy === 'validUntil' || sortBy === 'validFrom' || sortBy === 'id') {
+            aVal = Number(aVal);
+            bVal = Number(bVal);
+          } else if (sortBy === 'createdAtApi' || sortBy === 'updatedAtApi') {
+            aVal = new Date(aVal).getTime();
+            bVal = new Date(bVal).getTime();
+          }
+          
+          if (sortOrder === 'asc') {
+            return aVal > bVal ? 1 : -1;
+          } else {
+            return aVal < bVal ? 1 : -1;
+          }
+        });
+
         // Apply pagination
-        const paginatedBids = allBids.slice(offset, offset + limit);
-        const total = allBids.length;
+        const paginatedBids = filteredBids.slice(offset, offset + limit);
+        const totalFiltered = filteredBids.length;
         
         res.json({
           success: true,
           bids: paginatedBids,
-          total: total,
-          totalPages: Math.ceil(total / limit),
+          total: totalFiltered,
+          totalPages: Math.ceil(totalFiltered / limit),
           currentPage: page,
-          hasNext: page * limit < total,
-          hasPrev: page > 1
+          hasNext: page * limit < totalFiltered,
+          hasPrev: page > 1,
+          stats: {
+            totalBids: allBids.length,
+            filteredBids: totalFiltered,
+            activeBids: allBids.filter(bid => bid.validUntil > Math.floor(Date.now() / 1000)).length,
+            expiredBids: allBids.filter(bid => bid.validUntil <= Math.floor(Date.now() / 1000)).length,
+            searchTerm: search,
+            marketplaceFilter,
+            statusFilter
+          }
         });
       } catch (error: any) {
         res.status(500).json({

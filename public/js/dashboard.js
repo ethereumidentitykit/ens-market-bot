@@ -248,11 +248,17 @@ function dashboard() {
         bidsView: {
             data: null,
             loading: false,
+            searchTerm: '',
+            sortBy: 'createdAtApi',
+            sortOrder: 'desc',
             currentPage: 1,
+            searchTimeout: null,
             error: null,
             bids: [],
             totalBids: 0,
             totalPages: 1,
+            marketplaceFilter: 'all', // 'all', 'opensea', 'x2y2', 'blur', etc.
+            statusFilter: 'all', // 'all', 'active', 'expired'
 
             async loadPage(page) {
                 this.loading = true;
@@ -260,7 +266,26 @@ function dashboard() {
                 this.error = null;
                 
                 try {
-                    const response = await fetch(`/api/admin/bids?page=${page}&limit=10`);
+                    const params = new URLSearchParams({
+                        page: page,
+                        limit: '10',
+                        sortBy: this.sortBy,
+                        sortOrder: this.sortOrder
+                    });
+
+                    if (this.searchTerm.trim()) {
+                        params.append('search', this.searchTerm.trim());
+                    }
+
+                    if (this.marketplaceFilter !== 'all') {
+                        params.append('marketplace', this.marketplaceFilter);
+                    }
+
+                    if (this.statusFilter !== 'all') {
+                        params.append('status', this.statusFilter);
+                    }
+
+                    const response = await fetch(`/api/admin/bids?${params}`);
                     if (response.ok) {
                         const data = await response.json();
                         this.bids = data.bids || [];
@@ -280,6 +305,33 @@ function dashboard() {
                 }
                 
                 this.loading = false;
+            },
+
+            sort(field) {
+                if (this.sortBy === field) {
+                    this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
+                } else {
+                    this.sortBy = field;
+                    this.sortOrder = field === 'priceDecimal' || field === 'createdAtApi' || field === 'id' ? 'desc' : 'asc';
+                }
+                this.loadPage(1);
+            },
+
+            searchDebounced() {
+                clearTimeout(this.searchTimeout);
+                this.searchTimeout = setTimeout(() => {
+                    this.loadPage(1);
+                }, 500);
+            },
+
+            setMarketplaceFilter(marketplace) {
+                this.marketplaceFilter = marketplace;
+                this.loadPage(1);
+            },
+
+            setStatusFilter(status) {
+                this.statusFilter = status;
+                this.loadPage(1);
             }
         },
 

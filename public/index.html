@@ -1625,6 +1625,59 @@
 
                 <!-- ENS Bids Database View -->
                 <div x-show="databaseSubView === 'bids'" x-transition>
+                    <!-- Search and Filter Bar -->
+                    <div class="mb-6 bg-gray-800 border border-gray-700 rounded-lg p-4">
+                        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                            <!-- Search Box -->
+                            <div>
+                                <label class="block text-sm font-medium text-gray-300 mb-2">
+                                    <i class="fas fa-search text-green-400 mr-2"></i>Search Bids
+                                </label>
+                                <input 
+                                    type="text" 
+                                    x-model="bidsView.searchTerm"
+                                    @input="bidsView.searchDebounced()"
+                                    placeholder="ENS name, bidder address, bid ID..."
+                                    class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                                >
+                            </div>
+                            
+                            <!-- Marketplace Filter -->
+                            <div>
+                                <label class="block text-sm font-medium text-gray-300 mb-2">
+                                    <i class="fas fa-store text-green-400 mr-2"></i>Marketplace
+                                </label>
+                                <select 
+                                    x-model="bidsView.marketplaceFilter"
+                                    @change="bidsView.setMarketplaceFilter(bidsView.marketplaceFilter)"
+                                    class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                                >
+                                    <option value="all">All Marketplaces</option>
+                                    <option value="opensea">OpenSea</option>
+                                    <option value="x2y2">X2Y2</option>
+                                    <option value="blur">Blur</option>
+                                    <option value="looksrare">LooksRare</option>
+                                </select>
+                            </div>
+                            
+                            <!-- Status Filter -->
+                            <div>
+                                <label class="block text-sm font-medium text-gray-300 mb-2">
+                                    <i class="fas fa-clock text-green-400 mr-2"></i>Status
+                                </label>
+                                <select 
+                                    x-model="bidsView.statusFilter"
+                                    @change="bidsView.setStatusFilter(bidsView.statusFilter)"
+                                    class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                                >
+                                    <option value="all">All Status</option>
+                                    <option value="active">Active Only</option>
+                                    <option value="expired">Expired Only</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Loading State -->
                     <div x-show="bidsView.loading" class="text-center py-12">
                         <i class="fas fa-spinner fa-spin text-3xl text-gray-400 mb-4"></i>
@@ -1643,6 +1696,62 @@
                         </button>
                     </div>
 
+                    <!-- Bid Statistics -->
+                    <div x-show="!bidsView.loading && !bidsView.error" class="mb-6 bg-gray-800 border border-gray-700 rounded-lg p-4">
+                        <h4 class="text-sm font-medium text-gray-300 mb-3 flex items-center">
+                            <i class="fas fa-chart-bar text-green-400 mr-2"></i>
+                            Bid Statistics
+                        </h4>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                            <div class="bg-gray-700 rounded-lg p-3">
+                                <div class="text-lg font-bold text-white" x-text="bidsView.data?.stats?.totalBids || 0"></div>
+                                <div class="text-xs text-gray-400">Total Bids</div>
+                            </div>
+                            <div class="bg-green-700 rounded-lg p-3">
+                                <div class="text-lg font-bold text-white" x-text="bidsView.data?.stats?.activeBids || 0"></div>
+                                <div class="text-xs text-gray-400">Active</div>
+                            </div>
+                            <div class="bg-red-700 rounded-lg p-3">
+                                <div class="text-lg font-bold text-white" x-text="bidsView.data?.stats?.expiredBids || 0"></div>
+                                <div class="text-xs text-gray-400">Expired</div>
+                            </div>
+                            <div class="bg-blue-700 rounded-lg p-3">
+                                <div class="text-lg font-bold text-white" x-text="bidsView.data?.stats?.filteredBids || 0"></div>
+                                <div class="text-xs text-gray-400">Showing</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Active Filters Display -->
+                    <div x-show="!bidsView.loading && !bidsView.error && (bidsView.searchTerm || bidsView.marketplaceFilter !== 'all' || bidsView.statusFilter !== 'all')" class="mb-4 bg-gray-800 border border-gray-700 rounded-lg p-3">
+                        <h5 class="text-sm font-medium text-gray-300 mb-2 flex items-center">
+                            <i class="fas fa-filter text-green-400 mr-2"></i>Active Filters
+                        </h5>
+                        <div class="flex flex-wrap gap-2">
+                            <span x-show="bidsView.searchTerm" class="inline-flex items-center px-2 py-1 bg-green-600 text-white text-xs rounded-full">
+                                <i class="fas fa-search mr-1"></i>
+                                <span x-text="`Search: ${bidsView.searchTerm}`"></span>
+                                <button @click="bidsView.searchTerm = ''; bidsView.loadPage(1)" class="ml-1 text-green-200 hover:text-white">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </span>
+                            <span x-show="bidsView.marketplaceFilter !== 'all'" class="inline-flex items-center px-2 py-1 bg-blue-600 text-white text-xs rounded-full">
+                                <i class="fas fa-store mr-1"></i>
+                                <span x-text="`Marketplace: ${bidsView.marketplaceFilter}`"></span>
+                                <button @click="bidsView.setMarketplaceFilter('all')" class="ml-1 text-blue-200 hover:text-white">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </span>
+                            <span x-show="bidsView.statusFilter !== 'all'" class="inline-flex items-center px-2 py-1 bg-purple-600 text-white text-xs rounded-full">
+                                <i class="fas fa-clock mr-1"></i>
+                                <span x-text="`Status: ${bidsView.statusFilter}`"></span>
+                                <button @click="bidsView.setStatusFilter('all')" class="ml-1 text-purple-200 hover:text-white">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </span>
+                        </div>
+                    </div>
+
                     <!-- Success State - Bids Table -->
                     <div x-show="!bidsView.loading && !bidsView.error && bidsView.bids.length > 0" class="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
                         <!-- Table Header -->
@@ -1650,8 +1759,8 @@
                             <div class="flex items-center justify-between">
                                 <h3 class="text-lg font-medium text-white flex items-center">
                                     <i class="fas fa-hand-paper text-green-400 mr-2"></i>
-                                    Recent ENS Bids
-                                    <span class="ml-2 px-2 py-1 bg-gray-600 text-gray-300 text-xs rounded-full" x-text="`${bidsView.bids.length} bids`"></span>
+                                    ENS Bids
+                                    <span class="ml-2 px-2 py-1 bg-gray-600 text-gray-300 text-xs rounded-full" x-text="`${bidsView.totalBids} total, ${bidsView.bids.length} shown`"></span>
                                 </h3>
                                 <button 
                                     @click="bidsView.loadPage(1)" 
@@ -1667,13 +1776,34 @@
                             <table class="min-w-full">
                                 <thead class="bg-gray-700">
                                     <tr>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">ENS Name</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Price</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Bidder</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Marketplace</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Posted</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Created</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Expires</th>
+                                        <th @click="bidsView.sort('ensName')" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600 transition-colors">
+                                            ENS Name
+                                            <i :class="bidsView.sortBy === 'ensName' ? (bidsView.sortOrder === 'asc' ? 'fas fa-sort-up' : 'fas fa-sort-down') : 'fas fa-sort'" class="ml-1"></i>
+                                        </th>
+                                        <th @click="bidsView.sort('priceDecimal')" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600 transition-colors">
+                                            Price
+                                            <i :class="bidsView.sortBy === 'priceDecimal' ? (bidsView.sortOrder === 'asc' ? 'fas fa-sort-up' : 'fas fa-sort-down') : 'fas fa-sort'" class="ml-1"></i>
+                                        </th>
+                                        <th @click="bidsView.sort('makerAddress')" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600 transition-colors">
+                                            Bidder
+                                            <i :class="bidsView.sortBy === 'makerAddress' ? (bidsView.sortOrder === 'asc' ? 'fas fa-sort-up' : 'fas fa-sort-down') : 'fas fa-sort'" class="ml-1"></i>
+                                        </th>
+                                        <th @click="bidsView.sort('sourceName')" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600 transition-colors">
+                                            Marketplace
+                                            <i :class="bidsView.sortBy === 'sourceName' ? (bidsView.sortOrder === 'asc' ? 'fas fa-sort-up' : 'fas fa-sort-down') : 'fas fa-sort'" class="ml-1"></i>
+                                        </th>
+                                        <th @click="bidsView.sort('posted')" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600 transition-colors">
+                                            Posted
+                                            <i :class="bidsView.sortBy === 'posted' ? (bidsView.sortOrder === 'asc' ? 'fas fa-sort-up' : 'fas fa-sort-down') : 'fas fa-sort'" class="ml-1"></i>
+                                        </th>
+                                        <th @click="bidsView.sort('createdAtApi')" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600 transition-colors">
+                                            Created
+                                            <i :class="bidsView.sortBy === 'createdAtApi' ? (bidsView.sortOrder === 'asc' ? 'fas fa-sort-up' : 'fas fa-sort-down') : 'fas fa-sort'" class="ml-1"></i>
+                                        </th>
+                                        <th @click="bidsView.sort('validUntil')" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600 transition-colors">
+                                            Expires
+                                            <i :class="bidsView.sortBy === 'validUntil' ? (bidsView.sortOrder === 'asc' ? 'fas fa-sort-up' : 'fas fa-sort-down') : 'fas fa-sort'" class="ml-1"></i>
+                                        </th>
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y divide-gray-700">
@@ -1751,13 +1881,27 @@
                     <div x-show="!bidsView.loading && !bidsView.error && bidsView.bids.length === 0" class="text-center py-12 bg-gray-800 border border-gray-700 rounded-lg">
                         <i class="fas fa-hand-paper text-6xl text-gray-500 mb-4"></i>
                         <h3 class="text-lg font-medium text-gray-300 mb-2">No ENS Bids Found</h3>
-                        <p class="text-gray-400 mb-4">No bids have been processed yet.</p>
-                        <button 
-                            @click="bidsView.loadPage(1)" 
-                            class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition-colors duration-200"
-                        >
-                            <i class="fas fa-sync-alt mr-2"></i>Refresh
-                        </button>
+                        <p class="text-gray-400 mb-4" x-show="!bidsView.searchTerm && bidsView.marketplaceFilter === 'all' && bidsView.statusFilter === 'all'">
+                            No bids have been processed yet.
+                        </p>
+                        <p class="text-gray-400 mb-4" x-show="bidsView.searchTerm || bidsView.marketplaceFilter !== 'all' || bidsView.statusFilter !== 'all'">
+                            No bids match your current filters. Try adjusting your search criteria.
+                        </p>
+                        <div class="flex justify-center space-x-3">
+                            <button 
+                                @click="bidsView.loadPage(1)" 
+                                class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition-colors duration-200"
+                            >
+                                <i class="fas fa-sync-alt mr-2"></i>Refresh
+                            </button>
+                            <button 
+                                x-show="bidsView.searchTerm || bidsView.marketplaceFilter !== 'all' || bidsView.statusFilter !== 'all'"
+                                @click="bidsView.searchTerm = ''; bidsView.setMarketplaceFilter('all'); bidsView.setStatusFilter('all')" 
+                                class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded transition-colors duration-200"
+                            >
+                                <i class="fas fa-times mr-2"></i>Clear Filters
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Pagination -->
