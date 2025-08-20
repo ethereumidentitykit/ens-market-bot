@@ -99,94 +99,117 @@
                         </button>
                     </div>
                     
-                    <!-- Settings Grid -->
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                        <!-- Default ETH Minimum -->
-                        <div class="bg-white/10 backdrop-blur rounded-lg p-4">
-                            <label class="block text-sm font-medium text-blue-100 mb-2">Default Minimum (ETH)</label>
-                            <div class="flex items-center space-x-2">
-                                <input 
-                                    type="number" 
-                                    step="0.01" 
-                                    min="0"
-                                    x-model.number="autoPostSettings.minEthDefault"
-                                    class="w-20 px-2 py-1 bg-white/20 border border-white/30 rounded text-white placeholder-blue-200 focus:outline-none focus:ring-2 focus:ring-white/50 focus:border-transparent text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                    placeholder="0.1"
-                                >
+                                        <!-- Transaction-Specific Settings Grid -->
+                    <div class="space-y-3">
+                        <!-- Sales Auto-Posting -->
+                        <div class="bg-white/10 backdrop-blur rounded-lg p-3">
+                            <div class="flex items-center justify-between mb-3">
+                                <div class="flex items-center">
+                                    <i class="fas fa-dollar-sign text-green-400 mr-2"></i>
+                                    <span class="text-sm font-medium text-blue-100">Sales Auto-Posting</span>
+                                </div>
                                 <button 
-                                    @click="saveAutoPostSettings()"
-                                    class="px-2 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs font-medium transition-colors"
+                                    @click="toggleTransactionAutoPost('sales')"
+                                    :disabled="loading || !apiToggles.twitterEnabled"
+                                    :class="autoPostSettings.sales?.enabled ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-500 hover:bg-gray-600'"
+                                    class="px-2 py-1 rounded text-xs font-medium text-white transition-colors disabled:opacity-50"
                                 >
-                                    Save
+                                    <span x-text="autoPostSettings.sales?.enabled ? 'ON' : 'OFF'"></span>
                                 </button>
                             </div>
-                            <p class="text-xs text-blue-200 mt-1">For standard ENS names</p>
+                            <div class="grid grid-cols-4 gap-2">
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">Default</label>
+                                    <input type="number" step="0.01" min="0" x-model.number="autoPostSettings.sales.minEthDefault" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">10k Club</label>
+                                    <input type="number" step="0.01" min="0" x-model.number="autoPostSettings.sales.minEth10kClub" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">999 Club</label>
+                                    <input type="number" step="0.01" min="0" x-model.number="autoPostSettings.sales.minEth999Club" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">Max Age (h)</label>
+                                    <input type="number" min="1" max="168" x-model.number="autoPostSettings.sales.maxAgeHours" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
+                            </div>
+                            <button @click="saveTransactionAutoPostSettings('sales')" class="mt-2 px-3 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs font-medium transition-colors">Save Sales Settings</button>
                         </div>
-                        
-                        <!-- 10k Club ETH Minimum -->
-                        <div class="bg-white/10 backdrop-blur rounded-lg p-4">
-                            <label class="block text-sm font-medium text-blue-100 mb-2">10k Club Minimum (ETH)</label>
-                            <div class="flex items-center space-x-2">
-                                <input 
-                                    type="number" 
-                                    step="0.01" 
-                                    min="0"
-                                    x-model.number="autoPostSettings.minEth10kClub"
-                                    class="w-20 px-2 py-1 bg-white/20 border border-white/30 rounded text-white placeholder-blue-200 focus:outline-none focus:ring-2 focus:ring-white/50 focus:border-transparent text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                    placeholder="0.5"
-                                >
+
+                        <!-- Registrations Auto-Posting -->
+                        <div class="bg-white/10 backdrop-blur rounded-lg p-3">
+                            <div class="flex items-center justify-between mb-3">
+                                <div class="flex items-center">
+                                    <i class="fas fa-building text-blue-400 mr-2"></i>
+                                    <span class="text-sm font-medium text-blue-100">Registrations Auto-Posting</span>
+                                </div>
                                 <button 
-                                    @click="saveAutoPostSettings()"
-                                    class="px-2 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs font-medium transition-colors"
+                                    @click="toggleTransactionAutoPost('registrations')"
+                                    :disabled="loading || !apiToggles.twitterEnabled"
+                                    :class="autoPostSettings.registrations?.enabled ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-500 hover:bg-gray-600'"
+                                    class="px-2 py-1 rounded text-xs font-medium text-white transition-colors disabled:opacity-50"
                                 >
-                                    Save
+                                    <span x-text="autoPostSettings.registrations?.enabled ? 'ON' : 'OFF'"></span>
                                 </button>
                             </div>
-                            <p class="text-xs text-blue-200 mt-1">For 1234.eth style names</p>
+                            <div class="grid grid-cols-4 gap-2">
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">Default</label>
+                                    <input type="number" step="0.01" min="0" x-model.number="autoPostSettings.registrations.minEthDefault" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">10k Club</label>
+                                    <input type="number" step="0.01" min="0" x-model.number="autoPostSettings.registrations.minEth10kClub" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">999 Club</label>
+                                    <input type="number" step="0.01" min="0" x-model.number="autoPostSettings.registrations.minEth999Club" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">Max Age (h)</label>
+                                    <input type="number" min="1" max="168" x-model.number="autoPostSettings.registrations.maxAgeHours" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
+                            </div>
+                            <button @click="saveTransactionAutoPostSettings('registrations')" class="mt-2 px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs font-medium transition-colors">Save Registration Settings</button>
                         </div>
-                        
-                        <!-- 999 Club ETH Minimum -->
-                        <div class="bg-white/10 backdrop-blur rounded-lg p-4">
-                            <label class="block text-sm font-medium text-blue-100 mb-2">999 Club Minimum (ETH)</label>
-                            <div class="flex items-center space-x-2">
-                                <input 
-                                    type="number" 
-                                    step="0.01" 
-                                    min="0"
-                                    x-model.number="autoPostSettings.minEth999Club"
-                                    class="w-20 px-2 py-1 bg-white/20 border border-white/30 rounded text-white placeholder-blue-200 focus:outline-none focus:ring-2 focus:ring-white/50 focus:border-transparent text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                    placeholder="0.3"
-                                >
+
+                        <!-- Bids Auto-Posting -->
+                        <div class="bg-white/10 backdrop-blur rounded-lg p-3">
+                            <div class="flex items-center justify-between mb-3">
+                                <div class="flex items-center">
+                                    <i class="fas fa-hand-paper text-orange-400 mr-2"></i>
+                                    <span class="text-sm font-medium text-blue-100">Bids Auto-Posting</span>
+                                </div>
                                 <button 
-                                    @click="saveAutoPostSettings()"
-                                    class="px-2 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs font-medium transition-colors"
+                                    @click="toggleTransactionAutoPost('bids')"
+                                    :disabled="loading || !apiToggles.twitterEnabled"
+                                    :class="autoPostSettings.bids?.enabled ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-500 hover:bg-gray-600'"
+                                    class="px-2 py-1 rounded text-xs font-medium text-white transition-colors disabled:opacity-50"
                                 >
-                                    Save
+                                    <span x-text="autoPostSettings.bids?.enabled ? 'ON' : 'OFF'"></span>
                                 </button>
                             </div>
-                            <p class="text-xs text-blue-200 mt-1">For 123.eth style names</p>
-                        </div>
-                        
-                        <!-- Max Age Hours -->
-                        <div class="bg-white/10 backdrop-blur rounded-lg p-4">
-                            <label class="block text-sm font-medium text-blue-100 mb-2">Max Age (Hours)</label>
-                            <div class="flex items-center space-x-2">
-                                <input 
-                                    type="number" 
-                                    min="1" 
-                                    max="24"
-                                    x-model.number="autoPostSettings.maxAgeHours"
-                                    class="w-16 px-2 py-1 bg-white/20 border border-white/30 rounded text-white placeholder-blue-200 focus:outline-none focus:ring-2 focus:ring-white/50 focus:border-transparent text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                    placeholder="1"
-                                >
-                                <button 
-                                    @click="saveAutoPostSettings()"
-                                    class="px-2 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs font-medium transition-colors"
-                                >
-                                    Save
-                                </button>
+                            <div class="grid grid-cols-4 gap-2">
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">Default</label>
+                                    <input type="number" step="0.01" min="0" x-model.number="autoPostSettings.bids.minEthDefault" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">10k Club</label>
+                                    <input type="number" step="0.01" min="0" x-model.number="autoPostSettings.bids.minEth10kClub" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">999 Club</label>
+                                    <input type="number" step="0.01" min="0" x-model.number="autoPostSettings.bids.minEth999Club" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">Max Age (h)</label>
+                                    <input type="number" min="1" max="168" x-model.number="autoPostSettings.bids.maxAgeHours" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
                             </div>
-                            <p class="text-xs text-blue-200 mt-1">Sales older than this won't be posted</p>
+                            <button @click="saveTransactionAutoPostSettings('bids')" class="mt-2 px-3 py-1 bg-orange-500 hover:bg-orange-600 text-white rounded text-xs font-medium transition-colors">Save Bid Settings</button>
                         </div>
                     </div>
                     
@@ -200,9 +223,19 @@
                             <div :class="apiToggles.moralisEnabled ? 'bg-green-400' : 'bg-red-400'" class="w-2 h-2 rounded-full mr-2"></div>
                             <span class="text-blue-100">Moralis API: <span x-text="apiToggles.moralisEnabled ? 'Connected' : 'Disabled'"></span></span>
                         </div>
-                        <div class="flex items-center" x-show="autoPostSettings.enabled">
-                            <div class="bg-blue-400 w-2 h-2 rounded-full mr-2 animate-pulse"></div>
-                            <span class="text-blue-100">Auto-posting active</span>
+                        <div class="flex items-center space-x-4">
+                            <div class="flex items-center" x-show="autoPostSettings.sales?.enabled">
+                                <div class="bg-green-400 w-2 h-2 rounded-full mr-2 animate-pulse"></div>
+                                <span class="text-blue-100">Sales active</span>
+                            </div>
+                            <div class="flex items-center" x-show="autoPostSettings.registrations?.enabled">
+                                <div class="bg-blue-400 w-2 h-2 rounded-full mr-2 animate-pulse"></div>
+                                <span class="text-blue-100">Registrations active</span>
+                            </div>
+                            <div class="flex items-center" x-show="autoPostSettings.bids?.enabled">
+                                <div class="bg-orange-400 w-2 h-2 rounded-full mr-2 animate-pulse"></div>
+                                <span class="text-blue-100">Bids active</span>
+                            </div>
                         </div>
 
                     </div>
@@ -268,7 +301,7 @@
                                 class="relative inline-flex items-center px-3 py-1 rounded-full text-xs font-medium text-white transition-colors disabled:opacity-50"
                             >
                                 <i :class="autoPostSettings.enabled ? 'fas fa-robot' : 'fas fa-pause'" class="mr-1"></i>
-                                <span x-text="autoPostSettings.enabled ? 'Auto' : 'Manual'"></span>
+                                <span x-text="autoPostSettings.enabled ? 'Global' : 'Manual'"></span>
                             </button>
                         </div>
                     </div>

@@ -12,13 +12,30 @@ function dashboard() {
             magicEdenEnabled: true
         },
         
-        // Auto-posting settings
+        // Auto-posting settings (transaction-specific)
         autoPostSettings: {
-            enabled: false,
-            minEthDefault: 0.1,
-            minEth10kClub: 0.5,
-            minEth999Club: 0.3,
-            maxAgeHours: 1
+            enabled: false, // Global toggle
+            sales: {
+                enabled: true,
+                minEthDefault: 0.1,
+                minEth10kClub: 0.5,
+                minEth999Club: 0.3,
+                maxAgeHours: 1
+            },
+            registrations: {
+                enabled: true,
+                minEthDefault: 0.05,
+                minEth10kClub: 0.2,
+                minEth999Club: 0.1,
+                maxAgeHours: 2
+            },
+            bids: {
+                enabled: true,
+                minEthDefault: 0.2,
+                minEth10kClub: 1.0,
+                minEth999Club: 0.5,
+                maxAgeHours: 24
+            }
         },
         
         // Tweet history
@@ -1468,9 +1485,12 @@ function dashboard() {
                     const data = await response.json();
                     console.log('Loaded settings response:', data);
                     if (data.success) {
+                        // Update transaction-specific settings
                         this.autoPostSettings = {
                             ...this.autoPostSettings,
-                            ...data.settings
+                            sales: data.settings.sales,
+                            registrations: data.settings.registrations,
+                            bids: data.settings.bids
                         };
                         console.log('Updated autoPostSettings:', this.autoPostSettings);
                     }
@@ -1482,39 +1502,59 @@ function dashboard() {
             }
         },
 
-        // Save auto-post settings to backend
-        async saveAutoPostSettings() {
+        // Save transaction-specific auto-post settings to backend
+        async saveTransactionAutoPostSettings(transactionType) {
             try {
-                console.log('Saving auto-post settings:', this.autoPostSettings);
-                
-                // Use settings directly since x-model.number handles conversion
-                const settings = {
-                    minEthDefault: this.autoPostSettings.minEthDefault || 0.1,
-                    minEth10kClub: this.autoPostSettings.minEth10kClub || 0.5,
-                    minEth999Club: this.autoPostSettings.minEth999Club || 0.3,
-                    maxAgeHours: this.autoPostSettings.maxAgeHours || 1
-                };
-                
-                console.log('Converted settings:', settings);
+                console.log(`Saving ${transactionType} auto-post settings:`, this.autoPostSettings[transactionType]);
                 
                 const response = await fetch('/api/admin/autopost-settings', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(settings)
+                    body: JSON.stringify({
+                        transactionType: transactionType,
+                        settings: this.autoPostSettings[transactionType]
+                    })
                 });
                 
                 if (response.ok) {
                     const result = await response.json();
-                    console.log('Auto-post settings saved successfully:', result);
-                    this.showMessage('Settings saved successfully!', 'success');
+                    console.log(`${transactionType} auto-post settings saved successfully:`, result);
+                    this.showMessage(`${transactionType.charAt(0).toUpperCase() + transactionType.slice(1)} settings saved!`, 'success');
                 } else {
                     const error = await response.text();
-                    console.error('Failed to save auto-post settings:', error);
-                    this.showMessage('Failed to save settings', 'error');
+                    console.error(`Failed to save ${transactionType} auto-post settings:`, error);
+                    this.showMessage(`Failed to save ${transactionType} settings`, 'error');
                 }
             } catch (error) {
-                console.error('Error saving auto-post settings:', error);
-                this.showMessage('Error saving settings', 'error');
+                console.error(`Error saving ${transactionType} auto-post settings:`, error);
+                this.showMessage(`Error saving ${transactionType} settings`, 'error');
+            }
+        },
+
+        // Toggle individual transaction type auto-posting
+        async toggleTransactionAutoPost(transactionType) {
+            try {
+                this.loading = true;
+                const currentState = this.autoPostSettings[transactionType].enabled;
+                const newState = !currentState;
+                
+                // Update local state
+                this.autoPostSettings[transactionType].enabled = newState;
+                
+                // Save to backend
+                await this.saveTransactionAutoPostSettings(transactionType);
+                
+                this.showMessage(
+                    `${transactionType.charAt(0).toUpperCase() + transactionType.slice(1)} auto-posting ${newState ? 'enabled' : 'disabled'}`,
+                    'success'
+                );
+            } catch (error) {
+                // Revert on error
+                this.autoPostSettings[transactionType].enabled = !this.autoPostSettings[transactionType].enabled;
+                console.error(`Toggle ${transactionType} auto-posting error:`, error);
+                this.showMessage(`Failed to toggle ${transactionType} auto-posting`, 'error');
+            } finally {
+                this.loading = false;
             }
         },
 

@@ -516,22 +516,40 @@ async function startApplication(): Promise<void> {
       });
     });
 
-    // Auto-post settings endpoints
+    // Auto-post settings endpoints - transaction-specific
     app.get('/api/admin/autopost-settings', async (req, res) => {
       try {
-        // Load settings from database
-        const minEthDefault = await databaseService.getSystemState('autopost_min_eth_default') || '0.1';
-        const minEth10kClub = await databaseService.getSystemState('autopost_min_eth_10k') || '0.5';
-        const minEth999Club = await databaseService.getSystemState('autopost_min_eth_999') || '0.3';
-        const maxAgeHours = await databaseService.getSystemState('autopost_max_age_hours') || '1';
+        // Load transaction-specific settings from database
+        const salesSettings = {
+          enabled: (await databaseService.getSystemState('autopost_sales_enabled') || 'true') === 'true',
+          minEthDefault: parseFloat(await databaseService.getSystemState('autopost_sales_min_eth_default') || '0.1'),
+          minEth10kClub: parseFloat(await databaseService.getSystemState('autopost_sales_min_eth_10k') || '0.5'),
+          minEth999Club: parseFloat(await databaseService.getSystemState('autopost_sales_min_eth_999') || '0.3'),
+          maxAgeHours: parseInt(await databaseService.getSystemState('autopost_sales_max_age_hours') || '1')
+        };
+
+        const registrationsSettings = {
+          enabled: (await databaseService.getSystemState('autopost_registrations_enabled') || 'true') === 'true',
+          minEthDefault: parseFloat(await databaseService.getSystemState('autopost_registrations_min_eth_default') || '0.05'),
+          minEth10kClub: parseFloat(await databaseService.getSystemState('autopost_registrations_min_eth_10k') || '0.2'),
+          minEth999Club: parseFloat(await databaseService.getSystemState('autopost_registrations_min_eth_999') || '0.1'),
+          maxAgeHours: parseInt(await databaseService.getSystemState('autopost_registrations_max_age_hours') || '2')
+        };
+
+        const bidsSettings = {
+          enabled: (await databaseService.getSystemState('autopost_bids_enabled') || 'true') === 'true',
+          minEthDefault: parseFloat(await databaseService.getSystemState('autopost_bids_min_eth_default') || '0.2'),
+          minEth10kClub: parseFloat(await databaseService.getSystemState('autopost_bids_min_eth_10k') || '1.0'),
+          minEth999Club: parseFloat(await databaseService.getSystemState('autopost_bids_min_eth_999') || '0.5'),
+          maxAgeHours: parseInt(await databaseService.getSystemState('autopost_bids_max_age_hours') || '24')
+        };
         
         res.json({
           success: true,
           settings: {
-            minEthDefault: parseFloat(minEthDefault),
-            minEth10kClub: parseFloat(minEth10kClub),
-            minEth999Club: parseFloat(minEth999Club),
-            maxAgeHours: parseInt(maxAgeHours)
+            sales: salesSettings,
+            registrations: registrationsSettings,
+            bids: bidsSettings
           }
         });
       } catch (error: any) {
@@ -545,9 +563,26 @@ async function startApplication(): Promise<void> {
 
     app.post('/api/admin/autopost-settings', async (req, res) => {
       try {
-        const { minEthDefault, minEth10kClub, minEth999Club, maxAgeHours } = req.body;
+        const { transactionType, settings } = req.body;
+        
+        // Validate transaction type
+        if (!['sales', 'registrations', 'bids'].includes(transactionType)) {
+          return res.status(400).json({
+            success: false,
+            error: 'transactionType must be one of: sales, registrations, bids'
+          });
+        }
+
+        const { enabled, minEthDefault, minEth10kClub, minEth999Club, maxAgeHours } = settings;
         
         // Validate inputs
+        if (typeof enabled !== 'boolean') {
+          return res.status(400).json({
+            success: false,
+            error: 'enabled must be a boolean'
+          });
+        }
+
         if (typeof minEthDefault !== 'number' || minEthDefault < 0) {
           return res.status(400).json({
             success: false,
@@ -569,25 +604,28 @@ async function startApplication(): Promise<void> {
           });
         }
         
-        if (typeof maxAgeHours !== 'number' || maxAgeHours < 1 || maxAgeHours > 24) {
+        if (typeof maxAgeHours !== 'number' || maxAgeHours < 1 || maxAgeHours > 168) {
           return res.status(400).json({
             success: false,
-            error: 'maxAgeHours must be between 1 and 24'
+            error: 'maxAgeHours must be between 1 and 168 (1 week)'
           });
         }
         
-        // Save to database
-        await databaseService.setSystemState('autopost_min_eth_default', minEthDefault.toString());
-        await databaseService.setSystemState('autopost_min_eth_10k', minEth10kClub.toString());
-        await databaseService.setSystemState('autopost_min_eth_999', minEth999Club.toString());
-        await databaseService.setSystemState('autopost_max_age_hours', maxAgeHours.toString());
+        // Save transaction-specific settings to database
+        const prefix = `autopost_${transactionType}`;
+        await databaseService.setSystemState(`${prefix}_enabled`, enabled.toString());
+        await databaseService.setSystemState(`${prefix}_min_eth_default`, minEthDefault.toString());
+        await databaseService.setSystemState(`${prefix}_min_eth_10k`, minEth10kClub.toString());
+        await databaseService.setSystemState(`${prefix}_min_eth_999`, minEth999Club.toString());
+        await databaseService.setSystemState(`${prefix}_max_age_hours`, maxAgeHours.toString());
         
-        logger.info('Auto-post settings updated:', { minEthDefault, minEth10kClub, minEth999Club, maxAgeHours });
+        logger.info(`Auto-post ${transactionType} settings updated:`, { enabled, minEthDefault, minEth10kClub, minEth999Club, maxAgeHours });
         
         res.json({
           success: true,
-          message: 'Auto-post settings saved successfully',
-          settings: { minEthDefault, minEth10kClub, minEth999Club, maxAgeHours }
+          message: `Auto-post ${transactionType} settings saved successfully`,
+          transactionType,
+          settings: { enabled, minEthDefault, minEth10kClub, minEth999Club, maxAgeHours }
         });
       } catch (error: any) {
         logger.error('Failed to save auto-post settings:', error.message);
