@@ -313,6 +313,47 @@ function dashboard() {
             }
         },
 
+        // Helper function for expiration time (future timestamps)
+        getExpirationTime(timestamp) {
+            const now = new Date();
+            const time = new Date(timestamp);
+            const diffInSeconds = Math.floor((time - now) / 1000);
+
+            // If already expired (negative time)
+            if (diffInSeconds < 0) {
+                const expiredSeconds = Math.abs(diffInSeconds);
+                if (expiredSeconds < 60) {
+                    return `Expired ${expiredSeconds}s ago`;
+                } else if (expiredSeconds < 3600) {
+                    const minutes = Math.floor(expiredSeconds / 60);
+                    return `Expired ${minutes}m ago`;
+                } else if (expiredSeconds < 86400) {
+                    const hours = Math.floor(expiredSeconds / 3600);
+                    return `Expired ${hours}h ago`;
+                } else {
+                    const days = Math.floor(expiredSeconds / 86400);
+                    return `Expired ${days}d ago`;
+                }
+            }
+
+            // Still valid (positive time)
+            if (diffInSeconds < 60) {
+                return `Expires in ${diffInSeconds}s`;
+            } else if (diffInSeconds < 3600) {
+                const minutes = Math.floor(diffInSeconds / 60);
+                return `Expires in ${minutes}m`;
+            } else if (diffInSeconds < 86400) {
+                const hours = Math.floor(diffInSeconds / 3600);
+                return `Expires in ${hours}h`;
+            } else if (diffInSeconds < 604800) {
+                const days = Math.floor(diffInSeconds / 86400);
+                return `Expires in ${days}d`;
+            } else {
+                const weeks = Math.floor(diffInSeconds / 604800);
+                return `Expires in ${weeks}w`;
+            }
+        },
+
         // Initialize
         async init() {
             await this.loadToggleStates();

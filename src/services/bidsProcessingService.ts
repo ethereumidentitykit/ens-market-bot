@@ -275,8 +275,8 @@ export class BidsProcessingService {
         return priceEth >= 100; // Minimum $100 for stablecoins
       }
 
-      // Default minimum for other currencies
-      return priceEth >= 0.01;
+      // Default minimum for other currencies  
+      return priceEth >= 0.1; // Consistent 0.1 ETH equivalent for all currencies
 
     } catch (error: any) {
       logger.error(`Error in bid filtering:`, error.message);
@@ -339,13 +339,13 @@ export class BidsProcessingService {
   }
 
   /**
-   * Get default bid minimums (should match or be similar to sales/registrations)
+   * Get default bid minimums for ingestion (will be filtered again pre-tweet)
    */
   private getDefaultBidMinimums() {
     return {
-      minEthDefault: 0.05,    // Standard ENS bids 
-      minEth10kClub: 0.5,     // 4-digit ENS bids
-      minEth999Club: 3.0      // 3-digit ENS bids (higher than sales due to speculation)
+      minEthDefault: 0.1,     // Base minimum for ingestion - 0.1 ETH
+      minEth10kClub: 0.1,     // Same for all categories at ingestion
+      minEth999Club: 0.1      // Club-specific filtering happens pre-tweet
     };
   }
 

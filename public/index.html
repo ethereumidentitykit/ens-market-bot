@@ -1633,10 +1633,9 @@
                                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Price</th>
                                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Bidder</th>
                                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Marketplace</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Expires</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Status</th>
                                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Posted</th>
                                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Created</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Expires</th>
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y divide-gray-700">
@@ -1675,25 +1674,6 @@
                                                 <div class="text-sm text-gray-400" x-text="bid.sourceDomain || ''"></div>
                                             </td>
                                             
-                                            <!-- Expires -->
-                                            <td class="px-6 py-4 whitespace-nowrap">
-                                                <div class="text-sm text-white" x-text="getRelativeTime(new Date(bid.validUntil * 1000))"></div>
-                                                <div class="text-sm text-gray-400" x-text="new Date(bid.validUntil * 1000).toLocaleDateString()"></div>
-                                            </td>
-                                            
-                                            <!-- Status -->
-                                            <td class="px-6 py-4 whitespace-nowrap">
-                                                <span 
-                                                    :class="{
-                                                        'bg-green-100 text-green-800': bid.status === 'active',
-                                                        'bg-gray-100 text-gray-800': bid.status === 'expired',
-                                                        'bg-red-100 text-red-800': bid.status === 'cancelled'
-                                                    }"
-                                                    class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full capitalize"
-                                                    x-text="bid.status"
-                                                ></span>
-                                            </td>
-                                            
                                             <!-- Posted -->
                                             <td class="px-6 py-4 whitespace-nowrap">
                                                 <div class="flex items-center">
@@ -1715,6 +1695,12 @@
                                             <td class="px-6 py-4 whitespace-nowrap">
                                                 <div class="text-sm text-white" x-text="getRelativeTime(new Date(bid.createdAtApi))"></div>
                                                 <div class="text-sm text-gray-400" x-text="new Date(bid.createdAtApi).toLocaleString()"></div>
+                                            </td>
+                                            
+                                            <!-- Expires -->
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <div class="text-sm text-white" x-text="getExpirationTime(new Date(bid.validUntil * 1000))"></div>
+                                                <div class="text-sm text-gray-400" x-text="new Date(bid.validUntil * 1000).toLocaleDateString()"></div>
                                             </td>
                                         </tr>
                                     </template>
