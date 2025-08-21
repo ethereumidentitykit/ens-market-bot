@@ -171,7 +171,7 @@ export class PuppeteerImageService {
         <title>ENS Transaction Image</title>
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
         <style>
             * {
                 margin: 0;
@@ -230,9 +230,8 @@ export class PuppeteerImageService {
                 transform: translate(-50%, -50%);
                 text-align: center;
                 color: white;
-                font-size: 96px;
-                font-weight: bold;
-                text-shadow: 0px 2px 10px rgba(0, 0, 0, 0.8);
+                font-size: 85px;
+                font-weight: 600;
             }
 
             /* ETH Price (Left Side - Center Aligned) */
@@ -245,7 +244,6 @@ export class PuppeteerImageService {
                 color: white;
                 font-size: 48px;
                 font-weight: normal;
-                text-shadow: 0px 2px 10px rgba(0, 0, 0, 0.8);
             }
 
             /* Seller Section (Dynamic Positioning) */
@@ -263,7 +261,6 @@ export class PuppeteerImageService {
                 color: white;
                 font-size: 24px;
                 font-weight: normal;
-                text-shadow: 0px 2px 10px rgba(0, 0, 0, 0.8);
                 white-space: nowrap;
                 margin-left: 8px;
             }
@@ -295,7 +292,6 @@ export class PuppeteerImageService {
                 color: white;
                 font-size: 24px;
                 font-weight: normal;
-                text-shadow: 0px 2px 10px rgba(0, 0, 0, 0.8);
                 white-space: nowrap;
                 margin-left: 8px;
             }
