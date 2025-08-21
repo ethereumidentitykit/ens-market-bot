@@ -372,11 +372,6 @@ export class PuppeteerImageService {
                 height: 50px;
                 border-radius: 50%;
                 object-fit: cover;
-                background-image: url("${sellerAvatarPath}");
-                background-size: cover;
-                background-position: center;
-                background-repeat: no-repeat;
-                border: 2px solid rgba(255, 255, 255, 0.3);
             }
 
             /* Buyer Section (Dynamic Positioning) */
@@ -403,11 +398,6 @@ export class PuppeteerImageService {
                 height: 50px;
                 border-radius: 50%;
                 object-fit: cover;
-                background-image: url("${buyerAvatarPath}");
-                background-size: cover;
-                background-position: center;
-                background-repeat: no-repeat;
-                border: 2px solid rgba(255, 255, 255, 0.3);
             }
 
             /* Emoji SVG styling */
