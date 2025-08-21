@@ -8,7 +8,7 @@ import * as path from 'path';
 
 export class PuppeteerImageService {
   private static readonly IMAGE_WIDTH = 1000;
-  private static readonly IMAGE_HEIGHT = 545;
+  private static readonly IMAGE_HEIGHT = 666;
 
   /**
    * Generate ENS registration image using Puppeteer
@@ -129,33 +129,14 @@ export class PuppeteerImageService {
   }
 
   /**
-   * Load image file as base64 string
+   * Generate HTML template with embedded CSS
    */
-  private static loadAsBase64(imagePath: string): string {
-    try {
-      const imageBuffer = fs.readFileSync(path.join(process.cwd(), imagePath));
-      return imageBuffer.toString('base64');
-    } catch (error) {
-      logger.error(`Failed to load image from ${imagePath}:`, error);
-      // Return a 1x1 transparent pixel as fallback
-      return 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
-    }
-  }
-
-  /**
-   * Generate HTML template with embedded CSS - NEW EXACT POSITIONING
-   */
-  private static async generateHTML(data: MockImageData, imageType: 'sale' | 'registration' | 'bid' = 'sale'): Promise<string> {
-    // Load actual template images as base64
-    const backgroundImageBase64 = this.loadAsBase64('assets/image-templates/sales/sale-t1.png');
-    const userPlaceholderBase64 = this.loadAsBase64('assets/image-templates/user.png');
-    const ensPlaceholderBase64 = this.loadAsBase64('assets/image-templates/ens.png');
-    
-    // Use actual images or fallbacks
-    const templateImagePath = `data:image/png;base64,${backgroundImageBase64}`;
-    const ensNftImagePath = data.nftImageUrl || `data:image/png;base64,${ensPlaceholderBase64}`;
-    const sellerAvatarPath = data.sellerAvatar || `data:image/png;base64,${userPlaceholderBase64}`;
-    const buyerAvatarPath = data.buyerAvatar || `data:image/png;base64,${userPlaceholderBase64}`;
+  private static async generateHTML(data: MockImageData, imageType: 'sale' | 'registration' = 'sale'): Promise<string> {
+    // Get background image as base64 based on image type
+    const backgroundImageBase64 = imageType === 'registration' 
+      ? this.getRegistrationBackgroundImageBase64()
+      : this.getBackgroundImageBase64();
+    const userPlaceholderBase64 = this.getUserPlaceholderBase64();
     
     // Replace emojis in text fields with SVG elements
     const ensNameWithEmojis = await emojiMappingService.replaceEmojisWithSvg(data.ensName);
@@ -168,7 +149,7 @@ export class PuppeteerImageService {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>ENS Transaction Image</title>
+        <title>ENS Sale Image</title>
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
@@ -186,130 +167,167 @@ export class PuppeteerImageService {
                 overflow: hidden;
                 position: relative;
                 background: #1E1E1E;
+                ${backgroundImageBase64 ? `background-image: url(${backgroundImageBase64});` : ''}
+                background-size: cover;
+                background-position: center;
             }
 
-            .canvas {
-                position: relative;
-                width: ${this.IMAGE_WIDTH}px;
-                height: ${this.IMAGE_HEIGHT}px;
-            }
-
-            /* Background Template */
-            .background {
-                position: absolute;
-                top: 0;
-                left: 0;
+            .container {
                 width: 100%;
                 height: 100%;
-                background-image: url("${templateImagePath}");
-                background-size: cover;
-                background-position: center;
-                background-repeat: no-repeat;
+                position: relative;
             }
 
-            /* ENS NFT Image (Right Side) */
-            .ens-nft {
+            /* Price Section (Left Side) */
+            .price-section {
                 position: absolute;
-                left: 500px;
-                top: 45px;
-                width: 455px;
-                height: 455px;
-                border-radius: 19px;
-                object-fit: cover;
-                background-image: url("${ensNftImagePath}");
-                background-size: cover;
-                background-position: center;
-                background-repeat: no-repeat;
-            }
-
-            /* USD Price (Left Side - Center Aligned) */
-            .usd-price {
-                position: absolute;
-                left: 250px;
-                top: 210px;
-                transform: translate(-50%, -50%);
+                left: 270px;
+                top: 80px;
                 text-align: center;
                 color: white;
-                font-size: 48px;
-                font-weight: bold;
-                text-shadow: 0px 2px 10px rgba(0, 0, 0, 0.8);
+                transform: translateX(-50%);
             }
 
-            /* ETH Price (Left Side - Center Aligned) */
             .eth-price {
+                font-size: 120px;
+                font-weight: bold;
+                line-height: 1;
+                text-shadow: 0px 0px 50px rgba(255, 255, 255, 0.25);
+                margin-bottom: 10px;
+            }
+
+            .eth-label {
+                font-size: 40px;
+                text-shadow: 0px 0px 50px rgba(255, 255, 255, 0.25);
+                margin-bottom: 20px;
+            }
+
+            .usd-price {
+                font-size: 80px;
+                font-weight: bold;
+                text-shadow: 0px 0px 50px rgba(255, 255, 255, 0.25);
+                margin-bottom: 10px;
+            }
+
+            .usd-label {
+                font-size: 40px;
+                text-shadow: 0px 0px 50px rgba(255, 255, 255, 0.25);
+            }
+
+            /* ENS Image Section (Right Side) */
+            .ens-image-section {
                 position: absolute;
-                left: 250px;
-                top: 305px;
-                transform: translate(-50%, -50%);
-                text-align: center;
+                left: 552px;
+                top: 48px;
+                width: 400px;
+                height: 400px;
+            }
+
+            .ens-image {
+                width: 100%;
+                height: 100%;
+                border-radius: 30px;
+                object-fit: cover;
+                box-shadow: 0px 0px 50px rgba(0, 0, 0, 0.4);
+            }
+
+            .ens-placeholder {
+                width: 100%;
+                height: 100%;
+                background: #4496E7;
+                border-radius: 30px;
+                display: flex;
+                align-items: center;
+                justify-content: flex-start;
+                color: white;
+                font-size: 58px;
+                font-weight: bold;
+                box-shadow: 0px 0px 50px rgba(0, 0, 0, 0.4);
+                padding: 20px;
+                overflow: hidden;
+            }
+
+            .ens-text {
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                max-width: 100%;
+                text-align: left;
+                flex-shrink: 1;
+                width: 100%;
+            }
+
+            /* Buyer/Seller Pills (Bottom) */
+            .pills-section {
+                position: absolute;
+                bottom: 28px;
+                left: 0;
+                right: 0;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 0 26px;
+            }
+
+            .pill {
+                width: 433px;
+                height: 132px;
+                background: #242424;
+                border-radius: 66px;
+                display: flex;
+                align-items: center;
+                padding: 16px 20px;
+                box-shadow: 0px 0px 50px rgba(0, 0, 0, 0.4);
+            }
+
+            .pill-left {
+                justify-content: flex-start;
+            }
+
+            .pill-right {
+                justify-content: flex-start;
+            }
+
+            .avatar {
+                width: 100px;
+                height: 100px;
+                border-radius: 50px;
+                object-fit: cover;
+                margin: 0 15px 0 0;
+            }
+
+            .avatar-placeholder {
+                width: 100px;
+                height: 100px;
+                border-radius: 50px;
+                margin: 0 15px 0 0;
+                background-color: #666;
+                background-size: contain;
+                background-position: center;
+                background-repeat: no-repeat;
+            }
+
+            .pill-right .avatar,
+            .pill-right .avatar-placeholder {
+                margin: 0 15px 0 0;
+            }
+
+            .pill-text {
                 color: white;
                 font-size: 36px;
-                font-weight: normal;
-                text-shadow: 0px 2px 10px rgba(0, 0, 0, 0.8);
-            }
-
-            /* Seller Section (Dynamic Positioning) */
-            .seller-section {
-                position: absolute;
-                right: 545px;
-                top: 390px;
-                transform: translateY(-50%);
-                display: flex;
-                align-items: center;
-                flex-direction: row-reverse;
-            }
-
-            .seller-name {
-                color: white;
-                font-size: 24px;
                 font-weight: bold;
-                text-shadow: 0px 2px 10px rgba(0, 0, 0, 0.8);
-                white-space: nowrap;
-                margin-left: 8px;
+                flex: 1;
+                text-align: left;
+                word-break: break-word;
             }
 
-            .seller-avatar {
-                width: 50px;
-                height: 50px;
-                border-radius: 50%;
-                object-fit: cover;
-                background-image: url("${sellerAvatarPath}");
-                background-size: cover;
-                background-position: center;
-                background-repeat: no-repeat;
-                border: 2px solid rgba(255, 255, 255, 0.3);
-            }
-
-            /* Buyer Section (Dynamic Positioning) */
-            .buyer-section {
-                position: absolute;
-                right: 545px;
-                top: 477px;
-                transform: translateY(-50%);
-                display: flex;
-                align-items: center;
-                flex-direction: row-reverse;
-            }
-
-            .buyer-name {
+            /* Arrow between pills */
+            .arrow {
                 color: white;
-                font-size: 24px;
+                font-size: 72px;
                 font-weight: bold;
-                text-shadow: 0px 2px 10px rgba(0, 0, 0, 0.8);
-                white-space: nowrap;
-                margin-left: 8px;
-            }
-
-            .buyer-avatar {
-                width: 50px;
-                height: 50px;
-                border-radius: 50%;
-                object-fit: cover;
-                background-image: url("${buyerAvatarPath}");
-                background-size: cover;
-                background-position: center;
-                background-repeat: no-repeat;
-                border: 2px solid rgba(255, 255, 255, 0.3);
+                text-shadow: 0px 0px 50px rgba(255, 255, 255, 0.25);
+                line-height: 1;
             }
 
             /* Emoji SVG styling */
@@ -323,33 +341,48 @@ export class PuppeteerImageService {
         </style>
     </head>
     <body>
-        <div class="canvas">
-            <!-- Background Template -->
-            <div class="background"></div>
-
-            <!-- ENS NFT Image -->
-            <img src="${ensNftImagePath}" alt="ENS NFT" class="ens-nft" onerror="this.src='data:image/png;base64,${ensPlaceholderBase64}'">
-
-            <!-- USD Price -->
-            <div class="usd-price">
-                ${data.priceUsd}
+        <div class="container">
+            <!-- Price Section -->
+            <div class="price-section">
+                <div class="eth-price">${data.priceEth.toFixed(2)}</div>
+                <div class="eth-label">ETH</div>
+                <div class="usd-price">$${data.priceUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+                <div class="usd-label">USD</div>
             </div>
 
-            <!-- ETH Price -->
-            <div class="eth-price">
-                ${data.priceEth} ETH
+            <!-- ENS Image Section -->
+            <div class="ens-image-section">
+                ${data.nftImageUrl ? 
+                    `<img src="${data.nftImageUrl}" alt="NFT Image" class="ens-image" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                     <div class="ens-placeholder" style="display: none;"><span class="ens-text">${ensNameWithEmojis}</span></div>` :
+                    `<div class="ens-placeholder"><span class="ens-text">${ensNameWithEmojis}</span></div>`
+                }
             </div>
 
-            <!-- Seller Section -->
-            <div class="seller-section">
-                <div class="seller-name">${data.sellerEns || 'seller'}</div>
-                <img src="${sellerAvatarPath}" alt="Seller" class="seller-avatar" onerror="this.src='data:image/png;base64,${userPlaceholderBase64}'">
-            </div>
+            <!-- Buyer/Seller Pills -->
+            <div class="pills-section">
+                <!-- Seller Pill (Left) -->
+                <div class="pill pill-left">
+                    ${data.sellerAvatar ? 
+                        `<img src="${data.sellerAvatar}" alt="Seller Avatar" class="avatar" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                         <div class="avatar-placeholder" style="display: none; ${userPlaceholderBase64 ? `background-image: url(${userPlaceholderBase64});` : ''}"></div>` :
+                        `<div class="avatar-placeholder" style="${userPlaceholderBase64 ? `background-image: url(${userPlaceholderBase64});` : ''}"></div>`
+                    }
+                    <div class="pill-text">${sellerEnsWithEmojis}</div>
+                </div>
 
-            <!-- Buyer Section -->
-            <div class="buyer-section">
-                <div class="buyer-name">${data.buyerEns || 'buyer'}</div>
-                <img src="${buyerAvatarPath}" alt="Buyer" class="buyer-avatar" onerror="this.src='data:image/png;base64,${userPlaceholderBase64}'">
+                <!-- Arrow -->
+                <div class="arrow">→</div>
+
+                <!-- Buyer Pill (Right) -->
+                <div class="pill pill-right">
+                    ${data.buyerAvatar ? 
+                        `<img src="${data.buyerAvatar}" alt="Buyer Avatar" class="avatar" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                         <div class="avatar-placeholder" style="display: none; ${userPlaceholderBase64 ? `background-image: url(${userPlaceholderBase64});` : ''}"></div>` :
+                        `<div class="avatar-placeholder" style="${userPlaceholderBase64 ? `background-image: url(${userPlaceholderBase64});` : ''}"></div>`
+                    }
+                    <div class="pill-text">${buyerEnsWithEmojis}</div>
+                </div>
             </div>
         </div>
     </body>
