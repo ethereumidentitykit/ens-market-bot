@@ -13,7 +13,7 @@ export class PuppeteerImageService {
   /**
    * Generate ENS registration image using Puppeteer
    */
-  public static async generateRegistrationImage(data: RealImageData): Promise<Buffer> {
+  public static async generateRegistrationImage(data: RealImageData, databaseService?: IDatabaseService): Promise<Buffer> {
     // Convert RealImageData to MockImageData format for compatibility
     const mockData: MockImageData = {
       priceEth: data.priceEth,
@@ -30,20 +30,31 @@ export class PuppeteerImageService {
       timestamp: new Date()
     };
 
-    return await this.generateImageWithBackground(mockData, 'registration');
+    return await this.generateImageWithBackground(mockData, 'registration', databaseService);
   }
 
   /**
    * Generate ENS sale image using Puppeteer
    */
-  public static async generateSaleImage(data: MockImageData): Promise<Buffer> {
-    return await this.generateImageWithBackground(data, 'sale');
+  public static async generateSaleImage(data: MockImageData, databaseService?: IDatabaseService): Promise<Buffer> {
+    return await this.generateImageWithBackground(data, 'sale', databaseService);
+  }
+
+  /**
+   * Generate ENS bid image using Puppeteer
+   */
+  public static async generateBidImage(data: MockImageData, databaseService?: IDatabaseService): Promise<Buffer> {
+    return await this.generateImageWithBackground(data, 'bid', databaseService);
   }
 
   /**
    * Generate image with specified background type
    */
-  private static async generateImageWithBackground(data: MockImageData, imageType: 'sale' | 'registration'): Promise<Buffer> {
+  private static async generateImageWithBackground(
+    data: MockImageData, 
+    imageType: 'sale' | 'registration' | 'bid', 
+    databaseService?: IDatabaseService
+  ): Promise<Buffer> {
     // Environment-aware Puppeteer setup
     const isVercel = process.env.VERCEL === '1';
     
@@ -90,7 +101,7 @@ export class PuppeteerImageService {
       });
 
       // Generate HTML content with emoji replacement and background type
-      const htmlContent = await this.generateHTML(data, imageType);
+      const htmlContent = await this.generateHTML(data, imageType, databaseService);
       
       // Set the HTML content
       await page.setContent(htmlContent, { 
@@ -143,13 +154,96 @@ export class PuppeteerImageService {
   }
 
   /**
-   * Generate HTML template with embedded CSS - NEW EXACT POSITIONING
+   * Format price string with proper comma separators
    */
-  private static async generateHTML(data: MockImageData, imageType: 'sale' | 'registration' | 'bid' = 'sale'): Promise<string> {
+  private static formatPrice(priceUsd: string | number): string {
+    // Convert to string and remove existing formatting
+    const cleanPrice = priceUsd.toString().replace(/[$,]/g, '');
+    const numericPrice = parseFloat(cleanPrice);
+    
+    // Return formatted price with commas and dollar sign
+    if (!isNaN(numericPrice)) {
+      return '$' + numericPrice.toLocaleString('en-US');
+    }
+    
+    // Return original if parsing fails
+    return priceUsd.toString();
+  }
+
+  /**
+   * Get dynamic template path based on transaction type and price tier
+   */
+  private static async getTemplatePath(
+    data: MockImageData, 
+    imageType: 'sale' | 'registration' | 'bid',
+    databaseService?: IDatabaseService
+  ): Promise<string> {
+    
+    // Convert imageType to database transaction type
+    const transactionTypeMap = {
+      'sale': 'sales',
+      'registration': 'registrations', 
+      'bid': 'bids'
+    } as const;
+    
+    const transactionType = transactionTypeMap[imageType];
+    
+    // Default to T1 if no database service available
+    let tier = 1;
+    
+    if (databaseService && data.priceUsd) {
+      try {
+        // Extract numeric value from price string (e.g., "$1,269" -> 1269)
+        const priceString = data.priceUsd.toString().replace(/[$,]/g, '');
+        const priceNumeric = parseFloat(priceString);
+        
+        if (!isNaN(priceNumeric)) {
+          // Query database for price tier
+          const priceTier = await databaseService.getPriceTierForAmount(transactionType, priceNumeric);
+          if (priceTier) {
+            tier = priceTier.tierLevel;
+            logger.info(`Selected ${transactionType} tier ${tier} for $${priceNumeric} USD`);
+          }
+        }
+      } catch (error) {
+        logger.error('Error determining price tier:', error);
+        // Fall back to T1 on error
+      }
+    }
+    
+    // Build template path based on transaction type and tier
+    const typeMap = {
+      'sales': 'sale',
+      'registrations': 'reg',
+      'bids': 'bid'
+    } as const;
+    
+    const basename = typeMap[transactionType];
+    const templatePath = `assets/image-templates/${transactionType}/${basename}-t${tier}.png`;
+    
+    logger.info(`Using template: ${templatePath}`);
+    return templatePath;
+  }
+
+  /**
+   * Generate HTML template with embedded CSS - NEW EXACT POSITIONING WITH DYNAMIC TEMPLATES
+   */
+  private static async generateHTML(
+    data: MockImageData, 
+    imageType: 'sale' | 'registration' | 'bid' = 'sale',
+    databaseService?: IDatabaseService
+  ): Promise<string> {
+    
+    // Get dynamic template path based on transaction type and price tier
+    const templatePath = await this.getTemplatePath(data, imageType, databaseService);
+    
     // Load actual template images as base64
-    const backgroundImageBase64 = this.loadAsBase64('assets/image-templates/sales/sale-t1.png');
+    const backgroundImageBase64 = this.loadAsBase64(templatePath);
     const userPlaceholderBase64 = this.loadAsBase64('assets/image-templates/user.png');
     const ensPlaceholderBase64 = this.loadAsBase64('assets/image-templates/ens.png');
+    
+    // Format USD price with commas
+    const formattedUsdPrice = this.formatPrice(data.priceUsd);
     
     // Use actual images or fallbacks
     const templateImagePath = `data:image/png;base64,${backgroundImageBase64}`;
@@ -328,7 +422,7 @@ export class PuppeteerImageService {
 
             <!-- USD Price -->
             <div class="usd-price">
-                ${data.priceUsd}
+                ${formattedUsdPrice}
             </div>
 
             <!-- ETH Price -->
