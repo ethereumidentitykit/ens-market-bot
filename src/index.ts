@@ -1444,9 +1444,123 @@ async function startApplication(): Promise<void> {
       await ImageController.generateTestImage(req, res);
     });
 
-    app.post('/api/image/generate-custom', async (req, res) => {
+    app.post('/api/image/generate-custom-sale', async (req, res) => {
       const { ImageController } = await import('./controllers/imageController');
       await ImageController.generateCustomImage(req, res);
+    });
+
+    app.post('/api/image/generate-custom-registration', async (req, res) => {
+      try {
+        const { mockData } = req.body;
+        
+        if (!mockData) {
+          res.status(400).json({
+            success: false,
+            error: 'Mock data is required'
+          });
+          return;
+        }
+        
+        // Get database service from app.locals
+        const { databaseService } = req.app.locals;
+        
+        logger.info('Generating custom registration image with provided data');
+        
+        // Convert MockImageData to RealImageData format for registration
+        const realImageData = {
+          priceEth: mockData.priceEth,
+          priceUsd: mockData.priceUsd,
+          ensName: mockData.ensName,
+          nftImageUrl: mockData.nftImageUrl || '',
+          buyerEns: mockData.buyerEns || 'New Owner',
+          buyerAvatar: mockData.buyerAvatar || '',
+          sellerEns: 'ENS DAO',
+          sellerAvatar: '',
+          transactionHash: '0x0000',
+          saleId: 0,
+          tokenId: ''
+        };
+        
+        const startTime = Date.now();
+        const { PuppeteerImageService } = await import('./services/puppeteerImageService');
+        const imageBuffer = await PuppeteerImageService.generateRegistrationImage(realImageData, databaseService);
+        const endTime = Date.now();
+        
+        // Save image with timestamp
+        const filename = `custom-registration-${Date.now()}.png`;
+        const savedPath = await PuppeteerImageService.saveImageToFile(imageBuffer, filename, databaseService);
+        
+        // Create URL for the generated image
+        const imageUrl = savedPath.startsWith('/api/images/') ? savedPath : `/generated-images/${filename}`;
+        
+        logger.info(`Custom registration image generated successfully: ${filename} (${endTime - startTime}ms)`);
+        
+        res.json({
+          success: true,
+          imageUrl,
+          mockData,
+          generationTime: endTime - startTime,
+          dimensions: '1000x545px',
+          filename
+        });
+        
+      } catch (error) {
+        logger.error('Failed to generate custom registration image:', error);
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error occurred'
+        });
+      }
+    });
+
+    app.post('/api/image/generate-custom-bid', async (req, res) => {
+      try {
+        const { mockData } = req.body;
+        
+        if (!mockData) {
+          res.status(400).json({
+            success: false,
+            error: 'Mock data is required'
+          });
+          return;
+        }
+        
+        // Get database service from app.locals
+        const { databaseService } = req.app.locals;
+        
+        logger.info('Generating custom bid image with provided data');
+        
+        // Use MockImageData format directly for bids
+        const startTime = Date.now();
+        const { PuppeteerImageService } = await import('./services/puppeteerImageService');
+        const imageBuffer = await PuppeteerImageService.generateBidImage(mockData, databaseService);
+        const endTime = Date.now();
+        
+        // Save image with timestamp
+        const filename = `custom-bid-${Date.now()}.png`;
+        const savedPath = await PuppeteerImageService.saveImageToFile(imageBuffer, filename, databaseService);
+        
+        // Create URL for the generated image
+        const imageUrl = savedPath.startsWith('/api/images/') ? savedPath : `/generated-images/${filename}`;
+        
+        logger.info(`Custom bid image generated successfully: ${filename} (${endTime - startTime}ms)`);
+        
+        res.json({
+          success: true,
+          imageUrl,
+          mockData,
+          generationTime: endTime - startTime,
+          dimensions: '1000x545px',
+          filename
+        });
+        
+      } catch (error) {
+        logger.error('Failed to generate custom bid image:', error);
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error occurred'
+        });
+      }
     });
 
     // Serve generated images

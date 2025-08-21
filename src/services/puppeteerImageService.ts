@@ -218,8 +218,16 @@ export class PuppeteerImageService {
       'bids': 'bid'
     } as const;
     
+    // Map transaction types to actual directory names
+    const directoryMap = {
+      'sales': 'sales',
+      'registrations': 'regs',
+      'bids': 'bids'
+    } as const;
+    
     const basename = typeMap[transactionType];
-    const templatePath = `assets/image-templates/${transactionType}/${basename}-t${tier}.png`;
+    const directoryName = directoryMap[transactionType];
+    const templatePath = `assets/image-templates/${directoryName}/${basename}-t${tier}.png`;
     
     logger.info(`Using template: ${templatePath}`);
     return templatePath;
