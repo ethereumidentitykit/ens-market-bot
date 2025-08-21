@@ -58,7 +58,7 @@ export class ImageController {
             sellerAvatar: mockData.sellerAvatar ? 'Loaded' : 'Default'
           },
           generationTime: endTime - startTime,
-          dimensions: '1000x666px',
+          dimensions: '1000x545px',
           filename
         });
         return;
@@ -95,7 +95,7 @@ export class ImageController {
           saleId: imageData.saleId
         },
         generationTime: endTime - startTime,
-        dimensions: '1000x666px',
+        dimensions: '1000x545px',
         filename
       });
       
@@ -146,7 +146,7 @@ export class ImageController {
         imageUrl,
         mockData,
         generationTime: endTime - startTime,
-        dimensions: '1000x666px',
+        dimensions: '1000x545px',
         filename
       });
       

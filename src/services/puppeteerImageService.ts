@@ -352,7 +352,7 @@ export class PuppeteerImageService {
             .seller-section {
                 position: absolute;
                 right: 545px;
-                top: 390px;
+                top: ${imageType === 'registration' ? '390px' : '477px'}; /* Bottom for sales/bids, top for regs */
                 transform: translateY(-50%);
                 display: flex;
                 align-items: center;
@@ -383,7 +383,7 @@ export class PuppeteerImageService {
             .buyer-section {
                 position: absolute;
                 right: 545px;
-                top: 477px;
+                top: ${imageType === 'registration' ? '477px' : '390px'}; /* Bottom for regs (no seller), top for sales/bids */
                 transform: translateY(-50%);
                 display: flex;
                 align-items: center;
@@ -438,11 +438,13 @@ export class PuppeteerImageService {
                 ${data.priceEth} ETH
             </div>
 
+            ${imageType !== 'registration' ? `
             <!-- Seller Section -->
             <div class="seller-section">
                 <div class="seller-name">${data.sellerEns || 'seller'}</div>
                 <img src="${sellerAvatarPath}" alt="Seller" class="seller-avatar" onerror="this.src='data:image/png;base64,${userPlaceholderBase64}'">
             </div>
+            ` : ''}
 
             <!-- Buyer Section -->
             <div class="buyer-section">
