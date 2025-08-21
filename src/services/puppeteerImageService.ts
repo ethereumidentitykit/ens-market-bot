@@ -230,7 +230,7 @@ export class PuppeteerImageService {
                 transform: translate(-50%, -50%);
                 text-align: center;
                 color: white;
-                font-size: 48px;
+                font-size: 96px;
                 font-weight: bold;
                 text-shadow: 0px 2px 10px rgba(0, 0, 0, 0.8);
             }
@@ -243,7 +243,7 @@ export class PuppeteerImageService {
                 transform: translate(-50%, -50%);
                 text-align: center;
                 color: white;
-                font-size: 36px;
+                font-size: 48px;
                 font-weight: normal;
                 text-shadow: 0px 2px 10px rgba(0, 0, 0, 0.8);
             }
@@ -262,7 +262,7 @@ export class PuppeteerImageService {
             .seller-name {
                 color: white;
                 font-size: 24px;
-                font-weight: bold;
+                font-weight: normal;
                 text-shadow: 0px 2px 10px rgba(0, 0, 0, 0.8);
                 white-space: nowrap;
                 margin-left: 8px;
@@ -294,7 +294,7 @@ export class PuppeteerImageService {
             .buyer-name {
                 color: white;
                 font-size: 24px;
-                font-weight: bold;
+                font-weight: normal;
                 text-shadow: 0px 2px 10px rgba(0, 0, 0, 0.8);
                 white-space: nowrap;
                 margin-left: 8px;
