@@ -246,6 +246,21 @@ export class PuppeteerImageService {
   }
 
   /**
+   * Format ETH value to 1 decimal place
+   */
+  private static formatEthPrice(priceEth: string | number): string {
+    const numericPrice = parseFloat(priceEth.toString());
+    
+    // Return formatted ETH price with 1 decimal place
+    if (!isNaN(numericPrice)) {
+      return numericPrice.toFixed(1);
+    }
+    
+    // Return original if parsing fails
+    return priceEth.toString();
+  }
+
+  /**
    * Get dynamic template path based on transaction type and price tier
    */
   private static async getTemplatePath(
@@ -525,7 +540,7 @@ export class PuppeteerImageService {
 
             <!-- ETH Price -->
             <div class="eth-price">
-                ${data.priceEth} ETH
+                ${this.formatEthPrice(data.priceEth)} ETH
             </div>
 
             ${imageType !== 'registration' ? `
