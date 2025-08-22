@@ -228,16 +228,17 @@ export class PuppeteerImageService {
   }
 
   /**
-   * Format price string with proper comma separators
+   * Format price string with proper comma separators (whole numbers only)
    */
   private static formatPrice(priceUsd: string | number): string {
     // Convert to string and remove existing formatting
     const cleanPrice = priceUsd.toString().replace(/[$,]/g, '');
     const numericPrice = parseFloat(cleanPrice);
     
-    // Return formatted price with commas and dollar sign
+    // Return formatted price with commas and dollar sign (rounded to whole number)
     if (!isNaN(numericPrice)) {
-      return '$' + numericPrice.toLocaleString('en-US');
+      const roundedPrice = Math.round(numericPrice);
+      return '$' + roundedPrice.toLocaleString('en-US');
     }
     
     // Return original if parsing fails
