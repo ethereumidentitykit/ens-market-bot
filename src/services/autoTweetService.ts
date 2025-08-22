@@ -11,16 +11,19 @@ import { TwitterService } from './twitterService';
 import { RateLimitService } from './rateLimitService';
 import { WorldTimeService } from './worldTimeService';
 
-export interface AutoPostSettings {
+export interface TransactionSpecificSettings {
   enabled: boolean;
   minEthDefault: number;
   minEth10kClub: number;
   minEth999Club: number;
   maxAgeHours: number;
-  // Registration-specific settings
-  registrationsEnabled: boolean;
-  minEthRegistrations: number;
-  maxAgeHoursRegistrations: number;
+}
+
+export interface AutoPostSettings {
+  enabled: boolean; // Global master toggle
+  sales: TransactionSpecificSettings;
+  registrations: TransactionSpecificSettings;
+  bids: TransactionSpecificSettings;
 }
 
 export interface PostResult {
@@ -66,18 +69,20 @@ export class AutoTweetService {
    * Process new sales for automated posting
    */
   async processNewSales(sales: ProcessedSale[], settings: AutoPostSettings): Promise<PostResult[]> {
+    // Check global master toggle
     if (!settings.enabled) {
-      logger.debug('Auto-posting is disabled');
+      logger.debug('Auto-posting is globally disabled');
+      return [];
+    }
+
+    // Check sales-specific toggle
+    if (!settings.sales.enabled) {
+      logger.debug('Sales auto-posting is disabled');
       return [];
     }
 
     if (!this.apiToggleService.isTwitterEnabled()) {
       logger.warn('Cannot auto-post: Twitter API is disabled');
-      return [];
-    }
-
-    if (!this.apiToggleService.isAutoPostingEnabled()) {
-      logger.debug('Auto-posting is disabled via toggle');
       return [];
     }
 
@@ -118,18 +123,20 @@ export class AutoTweetService {
    * Process new registrations for automated posting
    */
   async processNewRegistrations(registrations: ENSRegistration[], settings: AutoPostSettings): Promise<PostResult[]> {
-    if (!settings.enabled || !settings.registrationsEnabled) {
+    // Check global master toggle
+    if (!settings.enabled) {
+      logger.debug('Auto-posting is globally disabled');
+      return [];
+    }
+
+    // Check registrations-specific toggle  
+    if (!settings.registrations.enabled) {
       logger.debug('Registration auto-posting is disabled');
       return [];
     }
 
     if (!this.apiToggleService.isTwitterEnabled()) {
       logger.warn('Cannot auto-post registrations: Twitter API is disabled');
-      return [];
-    }
-
-    if (!this.apiToggleService.isAutoPostingEnabled()) {
-      logger.debug('Auto-posting is disabled via toggle');
       return [];
     }
 
@@ -173,19 +180,19 @@ export class AutoTweetService {
   private async processSingleSale(sale: ProcessedSale, settings: AutoPostSettings): Promise<PostResult> {
     const saleId = sale.id!;
 
-    // Check if sale is too old
-    if (!(await this.isWithinTimeLimit(sale, settings.maxAgeHours))) {
+    // Check if sale is too old (use sales-specific settings)
+    if (!(await this.isWithinTimeLimit(sale, settings.sales.maxAgeHours))) {
       return {
         success: false,
         saleId,
         skipped: true,
-        reason: `Sale is older than ${settings.maxAgeHours} hours`,
+        reason: `Sale is older than ${settings.sales.maxAgeHours} hours`,
         type: 'sale'
       };
     }
 
-    // Check if sale meets ETH minimum requirements
-    const ethMinimum = this.getEthMinimumForSale(sale, settings);
+    // Check if sale meets ETH minimum requirements (use sales-specific settings)
+    const ethMinimum = this.getEthMinimumForSale(sale, settings.sales);
     const saleEthValue = parseFloat(sale.priceEth);
     
     if (saleEthValue < ethMinimum) {
@@ -278,20 +285,20 @@ export class AutoTweetService {
   private async processSingleRegistration(registration: ENSRegistration, settings: AutoPostSettings): Promise<PostResult> {
     const registrationId = registration.id!;
 
-    // Check if registration is too old
-    if (!(await this.isWithinRegistrationTimeLimit(registration, settings.maxAgeHoursRegistrations))) {
+    // Check if registration is too old (use registrations-specific settings)
+    if (!(await this.isWithinRegistrationTimeLimit(registration, settings.registrations.maxAgeHours))) {
       return {
         success: false,
         registrationId,
         skipped: true,
-        reason: `Registration is older than ${settings.maxAgeHoursRegistrations} hours`,
+        reason: `Registration is older than ${settings.registrations.maxAgeHours} hours`,
         type: 'registration'
       };
     }
 
-    // Check if registration meets ETH minimum requirements
+    // Check if registration meets ETH minimum requirements (use registrations-specific settings)
     const registrationEthValue = parseFloat(registration.costEth || '0');
-    const ethMinimum = this.getEthMinimumForRegistration(registration, settings);
+    const ethMinimum = this.getEthMinimumForRegistration(registration, settings.registrations);
     
     if (registrationEthValue < ethMinimum) {
       return {
@@ -411,7 +418,7 @@ export class AutoTweetService {
   /**
    * Get ETH minimum requirement for a sale based on category
    */
-  private getEthMinimumForSale(sale: ProcessedSale, settings: AutoPostSettings): number {
+  private getEthMinimumForSale(sale: ProcessedSale, settings: TransactionSpecificSettings): number {
     const nftName = sale.nftName || '';
     
     if (this.CLUB_999_PATTERN.test(nftName)) {
@@ -441,7 +448,7 @@ export class AutoTweetService {
   /**
    * Get ETH minimum requirement for a registration based on category
    */
-  private getEthMinimumForRegistration(registration: ENSRegistration, settings: AutoPostSettings): number {
+  private getEthMinimumForRegistration(registration: ENSRegistration, settings: TransactionSpecificSettings): number {
     const ensName = registration.fullName || registration.ensName || '';
     
     if (this.CLUB_999_PATTERN.test(ensName)) {
@@ -449,7 +456,7 @@ export class AutoTweetService {
     } else if (this.CLUB_10K_PATTERN.test(ensName)) {
       return settings.minEth10kClub;
     } else {
-      return settings.minEthRegistrations; // Use registration-specific default
+      return settings.minEthDefault; // Use registration-specific default
     }
   }
 
@@ -472,8 +479,15 @@ export class AutoTweetService {
    * Process array of ENS bids for auto-posting
    */
   async processNewBids(bids: ENSBid[], settings: AutoPostSettings): Promise<PostResult[]> {
+    // Check global master toggle
     if (!settings.enabled) {
-      logger.debug('Auto-posting is disabled');
+      logger.debug('Auto-posting is globally disabled');
+      return [];
+    }
+
+    // Check bids-specific toggle
+    if (!settings.bids.enabled) {
+      logger.debug('Bids auto-posting is disabled');
       return [];
     }
 
@@ -529,20 +543,20 @@ export class AutoTweetService {
   private async processSingleBid(bid: ENSBid, settings: AutoPostSettings): Promise<PostResult> {
     const bidId = bid.id!;
 
-    // Check if bid is too old (24 hours for bids - they're time-sensitive)
-    if (!(await this.isWithinBidTimeLimit(bid, 24))) {
+    // Check if bid is too old (use bids-specific settings)
+    if (!(await this.isWithinBidTimeLimit(bid, settings.bids.maxAgeHours))) {
       return {
         success: false,
         bidId,
         skipped: true,
-        reason: `Bid is older than 24 hours`,
+        reason: `Bid is older than ${settings.bids.maxAgeHours} hours`,
         type: 'bid'
       };
     }
 
-    // Check if bid meets ETH minimum requirements
+    // Check if bid meets ETH minimum requirements (use bids-specific settings)
     const bidEthValue = parseFloat(bid.priceDecimal);
-    const ethMinimum = await this.getEthMinimumForBid(bid, settings);
+    const ethMinimum = await this.getEthMinimumForBid(bid, settings.bids);
     
     if (bidEthValue < ethMinimum) {
       return {
@@ -623,7 +637,7 @@ export class AutoTweetService {
   /**
    * Get ETH minimum requirement for a bid based on ENS name category
    */
-  private async getEthMinimumForBid(bid: ENSBid, settings: AutoPostSettings): Promise<number> {
+  private async getEthMinimumForBid(bid: ENSBid, settings: TransactionSpecificSettings): Promise<number> {
     try {
       // Get ENS name from bid (requires live lookup)
       let ensName = '';
@@ -650,7 +664,7 @@ export class AutoTweetService {
       } else if (this.CLUB_10K_PATTERN.test(ensName)) {
         return settings.minEth10kClub;
       } else {
-        return settings.minEthDefault; // Use general default for bids
+        return settings.minEthDefault; // Use bids-specific default
       }
 
     } catch (error: any) {
@@ -702,43 +716,68 @@ export class AutoTweetService {
   }
 
   /**
-   * Load auto-posting settings from database
+   * Load auto-posting settings from database (transaction-specific)
    */
   async getSettings(): Promise<AutoPostSettings> {
     try {
-      const minEthDefault = await this.databaseService.getSystemState('autopost_min_eth_default') || '0.1';
-      const minEth10kClub = await this.databaseService.getSystemState('autopost_min_eth_10k') || '0.5';
-      const minEth999Club = await this.databaseService.getSystemState('autopost_min_eth_999') || '5';
-      const maxAgeHours = await this.databaseService.getSystemState('autopost_max_age_hours') || '1';
-      
-      // Registration-specific settings
-      const registrationsEnabled = await this.databaseService.getSystemState('autopost_registrations_enabled') || 'true';
-      const minEthRegistrations = await this.databaseService.getSystemState('autopost_min_eth_registrations') || '0.1';
-      const maxAgeHoursRegistrations = await this.databaseService.getSystemState('autopost_max_age_hours_registrations') || '2';
+      // Load sales settings
+      const salesSettings: TransactionSpecificSettings = {
+        enabled: (await this.databaseService.getSystemState('autopost_sales_enabled') || 'true') === 'true',
+        minEthDefault: parseFloat(await this.databaseService.getSystemState('autopost_sales_min_eth_default') || '0.1'),
+        minEth10kClub: parseFloat(await this.databaseService.getSystemState('autopost_sales_min_eth_10k') || '0.5'),
+        minEth999Club: parseFloat(await this.databaseService.getSystemState('autopost_sales_min_eth_999') || '0.3'),
+        maxAgeHours: parseInt(await this.databaseService.getSystemState('autopost_sales_max_age_hours') || '1')
+      };
+
+      // Load registrations settings
+      const registrationsSettings: TransactionSpecificSettings = {
+        enabled: (await this.databaseService.getSystemState('autopost_registrations_enabled') || 'true') === 'true',
+        minEthDefault: parseFloat(await this.databaseService.getSystemState('autopost_registrations_min_eth_default') || '0.05'),
+        minEth10kClub: parseFloat(await this.databaseService.getSystemState('autopost_registrations_min_eth_10k') || '0.2'),
+        minEth999Club: parseFloat(await this.databaseService.getSystemState('autopost_registrations_min_eth_999') || '0.1'),
+        maxAgeHours: parseInt(await this.databaseService.getSystemState('autopost_registrations_max_age_hours') || '2')
+      };
+
+      // Load bids settings
+      const bidsSettings: TransactionSpecificSettings = {
+        enabled: (await this.databaseService.getSystemState('autopost_bids_enabled') || 'true') === 'true',
+        minEthDefault: parseFloat(await this.databaseService.getSystemState('autopost_bids_min_eth_default') || '0.2'),
+        minEth10kClub: parseFloat(await this.databaseService.getSystemState('autopost_bids_min_eth_10k') || '1.0'),
+        minEth999Club: parseFloat(await this.databaseService.getSystemState('autopost_bids_min_eth_999') || '0.5'),
+        maxAgeHours: parseInt(await this.databaseService.getSystemState('autopost_bids_max_age_hours') || '24')
+      };
       
       return {
-        enabled: this.apiToggleService.isAutoPostingEnabled(),
-        minEthDefault: parseFloat(minEthDefault),
-        minEth10kClub: parseFloat(minEth10kClub),
-        minEth999Club: parseFloat(minEth999Club),
-        maxAgeHours: parseInt(maxAgeHours),
-        // Registration settings
-        registrationsEnabled: registrationsEnabled === 'true',
-        minEthRegistrations: parseFloat(minEthRegistrations),
-        maxAgeHoursRegistrations: parseInt(maxAgeHoursRegistrations)
+        enabled: this.apiToggleService.isAutoPostingEnabled(), // Global master toggle
+        sales: salesSettings,
+        registrations: registrationsSettings,
+        bids: bidsSettings
       };
     } catch (error: any) {
       logger.warn('Failed to load auto-post settings from database, using defaults:', error.message);
       return {
         enabled: false,
-        minEthDefault: 0.1,
-        minEth10kClub: 0.5,
-        minEth999Club: 0.3,
-        maxAgeHours: 1,
-        // Registration defaults
-        registrationsEnabled: true,
-        minEthRegistrations: 0.01,
-        maxAgeHoursRegistrations: 2
+        sales: {
+          enabled: true,
+          minEthDefault: 0.1,
+          minEth10kClub: 0.5,
+          minEth999Club: 0.3,
+          maxAgeHours: 1
+        },
+        registrations: {
+          enabled: true,
+          minEthDefault: 0.05,
+          minEth10kClub: 0.2,
+          minEth999Club: 0.1,
+          maxAgeHours: 2
+        },
+        bids: {
+          enabled: true,
+          minEthDefault: 0.2,
+          minEth10kClub: 1.0,
+          minEth999Club: 0.5,
+          maxAgeHours: 24
+        }
       };
     }
   }
@@ -749,13 +788,27 @@ export class AutoTweetService {
   getDefaultSettings(): AutoPostSettings {
     return {
       enabled: false,
-      minEthDefault: 0.1,
-      minEth10kClub: 0.5,
-      minEth999Club: 0.3,
-      maxAgeHours: 1,
-      registrationsEnabled: true,
-      minEthRegistrations: 0.01,
-      maxAgeHoursRegistrations: 2
+      sales: {
+        enabled: true,
+        minEthDefault: 0.1,
+        minEth10kClub: 0.5,
+        minEth999Club: 0.3,
+        maxAgeHours: 1
+      },
+      registrations: {
+        enabled: true,
+        minEthDefault: 0.05,
+        minEth10kClub: 0.2,
+        minEth999Club: 0.1,
+        maxAgeHours: 2
+      },
+      bids: {
+        enabled: true,
+        minEthDefault: 0.2,
+        minEth10kClub: 1.0,
+        minEth999Club: 0.5,
+        maxAgeHours: 24
+      }
     };
   }
 

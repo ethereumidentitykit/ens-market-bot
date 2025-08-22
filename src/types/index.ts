@@ -39,6 +39,29 @@ export interface AlchemyNFTSalesResponse {
   };
 }
 
+export interface AlchemyPriceResponse {
+  data: Array<{
+    symbol: string;
+    prices: Array<{
+      currency: string;
+      value: string;
+      lastUpdatedAt: string;
+    }>;
+  }>;
+}
+
+// Price Tier Configuration
+export interface PriceTier {
+  id?: number;
+  transactionType?: string;
+  tierLevel: number;
+  minUsd: number;
+  maxUsd: number | null;
+  description?: string;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
 // Database Models
 export interface ProcessedSale {
   id?: number;
@@ -113,9 +136,7 @@ export interface Config {
     accessToken: string;
     accessTokenSecret: string;
   };
-  database: {
-    path: string;
-  };
+
   contracts: string[];
   port: number;
   nodeEnv: string;
@@ -176,6 +197,11 @@ export interface IDatabaseService {
   getRecentBids(limit?: number): Promise<ENSBid[]>;
   getUnpostedBids(limit?: number): Promise<ENSBid[]>;
   markBidAsPosted(id: number, tweetId: string): Promise<void>;
+  
+  // Price tier methods
+  getPriceTiers(transactionType?: string): Promise<PriceTier[]>;
+  updatePriceTier(transactionType: string, tierLevel: number, minUsd: number, maxUsd: number | null): Promise<void>;
+  getPriceTierForAmount(transactionType: string, usdAmount: number): Promise<PriceTier | null>;
   getLastProcessedBidTimestamp(): Promise<number>;
   setLastProcessedBidTimestamp(timestamp: number): Promise<void>;
 }

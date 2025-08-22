@@ -8,16 +8,53 @@ function dashboard() {
         // Master API Toggles
         apiToggles: {
             twitterEnabled: true,
-            moralisEnabled: true
+            moralisEnabled: true,
+            magicEdenEnabled: true
         },
         
-        // Auto-posting settings
+        // Price Tier Configuration
+        priceTiers: {
+            sales: {
+                tier1: 5000,
+                tier2: 10000,
+                tier3: 40000
+            },
+            registrations: {
+                tier1: 5000,
+                tier2: 10000,
+                tier3: 40000
+            },
+            bids: {
+                tier1: 5000,
+                tier2: 10000,
+                tier3: 40000
+            }
+        },
+        
+        // Auto-posting settings (transaction-specific)
         autoPostSettings: {
-            enabled: false,
-            minEthDefault: 0.1,
-            minEth10kClub: 0.5,
-            minEth999Club: 0.3,
-            maxAgeHours: 1
+            enabled: false, // Global toggle
+            sales: {
+                enabled: true,
+                minEthDefault: 0.1,
+                minEth10kClub: 0.5,
+                minEth999Club: 0.3,
+                maxAgeHours: 1
+            },
+            registrations: {
+                enabled: true,
+                minEthDefault: 0.05,
+                minEth10kClub: 0.2,
+                minEth999Club: 0.1,
+                maxAgeHours: 2
+            },
+            bids: {
+                enabled: true,
+                minEthDefault: 0.2,
+                minEth10kClub: 1.0,
+                minEth999Club: 0.5,
+                maxAgeHours: 24
+            }
         },
         
         // Tweet history
@@ -412,6 +449,7 @@ function dashboard() {
         async init() {
             await this.loadToggleStates();
             await this.loadAutoPostSettings();
+            await this.loadPriceTiers();
             await this.refreshData();
             await this.loadUnpostedSales();
             await this.loadUnpostedRegistrations();
@@ -421,6 +459,10 @@ function dashboard() {
             await this.databaseView.loadPage(1);
             await this.registrationsView.loadPage(1);
             await this.bidsView.loadPage(1);
+            
+            // Initialize NoUISliders after data is loaded
+            this.initializeSliders();
+            
             // Auto-refresh every 30 seconds
             setInterval(() => {
                 if (!this.loading && !this.processing) {
@@ -1016,6 +1058,172 @@ function dashboard() {
             this.selectedRegistrationId = '';
             this.selectedBidId = '';
         },
+        
+        // Price Tier Management
+        async loadPriceTiers() {
+            try {
+                const response = await fetch('/api/price-tiers');
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    if (data.success && data.tiers) {
+                        // Load tiers for each transaction type
+                        ['sales', 'registrations', 'bids'].forEach(type => {
+                            const typeTiers = data.tiers[type];
+                            if (typeTiers && typeTiers.length >= 3) {
+                                const tier1 = typeTiers.find(t => t.tierLevel === 1);
+                                const tier2 = typeTiers.find(t => t.tierLevel === 2);
+                                const tier3 = typeTiers.find(t => t.tierLevel === 3);
+                                
+                                if (tier1 && tier2 && tier3) {
+                                    // Use maxUsd as the tier threshold
+                                    this.priceTiers[type] = {
+                                        tier1: tier1.maxUsd || 10000,
+                                        tier2: tier2.maxUsd || 40000,
+                                        tier3: tier3.maxUsd || 100000
+                                    };
+                                }
+                            }
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to load price tiers:', error);
+            }
+        },
+        
+        initializeSliders() {
+            const self = this;
+            
+            // Initialize Sales Slider
+            const salesSlider = document.getElementById('sales-slider');
+            if (salesSlider && typeof noUiSlider !== 'undefined') {
+                noUiSlider.create(salesSlider, {
+                    start: [
+                        this.priceTiers.sales.tier1,
+                        this.priceTiers.sales.tier2,
+                        this.priceTiers.sales.tier3
+                    ],
+                    connect: [true, true, true, true],
+                    step: 500,
+                    margin: 500, // Minimum $500 between handles
+                    range: {
+                        'min': 500,
+                        'max': 200000
+                    },
+                    tooltips: [
+                        { to: (value) => '$' + (value/1000).toFixed(0) + 'k' },
+                        { to: (value) => '$' + (value/1000).toFixed(0) + 'k' },
+                        { to: (value) => '$' + (value/1000).toFixed(0) + 'k' }
+                    ]
+                });
+                
+                salesSlider.noUiSlider.on('update', function(values) {
+                    self.priceTiers.sales.tier1 = Math.round(values[0]);
+                    self.priceTiers.sales.tier2 = Math.round(values[1]);
+                    self.priceTiers.sales.tier3 = Math.round(values[2]);
+                    self.$nextTick();
+                });
+            }
+            
+            // Initialize Registrations Slider
+            const registrationsSlider = document.getElementById('registrations-slider');
+            if (registrationsSlider && typeof noUiSlider !== 'undefined') {
+                noUiSlider.create(registrationsSlider, {
+                    start: [
+                        this.priceTiers.registrations.tier1,
+                        this.priceTiers.registrations.tier2,
+                        this.priceTiers.registrations.tier3
+                    ],
+                    connect: [true, true, true, true],
+                    step: 500,
+                    margin: 500,
+                    range: {
+                        'min': 500,
+                        'max': 200000
+                    },
+                    tooltips: [
+                        { to: (value) => '$' + (value/1000).toFixed(0) + 'k' },
+                        { to: (value) => '$' + (value/1000).toFixed(0) + 'k' },
+                        { to: (value) => '$' + (value/1000).toFixed(0) + 'k' }
+                    ]
+                });
+                
+                registrationsSlider.noUiSlider.on('update', function(values) {
+                    self.priceTiers.registrations.tier1 = Math.round(values[0]);
+                    self.priceTiers.registrations.tier2 = Math.round(values[1]);
+                    self.priceTiers.registrations.tier3 = Math.round(values[2]);
+                    self.$nextTick();
+                });
+            }
+            
+            // Initialize Bids Slider
+            const bidsSlider = document.getElementById('bids-slider');
+            if (bidsSlider && typeof noUiSlider !== 'undefined') {
+                noUiSlider.create(bidsSlider, {
+                    start: [
+                        this.priceTiers.bids.tier1,
+                        this.priceTiers.bids.tier2,
+                        this.priceTiers.bids.tier3
+                    ],
+                    connect: [true, true, true, true],
+                    step: 500,
+                    margin: 500,
+                    range: {
+                        'min': 500,
+                        'max': 200000
+                    },
+                    tooltips: [
+                        { to: (value) => '$' + (value/1000).toFixed(0) + 'k' },
+                        { to: (value) => '$' + (value/1000).toFixed(0) + 'k' },
+                        { to: (value) => '$' + (value/1000).toFixed(0) + 'k' }
+                    ]
+                });
+                
+                bidsSlider.noUiSlider.on('update', function(values) {
+                    self.priceTiers.bids.tier1 = Math.round(values[0]);
+                    self.priceTiers.bids.tier2 = Math.round(values[1]);
+                    self.priceTiers.bids.tier3 = Math.round(values[2]);
+                    self.$nextTick();
+                });
+            }
+        },
+        
+        async savePriceTiers(type) {
+            this.loading = true;
+            try {
+                const tiers = this.priceTiers[type];
+                
+                // Update all 4 tiers for this specific transaction type
+                const updates = [
+                    { level: 1, min: 0, max: tiers.tier1 },
+                    { level: 2, min: tiers.tier1, max: tiers.tier2 },
+                    { level: 3, min: tiers.tier2, max: tiers.tier3 },
+                    { level: 4, min: tiers.tier3, max: null }
+                ];
+                
+                // Send updates to server with transaction type
+                const response = await fetch('/api/price-tiers/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        type: type,  // Include the transaction type
+                        tiers: updates 
+                    })
+                });
+                
+                if (response.ok) {
+                    this.showNotification(`${type.charAt(0).toUpperCase() + type.slice(1)} image tiers saved successfully!`, 'success');
+                } else {
+                    throw new Error('Failed to save price tiers');
+                }
+            } catch (error) {
+                console.error('Error saving price tiers:', error);
+                this.showNotification('Failed to save price tiers', 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
 
         clearTweetPreview() {
             this.generatedTweet = null;
@@ -1390,6 +1598,32 @@ function dashboard() {
             }
         },
 
+        async toggleMagicEdenAPI() {
+            try {
+                this.loading = true;
+                const response = await fetch('/api/admin/toggle-magic-eden', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: !this.apiToggles.magicEdenEnabled })
+                });
+                
+                if (response.ok) {
+                    this.apiToggles.magicEdenEnabled = !this.apiToggles.magicEdenEnabled;
+                    this.showMessage(
+                        `Magic Eden API ${this.apiToggles.magicEdenEnabled ? 'enabled' : 'disabled'}`,
+                        'success'
+                    );
+                } else {
+                    throw new Error('Failed to toggle Magic Eden API');
+                }
+            } catch (error) {
+                console.error('Toggle Magic Eden API error:', error);
+                this.showMessage('Failed to toggle Magic Eden API', 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
         async toggleAutoPosting() {
             try {
                 this.loading = true;
@@ -1441,9 +1675,12 @@ function dashboard() {
                     const data = await response.json();
                     console.log('Loaded settings response:', data);
                     if (data.success) {
+                        // Update transaction-specific settings
                         this.autoPostSettings = {
                             ...this.autoPostSettings,
-                            ...data.settings
+                            sales: data.settings.sales,
+                            registrations: data.settings.registrations,
+                            bids: data.settings.bids
                         };
                         console.log('Updated autoPostSettings:', this.autoPostSettings);
                     }
@@ -1455,39 +1692,59 @@ function dashboard() {
             }
         },
 
-        // Save auto-post settings to backend
-        async saveAutoPostSettings() {
+        // Save transaction-specific auto-post settings to backend
+        async saveTransactionAutoPostSettings(transactionType) {
             try {
-                console.log('Saving auto-post settings:', this.autoPostSettings);
-                
-                // Use settings directly since x-model.number handles conversion
-                const settings = {
-                    minEthDefault: this.autoPostSettings.minEthDefault || 0.1,
-                    minEth10kClub: this.autoPostSettings.minEth10kClub || 0.5,
-                    minEth999Club: this.autoPostSettings.minEth999Club || 0.3,
-                    maxAgeHours: this.autoPostSettings.maxAgeHours || 1
-                };
-                
-                console.log('Converted settings:', settings);
+                console.log(`Saving ${transactionType} auto-post settings:`, this.autoPostSettings[transactionType]);
                 
                 const response = await fetch('/api/admin/autopost-settings', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(settings)
+                    body: JSON.stringify({
+                        transactionType: transactionType,
+                        settings: this.autoPostSettings[transactionType]
+                    })
                 });
                 
                 if (response.ok) {
                     const result = await response.json();
-                    console.log('Auto-post settings saved successfully:', result);
-                    this.showMessage('Settings saved successfully!', 'success');
+                    console.log(`${transactionType} auto-post settings saved successfully:`, result);
+                    this.showMessage(`${transactionType.charAt(0).toUpperCase() + transactionType.slice(1)} settings saved!`, 'success');
                 } else {
                     const error = await response.text();
-                    console.error('Failed to save auto-post settings:', error);
-                    this.showMessage('Failed to save settings', 'error');
+                    console.error(`Failed to save ${transactionType} auto-post settings:`, error);
+                    this.showMessage(`Failed to save ${transactionType} settings`, 'error');
                 }
             } catch (error) {
-                console.error('Error saving auto-post settings:', error);
-                this.showMessage('Error saving settings', 'error');
+                console.error(`Error saving ${transactionType} auto-post settings:`, error);
+                this.showMessage(`Error saving ${transactionType} settings`, 'error');
+            }
+        },
+
+        // Toggle individual transaction type auto-posting
+        async toggleTransactionAutoPost(transactionType) {
+            try {
+                this.loading = true;
+                const currentState = this.autoPostSettings[transactionType].enabled;
+                const newState = !currentState;
+                
+                // Update local state
+                this.autoPostSettings[transactionType].enabled = newState;
+                
+                // Save to backend
+                await this.saveTransactionAutoPostSettings(transactionType);
+                
+                this.showMessage(
+                    `${transactionType.charAt(0).toUpperCase() + transactionType.slice(1)} auto-posting ${newState ? 'enabled' : 'disabled'}`,
+                    'success'
+                );
+            } catch (error) {
+                // Revert on error
+                this.autoPostSettings[transactionType].enabled = !this.autoPostSettings[transactionType].enabled;
+                console.error(`Toggle ${transactionType} auto-posting error:`, error);
+                this.showMessage(`Failed to toggle ${transactionType} auto-posting`, 'error');
+            } finally {
+                this.loading = false;
             }
         },
 

@@ -209,7 +209,8 @@ export class SchedulerService {
       
       if (result.newSales > 0 && result.processedSales.length > 0) {
         const autoPostSettings = await this.autoTweetService.getSettings();
-        if (autoPostSettings.enabled && this.apiToggleService.isAutoPostingEnabled()) {
+        // Check global AND sales-specific toggles
+        if (autoPostSettings.enabled && autoPostSettings.sales.enabled) {
           logger.info(`🤖 Auto-posting ${result.processedSales.length} new sales...`);
           autoPostResults = await this.autoTweetService.processNewSales(result.processedSales, autoPostSettings);
           
@@ -218,6 +219,8 @@ export class SchedulerService {
           const failed = autoPostResults.filter(r => !r.success && !r.skipped).length;
           
           logger.info(`🐦 Sales auto-posting results: ${posted} posted, ${skipped} skipped, ${failed} failed`);
+        } else {
+          logger.debug(`🤖 Skipping sales auto-posting - Global: ${autoPostSettings.enabled}, Sales: ${autoPostSettings.sales.enabled}`);
         }
       }
       
@@ -291,7 +294,8 @@ export class SchedulerService {
       
       if (unpostedRegistrations.length > 0) {
         const autoPostSettings = await this.autoTweetService.getSettings();
-        if (autoPostSettings.enabled && autoPostSettings.registrationsEnabled && this.apiToggleService.isAutoPostingEnabled()) {
+        // Check global AND registrations-specific toggles
+        if (autoPostSettings.enabled && autoPostSettings.registrations.enabled) {
           logger.info(`🏛️ Auto-posting ${unpostedRegistrations.length} unposted registrations...`);
           registrationAutoPostResults = await this.autoTweetService.processNewRegistrations(unpostedRegistrations, autoPostSettings);
           
@@ -300,6 +304,8 @@ export class SchedulerService {
           const failed = registrationAutoPostResults.filter(r => !r.success && !r.skipped).length;
           
           logger.info(`🏛️ Registration auto-posting results: ${posted} posted, ${skipped} skipped, ${failed} failed`);
+        } else {
+          logger.debug(`🏛️ Skipping registrations auto-posting - Global: ${autoPostSettings.enabled}, Registrations: ${autoPostSettings.registrations.enabled}`);
         }
       }
 
@@ -347,7 +353,8 @@ export class SchedulerService {
       
       if (unpostedBids.length > 0) {
         const autoPostSettings = await this.autoTweetService.getSettings();
-        if (autoPostSettings.enabled && this.apiToggleService.isAutoPostingEnabled()) {
+        // Check global AND bids-specific toggles
+        if (autoPostSettings.enabled && autoPostSettings.bids.enabled) {
           logger.info(`✋ Auto-posting ${unpostedBids.length} unposted bids...`);
           bidAutoPostResults = await this.autoTweetService.processNewBids(unpostedBids, autoPostSettings);
           
@@ -356,6 +363,8 @@ export class SchedulerService {
           const failed = bidAutoPostResults.filter(r => !r.success && !r.skipped).length;
           
           logger.info(`✋ Bid auto-posting results: ${posted} posted, ${skipped} skipped, ${failed} failed`);
+        } else {
+          logger.debug(`✋ Skipping bids auto-posting - Global: ${autoPostSettings.enabled}, Bids: ${autoPostSettings.bids.enabled}`);
         }
       }
 

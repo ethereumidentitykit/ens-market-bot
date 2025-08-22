@@ -1,4 +1,4 @@
-import axios, { AxiosResponse } from 'axios';
+import axios, { AxiosResponse, AxiosInstance } from 'axios';
 import { logger } from '../utils/logger';
 import { NFTSale } from '../types';
 import { config } from '../utils/config';
@@ -107,7 +107,12 @@ export class MoralisService {
   private readonly baseUrl: string;
   private readonly apiKey: string;
   private readonly MIN_BLOCK_NUMBER = 23000000; // Only fetch trades from block 23M onwards
+  
+  // ETH price cache (30-minute in-memory cache to avoid API abuse)
+  private ethPriceCache: { price: number; timestamp: number } | null = null;
+  private readonly CACHE_DURATION = 30 * 60 * 1000; // 30 minutes in milliseconds
   private apiToggleService: APIToggleService;
+  private axiosInstance: AxiosInstance;
 
   constructor() {
     this.apiToggleService = APIToggleService.getInstance();
@@ -117,17 +122,25 @@ export class MoralisService {
     
     this.baseUrl = config.moralis.baseUrl;
     this.apiKey = config.moralis.apiKey;
-  }
-
-  /**
-   * Check if Moralis API is enabled via admin toggle
-   */
-  private checkApiEnabled(): boolean {
-    if (!this.apiToggleService.isMoralisEnabled()) {
-      logger.warn('Moralis API call blocked - API disabled via admin toggle');
-      return false;
-    }
-    return true;
+    
+    // Create axios instance with interceptor for API toggle protection
+    this.axiosInstance = axios.create({
+      baseURL: this.baseUrl,
+      headers: {
+        'X-API-Key': this.apiKey,
+        'Content-Type': 'application/json'
+      },
+      timeout: 30000 // 30 second timeout
+    });
+    
+    // Intercept ALL Moralis API requests automatically  
+    this.axiosInstance.interceptors.request.use((config) => {
+      if (!this.apiToggleService.isMoralisEnabled()) {
+        logger.warn('Moralis API call blocked - API disabled via admin toggle');
+        throw new Error('Moralis API disabled via admin toggle');
+      }
+      return config;
+    });
   }
 
   /**
@@ -143,10 +156,6 @@ export class MoralisService {
     cursor?: string,
     fromBlock?: string
   ): Promise<{ trades: EnhancedNFTSale[], nextCursor?: string }> {
-    if (!this.checkApiEnabled()) {
-      return { trades: [] };
-    }
-
     try {
       logger.info(`Fetching NFT trades for contract: ${contractAddress} (limit: ${limit})`);
 
@@ -165,15 +174,10 @@ export class MoralisService {
         params.from_block = fromBlock;
       }
 
-      const response: AxiosResponse<MoralisNFTTradesResponse> = await axios.get(
-        `${this.baseUrl}/nft/${contractAddress}/trades`,
+      const response: AxiosResponse<MoralisNFTTradesResponse> = await this.axiosInstance.get(
+        `/nft/${contractAddress}/trades`,
         {
-          params,
-          headers: {
-            'X-API-Key': this.apiKey,
-            'Content-Type': 'application/json',
-          },
-          timeout: 30000, // 30 second timeout
+          params
         }
       );
 
@@ -486,10 +490,6 @@ export class MoralisService {
    * Test connection to Moralis API
    */
   async testConnection(): Promise<boolean> {
-    if (!this.checkApiEnabled()) {
-      return false;
-    }
-
     try {
       logger.info('Testing Moralis API connection...');
       
@@ -540,17 +540,6 @@ export class MoralisService {
     finalCursor?: string;
     trades?: EnhancedNFTSale[];
   }> {
-    if (!this.checkApiEnabled()) {
-      return {
-        totalFetched: 0,
-        totalProcessed: 0,
-        totalFiltered: 0,
-        totalDuplicates: 0,
-        oldestBlockReached: 0,
-        targetBlockReached: false
-      };
-    }
-
     const stats = {
       totalFetched: 0,
       totalProcessed: 0,
@@ -649,35 +638,92 @@ export class MoralisService {
   }
 
   /**
-   * Get current ETH price in USD from Moralis Token Price API
+   * Get current ETH price in USD with 30-minute caching to avoid API abuse
    * Uses WETH contract address since ENS registrations are paid in ETH
    */
   async getETHPriceUSD(): Promise<number | null> {
     try {
+      // Check for cached price first (30-minute cache)
+      const cachedPrice = await this.getCachedETHPrice();
+      if (cachedPrice) {
+        return cachedPrice;
+      }
+
+      logger.debug('ETH price cache expired, fetching fresh price from Moralis API');
       const wethContractAddress = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'; // WETH contract
       
-      const response: AxiosResponse<MoralisTokenPriceResponse> = await axios.get(
-        `${this.baseUrl}/erc20/${wethContractAddress}/price`,
+      const response: AxiosResponse<MoralisTokenPriceResponse> = await this.axiosInstance.get(
+        `/erc20/${wethContractAddress}/price`,
         {
           params: {
             chain: 'eth',
             exchange: 'uniswapv3'
           },
-          headers: {
-            'X-API-Key': this.apiKey,
-            'accept': 'application/json',
-          },
-          timeout: 10000, // 10 second timeout
+          timeout: 10000 // 10 second timeout
         }
       );
 
       const priceData = response.data;
       logger.debug(`ETH price fetched: $${priceData.usdPrice} (via ${priceData.exchangeName})`);
       
+      // Cache the fresh price for 30 minutes
+      await this.cacheETHPrice(priceData.usdPrice);
+      
       return priceData.usdPrice;
     } catch (error: any) {
       logger.warn('Failed to fetch ETH price from Moralis:', error.message);
+      
+      // Fallback to $4000 if API is exhausted/unavailable
+      const fallbackPrice = 4000;
+      logger.info(`💰 Using fallback ETH price: $${fallbackPrice} (API unavailable)`);
+      
+      // Cache the fallback price to avoid repeated API attempts
+      await this.cacheETHPrice(fallbackPrice);
+      
+      return fallbackPrice;
+    }
+  }
+
+  /**
+   * Check for cached ETH price (30-minute cache)
+   * Returns null if cache is expired or missing
+   */
+  private async getCachedETHPrice(): Promise<number | null> {
+    try {
+      if (!this.ethPriceCache) {
+        return null;
+      }
+
+      const now = Date.now();
+      const age = now - this.ethPriceCache.timestamp;
+      
+      if (age > this.CACHE_DURATION) {
+        logger.debug('ETH price cache expired, will fetch fresh');
+        this.ethPriceCache = null;
+        return null;
+      }
+
+      const cacheAgeMinutes = Math.floor(age / 60000);
+      logger.debug(`Using cached ETH price: $${this.ethPriceCache.price} (${cacheAgeMinutes}m old)`);
+      return this.ethPriceCache.price;
+    } catch (error: any) {
+      logger.debug('Failed to get cached ETH price:', error.message);
       return null;
+    }
+  }
+
+  /**
+   * Cache ETH price with timestamp for 30-minute expiry
+   */
+  private async cacheETHPrice(price: number): Promise<void> {
+    try {
+      this.ethPriceCache = {
+        price: price,
+        timestamp: Date.now()
+      };
+      logger.debug(`ETH price cached: $${price} (will expire in 30 minutes)`);
+    } catch (error: any) {
+      logger.debug('Failed to cache ETH price:', error.message);
     }
   }
 }

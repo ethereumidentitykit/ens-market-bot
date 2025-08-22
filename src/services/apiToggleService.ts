@@ -8,6 +8,7 @@ import { logger } from '../utils/logger';
 export interface APIToggleState {
   twitterEnabled: boolean;
   moralisEnabled: boolean;
+  magicEdenEnabled: boolean;
   autoPostingEnabled: boolean;
 }
 
@@ -16,6 +17,7 @@ export class APIToggleService {
   private state: APIToggleState = {
     twitterEnabled: true,
     moralisEnabled: true,
+    magicEdenEnabled: true,
     autoPostingEnabled: false
   };
   private dbService: IDatabaseService | null = null;
@@ -50,6 +52,7 @@ export class APIToggleService {
       // Load each toggle state from system_state table
       const twitterState = await this.dbService.getSystemState('api_toggle_twitter');
       const moralisState = await this.dbService.getSystemState('api_toggle_moralis');
+      const magicEdenState = await this.dbService.getSystemState('api_toggle_magic_eden');
       const autoPostState = await this.dbService.getSystemState('api_toggle_auto_post');
 
       // Parse and apply states, keeping defaults if not found
@@ -58,6 +61,9 @@ export class APIToggleService {
       }
       if (moralisState) {
         this.state.moralisEnabled = moralisState === 'true';
+      }
+      if (magicEdenState) {
+        this.state.magicEdenEnabled = magicEdenState === 'true';
       }
       if (autoPostState) {
         this.state.autoPostingEnabled = autoPostState === 'true';
@@ -78,6 +84,7 @@ export class APIToggleService {
     try {
       await this.dbService.setSystemState('api_toggle_twitter', this.state.twitterEnabled.toString());
       await this.dbService.setSystemState('api_toggle_moralis', this.state.moralisEnabled.toString());
+      await this.dbService.setSystemState('api_toggle_magic_eden', this.state.magicEdenEnabled.toString());
       await this.dbService.setSystemState('api_toggle_auto_post', this.state.autoPostingEnabled.toString());
       
       logger.debug('Toggle states saved to database');
@@ -98,6 +105,13 @@ export class APIToggleService {
    */
   isMoralisEnabled(): boolean {
     return this.state.moralisEnabled;
+  }
+
+  /**
+   * Check if Magic Eden API is enabled
+   */
+  isMagicEdenEnabled(): boolean {
+    return this.state.magicEdenEnabled;
   }
 
   /**
@@ -133,6 +147,14 @@ export class APIToggleService {
    */
   async setMoralisEnabled(enabled: boolean): Promise<void> {
     this.state.moralisEnabled = enabled;
+    await this.saveToDatabase();
+  }
+
+  /**
+   * Set Magic Eden API toggle state
+   */
+  async setMagicEdenEnabled(enabled: boolean): Promise<void> {
+    this.state.magicEdenEnabled = enabled;
     await this.saveToDatabase();
   }
 

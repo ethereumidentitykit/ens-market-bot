@@ -1,6 +1,7 @@
-import axios, { AxiosResponse } from 'axios';
+import axios, { AxiosResponse, AxiosInstance } from 'axios';
 import { logger } from '../utils/logger';
 import { MagicEdenBidResponse, MagicEdenBid, BidProcessingStats } from '../types';
+import { APIToggleService } from './apiToggleService';
 
 /**
  * Magic Eden API Service
@@ -9,15 +10,32 @@ import { MagicEdenBidResponse, MagicEdenBid, BidProcessingStats } from '../types
 export class MagicEdenService {
   private readonly baseUrl: string;
   private readonly ensContracts: string[];
+  private readonly axiosInstance: AxiosInstance;
+  private readonly apiToggleService: APIToggleService;
   
   constructor() {
     this.baseUrl = 'https://api-mainnet.magiceden.dev/v3/rtp/ethereum';
+    this.apiToggleService = APIToggleService.getInstance();
     
     // ENS Contract Addresses (lowercase for consistent matching)
     this.ensContracts = [
       '0xd4416b13d2b3a9abae7acd5d6c2bbdbe25686401', // ENS Names (new)
       '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85'  // ENS Base Registrar (old)
     ];
+    
+    // Create axios instance with interceptor for API toggle protection
+    this.axiosInstance = axios.create({
+      baseURL: this.baseUrl
+    });
+    
+    // Intercept ALL Magic Eden API requests automatically  
+    this.axiosInstance.interceptors.request.use((config) => {
+      if (!this.apiToggleService.isMagicEdenEnabled()) {
+        logger.warn('Magic Eden API call blocked - API disabled via admin toggle');
+        throw new Error('Magic Eden API disabled via admin toggle');
+      }
+      return config;
+    });
   }
 
   /**
@@ -49,8 +67,8 @@ export class MagicEdenService {
         params.continuation = cursor;
       }
 
-      const response: AxiosResponse<MagicEdenBidResponse> = await axios.get(
-        `${this.baseUrl}/orders/bids/v6`,
+      const response: AxiosResponse<MagicEdenBidResponse> = await this.axiosInstance.get(
+        '/orders/bids/v6',
         {
           params,
           headers: {
@@ -108,7 +126,7 @@ export class MagicEdenService {
     let cursor: string | undefined;
     let allNewBids: MagicEdenBid[] = [];
     let totalPages = 0;
-    const maxPages = 20; // Safety limit to prevent runaway cursoring
+    const maxPages = 5; // Reduced limit to prevent scheduler overlap (250 bids max)
     
     do {
       totalPages++;
@@ -116,10 +134,17 @@ export class MagicEdenService {
       
       if (bids.length === 0) break;
       
-      // Filter bids to only those newer than our boundary
+      // Filter bids to only those newer than our boundary AND with >30min validity remaining
       const newBids = bids.filter(bid => {
         const bidTimestamp = new Date(bid.createdAt).getTime();
-        return bidTimestamp > boundaryTimestamp;
+        const validUntil = bid.validUntil * 1000; // Convert to milliseconds
+        const now = Date.now();
+        const thirtyMinutes = 30 * 60 * 1000; // 30 minutes in milliseconds
+        
+        const isNewerThanBoundary = bidTimestamp > boundaryTimestamp;
+        const hasValidityRemaining = validUntil > (now + thirtyMinutes);
+        
+        return isNewerThanBoundary && hasValidityRemaining;
       });
       
       allNewBids.push(...newBids);
@@ -269,7 +294,7 @@ export class MagicEdenService {
    */
   async healthCheck(): Promise<boolean> {
     try {
-      const response = await axios.get(`${this.baseUrl}/orders/bids/v6`, {
+      const response = await this.axiosInstance.get('/orders/bids/v6', {
         params: {
           contracts: this.ensContracts,
           status: 'active',

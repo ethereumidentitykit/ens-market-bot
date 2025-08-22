@@ -1,7 +1,7 @@
 import { IDatabaseService } from '../types';
 import { ProcessedSale } from '../types';
 import { EthIdentityService, ResolvedProfile } from './ethIdentityService';
-import { MockImageData } from '../types/imageTypes';
+import { ImageData } from '../types/imageTypes';
 import { PuppeteerImageService } from './puppeteerImageService';
 import { logger } from '../utils/logger';
 
@@ -240,8 +240,8 @@ export class RealDataImageService {
   async generateImageFromRealData(realData: RealImageData): Promise<Buffer> {
     logger.info('Generating image from real data...');
     
-    // Convert RealImageData to MockImageData format for the image service
-    const mockData: MockImageData = {
+    // Convert RealImageData to ImageData format for the image service
+    const mockData: ImageData = {
       priceEth: realData.priceEth,
       priceUsd: realData.priceUsd,
       ensName: realData.ensName,

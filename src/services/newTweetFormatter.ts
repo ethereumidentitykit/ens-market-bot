@@ -2,9 +2,10 @@ import { ProcessedSale, ENSRegistration, ENSBid } from '../types';
 import { logger } from '../utils/logger';
 import { EthIdentityService, EthIdentityAccount } from './ethIdentityService';
 import { RealDataImageService, RealImageData } from './realDataImageService';
-import { MockImageData } from '../types/imageTypes';
+import { ImageData } from '../types/imageTypes';
 import { PuppeteerImageService } from './puppeteerImageService';
 import { IDatabaseService } from '../types';
+import { AlchemyService } from './alchemyService';
 
 export interface GeneratedTweet {
   text: string;
@@ -28,7 +29,10 @@ export class NewTweetFormatter {
   private readonly MAX_TWEET_LENGTH = 280;
   private readonly ethIdentityService = new EthIdentityService();
 
-  constructor(private databaseService?: IDatabaseService) {}
+  constructor(
+    private databaseService?: IDatabaseService,
+    private alchemyService?: AlchemyService
+  ) {}
 
   /**
    * Generate a complete tweet with text and image for an ENS registration
@@ -41,7 +45,7 @@ export class NewTweetFormatter {
       const ownerAccount = await this.getAccountData(registration.ownerAddress);
 
       // Generate the tweet text
-      const tweetText = this.formatRegistrationTweetText(registration, ownerAccount);
+      const tweetText = await this.formatRegistrationTweetText(registration, ownerAccount);
       
       // Generate image if database service is available
       let imageBuffer: Buffer | undefined;
@@ -56,7 +60,7 @@ export class NewTweetFormatter {
           const registrationImageData = await this.convertRegistrationToImageData(registration, ownerAccount);
           
           // Generate image buffer using Puppeteer (registration-specific)
-          imageBuffer = await PuppeteerImageService.generateRegistrationImage(registrationImageData);
+          imageBuffer = await PuppeteerImageService.generateRegistrationImage(registrationImageData, this.databaseService);
           
           if (imageBuffer) {
             // Save image for preview
@@ -126,8 +130,11 @@ export class NewTweetFormatter {
           // Convert bid to image data format
           const bidImageData = await this.convertBidToImageData(bid, bidderAccount);
           
-          // Generate image buffer using Puppeteer (bid-specific - reuse registration background for now)
-          imageBuffer = await PuppeteerImageService.generateRegistrationImage(bidImageData);
+          // Convert RealImageData to ImageData for image generation
+          const mockImageData = this.convertRealToImageDataForBid(bidImageData, bid);
+          
+          // Generate image buffer using Puppeteer (bid-specific)
+          imageBuffer = await PuppeteerImageService.generateBidImage(mockImageData, this.databaseService);
           
           if (imageBuffer) {
             // Save image for preview
@@ -200,11 +207,11 @@ export class NewTweetFormatter {
           // Convert sale to image data
           const saleImageData = await realDataService.convertSaleToImageData(sale);
           
-          // Convert RealImageData to MockImageData for image generation
-          const mockImageData = this.convertRealToMockImageData(saleImageData, sale);
+          // Convert RealImageData to ImageData for image generation
+          const mockImageData = this.convertRealToImageData(saleImageData, sale);
           
           // Generate image buffer using Puppeteer
-          imageBuffer = await PuppeteerImageService.generateSaleImage(mockImageData);
+          imageBuffer = await PuppeteerImageService.generateSaleImage(mockImageData, this.databaseService);
           
           // Save image for preview
           const filename = `tweet-image-${sale.id}-${Date.now()}.png`;
@@ -266,20 +273,38 @@ export class NewTweetFormatter {
   /**
    * Format the tweet text for ENS registrations
    */
-  private formatRegistrationTweetText(
+  private async formatRegistrationTweetText(
     registration: ENSRegistration, 
     ownerAccount: EthIdentityAccount | null
-  ): string {
+  ): Promise<string> {
     // Header: Emoji + Registered
     const header = '🏛️ Registered';
     
     // Line 1: ENS name (use fullName if available, otherwise ensName)
     const ensName = registration.fullName || registration.ensName || 'Unknown ENS';
     
-    // Line 2: Price in ETH and USD
+    // Line 2: Price in ETH and USD (recalculate USD with fresh ETH rate)
     const priceEth = parseFloat(registration.costEth || '0').toFixed(2);
-    const priceUsd = registration.costUsd ? `($${parseFloat(registration.costUsd).toLocaleString()})` : '';
-    const priceLine = `Price: ${priceEth} ETH ${priceUsd}`.trim();
+    const priceEthValue = parseFloat(registration.costEth || '0');
+    
+    let priceUsd = '';
+    if (this.alchemyService && priceEthValue > 0) {
+      try {
+        const freshEthPriceUsd = await this.alchemyService.getETHPriceUSD();
+        if (freshEthPriceUsd) {
+          const calculatedUsd = priceEthValue * freshEthPriceUsd;
+          priceUsd = `($${Math.round(calculatedUsd).toLocaleString()})`;
+        }
+      } catch (error: any) {
+        logger.warn('Failed to recalculate USD for registration tweet text, using database value:', error.message);
+        priceUsd = registration.costUsd ? `($${parseFloat(registration.costUsd).toLocaleString()})` : '';
+      }
+    } else {
+      priceUsd = registration.costUsd ? `($${parseFloat(registration.costUsd).toLocaleString()})` : '';
+    }
+    
+    const ethPart = `(${priceEth} ETH)`;
+    const priceLine = priceUsd ? `Price: ${priceUsd.replace(/[()]/g, '')} ${ethPart}` : `Price: ${priceEth} ETH`;
     
     // Line 3: New Owner
     const ownerHandle = this.getDisplayHandle(ownerAccount, registration.ownerAddress);
@@ -305,18 +330,46 @@ export class NewTweetFormatter {
     // Line 1: ENS name - use stored name from database
     const ensName = bid.ensName || `Token: ${bid.tokenId?.slice(-6) || 'Unknown'}...`;
     
-    // Line 2: Price with currency display
+    // Line 2: Price with currency display (recalculate USD with fresh ETH rate)
     const currencyDisplay = this.getCurrencyDisplayName(bid.currencySymbol);
     const priceDecimal = parseFloat(bid.priceDecimal).toFixed(2);
-    const priceUsd = bid.priceUsd ? `($${parseFloat(bid.priceUsd).toLocaleString()})` : '';
+    
+    let priceUsd = '';
+    if (this.alchemyService && (bid.currencySymbol === 'ETH' || bid.currencySymbol === 'WETH')) {
+      try {
+        const freshEthPriceUsd = await this.alchemyService.getETHPriceUSD();
+        if (freshEthPriceUsd) {
+          const calculatedUsd = parseFloat(bid.priceDecimal) * freshEthPriceUsd;
+          priceUsd = `($${Math.round(calculatedUsd).toLocaleString()})`;
+        }
+      } catch (error: any) {
+        logger.warn('Failed to recalculate USD for tweet text, using database value:', error.message);
+        priceUsd = bid.priceUsd ? `($${parseFloat(bid.priceUsd).toLocaleString()})` : '';
+      }
+    } else {
+      priceUsd = bid.priceUsd ? `($${parseFloat(bid.priceUsd).toLocaleString()})` : '';
+    }
+    
     const priceLine = `Price: ${priceDecimal} ${currencyDisplay} ${priceUsd}`.trim();
     
-    // Line 3: From (bidder)
+    // Line 3: Bidder (changed from "From")
     const bidderHandle = this.getDisplayHandle(bidderAccount, bid.makerAddress);
-    const fromLine = `From: ${bidderHandle}`;
+    const bidderLine = `Bidder: ${bidderHandle}`;
     
-    // Line 4: Marketplace
-    const marketplaceLine = `Marketplace: ${bid.sourceName || 'Unknown'}`;
+    // Line 4: Current Owner (fetch the current NFT owner)
+    let currentOwnerLine = 'Current Owner: Unknown';
+    if (this.alchemyService && bid.tokenId) {
+      try {
+        const owners = await this.alchemyService.getOwnersForToken('0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85', bid.tokenId);
+        if (owners && owners.length > 0) {
+          const ownerAccount = await this.getAccountData(owners[0]);
+          const ownerHandle = this.getDisplayHandle(ownerAccount, owners[0]);
+          currentOwnerLine = `Current Owner: ${ownerHandle}`;
+        }
+      } catch (error: any) {
+        logger.warn('Failed to fetch current owner for bid tweet:', error.message);
+      }
+    }
     
     // Line 5: Valid duration - dynamic calculation
     const duration = this.calculateBidDuration(bid.validFrom, bid.validUntil);
@@ -325,8 +378,8 @@ export class NewTweetFormatter {
     // Line 6: Vision.io marketplace link
     const visionUrl = this.buildVisionioUrl(ensName);
     
-    // Combine all lines
-    return `${header}\n\n${ensName}\n\n${priceLine}\n${fromLine}\n\n${marketplaceLine}\n${validLine}\n\n${visionUrl}`;
+    // Combine all lines (added line break between price and bidder, removed break between bidder and current owner)
+    return `${header}\n\n${ensName}\n\n${priceLine}\n\n${bidderLine}\n${currentOwnerLine}\n\n${validLine}\n\n${visionUrl}`;
   }
 
 
@@ -478,21 +531,59 @@ export class NewTweetFormatter {
   }
 
   /**
+   * Get display handle for images (ENS name only, no Twitter handles)
+   * For images, we only want the ENS name without Twitter handles:
+   * - "ensname.eth" (if ENS exists)
+   * - "0xabcd...efg1" (truncated address fallback)
+   */
+  private getImageDisplayHandle(account: EthIdentityAccount | null, fallbackAddress: string): string {
+    if (!account) {
+      return this.shortenAddress(fallbackAddress);
+    }
+
+    const ensName = account.ens?.name;
+    
+    if (ensName) {
+      // Only return ENS name (no Twitter handle for images)
+      return ensName;
+    }
+
+    // Fallback to shortened address
+    return this.shortenAddress(account.address || fallbackAddress);
+  }
+
+  /**
    * Convert ENS registration to image data format for image generation
    */
   private async convertRegistrationToImageData(registration: ENSRegistration, ownerAccount: EthIdentityAccount | null): Promise<RealImageData> {
     logger.info(`Converting registration to image data: ${registration.transactionHash}`);
     
-    // Parse prices
+    // Parse ETH price
     const priceEth = parseFloat(registration.costEth || '0');
-    const priceUsd = registration.costUsd ? parseFloat(registration.costUsd) : 0;
+    
+    // Recalculate USD price with fresh ETH rate for accurate image generation
+    let priceUsd = 0;
+    if (this.alchemyService && priceEth > 0) {
+      try {
+        const freshEthPriceUsd = await this.alchemyService.getETHPriceUSD();
+        if (freshEthPriceUsd) {
+          priceUsd = priceEth * freshEthPriceUsd;
+          logger.debug(`💰 Recalculated USD price: ${priceEth} ETH × $${freshEthPriceUsd} = $${priceUsd.toFixed(2)}`);
+        }
+      } catch (error: any) {
+        logger.warn('Failed to recalculate USD price, using database value:', error.message);
+        priceUsd = registration.costUsd ? parseFloat(registration.costUsd) : 0;
+      }
+    } else {
+      priceUsd = registration.costUsd ? parseFloat(registration.costUsd) : 0;
+    }
     
     // Get ENS name for display
     const ensName = registration.fullName || registration.ensName || 'Unknown ENS';
     
-    // Get owner display info
-    const ownerHandle = this.getDisplayHandle(ownerAccount, registration.ownerAddress);
-    const ownerAvatar = ownerAccount?.ens?.records?.avatar;
+    // Get owner display info (ENS only for images)
+    const ownerHandle = this.getImageDisplayHandle(ownerAccount, registration.ownerAddress);
+    const ownerAvatar = ownerAccount?.ens?.avatar || ownerAccount?.ens?.records?.avatar;
     
     const imageData: RealImageData = {
       priceEth,
@@ -525,25 +616,68 @@ export class NewTweetFormatter {
   private async convertBidToImageData(bid: ENSBid, bidderAccount: EthIdentityAccount | null): Promise<RealImageData> {
     logger.info(`Converting bid to image data: ${bid.bidId}`);
     
-    // Parse prices
+    // Parse ETH price
     const priceEth = parseFloat(bid.priceDecimal);
-    const priceUsd = bid.priceUsd ? parseFloat(bid.priceUsd) : 0;
+    
+    // Recalculate USD price with fresh ETH rate for accurate image generation
+    let priceUsd = 0;
+    if (this.alchemyService && (bid.currencySymbol === 'ETH' || bid.currencySymbol === 'WETH')) {
+      try {
+        const freshEthPriceUsd = await this.alchemyService.getETHPriceUSD();
+        if (freshEthPriceUsd) {
+          priceUsd = priceEth * freshEthPriceUsd;
+          logger.debug(`💰 Recalculated USD price: ${priceEth} ETH × $${freshEthPriceUsd} = $${priceUsd.toFixed(2)}`);
+        }
+      } catch (error: any) {
+        logger.warn('Failed to recalculate USD price, using database value:', error.message);
+        priceUsd = bid.priceUsd ? parseFloat(bid.priceUsd) : 0;
+      }
+    } else {
+      priceUsd = bid.priceUsd ? parseFloat(bid.priceUsd) : 0;
+    }
     
     // Get ENS name for display (from database)
     const ensName = bid.ensName || `Token: ${bid.tokenId?.slice(-6) || 'Unknown'}...`;
     
-    // Get bidder display info
-    const bidderHandle = this.getDisplayHandle(bidderAccount, bid.makerAddress);
-    const bidderAvatar = bidderAccount?.ens?.records?.avatar;
+    // Get bidder display info (ENS only for images)
+    const bidderHandle = this.getImageDisplayHandle(bidderAccount, bid.makerAddress);
+    const bidderAvatar = bidderAccount?.ens?.avatar || bidderAccount?.ens?.records?.avatar;
+    
+    // Try to get current owner using Alchemy API
+    let currentOwnerEns = '';
+    let currentOwnerAvatar: string | undefined;
+    
+    if (this.alchemyService && bid.tokenId && bid.contractAddress) {
+      try {
+        logger.debug(`Looking up current owner for token ${bid.tokenId}`);
+        const owners = await this.alchemyService.getOwnersForToken(bid.contractAddress, bid.tokenId);
+        
+        if (owners.length > 0) {
+          const ownerAddress = owners[0]; // ENS tokens typically have only one owner
+          logger.debug(`Found current owner: ${ownerAddress}`);
+          
+          // Get profile info for the owner (ENS only for images)
+          const ownerAccount = await this.getAccountData(ownerAddress);
+          currentOwnerEns = this.getImageDisplayHandle(ownerAccount, ownerAddress);
+          currentOwnerAvatar = ownerAccount?.ens?.avatar || ownerAccount?.ens?.records?.avatar;
+          
+          logger.debug(`Current owner display: ${currentOwnerEns}, Avatar URL: ${currentOwnerAvatar}`);
+        } else {
+          logger.debug(`No owners found for token ${bid.tokenId}`);
+        }
+      } catch (error: any) {
+        logger.warn(`Failed to get current owner for token ${bid.tokenId}:`, error.message);
+      }
+    }
     
     const imageData: RealImageData = {
       priceEth,
       priceUsd,
       ensName,
       buyerEns: bidderHandle, // Bidder is the potential "buyer"
-      sellerEns: 'Current Owner', // Placeholder for current owner
+      sellerEns: currentOwnerEns, // Current owner (empty if lookup failed)
       buyerAvatar: bidderAvatar,
-      sellerAvatar: undefined, // We don't know current owner yet
+      sellerAvatar: currentOwnerAvatar,
       nftImageUrl: bid.nftImage, // Use ENS NFT image if available
       saleId: bid.id,
       transactionHash: bid.bidId // Use bid ID as transaction reference
@@ -552,19 +686,21 @@ export class NewTweetFormatter {
     logger.info('Converted bid to image data:', {
       ensName: imageData.ensName,
       bidderEns: imageData.buyerEns,
+      currentOwnerEns: imageData.sellerEns,
       priceEth: imageData.priceEth,
       priceUsd: imageData.priceUsd,
       hasNftImage: !!imageData.nftImageUrl,
-      hasBidderAvatar: !!imageData.buyerAvatar
+      hasBidderAvatar: !!imageData.buyerAvatar,
+      hasCurrentOwnerAvatar: !!imageData.sellerAvatar
     });
 
     return imageData;
   }
 
   /**
-   * Convert RealImageData to MockImageData for image generation
+   * Convert RealImageData to ImageData for image generation
    */
-  private convertRealToMockImageData(realData: RealImageData, sale: ProcessedSale): MockImageData {
+  private convertRealToImageData(realData: RealImageData, sale: ProcessedSale): ImageData {
     return {
       priceEth: realData.priceEth,
       priceUsd: realData.priceUsd,
@@ -577,6 +713,26 @@ export class NewTweetFormatter {
       sellerEns: realData.sellerEns,
       sellerAvatar: realData.sellerAvatar,
       transactionHash: sale.transactionHash,
+      timestamp: new Date() // Use current timestamp
+    };
+  }
+
+  /**
+   * Convert RealImageData to ImageData for bid image generation
+   */
+  private convertRealToImageDataForBid(realData: RealImageData, bid: ENSBid): ImageData {
+    return {
+      priceEth: realData.priceEth,
+      priceUsd: realData.priceUsd,
+      ensName: realData.ensName,
+      nftImageUrl: realData.nftImageUrl,
+      buyerAddress: bid.makerAddress, // Bidder is the potential buyer
+      buyerEns: realData.buyerEns,
+      buyerAvatar: realData.buyerAvatar,
+      sellerAddress: '', // No seller address available for bids
+      sellerEns: realData.sellerEns,
+      sellerAvatar: realData.sellerAvatar,
+      transactionHash: bid.bidId, // Use bid ID as transaction reference
       timestamp: new Date() // Use current timestamp
     };
   }
@@ -816,11 +972,12 @@ export class NewTweetFormatter {
       header: string;
       ensName: string;
       priceLine: string;
-      fromLine: string;
-      marketplaceLine: string;
+      bidderLine: string;
+      currentOwnerLine: string;
       validLine: string;
       visionUrl: string;
       bidderHandle: string;
+      currentOwnerHandle: string;
     };
   }> {
     const tweet = await this.generateBidTweet(bid);
@@ -832,20 +989,52 @@ export class NewTweetFormatter {
     const ensName = bid.ensName || `Token: ${bid.tokenId?.slice(-6) || 'Unknown'}...`;
     const currencyDisplay = this.getCurrencyDisplayName(bid.currencySymbol);
     const priceDecimal = parseFloat(bid.priceDecimal).toFixed(2);
-    const priceUsd = bid.priceUsd ? `($${parseFloat(bid.priceUsd).toLocaleString()})` : '';
+    
+    // Recalculate USD price with fresh ETH rate for breakdown
+    let priceUsd = '';
+    if (this.alchemyService && (bid.currencySymbol === 'ETH' || bid.currencySymbol === 'WETH')) {
+      try {
+        const freshEthPriceUsd = await this.alchemyService.getETHPriceUSD();
+        if (freshEthPriceUsd) {
+          const calculatedUsd = parseFloat(bid.priceDecimal) * freshEthPriceUsd;
+          priceUsd = `($${Math.round(calculatedUsd).toLocaleString()})`;
+        }
+      } catch (error: any) {
+        logger.warn('Failed to recalculate USD for breakdown, using database value:', error.message);
+        priceUsd = bid.priceUsd ? `($${parseFloat(bid.priceUsd).toLocaleString()})` : '';
+      }
+    } else {
+      priceUsd = bid.priceUsd ? `($${parseFloat(bid.priceUsd).toLocaleString()})` : '';
+    }
+    
     const bidderHandle = this.getDisplayHandle(bidderAccount, bid.makerAddress);
     const duration = this.calculateBidDuration(bid.validFrom, bid.validUntil);
     const visionUrl = this.buildVisionioUrl(ensName);
+    
+    // Fetch current owner for breakdown (same logic as in tweet text)
+    let currentOwnerHandle = 'Unknown';
+    if (this.alchemyService && bid.tokenId) {
+      try {
+        const owners = await this.alchemyService.getOwnersForToken('0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85', bid.tokenId);
+        if (owners && owners.length > 0) {
+          const ownerAccount = await this.getAccountData(owners[0]);
+          currentOwnerHandle = this.getDisplayHandle(ownerAccount, owners[0]);
+        }
+      } catch (error: any) {
+        logger.warn('Failed to fetch current owner for breakdown:', error.message);
+      }
+    }
     
     const breakdown = {
       header: '✋ Offer',
       ensName: ensName,
       priceLine: `Price: ${priceDecimal} ${currencyDisplay} ${priceUsd}`.trim(),
-      fromLine: `From: ${bidderHandle}`,
-      marketplaceLine: `Marketplace: ${bid.sourceName || 'Unknown'}`,
+      bidderLine: `Bidder: ${bidderHandle}`,
+      currentOwnerLine: `Current Owner: ${currentOwnerHandle}`,
       validLine: `Valid: ${duration}`,
       visionUrl: visionUrl,
-      bidderHandle: bidderHandle
+      bidderHandle: bidderHandle,
+      currentOwnerHandle: currentOwnerHandle
     };
 
     return { tweet, validation, breakdown };

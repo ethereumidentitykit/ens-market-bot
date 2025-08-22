@@ -35,7 +35,7 @@ export class ImageController {
           : 'No real data available, falling back to mock data';
         logger.warn(message);
         const mockData = PuppeteerImageService.getMockData();
-        const imageBuffer = await PuppeteerImageService.generateSaleImage(mockData);
+        const imageBuffer = await PuppeteerImageService.generateSaleImage(mockData, databaseService);
         const endTime = Date.now();
         
         const filename = `test-image-mock-${Date.now()}.png`;
@@ -58,7 +58,7 @@ export class ImageController {
             sellerAvatar: mockData.sellerAvatar ? 'Loaded' : 'Default'
           },
           generationTime: endTime - startTime,
-          dimensions: '1000x666px',
+          dimensions: '1000x545px',
           filename
         });
         return;
@@ -95,7 +95,7 @@ export class ImageController {
           saleId: imageData.saleId
         },
         generationTime: endTime - startTime,
-        dimensions: '1000x666px',
+        dimensions: '1000x545px',
         filename
       });
       
@@ -129,7 +129,7 @@ export class ImageController {
       logger.info('Generating custom image with provided data');
       
       const startTime = Date.now();
-      const imageBuffer = await PuppeteerImageService.generateSaleImage(mockData);
+      const imageBuffer = await PuppeteerImageService.generateSaleImage(mockData, databaseService);
       const endTime = Date.now();
       
       // Save image with timestamp
@@ -146,7 +146,7 @@ export class ImageController {
         imageUrl,
         mockData,
         generationTime: endTime - startTime,
-        dimensions: '1000x666px',
+        dimensions: '1000x545px',
         filename
       });
       

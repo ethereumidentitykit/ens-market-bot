@@ -1,11 +1,15 @@
 import axios, { AxiosResponse } from 'axios';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
-import { AlchemyNFTSalesResponse, NFTSale } from '../types';
+import { AlchemyNFTSalesResponse, NFTSale, AlchemyPriceResponse } from '../types';
 
 export class AlchemyService {
   private baseUrl: string;
   private apiKey: string;
+
+  // ETH price cache (30-minute in-memory cache to avoid API abuse)
+  private ethPriceCache: { price: number; timestamp: number } | null = null;
+  private readonly CACHE_DURATION = 30 * 60 * 1000; // 30 minutes in milliseconds
 
   constructor() {
     this.baseUrl = config.alchemy.baseUrl;
@@ -166,6 +170,147 @@ export class AlchemyService {
     } catch (error: any) {
       logger.error('Failed to get latest valid block:', error.message);
       return null;
+    }
+  }
+
+  /**
+   * Get owners for a specific NFT token
+   * @param contractAddress - The contract address (e.g., ENS contract)
+   * @param tokenId - The token ID to get owners for
+   */
+  async getOwnersForToken(contractAddress: string, tokenId: string): Promise<string[]> {
+    try {
+      const url = `${this.baseUrl}/nft/v2/${this.apiKey}/getOwnersForToken`;
+      
+      const params = {
+        contractAddress,
+        tokenId
+      };
+
+      logger.debug(`Fetching owners for token ${tokenId} on contract ${contractAddress}`);
+
+      const response: AxiosResponse<{ owners: string[] }> = await axios.get(url, {
+        params,
+        timeout: 10000, // 10 second timeout
+      });
+
+      const owners = response.data.owners || [];
+      logger.debug(`Found ${owners.length} owners for token ${tokenId}`);
+      return owners;
+
+    } catch (error: any) {
+      logger.error(`Failed to fetch owners for token ${tokenId}:`, error.message);
+      
+      if (error.response) {
+        logger.error('API response error:', {
+          status: error.response.status,
+          data: error.response.data
+        });
+      }
+      
+      return []; // Return empty array on failure
+    }
+  }
+
+  /**
+   * Get current ETH price in USD with 30-minute caching to avoid API abuse
+   * Uses Alchemy's prices API endpoint
+   */
+  async getETHPriceUSD(): Promise<number | null> {
+    try {
+      // Check for cached price first (30-minute cache)
+      const cachedPrice = await this.getCachedETHPrice();
+      if (cachedPrice) {
+        return cachedPrice;
+      }
+
+      logger.debug('ETH price cache expired, fetching fresh price from Alchemy API');
+      
+      const response: AxiosResponse<AlchemyPriceResponse> = await axios.get(
+        `https://api.g.alchemy.com/prices/v1/${this.apiKey}/tokens/by-symbol`,
+        {
+          params: {
+            symbols: 'ETH'
+          },
+          timeout: 10000, // 10 second timeout
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'ENS-TwitterBot/1.0'
+          }
+        }
+      );
+
+      const ethData = response.data.data[0]; // First token in response
+      if (!ethData || ethData.symbol !== 'ETH') {
+        throw new Error('ETH price data not found in response');
+      }
+
+      const usdPrice = ethData.prices.find(p => p.currency === 'usd');
+      if (!usdPrice) {
+        throw new Error('USD price not found for ETH');
+      }
+
+      const priceValue = parseFloat(usdPrice.value);
+      logger.debug(`ETH price fetched: $${priceValue} (last updated: ${usdPrice.lastUpdatedAt})`);
+      
+      // Cache the fresh price for 30 minutes
+      await this.cacheETHPrice(priceValue);
+      
+      return priceValue;
+    } catch (error: any) {
+      logger.warn('Failed to fetch ETH price from Alchemy:', error.message);
+      
+      // Fallback to $4000 if API is unavailable
+      const fallbackPrice = 4000;
+      logger.info(`💰 Using fallback ETH price: $${fallbackPrice} (API unavailable)`);
+      
+      // Cache the fallback price to avoid repeated API attempts
+      await this.cacheETHPrice(fallbackPrice);
+      
+      return fallbackPrice;
+    }
+  }
+
+  /**
+   * Check for cached ETH price (30-minute cache)
+   * Returns null if cache is expired or missing
+   */
+  private async getCachedETHPrice(): Promise<number | null> {
+    try {
+      if (!this.ethPriceCache) {
+        return null;
+      }
+
+      const now = Date.now();
+      const age = now - this.ethPriceCache.timestamp;
+      
+      if (age > this.CACHE_DURATION) {
+        logger.debug('ETH price cache expired, will fetch fresh');
+        this.ethPriceCache = null;
+        return null;
+      }
+
+      const cacheAgeMinutes = Math.floor(age / 60000);
+      logger.debug(`Using cached ETH price: $${this.ethPriceCache.price} (${cacheAgeMinutes}m old)`);
+      return this.ethPriceCache.price;
+    } catch (error: any) {
+      logger.debug('Failed to get cached ETH price:', error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Cache ETH price with timestamp for 30-minute expiry
+   */
+  private async cacheETHPrice(price: number): Promise<void> {
+    try {
+      this.ethPriceCache = {
+        price: price,
+        timestamp: Date.now()
+      };
+      logger.debug(`ETH price cached: $${price} (will expire in 30 minutes)`);
+    } catch (error: any) {
+      logger.debug('Failed to cache ETH price:', error.message);
     }
   }
 

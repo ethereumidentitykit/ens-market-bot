@@ -1,21 +1,22 @@
 import { logger } from '../utils/logger';
-import { MockImageData } from '../types/imageTypes';
+import { ImageData } from '../types/imageTypes';
 import { IDatabaseService } from '../types';
 import { emojiMappingService } from './emojiMappingService';
 import { RealImageData } from './realDataImageService';
 import * as fs from 'fs';
 import * as path from 'path';
+import axios from 'axios';
 
 export class PuppeteerImageService {
   private static readonly IMAGE_WIDTH = 1000;
-  private static readonly IMAGE_HEIGHT = 666;
+  private static readonly IMAGE_HEIGHT = 545;
 
   /**
    * Generate ENS registration image using Puppeteer
    */
-  public static async generateRegistrationImage(data: RealImageData): Promise<Buffer> {
-    // Convert RealImageData to MockImageData format for compatibility
-    const mockData: MockImageData = {
+  public static async generateRegistrationImage(data: RealImageData, databaseService?: IDatabaseService): Promise<Buffer> {
+    // Convert RealImageData to ImageData format for compatibility
+    const mockData: ImageData = {
       priceEth: data.priceEth,
       priceUsd: data.priceUsd,
       ensName: data.ensName,
@@ -30,20 +31,31 @@ export class PuppeteerImageService {
       timestamp: new Date()
     };
 
-    return await this.generateImageWithBackground(mockData, 'registration');
+    return await this.generateImageWithBackground(mockData, 'registration', databaseService);
   }
 
   /**
    * Generate ENS sale image using Puppeteer
    */
-  public static async generateSaleImage(data: MockImageData): Promise<Buffer> {
-    return await this.generateImageWithBackground(data, 'sale');
+  public static async generateSaleImage(data: ImageData, databaseService?: IDatabaseService): Promise<Buffer> {
+    return await this.generateImageWithBackground(data, 'sale', databaseService);
+  }
+
+  /**
+   * Generate ENS bid image using Puppeteer
+   */
+  public static async generateBidImage(data: ImageData, databaseService?: IDatabaseService): Promise<Buffer> {
+    return await this.generateImageWithBackground(data, 'bid', databaseService);
   }
 
   /**
    * Generate image with specified background type
    */
-  private static async generateImageWithBackground(data: MockImageData, imageType: 'sale' | 'registration'): Promise<Buffer> {
+  private static async generateImageWithBackground(
+    data: ImageData, 
+    imageType: 'sale' | 'registration' | 'bid', 
+    databaseService?: IDatabaseService
+  ): Promise<Buffer> {
     // Environment-aware Puppeteer setup
     const isVercel = process.env.VERCEL === '1';
     
@@ -90,21 +102,20 @@ export class PuppeteerImageService {
       });
 
       // Generate HTML content with emoji replacement and background type
-      const htmlContent = await this.generateHTML(data, imageType);
+      const htmlContent = await this.generateHTML(data, imageType, databaseService);
+      logger.debug(`Generated HTML content length: ${htmlContent.length} chars`);
       
       // Set the HTML content
+      const contentStartTime = Date.now();
       await page.setContent(htmlContent, { 
-        waitUntil: 'networkidle0',
-        timeout: 15000 
+        waitUntil: 'domcontentloaded',
+        timeout: 30000 // Increased timeout to 30s but using faster wait condition
       });
+      logger.debug(`Page content loaded in ${Date.now() - contentStartTime}ms`);
 
-      // Wait for fonts to load
-      await page.evaluateOnNewDocument(() => {
-        document.fonts.ready;
-      });
-      
-      // Small delay to ensure fonts are rendered
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Small delay to ensure fonts and rendering are complete
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      logger.debug('Fonts and rendering delay complete, proceeding with image generation');
 
       // Take screenshot
       const screenshot = await page.screenshot({
@@ -129,14 +140,236 @@ export class PuppeteerImageService {
   }
 
   /**
-   * Generate HTML template with embedded CSS
+   * Load image file as base64 string (local files only)
    */
-  private static async generateHTML(data: MockImageData, imageType: 'sale' | 'registration' = 'sale'): Promise<string> {
-    // Get background image as base64 based on image type
-    const backgroundImageBase64 = imageType === 'registration' 
-      ? this.getRegistrationBackgroundImageBase64()
-      : this.getBackgroundImageBase64();
-    const userPlaceholderBase64 = this.getUserPlaceholderBase64();
+  private static loadAsBase64(imagePath: string): string {
+    try {
+      const imageBuffer = fs.readFileSync(path.join(process.cwd(), imagePath));
+      return imageBuffer.toString('base64');
+    } catch (error) {
+      logger.error(`Failed to load image from ${imagePath}:`, error);
+      // Return a 1x1 transparent pixel as fallback
+      return 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    }
+  }
+
+  /**
+   * Load NFT image with fallback chain: original URL → ENS metadata service → placeholder
+   */
+  private static async loadNftImageWithFallbacks(
+    originalUrl: string, 
+    ensName: string, 
+    placeholderBase64: string
+  ): Promise<string> {
+    // Try original URL first with short timeout
+    logger.debug(`Attempting to load NFT image: ${originalUrl.substring(0, 100)}...`);
+    
+    const originalImageBase64 = await this.loadRemoteImageAsBase64(originalUrl, 5000); // 5s timeout
+    if (originalImageBase64) {
+      logger.debug(`Successfully loaded original NFT image`);
+      return originalImageBase64;
+    }
+    
+    // Try ENS metadata service as fallback
+    const ensMetadataUrl = `https://metadata.ens.domains/mainnet/avatar/${ensName}`;
+    logger.debug(`Original NFT image failed, trying ENS metadata service: ${ensMetadataUrl}`);
+    
+    const ensImageBase64 = await this.loadRemoteImageAsBase64(ensMetadataUrl, 5000); // 5s timeout
+    if (ensImageBase64) {
+      logger.debug(`Successfully loaded ENS metadata image as fallback`);
+      return ensImageBase64;
+    }
+    
+    // Final fallback to placeholder
+    logger.warn(`Both NFT image sources failed, using placeholder for: ${ensName}`);
+    return `data:image/png;base64,${placeholderBase64}`;
+  }
+
+  /**
+   * Load remote image URL as base64 data URL
+   */
+  private static async loadRemoteImageAsBase64(imageUrl: string, timeoutMs: number = 10000): Promise<string | null> {
+    try {
+      logger.debug(`Loading avatar: ${imageUrl.substring(0, 100)}...`);
+      
+      // If it's already a data URL, return it as-is
+      if (imageUrl.startsWith('data:')) {
+        logger.debug(`Avatar is already a data URL, using as-is`);
+        return imageUrl;
+      }
+      
+      // Only proceed if we have a valid HTTP/HTTPS URL
+      if (!imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) {
+        logger.warn(`Invalid avatar URL protocol: ${imageUrl.substring(0, 100)}...`);
+        return null;
+      }
+      
+      const response = await axios.get(imageUrl, {
+        responseType: 'arraybuffer',
+        timeout: timeoutMs, // Use configurable timeout
+        headers: {
+          'User-Agent': 'ENS-TwitterBot/1.0'
+        }
+      });
+
+      const imageBuffer = Buffer.from(response.data);
+      const base64 = imageBuffer.toString('base64');
+      
+      // Detect image type from response headers
+      const contentType = response.headers['content-type'] || 'image/png';
+      
+      logger.debug(`Successfully loaded avatar: ${imageUrl} (${contentType})`);
+      return `data:${contentType};base64,${base64}`;
+      
+    } catch (error: any) {
+      logger.warn(`Failed to load remote image ${imageUrl}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Format price string with proper comma separators (whole numbers only)
+   */
+  private static formatPrice(priceUsd: string | number): string {
+    // Convert to string and remove existing formatting
+    const cleanPrice = priceUsd.toString().replace(/[$,]/g, '');
+    const numericPrice = parseFloat(cleanPrice);
+    
+    // Return formatted price with commas and dollar sign (rounded to whole number)
+    if (!isNaN(numericPrice)) {
+      const roundedPrice = Math.round(numericPrice);
+      return '$' + roundedPrice.toLocaleString('en-US');
+    }
+    
+    // Return original if parsing fails
+    return priceUsd.toString();
+  }
+
+  /**
+   * Format ETH value to 2 decimal places
+   */
+  private static formatEthPrice(priceEth: string | number): string {
+    const numericPrice = parseFloat(priceEth.toString());
+    
+    // Return formatted ETH price with 2 decimal places
+    if (!isNaN(numericPrice)) {
+      return numericPrice.toFixed(2);
+    }
+    
+    // Return original if parsing fails
+    return priceEth.toString();
+  }
+
+  /**
+   * Get dynamic template path based on transaction type and price tier
+   */
+  private static async getTemplatePath(
+    data: ImageData, 
+    imageType: 'sale' | 'registration' | 'bid',
+    databaseService?: IDatabaseService
+  ): Promise<string> {
+    
+    // Convert imageType to database transaction type
+    const transactionTypeMap = {
+      'sale': 'sales',
+      'registration': 'registrations', 
+      'bid': 'bids'
+    } as const;
+    
+    const transactionType = transactionTypeMap[imageType];
+    
+    // Default to T1 if no database service available
+    let tier = 1;
+    
+    if (databaseService && data.priceUsd) {
+      try {
+        // Extract numeric value from price string (e.g., "$1,269" -> 1269)
+        const priceString = data.priceUsd.toString().replace(/[$,]/g, '');
+        const priceNumeric = parseFloat(priceString);
+        
+        if (!isNaN(priceNumeric)) {
+          // Query database for price tier
+          const priceTier = await databaseService.getPriceTierForAmount(transactionType, priceNumeric);
+          if (priceTier) {
+            tier = priceTier.tierLevel;
+            logger.info(`Selected ${transactionType} tier ${tier} for $${priceNumeric} USD`);
+          }
+        }
+      } catch (error) {
+        logger.error('Error determining price tier:', error);
+        // Fall back to T1 on error
+      }
+    }
+    
+    // Build template path based on transaction type and tier
+    const typeMap = {
+      'sales': 'sale',
+      'registrations': 'reg',
+      'bids': 'bid'
+    } as const;
+    
+    // Map transaction types to actual directory names
+    const directoryMap = {
+      'sales': 'sales',
+      'registrations': 'regs',
+      'bids': 'bids'
+    } as const;
+    
+    const basename = typeMap[transactionType];
+    const directoryName = directoryMap[transactionType];
+    const templatePath = `assets/image-templates/${directoryName}/${basename}-t${tier}.png`;
+    
+    logger.info(`Using template: ${templatePath}`);
+    return templatePath;
+  }
+
+  /**
+   * Generate HTML template with embedded CSS - NEW EXACT POSITIONING WITH DYNAMIC TEMPLATES
+   */
+  private static async generateHTML(
+    data: ImageData, 
+    imageType: 'sale' | 'registration' | 'bid' = 'sale',
+    databaseService?: IDatabaseService
+  ): Promise<string> {
+    
+    // Get dynamic template path based on transaction type and price tier
+    const templatePath = await this.getTemplatePath(data, imageType, databaseService);
+    
+    // Load actual template images as base64
+    const backgroundImageBase64 = this.loadAsBase64(templatePath);
+    const userPlaceholderBase64 = this.loadAsBase64('assets/image-templates/user.png');
+    const ensPlaceholderBase64 = this.loadAsBase64('assets/image-templates/ens.png');
+    
+    // Format USD price with commas
+    const formattedUsdPrice = this.formatPrice(data.priceUsd);
+    
+    // Use actual images or fallbacks
+    const templateImagePath = `data:image/png;base64,${backgroundImageBase64}`;
+    
+    // Load NFT image with fallback chain: original URL → ENS metadata service → placeholder
+    let ensNftImagePath = `data:image/png;base64,${ensPlaceholderBase64}`;
+    if (data.nftImageUrl) {
+      ensNftImagePath = await this.loadNftImageWithFallbacks(data.nftImageUrl, data.ensName, ensPlaceholderBase64);
+    }
+    
+    // Convert avatar URLs to base64 data URLs (like other images)
+    let sellerAvatarPath = `data:image/png;base64,${userPlaceholderBase64}`;
+    if (data.sellerAvatar) {
+      const sellerAvatarBase64 = await this.loadRemoteImageAsBase64(data.sellerAvatar);
+      if (sellerAvatarBase64) {
+        sellerAvatarPath = sellerAvatarBase64;
+        logger.debug(`Loaded seller avatar successfully: ${data.sellerAvatar}`);
+      }
+    }
+    
+    let buyerAvatarPath = `data:image/png;base64,${userPlaceholderBase64}`;
+    if (data.buyerAvatar) {
+      const buyerAvatarBase64 = await this.loadRemoteImageAsBase64(data.buyerAvatar);
+      if (buyerAvatarBase64) {
+        buyerAvatarPath = buyerAvatarBase64;
+        logger.debug(`Loaded buyer avatar successfully: ${data.buyerAvatar}`);
+      }
+    }
     
     // Replace emojis in text fields with SVG elements
     const ensNameWithEmojis = await emojiMappingService.replaceEmojisWithSvg(data.ensName);
@@ -149,10 +382,10 @@ export class PuppeteerImageService {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>ENS Sale Image</title>
+        <title>ENS Transaction Image</title>
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
         <style>
             * {
                 margin: 0;
@@ -167,167 +400,116 @@ export class PuppeteerImageService {
                 overflow: hidden;
                 position: relative;
                 background: #1E1E1E;
-                ${backgroundImageBase64 ? `background-image: url(${backgroundImageBase64});` : ''}
-                background-size: cover;
-                background-position: center;
             }
 
-            .container {
-                width: 100%;
-                height: 100%;
+            .canvas {
                 position: relative;
+                width: ${this.IMAGE_WIDTH}px;
+                height: ${this.IMAGE_HEIGHT}px;
             }
 
-            /* Price Section (Left Side) */
-            .price-section {
+            /* Background Template */
+            .background {
                 position: absolute;
-                left: 270px;
-                top: 80px;
-                text-align: center;
-                color: white;
-                transform: translateX(-50%);
-            }
-
-            .eth-price {
-                font-size: 120px;
-                font-weight: bold;
-                line-height: 1;
-                text-shadow: 0px 0px 50px rgba(255, 255, 255, 0.25);
-                margin-bottom: 10px;
-            }
-
-            .eth-label {
-                font-size: 40px;
-                text-shadow: 0px 0px 50px rgba(255, 255, 255, 0.25);
-                margin-bottom: 20px;
-            }
-
-            .usd-price {
-                font-size: 80px;
-                font-weight: bold;
-                text-shadow: 0px 0px 50px rgba(255, 255, 255, 0.25);
-                margin-bottom: 10px;
-            }
-
-            .usd-label {
-                font-size: 40px;
-                text-shadow: 0px 0px 50px rgba(255, 255, 255, 0.25);
-            }
-
-            /* ENS Image Section (Right Side) */
-            .ens-image-section {
-                position: absolute;
-                left: 552px;
-                top: 48px;
-                width: 400px;
-                height: 400px;
-            }
-
-            .ens-image {
-                width: 100%;
-                height: 100%;
-                border-radius: 30px;
-                object-fit: cover;
-                box-shadow: 0px 0px 50px rgba(0, 0, 0, 0.4);
-            }
-
-            .ens-placeholder {
-                width: 100%;
-                height: 100%;
-                background: #4496E7;
-                border-radius: 30px;
-                display: flex;
-                align-items: center;
-                justify-content: flex-start;
-                color: white;
-                font-size: 58px;
-                font-weight: bold;
-                box-shadow: 0px 0px 50px rgba(0, 0, 0, 0.4);
-                padding: 20px;
-                overflow: hidden;
-            }
-
-            .ens-text {
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                max-width: 100%;
-                text-align: left;
-                flex-shrink: 1;
-                width: 100%;
-            }
-
-            /* Buyer/Seller Pills (Bottom) */
-            .pills-section {
-                position: absolute;
-                bottom: 28px;
+                top: 0;
                 left: 0;
-                right: 0;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                padding: 0 26px;
-            }
-
-            .pill {
-                width: 433px;
-                height: 132px;
-                background: #242424;
-                border-radius: 66px;
-                display: flex;
-                align-items: center;
-                padding: 16px 20px;
-                box-shadow: 0px 0px 50px rgba(0, 0, 0, 0.4);
-            }
-
-            .pill-left {
-                justify-content: flex-start;
-            }
-
-            .pill-right {
-                justify-content: flex-start;
-            }
-
-            .avatar {
-                width: 100px;
-                height: 100px;
-                border-radius: 50px;
-                object-fit: cover;
-                margin: 0 15px 0 0;
-            }
-
-            .avatar-placeholder {
-                width: 100px;
-                height: 100px;
-                border-radius: 50px;
-                margin: 0 15px 0 0;
-                background-color: #666;
-                background-size: contain;
+                width: 100%;
+                height: 100%;
+                background-image: url("${templateImagePath}");
+                background-size: cover;
                 background-position: center;
                 background-repeat: no-repeat;
             }
 
-            .pill-right .avatar,
-            .pill-right .avatar-placeholder {
-                margin: 0 15px 0 0;
+            /* ENS NFT Image (Right Side) */
+            .ens-nft {
+                position: absolute;
+                left: 500px;
+                top: 45px;
+                width: 455px;
+                height: 455px;
+                border-radius: 19px;
+                object-fit: cover;
+                background-image: url("${ensNftImagePath}");
+                background-size: cover;
+                background-position: center;
+                background-repeat: no-repeat;
             }
 
-            .pill-text {
+            /* USD Price (Left Side - Center Aligned) */
+            .usd-price {
+                position: absolute;
+                left: 250px;
+                top: 210px;
+                transform: translate(-50%, -50%);
+                text-align: center;
                 color: white;
-                font-size: 36px;
-                font-weight: bold;
-                flex: 1;
-                text-align: left;
-                word-break: break-word;
+                font-size: 85px;
+                font-weight: 600;
             }
 
-            /* Arrow between pills */
-            .arrow {
+            /* ETH Price (Left Side - Center Aligned) */
+            .eth-price {
+                position: absolute;
+                left: 250px;
+                top: 305px;
+                transform: translate(-50%, -50%);
+                text-align: center;
                 color: white;
-                font-size: 72px;
-                font-weight: bold;
-                text-shadow: 0px 0px 50px rgba(255, 255, 255, 0.25);
-                line-height: 1;
+                font-size: 48px;
+                font-weight: normal;
+            }
+
+            /* Seller Section (Dynamic Positioning) */
+            .seller-section {
+                position: absolute;
+                right: 545px;
+                top: ${imageType === 'registration' ? '390px' : '477px'}; /* Bottom for sales/bids, top for regs */
+                transform: translateY(-50%);
+                display: flex;
+                align-items: center;
+                flex-direction: row-reverse;
+            }
+
+            .seller-name {
+                color: white;
+                font-size: 24px;
+                font-weight: normal;
+                white-space: nowrap;
+                margin-left: 8px;
+            }
+
+            .seller-avatar {
+                width: 50px;
+                height: 50px;
+                border-radius: 50%;
+                object-fit: cover;
+            }
+
+            /* Buyer Section (Dynamic Positioning) */
+            .buyer-section {
+                position: absolute;
+                right: 545px;
+                top: ${imageType === 'registration' ? '477px' : '390px'}; /* Bottom for regs (no seller), top for sales/bids */
+                transform: translateY(-50%);
+                display: flex;
+                align-items: center;
+                flex-direction: row-reverse;
+            }
+
+            .buyer-name {
+                color: white;
+                font-size: 24px;
+                font-weight: normal;
+                white-space: nowrap;
+                margin-left: 8px;
+            }
+
+            .buyer-avatar {
+                width: 50px;
+                height: 50px;
+                border-radius: 50%;
+                object-fit: cover;
             }
 
             /* Emoji SVG styling */
@@ -341,48 +523,38 @@ export class PuppeteerImageService {
         </style>
     </head>
     <body>
-        <div class="container">
-            <!-- Price Section -->
-            <div class="price-section">
-                <div class="eth-price">${data.priceEth.toFixed(2)}</div>
-                <div class="eth-label">ETH</div>
-                <div class="usd-price">$${data.priceUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
-                <div class="usd-label">USD</div>
+        <div class="canvas">
+            <!-- Background Template -->
+            <div class="background"></div>
+
+            <!-- ENS NFT Image -->
+            <img src="${ensNftImagePath}" alt="ENS NFT" class="ens-nft" 
+                 onerror="this.src='data:image/png;base64,${ensPlaceholderBase64}'; console.log('NFT image failed to load:', this.getAttribute('original-src') || '${ensNftImagePath}');"
+                 onload="console.log('NFT image loaded successfully:', this.src);"
+            >
+
+            <!-- USD Price -->
+            <div class="usd-price">
+                ${formattedUsdPrice}
             </div>
 
-            <!-- ENS Image Section -->
-            <div class="ens-image-section">
-                ${data.nftImageUrl ? 
-                    `<img src="${data.nftImageUrl}" alt="NFT Image" class="ens-image" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                     <div class="ens-placeholder" style="display: none;"><span class="ens-text">${ensNameWithEmojis}</span></div>` :
-                    `<div class="ens-placeholder"><span class="ens-text">${ensNameWithEmojis}</span></div>`
-                }
+            <!-- ETH Price -->
+            <div class="eth-price">
+                ${this.formatEthPrice(data.priceEth)} ETH
             </div>
 
-            <!-- Buyer/Seller Pills -->
-            <div class="pills-section">
-                <!-- Seller Pill (Left) -->
-                <div class="pill pill-left">
-                    ${data.sellerAvatar ? 
-                        `<img src="${data.sellerAvatar}" alt="Seller Avatar" class="avatar" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
-                         <div class="avatar-placeholder" style="display: none; ${userPlaceholderBase64 ? `background-image: url(${userPlaceholderBase64});` : ''}"></div>` :
-                        `<div class="avatar-placeholder" style="${userPlaceholderBase64 ? `background-image: url(${userPlaceholderBase64});` : ''}"></div>`
-                    }
-                    <div class="pill-text">${sellerEnsWithEmojis}</div>
-                </div>
+            ${imageType !== 'registration' ? `
+            <!-- Seller Section -->
+            <div class="seller-section">
+                <div class="seller-name">${data.sellerEns || 'seller'}</div>
+                <img src="${sellerAvatarPath}" alt="Seller" class="seller-avatar" onerror="this.src='data:image/png;base64,${userPlaceholderBase64}'">
+            </div>
+            ` : ''}
 
-                <!-- Arrow -->
-                <div class="arrow">→</div>
-
-                <!-- Buyer Pill (Right) -->
-                <div class="pill pill-right">
-                    ${data.buyerAvatar ? 
-                        `<img src="${data.buyerAvatar}" alt="Buyer Avatar" class="avatar" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
-                         <div class="avatar-placeholder" style="display: none; ${userPlaceholderBase64 ? `background-image: url(${userPlaceholderBase64});` : ''}"></div>` :
-                        `<div class="avatar-placeholder" style="${userPlaceholderBase64 ? `background-image: url(${userPlaceholderBase64});` : ''}"></div>`
-                    }
-                    <div class="pill-text">${buyerEnsWithEmojis}</div>
-                </div>
+            <!-- Buyer Section -->
+            <div class="buyer-section">
+                <div class="buyer-name">${data.buyerEns || 'buyer'}</div>
+                <img src="${buyerAvatarPath}" alt="Buyer" class="buyer-avatar" onerror="this.src='data:image/png;base64,${userPlaceholderBase64}'">
             </div>
         </div>
     </body>
@@ -496,7 +668,7 @@ export class PuppeteerImageService {
   /**
    * Get mock data for testing
    */
-  public static getMockData(): MockImageData {
+  public static getMockData(): ImageData {
     return {
       priceEth: 5.51,
       priceUsd: 22560.01,

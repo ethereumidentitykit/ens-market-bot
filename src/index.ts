@@ -6,8 +6,8 @@ import { config, validateConfig } from './utils/config';
 import { logger } from './utils/logger';
 import { MONITORED_CONTRACTS } from './config/contracts';
 import { MoralisService } from './services/moralisService';
+import { AlchemyService } from './services/alchemyService';
 import { DatabaseService } from './services/databaseService';
-import { VercelDatabaseService } from './services/vercelDatabaseService';
 import { IDatabaseService, ENSRegistration } from './types';
 import { SalesProcessingService } from './services/salesProcessingService';
 import { BidsProcessingService } from './services/bidsProcessingService';
@@ -30,18 +30,17 @@ async function startApplication(): Promise<void> {
 
     // Initialize services
     const moralisService = new MoralisService();
+    const alchemyService = new AlchemyService();
     
-    // Use PostgreSQL if DATABASE_URL is provided, otherwise SQLite
-    const databaseService: IDatabaseService = process.env.DATABASE_URL?.startsWith('postgresql://') 
-      ? new VercelDatabaseService()  // Works for any PostgreSQL, not just Vercel
-      : new DatabaseService();       // SQLite for local development
+    // Initialize PostgreSQL database service
+    const databaseService: IDatabaseService = new DatabaseService();
     
     const salesProcessingService = new SalesProcessingService(moralisService, databaseService);
     const magicEdenService = new MagicEdenService();
-    const bidsProcessingService = new BidsProcessingService(magicEdenService, databaseService, moralisService);
+    const bidsProcessingService = new BidsProcessingService(magicEdenService, databaseService, alchemyService);
     const twitterService = new TwitterService();
     const tweetFormatter = new TweetFormatter();
-    const newTweetFormatter = new NewTweetFormatter(databaseService);
+    const newTweetFormatter = new NewTweetFormatter(databaseService, alchemyService);
     const rateLimitService = new RateLimitService(databaseService);
     const ethIdentityService = new EthIdentityService();
     const worldTimeService = new WorldTimeService();
@@ -97,6 +96,31 @@ async function startApplication(): Promise<void> {
       } catch (error: any) {
         res.status(500).json({
           success: false,
+          error: error.message
+        });
+      }
+    });
+
+    // Test Alchemy ETH price endpoint
+    app.get('/api/test-alchemy-price', async (req, res) => {
+      try {
+        const startTime = Date.now();
+        const ethPrice = await alchemyService.getETHPriceUSD();
+        const fetchTime = Date.now() - startTime;
+        
+        res.json({
+          success: true,
+          message: 'Alchemy ETH price fetched successfully',
+          data: {
+            ethPriceUsd: ethPrice,
+            fetchTimeMs: fetchTime,
+            timestamp: new Date().toISOString()
+          }
+        });
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          message: 'Error fetching ETH price from Alchemy',
           error: error.message
         });
       }
@@ -457,6 +481,33 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    app.post('/api/admin/toggle-magic-eden', async (req, res) => {
+      try {
+        const { enabled } = req.body;
+        if (typeof enabled !== 'boolean') {
+          return res.status(400).json({
+            success: false,
+            error: 'enabled must be a boolean'
+          });
+        }
+
+        await apiToggleService.setMagicEdenEnabled(enabled);
+        logger.info(`Magic Eden API ${enabled ? 'enabled' : 'disabled'} via admin toggle`);
+        
+        const state = apiToggleService.getState();
+        res.json({
+          success: true,
+          magicEdenEnabled: state.magicEdenEnabled
+        });
+      } catch (error: any) {
+        logger.error('Toggle Magic Eden API error:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     app.post('/api/admin/toggle-auto-posting', async (req, res) => {
       try {
         const { enabled } = req.body;
@@ -492,22 +543,80 @@ async function startApplication(): Promise<void> {
       });
     });
 
-    // Auto-post settings endpoints
+    // Price Tier API endpoints
+    app.get('/api/price-tiers', async (req, res) => {
+      try {
+        // Get all tiers for all transaction types
+        const allTiers = await databaseService.getPriceTiers();
+        
+        // Group by transaction type
+        const tiersByType = {
+          sales: allTiers.filter(t => t.transactionType === 'sales'),
+          registrations: allTiers.filter(t => t.transactionType === 'registrations'),
+          bids: allTiers.filter(t => t.transactionType === 'bids')
+        };
+        
+        res.json({ success: true, tiers: tiersByType });
+      } catch (error) {
+        logger.error('Failed to get price tiers:', error);
+        res.status(500).json({ success: false, error: 'Failed to get price tiers' });
+      }
+    });
+    
+    app.post('/api/price-tiers/update', async (req, res) => {
+      try {
+        const { type, tiers } = req.body;
+        
+        if (!type || !tiers || !Array.isArray(tiers)) {
+          return res.status(400).json({ success: false, error: 'Invalid tier data' });
+        }
+        
+        // Update each tier for the specified transaction type
+        for (const tier of tiers) {
+          await databaseService.updatePriceTier(type, tier.level, tier.min, tier.max);
+        }
+        
+        res.json({ success: true, message: `${type} price tiers updated successfully` });
+      } catch (error) {
+        logger.error('Failed to update price tiers:', error);
+        res.status(500).json({ success: false, error: 'Failed to update price tiers' });
+      }
+    });
+    
+    // Auto-post settings endpoints - transaction-specific
     app.get('/api/admin/autopost-settings', async (req, res) => {
       try {
-        // Load settings from database
-        const minEthDefault = await databaseService.getSystemState('autopost_min_eth_default') || '0.1';
-        const minEth10kClub = await databaseService.getSystemState('autopost_min_eth_10k') || '0.5';
-        const minEth999Club = await databaseService.getSystemState('autopost_min_eth_999') || '0.3';
-        const maxAgeHours = await databaseService.getSystemState('autopost_max_age_hours') || '1';
+        // Load transaction-specific settings from database
+        const salesSettings = {
+          enabled: (await databaseService.getSystemState('autopost_sales_enabled') || 'true') === 'true',
+          minEthDefault: parseFloat(await databaseService.getSystemState('autopost_sales_min_eth_default') || '0.1'),
+          minEth10kClub: parseFloat(await databaseService.getSystemState('autopost_sales_min_eth_10k') || '0.5'),
+          minEth999Club: parseFloat(await databaseService.getSystemState('autopost_sales_min_eth_999') || '0.3'),
+          maxAgeHours: parseInt(await databaseService.getSystemState('autopost_sales_max_age_hours') || '1')
+        };
+
+        const registrationsSettings = {
+          enabled: (await databaseService.getSystemState('autopost_registrations_enabled') || 'true') === 'true',
+          minEthDefault: parseFloat(await databaseService.getSystemState('autopost_registrations_min_eth_default') || '0.05'),
+          minEth10kClub: parseFloat(await databaseService.getSystemState('autopost_registrations_min_eth_10k') || '0.2'),
+          minEth999Club: parseFloat(await databaseService.getSystemState('autopost_registrations_min_eth_999') || '0.1'),
+          maxAgeHours: parseInt(await databaseService.getSystemState('autopost_registrations_max_age_hours') || '2')
+        };
+
+        const bidsSettings = {
+          enabled: (await databaseService.getSystemState('autopost_bids_enabled') || 'true') === 'true',
+          minEthDefault: parseFloat(await databaseService.getSystemState('autopost_bids_min_eth_default') || '0.2'),
+          minEth10kClub: parseFloat(await databaseService.getSystemState('autopost_bids_min_eth_10k') || '1.0'),
+          minEth999Club: parseFloat(await databaseService.getSystemState('autopost_bids_min_eth_999') || '0.5'),
+          maxAgeHours: parseInt(await databaseService.getSystemState('autopost_bids_max_age_hours') || '24')
+        };
         
         res.json({
           success: true,
           settings: {
-            minEthDefault: parseFloat(minEthDefault),
-            minEth10kClub: parseFloat(minEth10kClub),
-            minEth999Club: parseFloat(minEth999Club),
-            maxAgeHours: parseInt(maxAgeHours)
+            sales: salesSettings,
+            registrations: registrationsSettings,
+            bids: bidsSettings
           }
         });
       } catch (error: any) {
@@ -521,9 +630,26 @@ async function startApplication(): Promise<void> {
 
     app.post('/api/admin/autopost-settings', async (req, res) => {
       try {
-        const { minEthDefault, minEth10kClub, minEth999Club, maxAgeHours } = req.body;
+        const { transactionType, settings } = req.body;
+        
+        // Validate transaction type
+        if (!['sales', 'registrations', 'bids'].includes(transactionType)) {
+          return res.status(400).json({
+            success: false,
+            error: 'transactionType must be one of: sales, registrations, bids'
+          });
+        }
+
+        const { enabled, minEthDefault, minEth10kClub, minEth999Club, maxAgeHours } = settings;
         
         // Validate inputs
+        if (typeof enabled !== 'boolean') {
+          return res.status(400).json({
+            success: false,
+            error: 'enabled must be a boolean'
+          });
+        }
+
         if (typeof minEthDefault !== 'number' || minEthDefault < 0) {
           return res.status(400).json({
             success: false,
@@ -545,25 +671,28 @@ async function startApplication(): Promise<void> {
           });
         }
         
-        if (typeof maxAgeHours !== 'number' || maxAgeHours < 1 || maxAgeHours > 24) {
+        if (typeof maxAgeHours !== 'number' || maxAgeHours < 1 || maxAgeHours > 168) {
           return res.status(400).json({
             success: false,
-            error: 'maxAgeHours must be between 1 and 24'
+            error: 'maxAgeHours must be between 1 and 168 (1 week)'
           });
         }
         
-        // Save to database
-        await databaseService.setSystemState('autopost_min_eth_default', minEthDefault.toString());
-        await databaseService.setSystemState('autopost_min_eth_10k', minEth10kClub.toString());
-        await databaseService.setSystemState('autopost_min_eth_999', minEth999Club.toString());
-        await databaseService.setSystemState('autopost_max_age_hours', maxAgeHours.toString());
+        // Save transaction-specific settings to database
+        const prefix = `autopost_${transactionType}`;
+        await databaseService.setSystemState(`${prefix}_enabled`, enabled.toString());
+        await databaseService.setSystemState(`${prefix}_min_eth_default`, minEthDefault.toString());
+        await databaseService.setSystemState(`${prefix}_min_eth_10k`, minEth10kClub.toString());
+        await databaseService.setSystemState(`${prefix}_min_eth_999`, minEth999Club.toString());
+        await databaseService.setSystemState(`${prefix}_max_age_hours`, maxAgeHours.toString());
         
-        logger.info('Auto-post settings updated:', { minEthDefault, minEth10kClub, minEth999Club, maxAgeHours });
+        logger.info(`Auto-post ${transactionType} settings updated:`, { enabled, minEthDefault, minEth10kClub, minEth999Club, maxAgeHours });
         
         res.json({
           success: true,
-          message: 'Auto-post settings saved successfully',
-          settings: { minEthDefault, minEth10kClub, minEth999Club, maxAgeHours }
+          message: `Auto-post ${transactionType} settings saved successfully`,
+          transactionType,
+          settings: { enabled, minEthDefault, minEth10kClub, minEth999Club, maxAgeHours }
         });
       } catch (error: any) {
         logger.error('Failed to save auto-post settings:', error.message);
@@ -1342,9 +1471,123 @@ async function startApplication(): Promise<void> {
       await ImageController.generateTestImage(req, res);
     });
 
-    app.post('/api/image/generate-custom', async (req, res) => {
+    app.post('/api/image/generate-custom-sale', async (req, res) => {
       const { ImageController } = await import('./controllers/imageController');
       await ImageController.generateCustomImage(req, res);
+    });
+
+    app.post('/api/image/generate-custom-registration', async (req, res) => {
+      try {
+        const { mockData } = req.body;
+        
+        if (!mockData) {
+          res.status(400).json({
+            success: false,
+            error: 'Mock data is required'
+          });
+          return;
+        }
+        
+        // Get database service from app.locals
+        const { databaseService } = req.app.locals;
+        
+        logger.info('Generating custom registration image with provided data');
+        
+        // Convert ImageData to RealImageData format for registration
+        const realImageData = {
+          priceEth: mockData.priceEth,
+          priceUsd: mockData.priceUsd,
+          ensName: mockData.ensName,
+          nftImageUrl: mockData.nftImageUrl || '',
+          buyerEns: mockData.buyerEns || 'New Owner',
+          buyerAvatar: mockData.buyerAvatar || '',
+          sellerEns: 'ENS DAO',
+          sellerAvatar: '',
+          transactionHash: '0x0000',
+          saleId: 0,
+          tokenId: ''
+        };
+        
+        const startTime = Date.now();
+        const { PuppeteerImageService } = await import('./services/puppeteerImageService');
+        const imageBuffer = await PuppeteerImageService.generateRegistrationImage(realImageData, databaseService);
+        const endTime = Date.now();
+        
+        // Save image with timestamp
+        const filename = `custom-registration-${Date.now()}.png`;
+        const savedPath = await PuppeteerImageService.saveImageToFile(imageBuffer, filename, databaseService);
+        
+        // Create URL for the generated image
+        const imageUrl = savedPath.startsWith('/api/images/') ? savedPath : `/generated-images/${filename}`;
+        
+        logger.info(`Custom registration image generated successfully: ${filename} (${endTime - startTime}ms)`);
+        
+        res.json({
+          success: true,
+          imageUrl,
+          mockData,
+          generationTime: endTime - startTime,
+          dimensions: '1000x545px',
+          filename
+        });
+        
+      } catch (error) {
+        logger.error('Failed to generate custom registration image:', error);
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error occurred'
+        });
+      }
+    });
+
+    app.post('/api/image/generate-custom-bid', async (req, res) => {
+      try {
+        const { mockData } = req.body;
+        
+        if (!mockData) {
+          res.status(400).json({
+            success: false,
+            error: 'Mock data is required'
+          });
+          return;
+        }
+        
+        // Get database service from app.locals
+        const { databaseService } = req.app.locals;
+        
+        logger.info('Generating custom bid image with provided data');
+        
+        // Use ImageData format directly for bids
+        const startTime = Date.now();
+        const { PuppeteerImageService } = await import('./services/puppeteerImageService');
+        const imageBuffer = await PuppeteerImageService.generateBidImage(mockData, databaseService);
+        const endTime = Date.now();
+        
+        // Save image with timestamp
+        const filename = `custom-bid-${Date.now()}.png`;
+        const savedPath = await PuppeteerImageService.saveImageToFile(imageBuffer, filename, databaseService);
+        
+        // Create URL for the generated image
+        const imageUrl = savedPath.startsWith('/api/images/') ? savedPath : `/generated-images/${filename}`;
+        
+        logger.info(`Custom bid image generated successfully: ${filename} (${endTime - startTime}ms)`);
+        
+        res.json({
+          success: true,
+          imageUrl,
+          mockData,
+          generationTime: endTime - startTime,
+          dimensions: '1000x545px',
+          filename
+        });
+        
+      } catch (error) {
+        logger.error('Failed to generate custom bid image:', error);
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error occurred'
+        });
+      }
     });
 
     // Serve generated images
@@ -1891,7 +2134,7 @@ async function startApplication(): Promise<void> {
               // Get current ETH price in USD for cost calculation
               let costUsd: string | undefined;
               try {
-                const ethPriceUsd = await moralisService.getETHPriceUSD();
+                const ethPriceUsd = await alchemyService.getETHPriceUSD();
                 if (ethPriceUsd) {
                   const costInUsd = parseFloat(costInEth) * ethPriceUsd;
                   costUsd = costInUsd.toFixed(2);

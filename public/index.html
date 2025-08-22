@@ -5,14 +5,53 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NFT Sales Bot - Admin Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.7.1/nouislider.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.7.1/nouislider.min.js"></script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
     <style>
         [x-cloak] { display: none !important; }
         .loading { animation: spin 1s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
         .fade-in { animation: fadeIn 0.5s ease-in; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        
+        /* NoUISlider custom styles */
+        .noUi-target {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            box-shadow: none;
+            height: 8px;
+        }
+        .noUi-connect {
+            background: #6b46c1;
+        }
+        .noUi-connect-0 { background: #6b7280; } /* Grey */
+        .noUi-connect-1 { background: #3b82f6; } /* Blue */
+        .noUi-connect-2 { background: #9333ea; } /* Purple */
+        .noUi-connect-3 { background: #ef4444; } /* Red */
+        .noUi-handle {
+            height: 20px;
+            width: 20px;
+            top: -6px;
+            right: -10px;
+            border-radius: 50%;
+            background: white;
+            border: 2px solid #6b46c1;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .noUi-handle:before,
+        .noUi-handle:after {
+            display: none;
+        }
+        .noUi-tooltip {
+            background: #1f2937;
+            border: none;
+            color: white;
+            font-size: 12px;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -74,142 +113,6 @@
                 </div>
             </div>
         </header>
-
-        <!-- Automatic Posting Controls -->
-        <div class="bg-gradient-to-r from-blue-600 to-purple-600 border-b border-gray-200 text-white">
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="py-6">
-                    <div class="flex items-center justify-between mb-4">
-                        <div>
-                            <h2 class="text-xl font-semibold flex items-center">
-                                <i class="fas fa-robot mr-2"></i>
-                                Automatic Posting
-                            </h2>
-                            <p class="text-blue-100 text-sm mt-1">Configure automated ENS sales posting to Twitter</p>
-                        </div>
-                        <!-- Master Auto-Posting Toggle -->
-                        <button 
-                            @click="toggleAutoPosting()"
-                            :disabled="loading || !apiToggles.twitterEnabled"
-                            :class="autoPostSettings.enabled ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-500 hover:bg-gray-600'"
-                            class="relative inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            <i :class="autoPostSettings.enabled ? 'fas fa-play' : 'fas fa-pause'" class="mr-2"></i>
-                            <span x-text="autoPostSettings.enabled ? 'Auto-Posting ON' : 'Auto-Posting OFF'"></span>
-                        </button>
-                    </div>
-                    
-                    <!-- Settings Grid -->
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                        <!-- Default ETH Minimum -->
-                        <div class="bg-white/10 backdrop-blur rounded-lg p-4">
-                            <label class="block text-sm font-medium text-blue-100 mb-2">Default Minimum (ETH)</label>
-                            <div class="flex items-center space-x-2">
-                                <input 
-                                    type="number" 
-                                    step="0.01" 
-                                    min="0"
-                                    x-model.number="autoPostSettings.minEthDefault"
-                                    class="w-20 px-2 py-1 bg-white/20 border border-white/30 rounded text-white placeholder-blue-200 focus:outline-none focus:ring-2 focus:ring-white/50 focus:border-transparent text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                    placeholder="0.1"
-                                >
-                                <button 
-                                    @click="saveAutoPostSettings()"
-                                    class="px-2 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs font-medium transition-colors"
-                                >
-                                    Save
-                                </button>
-                            </div>
-                            <p class="text-xs text-blue-200 mt-1">For standard ENS names</p>
-                        </div>
-                        
-                        <!-- 10k Club ETH Minimum -->
-                        <div class="bg-white/10 backdrop-blur rounded-lg p-4">
-                            <label class="block text-sm font-medium text-blue-100 mb-2">10k Club Minimum (ETH)</label>
-                            <div class="flex items-center space-x-2">
-                                <input 
-                                    type="number" 
-                                    step="0.01" 
-                                    min="0"
-                                    x-model.number="autoPostSettings.minEth10kClub"
-                                    class="w-20 px-2 py-1 bg-white/20 border border-white/30 rounded text-white placeholder-blue-200 focus:outline-none focus:ring-2 focus:ring-white/50 focus:border-transparent text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                    placeholder="0.5"
-                                >
-                                <button 
-                                    @click="saveAutoPostSettings()"
-                                    class="px-2 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs font-medium transition-colors"
-                                >
-                                    Save
-                                </button>
-                            </div>
-                            <p class="text-xs text-blue-200 mt-1">For 1234.eth style names</p>
-                        </div>
-                        
-                        <!-- 999 Club ETH Minimum -->
-                        <div class="bg-white/10 backdrop-blur rounded-lg p-4">
-                            <label class="block text-sm font-medium text-blue-100 mb-2">999 Club Minimum (ETH)</label>
-                            <div class="flex items-center space-x-2">
-                                <input 
-                                    type="number" 
-                                    step="0.01" 
-                                    min="0"
-                                    x-model.number="autoPostSettings.minEth999Club"
-                                    class="w-20 px-2 py-1 bg-white/20 border border-white/30 rounded text-white placeholder-blue-200 focus:outline-none focus:ring-2 focus:ring-white/50 focus:border-transparent text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                    placeholder="0.3"
-                                >
-                                <button 
-                                    @click="saveAutoPostSettings()"
-                                    class="px-2 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs font-medium transition-colors"
-                                >
-                                    Save
-                                </button>
-                            </div>
-                            <p class="text-xs text-blue-200 mt-1">For 123.eth style names</p>
-                        </div>
-                        
-                        <!-- Max Age Hours -->
-                        <div class="bg-white/10 backdrop-blur rounded-lg p-4">
-                            <label class="block text-sm font-medium text-blue-100 mb-2">Max Age (Hours)</label>
-                            <div class="flex items-center space-x-2">
-                                <input 
-                                    type="number" 
-                                    min="1" 
-                                    max="24"
-                                    x-model.number="autoPostSettings.maxAgeHours"
-                                    class="w-16 px-2 py-1 bg-white/20 border border-white/30 rounded text-white placeholder-blue-200 focus:outline-none focus:ring-2 focus:ring-white/50 focus:border-transparent text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                    placeholder="1"
-                                >
-                                <button 
-                                    @click="saveAutoPostSettings()"
-                                    class="px-2 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs font-medium transition-colors"
-                                >
-                                    Save
-                                </button>
-                            </div>
-                            <p class="text-xs text-blue-200 mt-1">Sales older than this won't be posted</p>
-                        </div>
-                    </div>
-                    
-                    <!-- Status Info -->
-                    <div class="mt-4 flex items-center space-x-4 text-sm">
-                        <div class="flex items-center">
-                            <div :class="apiToggles.twitterEnabled ? 'bg-green-400' : 'bg-red-400'" class="w-2 h-2 rounded-full mr-2"></div>
-                            <span class="text-blue-100">Twitter API: <span x-text="apiToggles.twitterEnabled ? 'Connected' : 'Disabled'"></span></span>
-                        </div>
-                        <div class="flex items-center">
-                            <div :class="apiToggles.moralisEnabled ? 'bg-green-400' : 'bg-red-400'" class="w-2 h-2 rounded-full mr-2"></div>
-                            <span class="text-blue-100">Moralis API: <span x-text="apiToggles.moralisEnabled ? 'Connected' : 'Disabled'"></span></span>
-                        </div>
-                        <div class="flex items-center" x-show="autoPostSettings.enabled">
-                            <div class="bg-blue-400 w-2 h-2 rounded-full mr-2 animate-pulse"></div>
-                            <span class="text-blue-100">Auto-posting active</span>
-                        </div>
-
-                    </div>
-                </div>
-            </div>
-        </div>
-
         <!-- Master API Toggles -->
         <div class="bg-yellow-50 border-b border-yellow-200">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
@@ -245,6 +148,19 @@
                                 <span x-text="apiToggles.moralisEnabled ? 'Enabled' : 'Disabled'"></span>
                             </button>
                         </div>
+                        <!-- Magic Eden API Toggle -->
+                        <div class="flex items-center space-x-2">
+                            <span class="text-sm text-gray-700">Magic Eden API:</span>
+                            <button 
+                                @click="toggleMagicEdenAPI()"
+                                :disabled="loading"
+                                :class="apiToggles.magicEdenEnabled ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'"
+                                class="relative inline-flex items-center px-3 py-1 rounded-full text-xs font-medium text-white transition-colors disabled:opacity-50"
+                            >
+                                <i :class="apiToggles.magicEdenEnabled ? 'fas fa-check' : 'fas fa-times'" class="mr-1"></i>
+                                <span x-text="apiToggles.magicEdenEnabled ? 'Enabled' : 'Disabled'"></span>
+                            </button>
+                        </div>
                         <!-- Auto-Posting Toggle -->
                         <div class="flex items-center space-x-2">
                             <span class="text-sm text-gray-700">Auto-Posting:</span>
@@ -255,13 +171,262 @@
                                 class="relative inline-flex items-center px-3 py-1 rounded-full text-xs font-medium text-white transition-colors disabled:opacity-50"
                             >
                                 <i :class="autoPostSettings.enabled ? 'fas fa-robot' : 'fas fa-pause'" class="mr-1"></i>
-                                <span x-text="autoPostSettings.enabled ? 'Auto' : 'Manual'"></span>
+                                <span x-text="autoPostSettings.enabled ? 'Global' : 'Manual'"></span>
                             </button>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
+
+        <!-- Automatic Posting Controls -->
+        <div class="bg-gradient-to-r from-blue-600 to-purple-600 border-b border-gray-200 text-white">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="py-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <div>
+                            <h2 class="text-xl font-semibold flex items-center">
+                                <i class="fas fa-robot mr-2"></i>
+                                Automatic Posting
+                            </h2>
+                            <p class="text-blue-100 text-sm mt-1">Configure automated ENS sales posting to Twitter</p>
+                        </div>
+                        <!-- Master Auto-Posting Toggle -->
+                        <button 
+                            @click="toggleAutoPosting()"
+                            :disabled="loading || !apiToggles.twitterEnabled"
+                            :class="autoPostSettings.enabled ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-500 hover:bg-gray-600'"
+                            class="relative inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <i :class="autoPostSettings.enabled ? 'fas fa-play' : 'fas fa-pause'" class="mr-2"></i>
+                            <span x-text="autoPostSettings.enabled ? 'Auto-Posting ON' : 'Auto-Posting OFF'"></span>
+                        </button>
+                    </div>
+                    
+                                        <!-- Transaction-Specific Settings Grid -->
+                    <div class="space-y-3">
+                        <!-- Sales Auto-Posting -->
+                        <div class="bg-white/10 backdrop-blur rounded-lg p-3">
+                            <div class="flex items-center justify-between mb-3">
+                                <div class="flex items-center">
+                                    <i class="fas fa-dollar-sign text-green-400 mr-2"></i>
+                                    <span class="text-sm font-medium text-blue-100">Sales Auto-Posting</span>
+                                </div>
+                                <button 
+                                    @click="toggleTransactionAutoPost('sales')"
+                                    :disabled="loading || !apiToggles.twitterEnabled"
+                                    :class="autoPostSettings.sales?.enabled ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-500 hover:bg-gray-600'"
+                                    class="px-2 py-1 rounded text-xs font-medium text-white transition-colors disabled:opacity-50"
+                                >
+                                    <span x-text="autoPostSettings.sales?.enabled ? 'ON' : 'OFF'"></span>
+                                </button>
+                            </div>
+                            <div class="grid grid-cols-4 gap-2">
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">Default</label>
+                                    <input type="number" step="0.01" min="0" x-model.number="autoPostSettings.sales.minEthDefault" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">10k Club</label>
+                                    <input type="number" step="0.01" min="0" x-model.number="autoPostSettings.sales.minEth10kClub" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">999 Club</label>
+                                    <input type="number" step="0.01" min="0" x-model.number="autoPostSettings.sales.minEth999Club" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">Max Age (h)</label>
+                                    <input type="number" min="1" max="168" x-model.number="autoPostSettings.sales.maxAgeHours" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
+                            </div>
+                            <button @click="saveTransactionAutoPostSettings('sales')" class="mt-2 px-3 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs font-medium transition-colors">Save Sales Settings</button>
+                        </div>
+
+                        <!-- Registrations Auto-Posting -->
+                        <div class="bg-white/10 backdrop-blur rounded-lg p-3">
+                            <div class="flex items-center justify-between mb-3">
+                                <div class="flex items-center">
+                                    <i class="fas fa-building text-blue-400 mr-2"></i>
+                                    <span class="text-sm font-medium text-blue-100">Registrations Auto-Posting</span>
+                                </div>
+                                <button 
+                                    @click="toggleTransactionAutoPost('registrations')"
+                                    :disabled="loading || !apiToggles.twitterEnabled"
+                                    :class="autoPostSettings.registrations?.enabled ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-500 hover:bg-gray-600'"
+                                    class="px-2 py-1 rounded text-xs font-medium text-white transition-colors disabled:opacity-50"
+                                >
+                                    <span x-text="autoPostSettings.registrations?.enabled ? 'ON' : 'OFF'"></span>
+                                </button>
+                            </div>
+                            <div class="grid grid-cols-4 gap-2">
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">Default</label>
+                                    <input type="number" step="0.01" min="0" x-model.number="autoPostSettings.registrations.minEthDefault" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">10k Club</label>
+                                    <input type="number" step="0.01" min="0" x-model.number="autoPostSettings.registrations.minEth10kClub" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">999 Club</label>
+                                    <input type="number" step="0.01" min="0" x-model.number="autoPostSettings.registrations.minEth999Club" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">Max Age (h)</label>
+                                    <input type="number" min="1" max="168" x-model.number="autoPostSettings.registrations.maxAgeHours" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
+                            </div>
+                            <button @click="saveTransactionAutoPostSettings('registrations')" class="mt-2 px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs font-medium transition-colors">Save Registration Settings</button>
+                        </div>
+
+                        <!-- Bids Auto-Posting -->
+                        <div class="bg-white/10 backdrop-blur rounded-lg p-3">
+                            <div class="flex items-center justify-between mb-3">
+                                <div class="flex items-center">
+                                    <i class="fas fa-hand-paper text-orange-400 mr-2"></i>
+                                    <span class="text-sm font-medium text-blue-100">Bids Auto-Posting</span>
+                                </div>
+                                <button 
+                                    @click="toggleTransactionAutoPost('bids')"
+                                    :disabled="loading || !apiToggles.twitterEnabled"
+                                    :class="autoPostSettings.bids?.enabled ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-500 hover:bg-gray-600'"
+                                    class="px-2 py-1 rounded text-xs font-medium text-white transition-colors disabled:opacity-50"
+                                >
+                                    <span x-text="autoPostSettings.bids?.enabled ? 'ON' : 'OFF'"></span>
+                                </button>
+                            </div>
+                            <div class="grid grid-cols-4 gap-2">
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">Default</label>
+                                    <input type="number" step="0.01" min="0" x-model.number="autoPostSettings.bids.minEthDefault" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">10k Club</label>
+                                    <input type="number" step="0.01" min="0" x-model.number="autoPostSettings.bids.minEth10kClub" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">999 Club</label>
+                                    <input type="number" step="0.01" min="0" x-model.number="autoPostSettings.bids.minEth999Club" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">Max Age (h)</label>
+                                    <input type="number" min="1" max="168" x-model.number="autoPostSettings.bids.maxAgeHours" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
+                            </div>
+                            <button @click="saveTransactionAutoPostSettings('bids')" class="mt-2 px-3 py-1 bg-orange-500 hover:bg-orange-600 text-white rounded text-xs font-medium transition-colors">Save Bid Settings</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Status Info -->
+                    <div class="mt-4 flex items-center space-x-4 text-sm">
+                        <div class="flex items-center">
+                            <div :class="apiToggles.twitterEnabled ? 'bg-green-400' : 'bg-red-400'" class="w-2 h-2 rounded-full mr-2"></div>
+                            <span class="text-blue-100">Twitter API: <span x-text="apiToggles.twitterEnabled ? 'Connected' : 'Disabled'"></span></span>
+                        </div>
+                        <div class="flex items-center">
+                            <div :class="apiToggles.moralisEnabled ? 'bg-green-400' : 'bg-red-400'" class="w-2 h-2 rounded-full mr-2"></div>
+                            <span class="text-blue-100">Moralis API: <span x-text="apiToggles.moralisEnabled ? 'Connected' : 'Disabled'"></span></span>
+                        </div>
+                        <div class="flex items-center space-x-4">
+                            <div class="flex items-center" x-show="autoPostSettings.sales?.enabled">
+                                <div class="bg-green-400 w-2 h-2 rounded-full mr-2 animate-pulse"></div>
+                                <span class="text-blue-100">Sales active</span>
+                            </div>
+                            <div class="flex items-center" x-show="autoPostSettings.registrations?.enabled">
+                                <div class="bg-blue-400 w-2 h-2 rounded-full mr-2 animate-pulse"></div>
+                                <span class="text-blue-100">Registrations active</span>
+                            </div>
+                            <div class="flex items-center" x-show="autoPostSettings.bids?.enabled">
+                                <div class="bg-orange-400 w-2 h-2 rounded-full mr-2 animate-pulse"></div>
+                                <span class="text-blue-100">Bids active</span>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Price Tier Configuration -->
+        <div class="bg-gradient-to-r from-purple-600 to-pink-600 border-b border-gray-200 text-white">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+                <h2 class="text-xl font-semibold mb-4 flex items-center">
+                    <i class="fas fa-sliders-h mr-2"></i>
+                    Image Generation Price Tiers
+                    <span class="ml-3 text-sm font-normal text-purple-200">(Drag markers to adjust thresholds)</span>
+                </h2>
+                
+                <div class="space-y-4">
+                    <!-- Sales Tier Slider -->
+                    <div class="bg-white/10 backdrop-blur rounded-lg p-3">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="font-medium flex items-center text-sm">
+                                <i class="fas fa-dollar-sign text-green-400 mr-2"></i>
+                                Sales Image Tiers
+                            </h3>
+                            <button 
+                                @click="savePriceTiers('sales')"
+                                :disabled="loading"
+                                class="px-3 py-1 bg-purple-500 hover:bg-purple-600 rounded text-xs font-medium transition-colors disabled:opacity-50"
+                            >
+                                Save
+                            </button>
+                        </div>
+                        
+                        <!-- NoUISlider Container -->
+                        <div class="px-4 py-2">
+                            <div id="sales-slider" class="mb-2"></div>
+                        </div>
+                        
+                    </div>
+                    
+                    <!-- Registrations Tier Slider -->
+                    <div class="bg-white/10 backdrop-blur rounded-lg p-3">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="font-medium flex items-center text-sm">
+                                <i class="fas fa-building text-blue-400 mr-2"></i>
+                                Registration Image Tiers
+                            </h3>
+                            <button 
+                                @click="savePriceTiers('registrations')"
+                                :disabled="loading"
+                                class="px-3 py-1 bg-purple-500 hover:bg-purple-600 rounded text-xs font-medium transition-colors disabled:opacity-50"
+                            >
+                                Save
+                            </button>
+                        </div>
+                        
+                        <!-- NoUISlider Container -->
+                        <div class="px-4 py-2">
+                            <div id="registrations-slider" class="mb-2"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Bids Tier Slider -->
+                    <div class="bg-white/10 backdrop-blur rounded-lg p-3">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="font-medium flex items-center text-sm">
+                                <i class="fas fa-hand-paper text-orange-400 mr-2"></i>
+                                Bid/Offer Image Tiers
+                            </h3>
+                            <button 
+                                @click="savePriceTiers('bids')"
+                                :disabled="loading"
+                                class="px-3 py-1 bg-purple-500 hover:bg-purple-600 rounded text-xs font-medium transition-colors disabled:opacity-50"
+                            >
+                                Save
+                            </button>
+                        </div>
+                        
+                        <!-- NoUISlider Container -->
+                        <div class="px-4 py-2">
+                            <div id="bids-slider" class="mb-2"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
 
         <!-- Main Content -->
         <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
