@@ -1,10 +1,11 @@
 import { logger } from '../utils/logger';
-import { MockImageData } from '../types/imageTypes';
+import { ImageData } from '../types/imageTypes';
 import { IDatabaseService } from '../types';
 import { emojiMappingService } from './emojiMappingService';
 import { RealImageData } from './realDataImageService';
 import * as fs from 'fs';
 import * as path from 'path';
+import axios from 'axios';
 
 export class PuppeteerImageService {
   private static readonly IMAGE_WIDTH = 1000;
@@ -14,8 +15,8 @@ export class PuppeteerImageService {
    * Generate ENS registration image using Puppeteer
    */
   public static async generateRegistrationImage(data: RealImageData, databaseService?: IDatabaseService): Promise<Buffer> {
-    // Convert RealImageData to MockImageData format for compatibility
-    const mockData: MockImageData = {
+    // Convert RealImageData to ImageData format for compatibility
+    const mockData: ImageData = {
       priceEth: data.priceEth,
       priceUsd: data.priceUsd,
       ensName: data.ensName,
@@ -36,14 +37,14 @@ export class PuppeteerImageService {
   /**
    * Generate ENS sale image using Puppeteer
    */
-  public static async generateSaleImage(data: MockImageData, databaseService?: IDatabaseService): Promise<Buffer> {
+  public static async generateSaleImage(data: ImageData, databaseService?: IDatabaseService): Promise<Buffer> {
     return await this.generateImageWithBackground(data, 'sale', databaseService);
   }
 
   /**
    * Generate ENS bid image using Puppeteer
    */
-  public static async generateBidImage(data: MockImageData, databaseService?: IDatabaseService): Promise<Buffer> {
+  public static async generateBidImage(data: ImageData, databaseService?: IDatabaseService): Promise<Buffer> {
     return await this.generateImageWithBackground(data, 'bid', databaseService);
   }
 
@@ -51,7 +52,7 @@ export class PuppeteerImageService {
    * Generate image with specified background type
    */
   private static async generateImageWithBackground(
-    data: MockImageData, 
+    data: ImageData, 
     imageType: 'sale' | 'registration' | 'bid', 
     databaseService?: IDatabaseService
   ): Promise<Buffer> {
@@ -140,7 +141,7 @@ export class PuppeteerImageService {
   }
 
   /**
-   * Load image file as base64 string
+   * Load image file as base64 string (local files only)
    */
   private static loadAsBase64(imagePath: string): string {
     try {
@@ -150,6 +151,36 @@ export class PuppeteerImageService {
       logger.error(`Failed to load image from ${imagePath}:`, error);
       // Return a 1x1 transparent pixel as fallback
       return 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    }
+  }
+
+  /**
+   * Load remote image URL as base64 data URL
+   */
+  private static async loadRemoteImageAsBase64(imageUrl: string): Promise<string | null> {
+    try {
+      logger.debug(`Loading remote avatar: ${imageUrl}`);
+      
+      const response = await axios.get(imageUrl, {
+        responseType: 'arraybuffer',
+        timeout: 10000, // 10 second timeout
+        headers: {
+          'User-Agent': 'ENS-TwitterBot/1.0'
+        }
+      });
+
+      const imageBuffer = Buffer.from(response.data);
+      const base64 = imageBuffer.toString('base64');
+      
+      // Detect image type from response headers
+      const contentType = response.headers['content-type'] || 'image/png';
+      
+      logger.debug(`Successfully loaded avatar: ${imageUrl} (${contentType})`);
+      return `data:${contentType};base64,${base64}`;
+      
+    } catch (error: any) {
+      logger.warn(`Failed to load remote image ${imageUrl}:`, error.message);
+      return null;
     }
   }
 
@@ -174,7 +205,7 @@ export class PuppeteerImageService {
    * Get dynamic template path based on transaction type and price tier
    */
   private static async getTemplatePath(
-    data: MockImageData, 
+    data: ImageData, 
     imageType: 'sale' | 'registration' | 'bid',
     databaseService?: IDatabaseService
   ): Promise<string> {
@@ -237,7 +268,7 @@ export class PuppeteerImageService {
    * Generate HTML template with embedded CSS - NEW EXACT POSITIONING WITH DYNAMIC TEMPLATES
    */
   private static async generateHTML(
-    data: MockImageData, 
+    data: ImageData, 
     imageType: 'sale' | 'registration' | 'bid' = 'sale',
     databaseService?: IDatabaseService
   ): Promise<string> {
@@ -256,8 +287,25 @@ export class PuppeteerImageService {
     // Use actual images or fallbacks
     const templateImagePath = `data:image/png;base64,${backgroundImageBase64}`;
     const ensNftImagePath = data.nftImageUrl || `data:image/png;base64,${ensPlaceholderBase64}`;
-    const sellerAvatarPath = data.sellerAvatar || `data:image/png;base64,${userPlaceholderBase64}`;
-    const buyerAvatarPath = data.buyerAvatar || `data:image/png;base64,${userPlaceholderBase64}`;
+    
+    // Convert avatar URLs to base64 data URLs (like other images)
+    let sellerAvatarPath = `data:image/png;base64,${userPlaceholderBase64}`;
+    if (data.sellerAvatar) {
+      const sellerAvatarBase64 = await this.loadRemoteImageAsBase64(data.sellerAvatar);
+      if (sellerAvatarBase64) {
+        sellerAvatarPath = sellerAvatarBase64;
+        logger.debug(`Loaded seller avatar successfully: ${data.sellerAvatar}`);
+      }
+    }
+    
+    let buyerAvatarPath = `data:image/png;base64,${userPlaceholderBase64}`;
+    if (data.buyerAvatar) {
+      const buyerAvatarBase64 = await this.loadRemoteImageAsBase64(data.buyerAvatar);
+      if (buyerAvatarBase64) {
+        buyerAvatarPath = buyerAvatarBase64;
+        logger.debug(`Loaded buyer avatar successfully: ${data.buyerAvatar}`);
+      }
+    }
     
     // Replace emojis in text fields with SVG elements
     const ensNameWithEmojis = await emojiMappingService.replaceEmojisWithSvg(data.ensName);
@@ -553,7 +601,7 @@ export class PuppeteerImageService {
   /**
    * Get mock data for testing
    */
-  public static getMockData(): MockImageData {
+  public static getMockData(): ImageData {
     return {
       priceEth: 5.51,
       priceUsd: 22560.01,

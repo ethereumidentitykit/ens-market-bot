@@ -1,5 +1,5 @@
 import { logger } from '../utils/logger';
-import { MockImageData } from '../types/imageTypes';
+import { ImageData } from '../types/imageTypes';
 import { IDatabaseService } from '../types';
 import { emojiMappingService } from './emojiMappingService';
 import { RealImageData } from './realDataImageService';
@@ -14,8 +14,8 @@ export class PuppeteerImageService {
    * Generate ENS registration image using Puppeteer
    */
   public static async generateRegistrationImage(data: RealImageData): Promise<Buffer> {
-    // Convert RealImageData to MockImageData format for compatibility
-    const mockData: MockImageData = {
+    // Convert RealImageData to ImageData format for compatibility
+    const mockData: ImageData = {
       priceEth: data.priceEth,
       priceUsd: data.priceUsd,
       ensName: data.ensName,
@@ -36,14 +36,14 @@ export class PuppeteerImageService {
   /**
    * Generate ENS sale image using Puppeteer
    */
-  public static async generateSaleImage(data: MockImageData): Promise<Buffer> {
+  public static async generateSaleImage(data: ImageData): Promise<Buffer> {
     return await this.generateImageWithBackground(data, 'sale');
   }
 
   /**
    * Generate image with specified background type
    */
-  private static async generateImageWithBackground(data: MockImageData, imageType: 'sale' | 'registration'): Promise<Buffer> {
+  private static async generateImageWithBackground(data: ImageData, imageType: 'sale' | 'registration'): Promise<Buffer> {
     // Environment-aware Puppeteer setup
     const isVercel = process.env.VERCEL === '1';
     
@@ -131,7 +131,7 @@ export class PuppeteerImageService {
   /**
    * Generate HTML template with embedded CSS
    */
-  private static async generateHTML(data: MockImageData, imageType: 'sale' | 'registration' = 'sale'): Promise<string> {
+  private static async generateHTML(data: ImageData, imageType: 'sale' | 'registration' = 'sale'): Promise<string> {
     // Get background image as base64 based on image type
     const backgroundImageBase64 = imageType === 'registration' 
       ? this.getRegistrationBackgroundImageBase64()
@@ -496,7 +496,7 @@ export class PuppeteerImageService {
   /**
    * Get mock data for testing
    */
-  public static getMockData(): MockImageData {
+  public static getMockData(): ImageData {
     return {
       priceEth: 5.51,
       priceUsd: 22560.01,

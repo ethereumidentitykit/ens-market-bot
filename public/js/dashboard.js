@@ -1108,7 +1108,7 @@ function dashboard() {
                     step: 500,
                     margin: 500, // Minimum $500 between handles
                     range: {
-                        'min': 0,
+                        'min': 500,
                         'max': 200000
                     },
                     tooltips: [
@@ -1139,7 +1139,7 @@ function dashboard() {
                     step: 500,
                     margin: 500,
                     range: {
-                        'min': 0,
+                        'min': 500,
                         'max': 200000
                     },
                     tooltips: [
@@ -1170,7 +1170,7 @@ function dashboard() {
                     step: 500,
                     margin: 500,
                     range: {
-                        'min': 0,
+                        'min': 500,
                         'max': 200000
                     },
                     tooltips: [

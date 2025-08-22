@@ -1,7 +1,7 @@
 /**
- * Interface for mock image data used in image generation
+ * Interface for image data used in image generation
  */
-export interface MockImageData {
+export interface ImageData {
   priceEth: number;
   priceUsd: number;
   ensName: string;

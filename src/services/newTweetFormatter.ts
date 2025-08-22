@@ -2,9 +2,10 @@ import { ProcessedSale, ENSRegistration, ENSBid } from '../types';
 import { logger } from '../utils/logger';
 import { EthIdentityService, EthIdentityAccount } from './ethIdentityService';
 import { RealDataImageService, RealImageData } from './realDataImageService';
-import { MockImageData } from '../types/imageTypes';
+import { ImageData } from '../types/imageTypes';
 import { PuppeteerImageService } from './puppeteerImageService';
 import { IDatabaseService } from '../types';
+import { AlchemyService } from './alchemyService';
 
 export interface GeneratedTweet {
   text: string;
@@ -28,7 +29,10 @@ export class NewTweetFormatter {
   private readonly MAX_TWEET_LENGTH = 280;
   private readonly ethIdentityService = new EthIdentityService();
 
-  constructor(private databaseService?: IDatabaseService) {}
+  constructor(
+    private databaseService?: IDatabaseService,
+    private alchemyService?: AlchemyService
+  ) {}
 
   /**
    * Generate a complete tweet with text and image for an ENS registration
@@ -56,7 +60,7 @@ export class NewTweetFormatter {
           const registrationImageData = await this.convertRegistrationToImageData(registration, ownerAccount);
           
           // Generate image buffer using Puppeteer (registration-specific)
-          imageBuffer = await PuppeteerImageService.generateRegistrationImage(registrationImageData);
+          imageBuffer = await PuppeteerImageService.generateRegistrationImage(registrationImageData, this.databaseService);
           
           if (imageBuffer) {
             // Save image for preview
@@ -126,8 +130,11 @@ export class NewTweetFormatter {
           // Convert bid to image data format
           const bidImageData = await this.convertBidToImageData(bid, bidderAccount);
           
-          // Generate image buffer using Puppeteer (bid-specific - reuse registration background for now)
-          imageBuffer = await PuppeteerImageService.generateRegistrationImage(bidImageData);
+          // Convert RealImageData to ImageData for image generation
+          const mockImageData = this.convertRealToImageDataForBid(bidImageData, bid);
+          
+          // Generate image buffer using Puppeteer (bid-specific)
+          imageBuffer = await PuppeteerImageService.generateBidImage(mockImageData, this.databaseService);
           
           if (imageBuffer) {
             // Save image for preview
@@ -200,11 +207,11 @@ export class NewTweetFormatter {
           // Convert sale to image data
           const saleImageData = await realDataService.convertSaleToImageData(sale);
           
-          // Convert RealImageData to MockImageData for image generation
-          const mockImageData = this.convertRealToMockImageData(saleImageData, sale);
+          // Convert RealImageData to ImageData for image generation
+          const mockImageData = this.convertRealToImageData(saleImageData, sale);
           
           // Generate image buffer using Puppeteer
-          imageBuffer = await PuppeteerImageService.generateSaleImage(mockImageData);
+          imageBuffer = await PuppeteerImageService.generateSaleImage(mockImageData, this.databaseService);
           
           // Save image for preview
           const filename = `tweet-image-${sale.id}-${Date.now()}.png`;
@@ -478,6 +485,28 @@ export class NewTweetFormatter {
   }
 
   /**
+   * Get display handle for images (ENS name only, no Twitter handles)
+   * For images, we only want the ENS name without Twitter handles:
+   * - "ensname.eth" (if ENS exists)
+   * - "0xabcd...efg1" (truncated address fallback)
+   */
+  private getImageDisplayHandle(account: EthIdentityAccount | null, fallbackAddress: string): string {
+    if (!account) {
+      return this.shortenAddress(fallbackAddress);
+    }
+
+    const ensName = account.ens?.name;
+    
+    if (ensName) {
+      // Only return ENS name (no Twitter handle for images)
+      return ensName;
+    }
+
+    // Fallback to shortened address
+    return this.shortenAddress(account.address || fallbackAddress);
+  }
+
+  /**
    * Convert ENS registration to image data format for image generation
    */
   private async convertRegistrationToImageData(registration: ENSRegistration, ownerAccount: EthIdentityAccount | null): Promise<RealImageData> {
@@ -490,8 +519,8 @@ export class NewTweetFormatter {
     // Get ENS name for display
     const ensName = registration.fullName || registration.ensName || 'Unknown ENS';
     
-    // Get owner display info
-    const ownerHandle = this.getDisplayHandle(ownerAccount, registration.ownerAddress);
+    // Get owner display info (ENS only for images)
+    const ownerHandle = this.getImageDisplayHandle(ownerAccount, registration.ownerAddress);
     const ownerAvatar = ownerAccount?.ens?.records?.avatar;
     
     const imageData: RealImageData = {
@@ -532,18 +561,45 @@ export class NewTweetFormatter {
     // Get ENS name for display (from database)
     const ensName = bid.ensName || `Token: ${bid.tokenId?.slice(-6) || 'Unknown'}...`;
     
-    // Get bidder display info
-    const bidderHandle = this.getDisplayHandle(bidderAccount, bid.makerAddress);
+    // Get bidder display info (ENS only for images)
+    const bidderHandle = this.getImageDisplayHandle(bidderAccount, bid.makerAddress);
     const bidderAvatar = bidderAccount?.ens?.records?.avatar;
+    
+    // Try to get current owner using Alchemy API
+    let currentOwnerEns = '';
+    let currentOwnerAvatar: string | undefined;
+    
+    if (this.alchemyService && bid.tokenId && bid.contractAddress) {
+      try {
+        logger.debug(`Looking up current owner for token ${bid.tokenId}`);
+        const owners = await this.alchemyService.getOwnersForToken(bid.contractAddress, bid.tokenId);
+        
+        if (owners.length > 0) {
+          const ownerAddress = owners[0]; // ENS tokens typically have only one owner
+          logger.debug(`Found current owner: ${ownerAddress}`);
+          
+          // Get profile info for the owner (ENS only for images)
+          const ownerAccount = await this.getAccountData(ownerAddress);
+          currentOwnerEns = this.getImageDisplayHandle(ownerAccount, ownerAddress);
+          currentOwnerAvatar = ownerAccount?.ens?.records?.avatar;
+          
+          logger.debug(`Current owner display: ${currentOwnerEns}`);
+        } else {
+          logger.debug(`No owners found for token ${bid.tokenId}`);
+        }
+      } catch (error: any) {
+        logger.warn(`Failed to get current owner for token ${bid.tokenId}:`, error.message);
+      }
+    }
     
     const imageData: RealImageData = {
       priceEth,
       priceUsd,
       ensName,
       buyerEns: bidderHandle, // Bidder is the potential "buyer"
-      sellerEns: 'Current Owner', // Placeholder for current owner
+      sellerEns: currentOwnerEns, // Current owner (empty if lookup failed)
       buyerAvatar: bidderAvatar,
-      sellerAvatar: undefined, // We don't know current owner yet
+      sellerAvatar: currentOwnerAvatar,
       nftImageUrl: bid.nftImage, // Use ENS NFT image if available
       saleId: bid.id,
       transactionHash: bid.bidId // Use bid ID as transaction reference
@@ -552,19 +608,21 @@ export class NewTweetFormatter {
     logger.info('Converted bid to image data:', {
       ensName: imageData.ensName,
       bidderEns: imageData.buyerEns,
+      currentOwnerEns: imageData.sellerEns,
       priceEth: imageData.priceEth,
       priceUsd: imageData.priceUsd,
       hasNftImage: !!imageData.nftImageUrl,
-      hasBidderAvatar: !!imageData.buyerAvatar
+      hasBidderAvatar: !!imageData.buyerAvatar,
+      hasCurrentOwnerAvatar: !!imageData.sellerAvatar
     });
 
     return imageData;
   }
 
   /**
-   * Convert RealImageData to MockImageData for image generation
+   * Convert RealImageData to ImageData for image generation
    */
-  private convertRealToMockImageData(realData: RealImageData, sale: ProcessedSale): MockImageData {
+  private convertRealToImageData(realData: RealImageData, sale: ProcessedSale): ImageData {
     return {
       priceEth: realData.priceEth,
       priceUsd: realData.priceUsd,
@@ -577,6 +635,26 @@ export class NewTweetFormatter {
       sellerEns: realData.sellerEns,
       sellerAvatar: realData.sellerAvatar,
       transactionHash: sale.transactionHash,
+      timestamp: new Date() // Use current timestamp
+    };
+  }
+
+  /**
+   * Convert RealImageData to ImageData for bid image generation
+   */
+  private convertRealToImageDataForBid(realData: RealImageData, bid: ENSBid): ImageData {
+    return {
+      priceEth: realData.priceEth,
+      priceUsd: realData.priceUsd,
+      ensName: realData.ensName,
+      nftImageUrl: realData.nftImageUrl,
+      buyerAddress: bid.makerAddress, // Bidder is the potential buyer
+      buyerEns: realData.buyerEns,
+      buyerAvatar: realData.buyerAvatar,
+      sellerAddress: '', // No seller address available for bids
+      sellerEns: realData.sellerEns,
+      sellerAvatar: realData.sellerAvatar,
+      transactionHash: bid.bidId, // Use bid ID as transaction reference
       timestamp: new Date() // Use current timestamp
     };
   }

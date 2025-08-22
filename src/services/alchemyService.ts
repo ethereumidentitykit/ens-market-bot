@@ -170,6 +170,45 @@ export class AlchemyService {
   }
 
   /**
+   * Get owners for a specific NFT token
+   * @param contractAddress - The contract address (e.g., ENS contract)
+   * @param tokenId - The token ID to get owners for
+   */
+  async getOwnersForToken(contractAddress: string, tokenId: string): Promise<string[]> {
+    try {
+      const url = `${this.baseUrl}/nft/v2/${this.apiKey}/getOwnersForToken`;
+      
+      const params = {
+        contractAddress,
+        tokenId
+      };
+
+      logger.debug(`Fetching owners for token ${tokenId} on contract ${contractAddress}`);
+
+      const response: AxiosResponse<{ owners: string[] }> = await axios.get(url, {
+        params,
+        timeout: 10000, // 10 second timeout
+      });
+
+      const owners = response.data.owners || [];
+      logger.debug(`Found ${owners.length} owners for token ${tokenId}`);
+      return owners;
+
+    } catch (error: any) {
+      logger.error(`Failed to fetch owners for token ${tokenId}:`, error.message);
+      
+      if (error.response) {
+        logger.error('API response error:', {
+          status: error.response.status,
+          data: error.response.data
+        });
+      }
+      
+      return []; // Return empty array on failure
+    }
+  }
+
+  /**
    * Test the API connection and configuration
    */
   async testConnection(): Promise<boolean> {

@@ -6,6 +6,7 @@ import { config, validateConfig } from './utils/config';
 import { logger } from './utils/logger';
 import { MONITORED_CONTRACTS } from './config/contracts';
 import { MoralisService } from './services/moralisService';
+import { AlchemyService } from './services/alchemyService';
 import { DatabaseService } from './services/databaseService';
 import { IDatabaseService, ENSRegistration } from './types';
 import { SalesProcessingService } from './services/salesProcessingService';
@@ -29,6 +30,7 @@ async function startApplication(): Promise<void> {
 
     // Initialize services
     const moralisService = new MoralisService();
+    const alchemyService = new AlchemyService();
     
     // Initialize PostgreSQL database service
     const databaseService: IDatabaseService = new DatabaseService();
@@ -38,7 +40,7 @@ async function startApplication(): Promise<void> {
     const bidsProcessingService = new BidsProcessingService(magicEdenService, databaseService, moralisService);
     const twitterService = new TwitterService();
     const tweetFormatter = new TweetFormatter();
-    const newTweetFormatter = new NewTweetFormatter(databaseService);
+    const newTweetFormatter = new NewTweetFormatter(databaseService, alchemyService);
     const rateLimitService = new RateLimitService(databaseService);
     const ethIdentityService = new EthIdentityService();
     const worldTimeService = new WorldTimeService();
@@ -1466,7 +1468,7 @@ async function startApplication(): Promise<void> {
         
         logger.info('Generating custom registration image with provided data');
         
-        // Convert MockImageData to RealImageData format for registration
+        // Convert ImageData to RealImageData format for registration
         const realImageData = {
           priceEth: mockData.priceEth,
           priceUsd: mockData.priceUsd,
@@ -1530,7 +1532,7 @@ async function startApplication(): Promise<void> {
         
         logger.info('Generating custom bid image with provided data');
         
-        // Use MockImageData format directly for bids
+        // Use ImageData format directly for bids
         const startTime = Date.now();
         const { PuppeteerImageService } = await import('./services/puppeteerImageService');
         const imageBuffer = await PuppeteerImageService.generateBidImage(mockData, databaseService);
