@@ -103,20 +103,19 @@ export class PuppeteerImageService {
 
       // Generate HTML content with emoji replacement and background type
       const htmlContent = await this.generateHTML(data, imageType, databaseService);
+      logger.debug(`Generated HTML content length: ${htmlContent.length} chars`);
       
       // Set the HTML content
+      const contentStartTime = Date.now();
       await page.setContent(htmlContent, { 
-        waitUntil: 'networkidle0',
-        timeout: 15000 
+        waitUntil: 'domcontentloaded',
+        timeout: 30000 // Increased timeout to 30s but using faster wait condition
       });
+      logger.debug(`Page content loaded in ${Date.now() - contentStartTime}ms`);
 
-      // Wait for fonts to load
-      await page.evaluateOnNewDocument(() => {
-        document.fonts.ready;
-      });
-      
-      // Small delay to ensure fonts are rendered
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Small delay to ensure fonts and rendering are complete
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      logger.debug('Fonts and rendering delay complete, proceeding with image generation');
 
       // Take screenshot
       const screenshot = await page.screenshot({
@@ -159,11 +158,17 @@ export class PuppeteerImageService {
    */
   private static async loadRemoteImageAsBase64(imageUrl: string): Promise<string | null> {
     try {
-      logger.debug(`Loading remote avatar: ${imageUrl}`);
+      logger.debug(`Loading avatar: ${imageUrl.substring(0, 100)}...`);
+      
+      // If it's already a data URL, return it as-is
+      if (imageUrl.startsWith('data:')) {
+        logger.debug(`Avatar is already a data URL, using as-is`);
+        return imageUrl;
+      }
       
       // Only proceed if we have a valid HTTP/HTTPS URL
       if (!imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) {
-        logger.warn(`Invalid avatar URL protocol: ${imageUrl}`);
+        logger.warn(`Invalid avatar URL protocol: ${imageUrl.substring(0, 100)}...`);
         return null;
       }
       
