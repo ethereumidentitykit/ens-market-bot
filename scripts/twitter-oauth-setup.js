@@ -5,6 +5,9 @@
  * Run this script to get your ACCESS_TOKEN and ACCESS_TOKEN_SECRET
  */
 
+// Load environment variables from .env file
+require('dotenv').config();
+
 const OAuth = require('oauth-1.0a');
 const crypto = require('crypto');
 const https = require('https');
@@ -14,7 +17,7 @@ const readline = require('readline');
 const config = {
   consumer_key: process.env.TWITTER_API_KEY || 'YOUR_API_KEY_HERE',
   consumer_secret: process.env.TWITTER_API_SECRET || 'YOUR_API_SECRET_HERE',
-  callback_url: process.env.TWITTER_CALLBACK_URL || 'http://192.135.112.98:3000/auth/twitter/callback'
+  callback_url: 'oob' // Out-of-band - Twitter will show a PIN instead of redirecting
 };
 
 // Validate configuration
@@ -116,20 +119,17 @@ async function startOAuthFlow() {
     console.log('1. Open this URL in your browser:');
     console.log(`   ${authUrl}`);
     console.log('2. Log in to Twitter and authorize the app');
-    console.log('3. You will be redirected to your callback URL');
-    console.log('4. Copy the full callback URL and paste it below\n');
+    console.log('3. Twitter will show you a PIN code on the page');
+    console.log('4. Copy the PIN code and paste it below\n');
     
-    const callbackUrl = await new Promise((resolve) => {
-      rl.question('📎 Paste the full callback URL here: ', resolve);
+    const oauthVerifier = await new Promise((resolve) => {
+      rl.question('📎 Enter the PIN code from Twitter: ', resolve);
     });
     
-    // Parse the callback URL to get oauth_verifier
-    const urlParams = new URL(callbackUrl);
-    const oauthVerifier = urlParams.searchParams.get('oauth_verifier');
-    const oauthToken = urlParams.searchParams.get('oauth_token');
+    const oauthToken = requestTokens.oauth_token;
     
     if (!oauthVerifier || !oauthToken) {
-      throw new Error('Invalid callback URL. Please make sure you copied the complete URL.');
+      throw new Error('Invalid PIN code. Please make sure you copied the complete PIN.');
     }
     
     console.log('✅ Authorization code received');
