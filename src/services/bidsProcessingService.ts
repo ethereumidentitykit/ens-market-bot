@@ -172,6 +172,7 @@ export class BidsProcessingService {
 
   /**
    * Enrich bid with ENS metadata (image, description)
+   * Only calls ENS service if Magic Eden didn't provide name/image
    */
   private async enrichBidWithMetadata(bid: any): Promise<any> {
     try {
@@ -179,7 +180,22 @@ export class BidsProcessingService {
         return bid;
       }
 
-      logger.debug(`🖼️  Fetching ENS metadata for token ID: ${bid.tokenId}`);
+      // Check if Magic Eden already provided metadata (80-90% of cases)
+      const hasName = !!bid.ensName;
+      const hasImage = !!bid.nftImage;
+      
+      logger.debug(`🔍 Magic Eden metadata check - Name: ${hasName ? `"${bid.ensName}"` : 'missing'}, Image: ${hasImage ? 'provided' : 'missing'}`);
+      
+      if (hasName && hasImage) {
+        logger.debug(`✅ Using Magic Eden metadata for ${bid.ensName} (no API call needed)`);
+        return {
+          ...bid,
+          nftDescription: undefined, // Magic Eden doesn't provide description
+        };
+      }
+
+      // Only fetch from ENS service if missing data
+      logger.debug(`🖼️  Fetching missing ENS metadata for token ID: ${bid.tokenId} (name: ${hasName ? '✓' : '✗'}, image: ${hasImage ? '✓' : '✗'})`);
       const metadataStartTime = Date.now();
       
       // Use ENS Base Registrar contract for metadata
@@ -194,8 +210,9 @@ export class BidsProcessingService {
       
       return {
         ...bid,
-        ensName: metadata.name, // Store the actual ENS name
-        nftImage: metadata.image || metadata.image_url,
+        // Use Magic Eden data if available, otherwise ENS metadata
+        ensName: bid.ensName || metadata.name,
+        nftImage: bid.nftImage || metadata.image || metadata.image_url,
         nftDescription: metadata.description,
       };
 
@@ -278,6 +295,7 @@ export class BidsProcessingService {
 
   /**
    * Get ETH minimum requirement for a bid based on ENS name category
+   * Uses Magic Eden data first, only calls ENS service if name is missing
    */
   private async getEthMinimumForBid(bid: any): Promise<number> {
     try {
@@ -286,12 +304,17 @@ export class BidsProcessingService {
       const club10kMin = await this.databaseService.getSystemState('autopost_bids_min_eth_10k') || '1.0';
       const club999Min = await this.databaseService.getSystemState('autopost_bids_min_eth_999') || '0.5';
       
-      // We need the ENS name to determine the category
-      let ensName = '';
+      // Use Magic Eden name if available (80-90% of cases)
+      let ensName = bid.ensName || '';
       
-      if (bid.tokenId) {
+      if (ensName) {
+        logger.debug(`🚀 Using Magic Eden name for filtering: "${ensName}" (no API call needed)`);
+      }
+      
+      // Only call ENS service if Magic Eden didn't provide the name
+      if (!ensName && bid.tokenId) {
         try {
-          // Quick ENS name resolution for filtering  
+          logger.debug(`🔍 Fetching ENS name for filtering (Magic Eden didn't provide): ${bid.tokenId}`);
           const ensContract = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
           const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
           
@@ -299,9 +322,10 @@ export class BidsProcessingService {
           if (response.ok) {
             const metadata = await response.json();
             ensName = metadata.name || '';
+            logger.debug(`✅ ENS name resolved: ${ensName}`);
           }
         } catch (error) {
-          // If resolution fails, use default threshold
+          logger.debug(`⚠️  ENS name resolution failed, using default threshold`);
           return parseFloat(defaultMin);
         }
       }

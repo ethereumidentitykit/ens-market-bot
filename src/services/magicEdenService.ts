@@ -53,7 +53,7 @@ export class MagicEdenService {
       const params: any = {
         contracts: this.ensContracts,
         status: 'active',
-        includeCriteriaMetadata: false,
+        includeCriteriaMetadata: true, // Enable metadata to get ENS names and images
         includeRawData: false,
         includeDepth: false,
         excludeEOA: false,
@@ -229,6 +229,9 @@ export class MagicEdenService {
     validFrom: number;
     validUntil: number;
     processedAt: string;
+    // Magic Eden metadata (when includeCriteriaMetadata=true)
+    ensName?: string;
+    nftImage?: string;
   } {
     return {
       bidId: magicEdenBid.id,
@@ -249,7 +252,10 @@ export class MagicEdenService {
       updatedAtApi: magicEdenBid.updatedAt,
       validFrom: magicEdenBid.validFrom,
       validUntil: magicEdenBid.validUntil,
-      processedAt: new Date().toISOString()
+      processedAt: new Date().toISOString(),
+      // Extract Magic Eden metadata when available (handle null values)
+      ensName: (magicEdenBid.criteria?.data?.token?.name && magicEdenBid.criteria.data.token.name !== 'null') ? magicEdenBid.criteria.data.token.name : undefined,
+      nftImage: (magicEdenBid.criteria?.data?.token?.image && magicEdenBid.criteria.data.token.image !== 'null') ? magicEdenBid.criteria.data.token.image : undefined
     };
   }
 
