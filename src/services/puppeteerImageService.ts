@@ -246,14 +246,14 @@ export class PuppeteerImageService {
   }
 
   /**
-   * Format ETH value to 1 decimal place
+   * Format ETH value to 2 decimal places
    */
   private static formatEthPrice(priceEth: string | number): string {
     const numericPrice = parseFloat(priceEth.toString());
     
-    // Return formatted ETH price with 1 decimal place
+    // Return formatted ETH price with 2 decimal places
     if (!isNaN(numericPrice)) {
-      return numericPrice.toFixed(1);
+      return numericPrice.toFixed(2);
     }
     
     // Return original if parsing fails
