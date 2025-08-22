@@ -27,6 +27,8 @@ export class BidsProcessingService {
     this.alchemyService = alchemyService;
   }
 
+
+
   /**
    * Process new ENS bids using timestamp-based pagination
    * Implements reliable processing with downtime recovery
@@ -266,7 +268,7 @@ export class BidsProcessingService {
       }
 
       // Default minimum for other currencies  
-      return priceEth >= 0.1; // Consistent 0.1 ETH equivalent for all currencies
+      return priceEth >= 0.4; // Increased fallback
 
     } catch (error: any) {
       logger.error(`Error in bid filtering:`, error.message);
@@ -279,13 +281,17 @@ export class BidsProcessingService {
    */
   private async getEthMinimumForBid(bid: any): Promise<number> {
     try {
+      // Simple database lookups for limits
+      const defaultMin = await this.databaseService.getSystemState('autopost_bids_min_eth_default') || '0.4';
+      const club10kMin = await this.databaseService.getSystemState('autopost_bids_min_eth_10k') || '1.0';
+      const club999Min = await this.databaseService.getSystemState('autopost_bids_min_eth_999') || '0.5';
+      
       // We need the ENS name to determine the category
-      // If we don't have it cached, resolve it temporarily for filtering
       let ensName = '';
       
       if (bid.tokenId) {
         try {
-          // Temporary ENS name resolution for filtering  
+          // Quick ENS name resolution for filtering  
           const ensContract = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
           const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
           
@@ -296,25 +302,24 @@ export class BidsProcessingService {
           }
         } catch (error) {
           // If resolution fails, use default threshold
-          return this.getDefaultBidMinimums().minEthDefault;
+          return parseFloat(defaultMin);
         }
       }
 
       // Apply club-aware logic
       const patterns = this.getClubPatterns();
-      const minimums = this.getDefaultBidMinimums();
 
       if (patterns.CLUB_999_PATTERN.test(ensName)) {
-        return minimums.minEth999Club;
+        return parseFloat(club999Min);
       } else if (patterns.CLUB_10K_PATTERN.test(ensName)) {
-        return minimums.minEth10kClub;
+        return parseFloat(club10kMin);
       } else {
-        return minimums.minEthDefault;
+        return parseFloat(defaultMin);
       }
 
     } catch (error: any) {
       logger.warn(`Error determining ETH minimum for bid:`, error.message);
-      return this.getDefaultBidMinimums().minEthDefault;
+      return 0.4; // Fallback
     }
   }
 
@@ -328,16 +333,7 @@ export class BidsProcessingService {
     };
   }
 
-  /**
-   * Get default bid minimums for ingestion (will be filtered again pre-tweet)
-   */
-  private getDefaultBidMinimums() {
-    return {
-      minEthDefault: 0.1,     // Base minimum for ingestion - 0.1 ETH
-      minEth10kClub: 0.1,     // Same for all categories at ingestion
-      minEth999Club: 0.1      // Club-specific filtering happens pre-tweet
-    };
-  }
+
 
   /**
    * Calculate human-readable bid duration
