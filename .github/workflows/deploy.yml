@@ -37,40 +37,130 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
           script: |
+            set -e  # Exit immediately if any command fails
+            set -u  # Exit on undefined variables
+            set -o pipefail  # Exit on pipe failures
+            
             echo "🚀 Starting deployment..."
             
             # Navigate to project directory
             cd /var/www/twitterbot || { echo "❌ Project directory not found"; exit 1; }
+            echo "✅ In project directory: $(pwd)"
             
             # Pull latest changes
             echo "📥 Pulling latest changes..."
-            git pull origin main
+            if ! git pull origin main; then
+              echo "❌ Failed to pull latest changes"
+              exit 1
+            fi
+            echo "✅ Git pull completed"
             
             # Install dependencies (including dev deps for build)
             echo "📦 Installing dependencies..."
-            npm ci
+            if ! npm ci; then
+              echo "❌ Failed to install dependencies"
+              exit 1
+            fi
+            echo "✅ Dependencies installed"
             
             # Build the project
             echo "🔨 Building project..."
-            npm run build
+            if ! npm run build; then
+              echo "❌ Build failed"
+              exit 1
+            fi
+            echo "✅ Build completed"
+            
+            # Verify build output exists
+            if [ ! -d "dist" ] || [ -z "$(ls -A dist)" ]; then
+              echo "❌ Build output directory 'dist' is empty or missing"
+              exit 1
+            fi
+            echo "✅ Build output verified: $(ls -1 dist/ | wc -l) files in dist/"
             
             # Install production-only dependencies for runtime
             echo "📦 Installing production dependencies..."
-            npm ci --omit=dev
+            if ! npm ci --omit=dev; then
+              echo "❌ Failed to install production dependencies"
+              exit 1
+            fi
+            echo "✅ Production dependencies installed"
             
-            # Restart the application with PM2
-            echo "🔄 Restarting application..."
-            pm2 reload xbot --update-env || pm2 start dist/index.js --name xbot
+            # Handle PM2 restart/start properly
+            echo "🔄 Managing PM2 process..."
+            if pm2 list | grep -q "xbot.*online"; then
+              echo "🔄 Reloading existing PM2 process..."
+              if ! pm2 reload xbot --update-env; then
+                echo "❌ Failed to reload PM2 process"
+                exit 1
+              fi
+              echo "✅ PM2 process reloaded"
+            else
+              echo "🚀 Starting new PM2 process..."
+              if ! pm2 start dist/index.js --name xbot; then
+                echo "❌ Failed to start PM2 process"
+                exit 1
+              fi
+              echo "✅ PM2 process started"
+            fi
             
-            # Show PM2 status
+            # Wait for process to start
+            sleep 3
+            
+            # Verify the process is actually running
+            echo "🔍 Verifying deployment..."
             pm2 status
             
+            if ! pm2 list | grep "xbot" | grep -q "online"; then
+              echo "❌ Application failed to start properly"
+              echo "📝 Recent logs:"
+              pm2 logs xbot --lines 20 --nostream || true
+              exit 1
+            fi
+            
+            # Save PM2 configuration
+            pm2 save
+            
             echo "✅ Deployment completed successfully at $(date)"
+            echo "🎉 Application is running and healthy!"
             
       - name: Deployment Status
         if: success()
-        run: echo "✅ Deployment to VPS completed successfully!"
+        run: |
+          echo "✅ Deployment to VPS completed successfully!"
+          echo "🎉 Application should be running at your VPS"
         
-      - name: Deployment Failed
+      - name: Deployment Failed - Get Logs
         if: failure()
-        run: echo "❌ Deployment failed. Check the logs above."
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            echo "❌ Deployment failed. Gathering debug info..."
+            echo ""
+            echo "📊 PM2 Status:"
+            pm2 status || echo "PM2 not running"
+            echo ""
+            echo "📝 Recent application logs:"
+            pm2 logs xbot --lines 30 --nostream || echo "No logs available"
+            echo ""
+            echo "🔍 System status:"
+            echo "  Node version: $(node --version)"
+            echo "  NPM version: $(npm --version)"
+            echo "  PM2 version: $(pm2 --version)"
+            echo "  Disk space: $(df -h /var/www/twitterbot 2>/dev/null | tail -1 || echo 'N/A')"
+        continue-on-error: true
+        
+      - name: Notify Deployment Status
+        if: failure()
+        run: |
+          echo "❌ Deployment failed!"
+          echo "📋 Check the 'Deployment Failed - Get Logs' step above for detailed error information"
+          echo "🔧 Common fixes:"
+          echo "  1. Check environment variables on VPS"
+          echo "  2. Verify database connectivity"
+          echo "  3. Check disk space and permissions"
+          echo "  4. Review application logs for specific errors"
