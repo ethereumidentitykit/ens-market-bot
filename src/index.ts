@@ -37,7 +37,7 @@ async function startApplication(): Promise<void> {
     
     const salesProcessingService = new SalesProcessingService(moralisService, databaseService);
     const magicEdenService = new MagicEdenService();
-    const bidsProcessingService = new BidsProcessingService(magicEdenService, databaseService, moralisService);
+    const bidsProcessingService = new BidsProcessingService(magicEdenService, databaseService, alchemyService);
     const twitterService = new TwitterService();
     const tweetFormatter = new TweetFormatter();
     const newTweetFormatter = new NewTweetFormatter(databaseService, alchemyService);
@@ -96,6 +96,31 @@ async function startApplication(): Promise<void> {
       } catch (error: any) {
         res.status(500).json({
           success: false,
+          error: error.message
+        });
+      }
+    });
+
+    // Test Alchemy ETH price endpoint
+    app.get('/api/test-alchemy-price', async (req, res) => {
+      try {
+        const startTime = Date.now();
+        const ethPrice = await alchemyService.getETHPriceUSD();
+        const fetchTime = Date.now() - startTime;
+        
+        res.json({
+          success: true,
+          message: 'Alchemy ETH price fetched successfully',
+          data: {
+            ethPriceUsd: ethPrice,
+            fetchTimeMs: fetchTime,
+            timestamp: new Date().toISOString()
+          }
+        });
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          message: 'Error fetching ETH price from Alchemy',
           error: error.message
         });
       }
@@ -2109,7 +2134,7 @@ async function startApplication(): Promise<void> {
               // Get current ETH price in USD for cost calculation
               let costUsd: string | undefined;
               try {
-                const ethPriceUsd = await moralisService.getETHPriceUSD();
+                const ethPriceUsd = await alchemyService.getETHPriceUSD();
                 if (ethPriceUsd) {
                   const costInUsd = parseFloat(costInEth) * ethPriceUsd;
                   costUsd = costInUsd.toFixed(2);

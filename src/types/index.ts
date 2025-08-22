@@ -39,6 +39,17 @@ export interface AlchemyNFTSalesResponse {
   };
 }
 
+export interface AlchemyPriceResponse {
+  data: Array<{
+    symbol: string;
+    prices: Array<{
+      currency: string;
+      value: string;
+      lastUpdatedAt: string;
+    }>;
+  }>;
+}
+
 // Price Tier Configuration
 export interface PriceTier {
   id?: number;

@@ -1,7 +1,7 @@
 import { MagicEdenService } from './magicEdenService';
 import { IDatabaseService, ENSBid, BidProcessingStats, MagicEdenBid } from '../types';
 import { logger } from '../utils/logger';
-import { MoralisService } from './moralisService';
+import { AlchemyService } from './alchemyService';
 import axios from 'axios';
 
 interface ENSMetadata {
@@ -15,16 +15,16 @@ interface ENSMetadata {
 export class BidsProcessingService {
   private magicEdenService: MagicEdenService;
   private databaseService: IDatabaseService;
-  private moralisService: MoralisService; // For ETH price and ENS metadata
+  private alchemyService: AlchemyService; // For ETH price
 
   constructor(
     magicEdenService: MagicEdenService, 
     databaseService: IDatabaseService,
-    moralisService: MoralisService
+    alchemyService: AlchemyService
   ) {
     this.magicEdenService = magicEdenService;
     this.databaseService = databaseService;
-    this.moralisService = moralisService;
+    this.alchemyService = alchemyService;
   }
 
   /**
@@ -224,7 +224,7 @@ export class BidsProcessingService {
       }
 
       const pricingStartTime = Date.now();
-      const ethPriceUSD = await this.moralisService.getETHPriceUSD();
+      const ethPriceUSD = await this.alchemyService.getETHPriceUSD();
       const pricingTime = Date.now() - pricingStartTime;
       
       if (ethPriceUSD) {
