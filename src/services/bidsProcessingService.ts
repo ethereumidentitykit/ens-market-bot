@@ -46,22 +46,12 @@ export class BidsProcessingService {
       // Get last processed timestamp and apply boundary logic
       const lastProcessedTimestamp = await this.databaseService.getLastProcessedBidTimestamp();
       
-      // Boundary logic: For testing use future timestamp, for production use lookback cap
-      const isTestMode = process.env.NODE_ENV !== 'production';
-      let boundaryTimestamp: number;
+      // Boundary logic: Use 1-hour maximum lookback cap for safety
+      const oneHourAgo = Date.now() - (60 * 60 * 1000); // 1 hour cap
+      const boundaryTimestamp = Math.max(lastProcessedTimestamp, oneHourAgo);
       
-      if (isTestMode) {
-        // Testing: use 7 days ago as boundary (captures all recent bids for first run)
-        boundaryTimestamp = Date.now() - (7 * 24 * 60 * 60 * 1000); // 7 days ago
-        logger.info(`📅 Boundary timestamp: ${boundaryTimestamp} (${new Date(boundaryTimestamp).toISOString()})`);
-        logger.info(`🧪 Testing mode: Using 7-day lookback boundary to capture recent bids`);
-      } else {
-        // Production: use 1-day lookback cap to prevent runaway cursoring
-        const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000); // 1 day cap
-        boundaryTimestamp = Math.max(lastProcessedTimestamp, oneDayAgo);
-        logger.info(`📅 Boundary timestamp: ${boundaryTimestamp} (${new Date(boundaryTimestamp).toISOString()})`);
-        logger.info(`🏭 Production mode: Using 1-day lookback cap`);
-      }
+      logger.info(`🔒 Using 1-hour lookback cap for safe API usage`);
+      logger.info(`📈 Cursoring for bids newer than: ${boundaryTimestamp} (${new Date(boundaryTimestamp).toISOString()})`);
 
       // Cursor through API until we hit the boundary timestamp
       const newBidsUnsorted = await this.magicEdenService.getNewBidsSince(boundaryTimestamp);

@@ -18,7 +18,7 @@ export class DatabaseService implements IDatabaseService {
       // Create PostgreSQL connection pool
       this.pool = new Pool({
         connectionString: process.env.POSTGRES_URL || process.env.DATABASE_URL,
-        ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+        // No SSL needed - database is on same VPS (localhost)
       });
 
       logger.info('PostgreSQL connection pool created');
@@ -1111,9 +1111,8 @@ export class DatabaseService implements IDatabaseService {
   async getLastProcessedBidTimestamp(): Promise<number> {
     const result = await this.getSystemState('last_processed_bid_timestamp');
     if (!result) {
-      // Default to 7 days ago if no timestamp is set
-      const defaultTimestamp = Date.now() - (7 * 24 * 60 * 60 * 1000);
-      return defaultTimestamp;
+      // Default to current time (boundary logic will apply 1-hour cap)
+      return Date.now();
     }
     return parseInt(result, 10);
   }
