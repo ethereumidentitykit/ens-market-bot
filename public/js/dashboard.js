@@ -480,6 +480,7 @@ function dashboard() {
                     const data = await response.json();
                     this.apiToggles.twitterEnabled = data.twitterEnabled;
                     this.apiToggles.moralisEnabled = data.moralisEnabled;
+                    this.apiToggles.magicEdenEnabled = data.magicEdenEnabled;
                     this.autoPostSettings.enabled = data.autoPostingEnabled;
                 }
             } catch (error) {
