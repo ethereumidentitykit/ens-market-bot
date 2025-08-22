@@ -303,7 +303,8 @@ export class NewTweetFormatter {
       priceUsd = registration.costUsd ? `($${parseFloat(registration.costUsd).toLocaleString()})` : '';
     }
     
-    const priceLine = `Price: ${priceEth} ETH ${priceUsd}`.trim();
+    const ethPart = `(${priceEth} ETH)`;
+    const priceLine = priceUsd ? `Price: ${priceUsd.replace(/[()]/g, '')} ${ethPart}` : `Price: ${priceEth} ETH`;
     
     // Line 3: New Owner
     const ownerHandle = this.getDisplayHandle(ownerAccount, registration.ownerAddress);
@@ -351,12 +352,24 @@ export class NewTweetFormatter {
     
     const priceLine = `Price: ${priceDecimal} ${currencyDisplay} ${priceUsd}`.trim();
     
-    // Line 3: From (bidder)
+    // Line 3: Bidder (changed from "From")
     const bidderHandle = this.getDisplayHandle(bidderAccount, bid.makerAddress);
-    const fromLine = `From: ${bidderHandle}`;
+    const bidderLine = `Bidder: ${bidderHandle}`;
     
-    // Line 4: Marketplace
-    const marketplaceLine = `Marketplace: ${bid.sourceName || 'Unknown'}`;
+    // Line 4: Current Owner (fetch the current NFT owner)
+    let currentOwnerLine = 'Current Owner: Unknown';
+    if (this.alchemyService && bid.tokenId) {
+      try {
+        const owners = await this.alchemyService.getOwnersForToken('0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85', bid.tokenId);
+        if (owners && owners.length > 0) {
+          const ownerAccount = await this.getAccountData(owners[0]);
+          const ownerHandle = this.getDisplayHandle(ownerAccount, owners[0]);
+          currentOwnerLine = `Current Owner: ${ownerHandle}`;
+        }
+      } catch (error: any) {
+        logger.warn('Failed to fetch current owner for bid tweet:', error.message);
+      }
+    }
     
     // Line 5: Valid duration - dynamic calculation
     const duration = this.calculateBidDuration(bid.validFrom, bid.validUntil);
@@ -365,8 +378,8 @@ export class NewTweetFormatter {
     // Line 6: Vision.io marketplace link
     const visionUrl = this.buildVisionioUrl(ensName);
     
-    // Combine all lines
-    return `${header}\n\n${ensName}\n\n${priceLine}\n${fromLine}\n\n${marketplaceLine}\n${validLine}\n\n${visionUrl}`;
+    // Combine all lines (added line break between price and bidder, removed break between bidder and current owner)
+    return `${header}\n\n${ensName}\n\n${priceLine}\n\n${bidderLine}\n${currentOwnerLine}\n\n${validLine}\n\n${visionUrl}`;
   }
 
 
@@ -959,11 +972,12 @@ export class NewTweetFormatter {
       header: string;
       ensName: string;
       priceLine: string;
-      fromLine: string;
-      marketplaceLine: string;
+      bidderLine: string;
+      currentOwnerLine: string;
       validLine: string;
       visionUrl: string;
       bidderHandle: string;
+      currentOwnerHandle: string;
     };
   }> {
     const tweet = await this.generateBidTweet(bid);
@@ -997,15 +1011,30 @@ export class NewTweetFormatter {
     const duration = this.calculateBidDuration(bid.validFrom, bid.validUntil);
     const visionUrl = this.buildVisionioUrl(ensName);
     
+    // Fetch current owner for breakdown (same logic as in tweet text)
+    let currentOwnerHandle = 'Unknown';
+    if (this.alchemyService && bid.tokenId) {
+      try {
+        const owners = await this.alchemyService.getOwnersForToken('0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85', bid.tokenId);
+        if (owners && owners.length > 0) {
+          const ownerAccount = await this.getAccountData(owners[0]);
+          currentOwnerHandle = this.getDisplayHandle(ownerAccount, owners[0]);
+        }
+      } catch (error: any) {
+        logger.warn('Failed to fetch current owner for breakdown:', error.message);
+      }
+    }
+    
     const breakdown = {
       header: '✋ Offer',
       ensName: ensName,
       priceLine: `Price: ${priceDecimal} ${currencyDisplay} ${priceUsd}`.trim(),
-      fromLine: `From: ${bidderHandle}`,
-      marketplaceLine: `Marketplace: ${bid.sourceName || 'Unknown'}`,
+      bidderLine: `Bidder: ${bidderHandle}`,
+      currentOwnerLine: `Current Owner: ${currentOwnerHandle}`,
       validLine: `Valid: ${duration}`,
       visionUrl: visionUrl,
-      bidderHandle: bidderHandle
+      bidderHandle: bidderHandle,
+      currentOwnerHandle: currentOwnerHandle
     };
 
     return { tweet, validation, breakdown };
