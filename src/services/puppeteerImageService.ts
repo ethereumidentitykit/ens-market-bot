@@ -154,9 +154,41 @@ export class PuppeteerImageService {
   }
 
   /**
+   * Load NFT image with fallback chain: original URL → ENS metadata service → placeholder
+   */
+  private static async loadNftImageWithFallbacks(
+    originalUrl: string, 
+    ensName: string, 
+    placeholderBase64: string
+  ): Promise<string> {
+    // Try original URL first with short timeout
+    logger.debug(`Attempting to load NFT image: ${originalUrl.substring(0, 100)}...`);
+    
+    const originalImageBase64 = await this.loadRemoteImageAsBase64(originalUrl, 5000); // 5s timeout
+    if (originalImageBase64) {
+      logger.debug(`Successfully loaded original NFT image`);
+      return originalImageBase64;
+    }
+    
+    // Try ENS metadata service as fallback
+    const ensMetadataUrl = `https://metadata.ens.domains/mainnet/avatar/${ensName}`;
+    logger.debug(`Original NFT image failed, trying ENS metadata service: ${ensMetadataUrl}`);
+    
+    const ensImageBase64 = await this.loadRemoteImageAsBase64(ensMetadataUrl, 5000); // 5s timeout
+    if (ensImageBase64) {
+      logger.debug(`Successfully loaded ENS metadata image as fallback`);
+      return ensImageBase64;
+    }
+    
+    // Final fallback to placeholder
+    logger.warn(`Both NFT image sources failed, using placeholder for: ${ensName}`);
+    return `data:image/png;base64,${placeholderBase64}`;
+  }
+
+  /**
    * Load remote image URL as base64 data URL
    */
-  private static async loadRemoteImageAsBase64(imageUrl: string): Promise<string | null> {
+  private static async loadRemoteImageAsBase64(imageUrl: string, timeoutMs: number = 10000): Promise<string | null> {
     try {
       logger.debug(`Loading avatar: ${imageUrl.substring(0, 100)}...`);
       
@@ -174,7 +206,7 @@ export class PuppeteerImageService {
       
       const response = await axios.get(imageUrl, {
         responseType: 'arraybuffer',
-        timeout: 10000, // 10 second timeout
+        timeout: timeoutMs, // Use configurable timeout
         headers: {
           'User-Agent': 'ENS-TwitterBot/1.0'
         }
@@ -297,7 +329,12 @@ export class PuppeteerImageService {
     
     // Use actual images or fallbacks
     const templateImagePath = `data:image/png;base64,${backgroundImageBase64}`;
-    const ensNftImagePath = data.nftImageUrl || `data:image/png;base64,${ensPlaceholderBase64}`;
+    
+    // Load NFT image with fallback chain: original URL → ENS metadata service → placeholder
+    let ensNftImagePath = `data:image/png;base64,${ensPlaceholderBase64}`;
+    if (data.nftImageUrl) {
+      ensNftImagePath = await this.loadNftImageWithFallbacks(data.nftImageUrl, data.ensName, ensPlaceholderBase64);
+    }
     
     // Convert avatar URLs to base64 data URLs (like other images)
     let sellerAvatarPath = `data:image/png;base64,${userPlaceholderBase64}`;
@@ -475,7 +512,10 @@ export class PuppeteerImageService {
             <div class="background"></div>
 
             <!-- ENS NFT Image -->
-            <img src="${ensNftImagePath}" alt="ENS NFT" class="ens-nft" onerror="this.src='data:image/png;base64,${ensPlaceholderBase64}'">
+            <img src="${ensNftImagePath}" alt="ENS NFT" class="ens-nft" 
+                 onerror="this.src='data:image/png;base64,${ensPlaceholderBase64}'; console.log('NFT image failed to load:', this.getAttribute('original-src') || '${ensNftImagePath}');"
+                 onload="console.log('NFT image loaded successfully:', this.src);"
+            >
 
             <!-- USD Price -->
             <div class="usd-price">
