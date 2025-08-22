@@ -45,7 +45,7 @@ export class NewTweetFormatter {
       const ownerAccount = await this.getAccountData(registration.ownerAddress);
 
       // Generate the tweet text
-      const tweetText = this.formatRegistrationTweetText(registration, ownerAccount);
+      const tweetText = await this.formatRegistrationTweetText(registration, ownerAccount);
       
       // Generate image if database service is available
       let imageBuffer: Buffer | undefined;
@@ -273,19 +273,36 @@ export class NewTweetFormatter {
   /**
    * Format the tweet text for ENS registrations
    */
-  private formatRegistrationTweetText(
+  private async formatRegistrationTweetText(
     registration: ENSRegistration, 
     ownerAccount: EthIdentityAccount | null
-  ): string {
+  ): Promise<string> {
     // Header: Emoji + Registered
     const header = '🏛️ Registered';
     
     // Line 1: ENS name (use fullName if available, otherwise ensName)
     const ensName = registration.fullName || registration.ensName || 'Unknown ENS';
     
-    // Line 2: Price in ETH and USD
+    // Line 2: Price in ETH and USD (recalculate USD with fresh ETH rate)
     const priceEth = parseFloat(registration.costEth || '0').toFixed(2);
-    const priceUsd = registration.costUsd ? `($${parseFloat(registration.costUsd).toLocaleString()})` : '';
+    const priceEthValue = parseFloat(registration.costEth || '0');
+    
+    let priceUsd = '';
+    if (this.alchemyService && priceEthValue > 0) {
+      try {
+        const freshEthPriceUsd = await this.alchemyService.getETHPriceUSD();
+        if (freshEthPriceUsd) {
+          const calculatedUsd = priceEthValue * freshEthPriceUsd;
+          priceUsd = `($${Math.round(calculatedUsd).toLocaleString()})`;
+        }
+      } catch (error: any) {
+        logger.warn('Failed to recalculate USD for registration tweet text, using database value:', error.message);
+        priceUsd = registration.costUsd ? `($${parseFloat(registration.costUsd).toLocaleString()})` : '';
+      }
+    } else {
+      priceUsd = registration.costUsd ? `($${parseFloat(registration.costUsd).toLocaleString()})` : '';
+    }
+    
     const priceLine = `Price: ${priceEth} ETH ${priceUsd}`.trim();
     
     // Line 3: New Owner
@@ -312,10 +329,26 @@ export class NewTweetFormatter {
     // Line 1: ENS name - use stored name from database
     const ensName = bid.ensName || `Token: ${bid.tokenId?.slice(-6) || 'Unknown'}...`;
     
-    // Line 2: Price with currency display
+    // Line 2: Price with currency display (recalculate USD with fresh ETH rate)
     const currencyDisplay = this.getCurrencyDisplayName(bid.currencySymbol);
     const priceDecimal = parseFloat(bid.priceDecimal).toFixed(2);
-    const priceUsd = bid.priceUsd ? `($${parseFloat(bid.priceUsd).toLocaleString()})` : '';
+    
+    let priceUsd = '';
+    if (this.alchemyService && (bid.currencySymbol === 'ETH' || bid.currencySymbol === 'WETH')) {
+      try {
+        const freshEthPriceUsd = await this.alchemyService.getETHPriceUSD();
+        if (freshEthPriceUsd) {
+          const calculatedUsd = parseFloat(bid.priceDecimal) * freshEthPriceUsd;
+          priceUsd = `($${Math.round(calculatedUsd).toLocaleString()})`;
+        }
+      } catch (error: any) {
+        logger.warn('Failed to recalculate USD for tweet text, using database value:', error.message);
+        priceUsd = bid.priceUsd ? `($${parseFloat(bid.priceUsd).toLocaleString()})` : '';
+      }
+    } else {
+      priceUsd = bid.priceUsd ? `($${parseFloat(bid.priceUsd).toLocaleString()})` : '';
+    }
+    
     const priceLine = `Price: ${priceDecimal} ${currencyDisplay} ${priceUsd}`.trim();
     
     // Line 3: From (bidder)
@@ -512,9 +545,25 @@ export class NewTweetFormatter {
   private async convertRegistrationToImageData(registration: ENSRegistration, ownerAccount: EthIdentityAccount | null): Promise<RealImageData> {
     logger.info(`Converting registration to image data: ${registration.transactionHash}`);
     
-    // Parse prices
+    // Parse ETH price
     const priceEth = parseFloat(registration.costEth || '0');
-    const priceUsd = registration.costUsd ? parseFloat(registration.costUsd) : 0;
+    
+    // Recalculate USD price with fresh ETH rate for accurate image generation
+    let priceUsd = 0;
+    if (this.alchemyService && priceEth > 0) {
+      try {
+        const freshEthPriceUsd = await this.alchemyService.getETHPriceUSD();
+        if (freshEthPriceUsd) {
+          priceUsd = priceEth * freshEthPriceUsd;
+          logger.debug(`💰 Recalculated USD price: ${priceEth} ETH × $${freshEthPriceUsd} = $${priceUsd.toFixed(2)}`);
+        }
+      } catch (error: any) {
+        logger.warn('Failed to recalculate USD price, using database value:', error.message);
+        priceUsd = registration.costUsd ? parseFloat(registration.costUsd) : 0;
+      }
+    } else {
+      priceUsd = registration.costUsd ? parseFloat(registration.costUsd) : 0;
+    }
     
     // Get ENS name for display
     const ensName = registration.fullName || registration.ensName || 'Unknown ENS';
@@ -554,9 +603,25 @@ export class NewTweetFormatter {
   private async convertBidToImageData(bid: ENSBid, bidderAccount: EthIdentityAccount | null): Promise<RealImageData> {
     logger.info(`Converting bid to image data: ${bid.bidId}`);
     
-    // Parse prices
+    // Parse ETH price
     const priceEth = parseFloat(bid.priceDecimal);
-    const priceUsd = bid.priceUsd ? parseFloat(bid.priceUsd) : 0;
+    
+    // Recalculate USD price with fresh ETH rate for accurate image generation
+    let priceUsd = 0;
+    if (this.alchemyService && (bid.currencySymbol === 'ETH' || bid.currencySymbol === 'WETH')) {
+      try {
+        const freshEthPriceUsd = await this.alchemyService.getETHPriceUSD();
+        if (freshEthPriceUsd) {
+          priceUsd = priceEth * freshEthPriceUsd;
+          logger.debug(`💰 Recalculated USD price: ${priceEth} ETH × $${freshEthPriceUsd} = $${priceUsd.toFixed(2)}`);
+        }
+      } catch (error: any) {
+        logger.warn('Failed to recalculate USD price, using database value:', error.message);
+        priceUsd = bid.priceUsd ? parseFloat(bid.priceUsd) : 0;
+      }
+    } else {
+      priceUsd = bid.priceUsd ? parseFloat(bid.priceUsd) : 0;
+    }
     
     // Get ENS name for display (from database)
     const ensName = bid.ensName || `Token: ${bid.tokenId?.slice(-6) || 'Unknown'}...`;
@@ -910,7 +975,24 @@ export class NewTweetFormatter {
     const ensName = bid.ensName || `Token: ${bid.tokenId?.slice(-6) || 'Unknown'}...`;
     const currencyDisplay = this.getCurrencyDisplayName(bid.currencySymbol);
     const priceDecimal = parseFloat(bid.priceDecimal).toFixed(2);
-    const priceUsd = bid.priceUsd ? `($${parseFloat(bid.priceUsd).toLocaleString()})` : '';
+    
+    // Recalculate USD price with fresh ETH rate for breakdown
+    let priceUsd = '';
+    if (this.alchemyService && (bid.currencySymbol === 'ETH' || bid.currencySymbol === 'WETH')) {
+      try {
+        const freshEthPriceUsd = await this.alchemyService.getETHPriceUSD();
+        if (freshEthPriceUsd) {
+          const calculatedUsd = parseFloat(bid.priceDecimal) * freshEthPriceUsd;
+          priceUsd = `($${Math.round(calculatedUsd).toLocaleString()})`;
+        }
+      } catch (error: any) {
+        logger.warn('Failed to recalculate USD for breakdown, using database value:', error.message);
+        priceUsd = bid.priceUsd ? `($${parseFloat(bid.priceUsd).toLocaleString()})` : '';
+      }
+    } else {
+      priceUsd = bid.priceUsd ? `($${parseFloat(bid.priceUsd).toLocaleString()})` : '';
+    }
+    
     const bidderHandle = this.getDisplayHandle(bidderAccount, bid.makerAddress);
     const duration = this.calculateBidDuration(bid.validFrom, bid.validUntil);
     const visionUrl = this.buildVisionioUrl(ensName);
