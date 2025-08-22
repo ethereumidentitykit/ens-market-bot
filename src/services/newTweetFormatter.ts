@@ -356,18 +356,18 @@ export class NewTweetFormatter {
     const bidderHandle = this.getDisplayHandle(bidderAccount, bid.makerAddress);
     const bidderLine = `Bidder: ${bidderHandle}`;
     
-    // Line 4: Current Owner (fetch the current NFT owner)
-    let currentOwnerLine = 'Current Owner: Unknown';
+    // Line 4: Owner (fetch the current NFT owner)
+    let currentOwnerLine = 'Owner: Unknown';
     if (this.alchemyService && bid.tokenId) {
       try {
         const owners = await this.alchemyService.getOwnersForToken('0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85', bid.tokenId);
         if (owners && owners.length > 0) {
           const ownerAccount = await this.getAccountData(owners[0]);
           const ownerHandle = this.getDisplayHandle(ownerAccount, owners[0]);
-          currentOwnerLine = `Current Owner: ${ownerHandle}`;
+          currentOwnerLine = `Owner: ${ownerHandle}`;
         }
       } catch (error: any) {
-        logger.warn('Failed to fetch current owner for bid tweet:', error.message);
+        logger.warn('Failed to fetch Owner for bid tweet:', error.message);
       }
     }
     
@@ -378,7 +378,7 @@ export class NewTweetFormatter {
     // Line 6: Vision.io marketplace link
     const visionUrl = this.buildVisionioUrl(ensName);
     
-    // Combine all lines (added line break between price and bidder, removed break between bidder and current owner)
+    // Combine all lines (added line break between price and bidder, removed break between bidder and Owner)
     return `${header}\n\n${ensName}\n\n${priceLine}\n\n${bidderLine}\n${currentOwnerLine}\n\n${validLine}\n\n${visionUrl}`;
   }
 
@@ -643,30 +643,30 @@ export class NewTweetFormatter {
     const bidderHandle = this.getImageDisplayHandle(bidderAccount, bid.makerAddress);
     const bidderAvatar = bidderAccount?.ens?.avatar || bidderAccount?.ens?.records?.avatar;
     
-    // Try to get current owner using Alchemy API
+    // Try to get Owner using Alchemy API
     let currentOwnerEns = '';
     let currentOwnerAvatar: string | undefined;
     
     if (this.alchemyService && bid.tokenId && bid.contractAddress) {
       try {
-        logger.debug(`Looking up current owner for token ${bid.tokenId}`);
+        logger.debug(`Looking up Owner for token ${bid.tokenId}`);
         const owners = await this.alchemyService.getOwnersForToken(bid.contractAddress, bid.tokenId);
         
         if (owners.length > 0) {
           const ownerAddress = owners[0]; // ENS tokens typically have only one owner
-          logger.debug(`Found current owner: ${ownerAddress}`);
+          logger.debug(`Found Owner: ${ownerAddress}`);
           
           // Get profile info for the owner (ENS only for images)
           const ownerAccount = await this.getAccountData(ownerAddress);
           currentOwnerEns = this.getImageDisplayHandle(ownerAccount, ownerAddress);
           currentOwnerAvatar = ownerAccount?.ens?.avatar || ownerAccount?.ens?.records?.avatar;
           
-          logger.debug(`Current owner display: ${currentOwnerEns}, Avatar URL: ${currentOwnerAvatar}`);
+          logger.debug(`Owner display: ${currentOwnerEns}, Avatar URL: ${currentOwnerAvatar}`);
         } else {
           logger.debug(`No owners found for token ${bid.tokenId}`);
         }
       } catch (error: any) {
-        logger.warn(`Failed to get current owner for token ${bid.tokenId}:`, error.message);
+        logger.warn(`Failed to get Owner for token ${bid.tokenId}:`, error.message);
       }
     }
     
@@ -675,7 +675,7 @@ export class NewTweetFormatter {
       priceUsd,
       ensName,
       buyerEns: bidderHandle, // Bidder is the potential "buyer"
-      sellerEns: currentOwnerEns, // Current owner (empty if lookup failed)
+      sellerEns: currentOwnerEns, // Owner (empty if lookup failed)
       buyerAvatar: bidderAvatar,
       sellerAvatar: currentOwnerAvatar,
       nftImageUrl: bid.nftImage, // Use ENS NFT image if available
@@ -1011,7 +1011,7 @@ export class NewTweetFormatter {
     const duration = this.calculateBidDuration(bid.validFrom, bid.validUntil);
     const visionUrl = this.buildVisionioUrl(ensName);
     
-    // Fetch current owner for breakdown (same logic as in tweet text)
+    // Fetch Owner for breakdown (same logic as in tweet text)
     let currentOwnerHandle = 'Unknown';
     if (this.alchemyService && bid.tokenId) {
       try {
@@ -1021,7 +1021,7 @@ export class NewTweetFormatter {
           currentOwnerHandle = this.getDisplayHandle(ownerAccount, owners[0]);
         }
       } catch (error: any) {
-        logger.warn('Failed to fetch current owner for breakdown:', error.message);
+        logger.warn('Failed to fetch Owner for breakdown:', error.message);
       }
     }
     
@@ -1030,7 +1030,7 @@ export class NewTweetFormatter {
       ensName: ensName,
       priceLine: `Price: ${priceDecimal} ${currencyDisplay} ${priceUsd}`.trim(),
       bidderLine: `Bidder: ${bidderHandle}`,
-      currentOwnerLine: `Current Owner: ${currentOwnerHandle}`,
+      currentOwnerLine: `Owner: ${currentOwnerHandle}`,
       validLine: `Valid: ${duration}`,
       visionUrl: visionUrl,
       bidderHandle: bidderHandle,
