@@ -324,8 +324,8 @@ export class NewTweetFormatter {
     bid: ENSBid, 
     bidderAccount: EthIdentityAccount | null
   ): Promise<string> {
-    // Header: ✋ Offer
-    const header = '✋ Offer';
+    // Header: ✋ Offer ✋
+    const header = '✋ Offer ✋';
     
     // Line 1: ENS name - use stored name from database
     const ensName = bid.ensName || `Token: ${bid.tokenId?.slice(-6) || 'Unknown'}...`;
@@ -426,7 +426,7 @@ export class NewTweetFormatter {
     sellerAccount: EthIdentityAccount | null
   ): string {
     // Header: Emoji + SOLD
-    const header = '💰 SOLD';
+    const header = '💰 SOLD 💰';
     
     // Line 1: ENS name
     const ensName = sale.nftName || 'Unknown ENS';
@@ -801,8 +801,8 @@ export class NewTweetFormatter {
     }
 
     // Check for required elements in bid format
-    if (!content.includes('✋ Offer')) {
-      errors.push('Bid tweet should include "✋ Offer" header');
+    if (!content.includes('✋ Offer ✋')) {
+      errors.push('Bid tweet should include "✋ Offer ✋" header');
     }
 
     if (!content.includes('Price:')) {
@@ -848,8 +848,8 @@ export class NewTweetFormatter {
     }
 
     // Check for required elements in new format
-    if (!content.includes('💰 SOLD')) {
-      errors.push('Tweet should include "💰 SOLD" header');
+    if (!content.includes('💰 SOLD 💰')) {
+      errors.push('Tweet should include "💰 SOLD 💰" header');
     }
 
     if (!content.includes('Price:')) {
@@ -911,7 +911,7 @@ export class NewTweetFormatter {
     const sellerHandle = this.getDisplayHandle(sellerAccount, sale.sellerAddress);
     
     const breakdown = {
-      header: '💰 SOLD',
+      header: '💰 SOLD 💰',
       ensName: ensName,
       priceLine: `Price: ${priceEth} ETH ${priceUsd}`.trim(),
       sellerLine: `Seller: ${sellerHandle}`,
@@ -1026,7 +1026,7 @@ export class NewTweetFormatter {
     }
     
     const breakdown = {
-      header: '✋ Offer',
+      header: '✋ Offer ✋',
       ensName: ensName,
       priceLine: `Price: ${priceDecimal} ${currencyDisplay} ${priceUsd}`.trim(),
       bidderLine: `Bidder: ${bidderHandle}`,
