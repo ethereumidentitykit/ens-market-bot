@@ -521,7 +521,7 @@ export class NewTweetFormatter {
     
     // Get owner display info (ENS only for images)
     const ownerHandle = this.getImageDisplayHandle(ownerAccount, registration.ownerAddress);
-    const ownerAvatar = ownerAccount?.ens?.records?.avatar;
+    const ownerAvatar = ownerAccount?.ens?.avatar || ownerAccount?.ens?.records?.avatar;
     
     const imageData: RealImageData = {
       priceEth,
@@ -563,7 +563,7 @@ export class NewTweetFormatter {
     
     // Get bidder display info (ENS only for images)
     const bidderHandle = this.getImageDisplayHandle(bidderAccount, bid.makerAddress);
-    const bidderAvatar = bidderAccount?.ens?.records?.avatar;
+    const bidderAvatar = bidderAccount?.ens?.avatar || bidderAccount?.ens?.records?.avatar;
     
     // Try to get current owner using Alchemy API
     let currentOwnerEns = '';
@@ -581,9 +581,9 @@ export class NewTweetFormatter {
           // Get profile info for the owner (ENS only for images)
           const ownerAccount = await this.getAccountData(ownerAddress);
           currentOwnerEns = this.getImageDisplayHandle(ownerAccount, ownerAddress);
-          currentOwnerAvatar = ownerAccount?.ens?.records?.avatar;
+          currentOwnerAvatar = ownerAccount?.ens?.avatar || ownerAccount?.ens?.records?.avatar;
           
-          logger.debug(`Current owner display: ${currentOwnerEns}`);
+          logger.debug(`Current owner display: ${currentOwnerEns}, Avatar URL: ${currentOwnerAvatar}`);
         } else {
           logger.debug(`No owners found for token ${bid.tokenId}`);
         }

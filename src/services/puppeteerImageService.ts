@@ -161,6 +161,12 @@ export class PuppeteerImageService {
     try {
       logger.debug(`Loading remote avatar: ${imageUrl}`);
       
+      // Only proceed if we have a valid HTTP/HTTPS URL
+      if (!imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) {
+        logger.warn(`Invalid avatar URL protocol: ${imageUrl}`);
+        return null;
+      }
+      
       const response = await axios.get(imageUrl, {
         responseType: 'arraybuffer',
         timeout: 10000, // 10 second timeout
