@@ -278,7 +278,7 @@ export class NewTweetFormatter {
     ownerAccount: EthIdentityAccount | null
   ): Promise<string> {
     // Header: Emoji + Registered
-    const header = '🏛️ Registered';
+    const header = '🏛️ REGISTERED 🏛️';
     
     // Line 1: ENS name (use fullName if available, otherwise ensName)
     const ensName = registration.fullName || registration.ensName || 'Unknown ENS';
@@ -760,7 +760,7 @@ export class NewTweetFormatter {
     }
 
     // Check for required elements in registration format
-    if (!content.includes('🏛️ Registered')) {
+    if (!content.includes('🏛️ REGISTERED 🏛️')) {
       errors.push('Registration tweet should include "🏛️ Registered" header');
     }
 
@@ -951,7 +951,7 @@ export class NewTweetFormatter {
     const ownerHandle = this.getDisplayHandle(ownerAccount, registration.ownerAddress);
     
     const breakdown = {
-      header: '🏛️ Registered',
+      header: '🏛️ REGISTERED 🏛️',
       ensName: ensName,
       priceLine: `Price: ${priceEth} ETH ${priceUsd}`.trim(),
       ownerLine: `New Owner: ${ownerHandle}`,
