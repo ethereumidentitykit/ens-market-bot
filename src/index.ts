@@ -360,9 +360,9 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.post('/api/scheduler/start', (req, res) => {
+    app.post('/api/scheduler/start', async (req, res) => {
       try {
-        schedulerService.start();
+        await schedulerService.start();
         res.json({
           success: true,
           message: 'Scheduler started'
@@ -375,9 +375,9 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.post('/api/scheduler/stop', (req, res) => {
+    app.post('/api/scheduler/stop', async (req, res) => {
       try {
-        schedulerService.stop();
+        await schedulerService.stop();
         res.json({
           success: true,
           message: 'Scheduler stopped'
@@ -390,9 +390,9 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.post('/api/scheduler/force-stop', (req, res) => {
+    app.post('/api/scheduler/force-stop', async (req, res) => {
       try {
-        schedulerService.forceStop();
+        await schedulerService.forceStop();
         res.json({
           success: true,
           message: 'Scheduler force stopped - all activity halted'
@@ -419,6 +419,8 @@ async function startApplication(): Promise<void> {
         });
       }
     });
+
+
 
     // Initialize API Toggle Service with database
     const apiToggleService = APIToggleService.getInstance();
@@ -2231,7 +2233,7 @@ async function startApplication(): Promise<void> {
       logger.info('Shutting down gracefully...');
       
       // Stop scheduler first
-      schedulerService.stop();
+      await schedulerService.stop();
       
       // Stop world time service
       worldTimeService.stop();

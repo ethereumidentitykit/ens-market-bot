@@ -39,16 +39,29 @@ export class SchedulerService {
    */
   async initializeFromDatabase(): Promise<void> {
     try {
+      logger.info('🔄 Initializing scheduler from database...');
+      
+      // Add a small delay to ensure database is fully ready
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
       const savedState = await this.databaseService.getSystemState('scheduler_enabled');
+      logger.info(`📊 Database scheduler state: ${savedState || 'not set'}`);
+      
       if (savedState === 'true') {
-        logger.info('Scheduler was enabled, starting automatically...');
-        this.start();
+        logger.info('✅ Scheduler was previously enabled - auto-starting...');
+        await this.start();
+        logger.info('🚀 Scheduler successfully restored and running');
       } else {
-        logger.info('Scheduler is disabled by default - use dashboard to start');
+        logger.info('⏹️  Scheduler remains stopped (database state: false or unset)');
       }
     } catch (error: any) {
-      logger.warn('Could not load scheduler state from database:', error.message);
-      logger.info('Scheduler will remain stopped until manually started');
+      logger.error('❌ Failed to load scheduler state from database:', error.message);
+      logger.info('🛑 Scheduler will remain stopped until manually started');
+      
+      // Log more details for debugging VPS deployment issues
+      if (error.code) {
+        logger.error(`Database error code: ${error.code}`);
+      }
     }
   }
 
@@ -56,11 +69,11 @@ export class SchedulerService {
    * Start the automated scheduling
    * Sales: every 5 minutes, Registrations: every 1 minute, Bids: every 2 minutes
    */
-  start(): void {
+  async start(): Promise<void> {
     // Stop existing jobs if running
     if (this.salesSyncJob || this.registrationSyncJob || this.bidsSyncJob) {
       logger.warn('Scheduler already running, stopping existing jobs first');
-      this.stop();
+      await this.stop();
     }
 
     // Create cron job for sales processing (every 5 minutes)
@@ -101,8 +114,8 @@ export class SchedulerService {
     this.bidsSyncJob.start();
     this.isRunning = true;
     
-    // Save enabled state to database
-    this.saveSchedulerState(true);
+    // Save enabled state to database for persistence across restarts
+    await this.saveSchedulerState(true);
     
     logger.info('Scheduler started - Sales: every 5 minutes, Registrations: every 1 minute, Bids: every 2 minutes');
     logger.info(`Next sales run: ${this.salesSyncJob.nextDate().toString()}`);
@@ -113,7 +126,7 @@ export class SchedulerService {
   /**
    * Stop the automated scheduling
    */
-  stop(): void {
+  async stop(): Promise<void> {
     let wasRunning = false;
     
     if (this.salesSyncJob) {
@@ -137,8 +150,8 @@ export class SchedulerService {
     if (wasRunning) {
       this.isRunning = false;
       
-      // Save disabled state to database
-      this.saveSchedulerState(false);
+      // Save disabled state to database for persistence across restarts
+      await this.saveSchedulerState(false);
       
       logger.info('Scheduler stopped - sales, registration, and bid processing halted');
     } else {
@@ -149,7 +162,7 @@ export class SchedulerService {
   /**
    * Force stop all scheduler activity
    */
-  forceStop(): void {
+  async forceStop(): Promise<void> {
     this.isRunning = false;
     
     if (this.salesSyncJob) {
@@ -167,8 +180,8 @@ export class SchedulerService {
       this.bidsSyncJob = null;
     }
     
-    // Save disabled state to database
-    this.saveSchedulerState(false);
+    // Save disabled state to database for persistence across restarts
+    await this.saveSchedulerState(false);
     
     logger.info('Scheduler force stopped - all activity halted');
   }
@@ -179,9 +192,10 @@ export class SchedulerService {
   private async saveSchedulerState(enabled: boolean): Promise<void> {
     try {
       await this.databaseService.setSystemState('scheduler_enabled', enabled.toString());
-      logger.debug(`Scheduler state saved: ${enabled ? 'enabled' : 'disabled'}`);
+      logger.info(`💾 Scheduler state persisted: ${enabled ? 'ENABLED' : 'DISABLED'} (survives restarts)`);
     } catch (error: any) {
-      logger.warn('Could not save scheduler state to database:', error.message);
+      logger.error('❌ Failed to save scheduler state to database:', error.message);
+      logger.warn('⚠️  Scheduler state will NOT persist across restarts!');
     }
   }
 

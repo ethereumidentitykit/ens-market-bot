@@ -104,8 +104,9 @@ jobs:
               echo "✅ PM2 process started"
             fi
             
-            # Wait for process to start
-            sleep 3
+            # Wait for process to start and initialize
+            echo "⏳ Waiting for application startup..."
+            sleep 8
             
             # Verify the process is actually running
             echo "🔍 Verifying deployment..."
@@ -116,6 +117,20 @@ jobs:
               echo "📝 Recent logs:"
               pm2 logs xbot --lines 20 --nostream || true
               exit 1
+            fi
+            
+            # Verify scheduler persistence is working
+            echo "🔍 Checking scheduler persistence..."
+            if curl -s http://localhost:3000/api/scheduler/status > /dev/null; then
+              echo "✅ Application responding to API requests"
+              # Check if scheduler was previously enabled and should auto-start
+              if curl -s http://localhost:3000/api/scheduler/status | grep -q '"isRunning":true'; then
+                echo "✅ Scheduler auto-started from database state"
+              else
+                echo "ℹ️  Scheduler remained stopped (as expected from database state)"
+              fi
+            else
+              echo "⚠️  Application not responding to API requests yet (this might be normal)"
             fi
             
             # Save PM2 configuration
