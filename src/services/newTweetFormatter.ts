@@ -324,8 +324,8 @@ export class NewTweetFormatter {
     bid: ENSBid, 
     bidderAccount: EthIdentityAccount | null
   ): Promise<string> {
-    // Header: ✋ Offer ✋
-    const header = '✋ Offer ✋';
+    // Header: ✋ OFFER ✋
+    const header = '✋ OFFER ✋';
     
     // Line 1: ENS name - use stored name from database, with ENS service fallback
     let ensName = bid.ensName;
@@ -881,8 +881,8 @@ export class NewTweetFormatter {
     }
 
     // Check for required elements in bid format
-    if (!content.includes('✋ Offer ✋')) {
-      errors.push('Bid tweet should include "✋ Offer ✋" header');
+    if (!content.includes('✋ OFFER ✋')) {
+      errors.push('Bid tweet should include "✋ OFFER ✋" header');
     }
 
     if (!content.includes('Price:')) {
@@ -1142,7 +1142,7 @@ export class NewTweetFormatter {
     }
     
     const breakdown = {
-      header: '✋ Offer ✋',
+      header: '✋ OFFER ✋',
       ensName: ensName,
       priceLine: `Price: ${priceDecimal} ${currencyDisplay} ${priceUsd}`.trim(),
       bidderLine: `Bidder: ${bidderHandle}`,

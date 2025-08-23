@@ -263,6 +263,12 @@ export class BidsProcessingService {
         return false;
       }
 
+      // Skip bids without token ID - can't resolve ENS name
+      if (!bid.tokenId || bid.tokenId === 'null') {
+        logger.debug(`🚫 Skipping bid without token ID: ${bid.bidId || 'unknown'}`);
+        return false;
+      }
+
       // Age filter: only bids from last 24 hours
       const bidAge = Date.now() - new Date(bid.createdAtApi).getTime();
       const maxAge = 24 * 60 * 60 * 1000; // 24 hours
