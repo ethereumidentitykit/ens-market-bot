@@ -293,18 +293,17 @@ export class NewTweetFormatter {
         const freshEthPriceUsd = await this.alchemyService.getETHPriceUSD();
         if (freshEthPriceUsd) {
           const calculatedUsd = priceEthValue * freshEthPriceUsd;
-          priceUsd = `($${Math.round(calculatedUsd).toLocaleString()})`;
+          priceUsd = `($${calculatedUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`;
         }
       } catch (error: any) {
         logger.warn('Failed to recalculate USD for registration tweet text, using database value:', error.message);
-        priceUsd = registration.costUsd ? `($${parseFloat(registration.costUsd).toLocaleString()})` : '';
+        priceUsd = registration.costUsd ? `($${parseFloat(registration.costUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})` : '';
       }
     } else {
-      priceUsd = registration.costUsd ? `($${parseFloat(registration.costUsd).toLocaleString()})` : '';
+      priceUsd = registration.costUsd ? `($${parseFloat(registration.costUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})` : '';
     }
     
-    const ethPart = `(${priceEth} ETH)`;
-    const priceLine = priceUsd ? `Price: ${priceUsd.replace(/[()]/g, '')} ${ethPart}` : `Price: ${priceEth} ETH`;
+    const priceLine = priceUsd ? `Price: ${priceUsd.replace(/[()]/g, '')} (${priceEth} ETH)` : `Price: ${priceEth} ETH`;
     
     // Line 3: New Owner
     const ownerHandle = this.getDisplayHandle(ownerAccount, registration.ownerAddress);
@@ -380,17 +379,17 @@ export class NewTweetFormatter {
         const freshEthPriceUsd = await this.alchemyService.getETHPriceUSD();
         if (freshEthPriceUsd) {
           const calculatedUsd = parseFloat(bid.priceDecimal) * freshEthPriceUsd;
-          priceUsd = `($${Math.round(calculatedUsd).toLocaleString()})`;
+          priceUsd = `$${calculatedUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
         }
       } catch (error: any) {
         logger.warn('Failed to recalculate USD for tweet text, using database value:', error.message);
-        priceUsd = bid.priceUsd ? `($${parseFloat(bid.priceUsd).toLocaleString()})` : '';
+        priceUsd = bid.priceUsd ? `$${parseFloat(bid.priceUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
       }
     } else {
-      priceUsd = bid.priceUsd ? `($${parseFloat(bid.priceUsd).toLocaleString()})` : '';
+      priceUsd = bid.priceUsd ? `$${parseFloat(bid.priceUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
     }
     
-    const priceLine = `Price: ${priceDecimal} ${currencyDisplay} ${priceUsd}`.trim();
+    const priceLine = priceUsd ? `Price: ${priceUsd} (${priceDecimal} ${currencyDisplay})` : `Price: ${priceDecimal} ${currencyDisplay}`;
     
     // Line 3: Bidder (changed from "From")
     const bidderHandle = this.getDisplayHandle(bidderAccount, bid.makerAddress);
@@ -471,10 +470,10 @@ export class NewTweetFormatter {
     // Line 1: ENS name
     const ensName = sale.nftName || 'Unknown ENS';
     
-    // Line 2: Price in ETH and USD
+    // Line 2: Price in USD and ETH (USD first, ETH in brackets) - 2 decimal places for USD in tweets
     const priceEth = parseFloat(sale.priceEth).toFixed(2);
-    const priceUsd = sale.priceUsd ? `($${parseFloat(sale.priceUsd).toLocaleString()})` : '';
-    const priceLine = `Price: ${priceEth} ETH ${priceUsd}`.trim();
+    const priceUsd = sale.priceUsd ? `$${parseFloat(sale.priceUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
+    const priceLine = priceUsd ? `Price: ${priceUsd} (${priceEth} ETH)` : `Price: ${priceEth} ETH`;
     
     // Line 3: Seller
     const sellerHandle = this.getDisplayHandle(sellerAccount, sale.sellerAddress);
@@ -986,14 +985,14 @@ export class NewTweetFormatter {
 
     const ensName = sale.nftName || 'Unknown ENS';
     const priceEth = parseFloat(sale.priceEth).toFixed(2);
-    const priceUsd = sale.priceUsd ? `($${parseFloat(sale.priceUsd).toLocaleString()})` : '';
+    const priceUsd = sale.priceUsd ? `$${parseFloat(sale.priceUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
     const buyerHandle = this.getDisplayHandle(buyerAccount, sale.buyerAddress);
     const sellerHandle = this.getDisplayHandle(sellerAccount, sale.sellerAddress);
     
     const breakdown = {
       header: '💰 SOLD 💰',
       ensName: ensName,
-      priceLine: `Price: ${priceEth} ETH ${priceUsd}`.trim(),
+      priceLine: priceUsd ? `Price: ${priceUsd} (${priceEth} ETH)` : `Price: ${priceEth} ETH`,
       sellerLine: `Seller: ${sellerHandle}`,
       buyerLine: `Buyer: ${buyerHandle}`,
       visionUrl: this.buildVisionioUrl(ensName),
@@ -1027,13 +1026,13 @@ export class NewTweetFormatter {
 
     const ensName = registration.fullName || registration.ensName || 'Unknown ENS';
     const priceEth = parseFloat(registration.costEth || '0').toFixed(2);
-    const priceUsd = registration.costUsd ? `($${parseFloat(registration.costUsd).toLocaleString()})` : '';
+    const priceUsd = registration.costUsd ? `($${parseFloat(registration.costUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})` : '';
     const ownerHandle = this.getDisplayHandle(ownerAccount, registration.ownerAddress);
     
     const breakdown = {
       header: '🏛️ REGISTERED 🏛️',
       ensName: ensName,
-      priceLine: `Price: ${priceEth} ETH ${priceUsd}`.trim(),
+      priceLine: priceUsd ? `Price: ${priceUsd.replace(/[()]/g, '')} (${priceEth} ETH)` : `Price: ${priceEth} ETH`,
       ownerLine: `New Owner: ${ownerHandle}`,
       visionUrl: this.buildVisionioUrl(ensName),
       ownerHandle: ownerHandle
@@ -1106,21 +1105,21 @@ export class NewTweetFormatter {
     const currencyDisplay = this.getCurrencyDisplayName(bid.currencySymbol);
     const priceDecimal = parseFloat(bid.priceDecimal).toFixed(2);
     
-    // Recalculate USD price with fresh ETH rate for breakdown
+    // Recalculate USD price with fresh ETH rate for breakdown (2 decimal places for tweets)
     let priceUsd = '';
     if (this.alchemyService && (bid.currencySymbol === 'ETH' || bid.currencySymbol === 'WETH')) {
       try {
         const freshEthPriceUsd = await this.alchemyService.getETHPriceUSD();
         if (freshEthPriceUsd) {
           const calculatedUsd = parseFloat(bid.priceDecimal) * freshEthPriceUsd;
-          priceUsd = `($${Math.round(calculatedUsd).toLocaleString()})`;
+          priceUsd = `$${calculatedUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
         }
       } catch (error: any) {
         logger.warn('Failed to recalculate USD for breakdown, using database value:', error.message);
-        priceUsd = bid.priceUsd ? `($${parseFloat(bid.priceUsd).toLocaleString()})` : '';
+        priceUsd = bid.priceUsd ? `$${parseFloat(bid.priceUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
       }
     } else {
-      priceUsd = bid.priceUsd ? `($${parseFloat(bid.priceUsd).toLocaleString()})` : '';
+      priceUsd = bid.priceUsd ? `$${parseFloat(bid.priceUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
     }
     
     const bidderHandle = this.getDisplayHandle(bidderAccount, bid.makerAddress);
@@ -1144,7 +1143,7 @@ export class NewTweetFormatter {
     const breakdown = {
       header: '✋ OFFER ✋',
       ensName: ensName,
-      priceLine: `Price: ${priceDecimal} ${currencyDisplay} ${priceUsd}`.trim(),
+      priceLine: priceUsd ? `Price: ${priceUsd} (${priceDecimal} ${currencyDisplay})` : `Price: ${priceDecimal} ${currencyDisplay}`,
       bidderLine: `Bidder: ${bidderHandle}`,
       currentOwnerLine: `Owner: ${currentOwnerHandle}`,
       validLine: `Valid: ${duration}`,
