@@ -327,8 +327,48 @@ export class NewTweetFormatter {
     // Header: ✋ Offer ✋
     const header = '✋ Offer ✋';
     
-    // Line 1: ENS name - use stored name from database
-    const ensName = bid.ensName || `Token: ${bid.tokenId?.slice(-6) || 'Unknown'}...`;
+    // Line 1: ENS name - use stored name from database, with ENS service fallback
+    let ensName = bid.ensName;
+    
+    // Debug: Show Magic Eden metadata status
+    if (ensName) {
+      logger.info(`✅ Magic Eden provided ENS name for bid ${bid.bidId}: ${ensName}`);
+    } else {
+      logger.warn(`⚠️  Magic Eden did not provide ENS name for bid ${bid.bidId} (token: ${bid.tokenId})`);
+    }
+    
+    // If no ENS name from Magic Eden, try to fetch it ourselves
+    if (!ensName && bid.tokenId) {
+      try {
+        logger.info(`🔍 Missing ENS name for bid ${bid.bidId}, attempting fallback lookup for token ${bid.tokenId}`);
+        const ensContract = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
+        const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
+        
+        const response = await fetch(metadataUrl, { 
+          signal: AbortSignal.timeout(5000) // 5 second timeout
+        });
+        
+        if (response.ok) {
+          const metadata = await response.json();
+          ensName = metadata.name;
+          if (ensName) {
+            logger.info(`✅ Successfully resolved ENS name via fallback: ${ensName}`);
+          } else {
+            logger.warn(`⚠️  ENS metadata service returned no name for token ${bid.tokenId}`);
+          }
+        } else {
+          logger.warn(`⚠️  ENS metadata service returned HTTP ${response.status} for token ${bid.tokenId}`);
+        }
+      } catch (error: any) {
+        logger.warn(`⚠️  ENS metadata service fallback failed for token ${bid.tokenId}:`, error.message);
+      }
+    }
+    
+    // Final fallback if everything failed
+    if (!ensName) {
+      ensName = `Token: ${bid.tokenId?.slice(-6) || 'Unknown'}...`;
+      logger.warn(`❌ No ENS name could be resolved for bid ${bid.bidId}, using fallback: ${ensName}`);
+    }
     
     // Line 2: Price with currency display (recalculate USD with fresh ETH rate)
     const currencyDisplay = this.getCurrencyDisplayName(bid.currencySymbol);
@@ -636,8 +676,48 @@ export class NewTweetFormatter {
       priceUsd = bid.priceUsd ? parseFloat(bid.priceUsd) : 0;
     }
     
-    // Get ENS name for display (from database)
-    const ensName = bid.ensName || `Token: ${bid.tokenId?.slice(-6) || 'Unknown'}...`;
+    // Get ENS name for display (from database), with ENS service fallback  
+    let ensName = bid.ensName;
+    
+    // Debug: Show Magic Eden metadata status for image generation
+    if (ensName) {
+      logger.info(`✅ Magic Eden provided ENS name for image bid ${bid.bidId}: ${ensName}`);
+    } else {
+      logger.warn(`⚠️  Magic Eden did not provide ENS name for image bid ${bid.bidId} (token: ${bid.tokenId})`);
+    }
+    
+    // If no ENS name from Magic Eden, try to fetch it ourselves (same logic as tweet text)
+    if (!ensName && bid.tokenId) {
+      try {
+        logger.info(`🔍 Missing ENS name for image generation of bid ${bid.bidId}, attempting fallback lookup for token ${bid.tokenId}`);
+        const ensContract = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
+        const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
+        
+        const response = await fetch(metadataUrl, { 
+          signal: AbortSignal.timeout(5000) // 5 second timeout
+        });
+        
+        if (response.ok) {
+          const metadata = await response.json();
+          ensName = metadata.name;
+          if (ensName) {
+            logger.info(`✅ Successfully resolved ENS name via fallback for image: ${ensName}`);
+          } else {
+            logger.warn(`⚠️  ENS metadata service returned no name for image token ${bid.tokenId}`);
+          }
+        } else {
+          logger.warn(`⚠️  ENS metadata service returned HTTP ${response.status} for image token ${bid.tokenId}`);
+        }
+      } catch (error: any) {
+        logger.warn(`⚠️  ENS metadata service fallback failed for image token ${bid.tokenId}:`, error.message);
+      }
+    }
+    
+    // Final fallback if everything failed
+    if (!ensName) {
+      ensName = `Token: ${bid.tokenId?.slice(-6) || 'Unknown'}...`;
+      logger.warn(`❌ No ENS name could be resolved for image bid ${bid.bidId}, using fallback: ${ensName}`);
+    }
     
     // Get bidder display info (ENS only for images)
     const bidderHandle = this.getImageDisplayHandle(bidderAccount, bid.makerAddress);
@@ -809,12 +889,12 @@ export class NewTweetFormatter {
       errors.push('Bid tweet should include "Price:" label');
     }
 
-    if (!content.includes('From:')) {
-      errors.push('Bid tweet should include "From:" label');
+    if (!content.includes('Bidder:')) {
+      errors.push('Bid tweet should include "Bidder:" label');
     }
 
-    if (!content.includes('Marketplace:')) {
-      errors.push('Bid tweet should include "Marketplace:" label');
+    if (!content.includes('Owner:')) {
+      errors.push('Bid tweet should include "Owner:" label');
     }
 
     if (!content.includes('Valid:')) {
@@ -986,7 +1066,43 @@ export class NewTweetFormatter {
     // Get account data for breakdown
     const bidderAccount = await this.getAccountData(bid.makerAddress);
 
-    const ensName = bid.ensName || `Token: ${bid.tokenId?.slice(-6) || 'Unknown'}...`;
+    // Use consistent ENS name resolution (same logic as tweet text and image)
+    let ensName = bid.ensName;
+    
+    // Debug: Show Magic Eden metadata status for breakdown
+    if (ensName) {
+      logger.info(`✅ Magic Eden provided ENS name for bid breakdown ${bid.bidId}: ${ensName}`);
+    } else {
+      logger.warn(`⚠️  Magic Eden did not provide ENS name for bid breakdown ${bid.bidId} (token: ${bid.tokenId})`);
+    }
+    
+    // If no ENS name from Magic Eden, try to fetch it ourselves
+    if (!ensName && bid.tokenId) {
+      try {
+        logger.info(`🔍 Missing ENS name for bid breakdown ${bid.bidId}, attempting fallback lookup for token ${bid.tokenId}`);
+        const ensContract = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
+        const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
+        
+        const response = await fetch(metadataUrl, { 
+          signal: AbortSignal.timeout(5000) // 5 second timeout
+        });
+        
+        if (response.ok) {
+          const metadata = await response.json();
+          ensName = metadata.name;
+          if (ensName) {
+            logger.info(`✅ Successfully resolved ENS name via fallback for breakdown: ${ensName}`);
+          }
+        }
+      } catch (error: any) {
+        logger.warn(`⚠️  ENS metadata service fallback failed for breakdown token ${bid.tokenId}:`, error.message);
+      }
+    }
+    
+    // Final fallback if everything failed
+    if (!ensName) {
+      ensName = `Token: ${bid.tokenId?.slice(-6) || 'Unknown'}...`;
+    }
     const currencyDisplay = this.getCurrencyDisplayName(bid.currencySymbol);
     const priceDecimal = parseFloat(bid.priceDecimal).toFixed(2);
     
