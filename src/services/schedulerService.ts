@@ -124,7 +124,7 @@ export class SchedulerService {
   }
 
   /**
-   * Stop the automated scheduling
+   * Stop the automated scheduling (manual stop - persists disabled state)
    */
   async stop(): Promise<void> {
     let wasRunning = false;
@@ -153,10 +153,36 @@ export class SchedulerService {
       // Save disabled state to database for persistence across restarts
       await this.saveSchedulerState(false);
       
+      logger.info('💾 Scheduler state persisted: DISABLED (survives restarts)');
       logger.info('Scheduler stopped - sales, registration, and bid processing halted');
     } else {
       logger.info('Scheduler was not running');
     }
+  }
+
+  /**
+   * Gracefully stop scheduler without persisting state (for app restarts)
+   */
+  async gracefulShutdown(): Promise<void> {
+    if (this.salesSyncJob) {
+      this.salesSyncJob.stop();
+      this.salesSyncJob = null;
+    }
+    
+    if (this.registrationSyncJob) {
+      this.registrationSyncJob.stop();
+      this.registrationSyncJob = null;
+    }
+    
+    if (this.bidsSyncJob) {
+      this.bidsSyncJob.stop();
+      this.bidsSyncJob = null;
+    }
+    
+    this.isRunning = false;
+    
+    // Don't persist state change - allows scheduler to resume after restart
+    logger.info('Scheduler gracefully stopped (state preserved for restart)');
   }
 
   /**

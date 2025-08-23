@@ -2232,8 +2232,8 @@ async function startApplication(): Promise<void> {
     const shutdown = async (): Promise<void> => {
       logger.info('Shutting down gracefully...');
       
-      // Stop scheduler first
-      await schedulerService.stop();
+      // Gracefully stop scheduler without persisting state (allows resume after restart)
+      await schedulerService.gracefulShutdown();
       
       // Stop world time service
       worldTimeService.stop();
