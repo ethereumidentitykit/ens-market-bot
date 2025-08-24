@@ -198,9 +198,11 @@ export class BidsProcessingService {
       logger.debug(`🖼️  Fetching missing ENS metadata for token ID: ${bid.tokenId} (name: ${hasName ? '✓' : '✗'}, image: ${hasImage ? '✓' : '✗'})`);
       const metadataStartTime = Date.now();
       
-      // Use ENS Base Registrar contract for metadata
-      const ensContract = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
+      // Use the actual contract address from the bid (instead of hard-coding old contract)
+      const ensContract = bid.contractAddress || '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
       const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
+      
+      logger.debug(`🔗 Using contract ${ensContract} for metadata lookup`);
       
       const response = await axios.get(metadataUrl, { timeout: 3000 }); // Reduced from 10s to 3s
       const metadata: ENSMetadata = response.data;
