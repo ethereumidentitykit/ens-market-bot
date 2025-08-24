@@ -212,7 +212,7 @@ export class AutoTweetService {
         success: false,
         saleId,
         skipped: true,
-        reason: `Rate limit exceeded: ${rateLimitCheck.postsInLast24Hours}/15 posts used`,
+        reason: `Rate limit exceeded: ${rateLimitCheck.postsInLast24Hours}/${this.rateLimitService.getDailyLimit()} posts used`,
         type: 'sale'
       };
     }
@@ -317,7 +317,7 @@ export class AutoTweetService {
         success: false,
         registrationId,
         skipped: true,
-        reason: `Rate limit exceeded: ${rateLimitCheck.postsInLast24Hours}/15 posts used`,
+        reason: `Rate limit exceeded: ${rateLimitCheck.postsInLast24Hours}/${this.rateLimitService.getDailyLimit()} posts used`,
         type: 'registration'
       };
     }

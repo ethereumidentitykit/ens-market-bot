@@ -312,12 +312,12 @@ async function startApplication(): Promise<void> {
 
     app.get('/api/unposted-sales', async (req, res) => {
       try {
-        const limit = parseInt(req.query.limit as string) || 10;
-        const unpostedSales = await salesProcessingService.getSalesForPosting(limit);
+        const limit = parseInt(req.query.limit as string) || 500; // Increased for testing
+        const recentSales = await databaseService.getRecentSales(limit); // Changed to get ALL sales
         res.json({
           success: true,
-          data: unpostedSales,
-          count: unpostedSales.length
+          data: recentSales,
+          count: recentSales.length
         });
       } catch (error: any) {
         res.status(500).json({
@@ -329,12 +329,12 @@ async function startApplication(): Promise<void> {
 
     app.get('/api/unposted-registrations', async (req, res) => {
       try {
-        const limit = parseInt(req.query.limit as string) || 10;
-        const unpostedRegistrations = await databaseService.getUnpostedRegistrations(limit);
+        const limit = parseInt(req.query.limit as string) || 500; // Increased for testing
+        const recentRegistrations = await databaseService.getRecentRegistrations(limit); // Changed to get ALL registrations
         res.json({
           success: true,
-          data: unpostedRegistrations,
-          count: unpostedRegistrations.length
+          data: recentRegistrations,
+          count: recentRegistrations.length
         });
       } catch (error: any) {
         res.status(500).json({
@@ -810,8 +810,8 @@ async function startApplication(): Promise<void> {
         // Check rate limit first
         await rateLimitService.validateTweetPost();
 
-        // Get the latest unposted sale
-        const unpostedSales = await databaseService.getUnpostedSales(1);
+        // Get the latest sale
+        const unpostedSales = await databaseService.getRecentSales(1);
         if (unpostedSales.length === 0) {
           return res.status(404).json({
             success: false,
@@ -889,7 +889,7 @@ async function startApplication(): Promise<void> {
         }
 
         // Get the sale from database
-        const unpostedSales = await databaseService.getUnpostedSales(100);
+        const unpostedSales = await databaseService.getRecentSales(500);
         const sale = unpostedSales.find(s => s.id === saleId);
         
         if (!sale) {
@@ -945,7 +945,7 @@ async function startApplication(): Promise<void> {
         }
 
         // Get the sale from database
-        const unpostedSales = await databaseService.getUnpostedSales(100);
+        const unpostedSales = await databaseService.getRecentSales(500);
         const sale = unpostedSales.find(s => s.id === saleId);
         
         if (!sale) {
@@ -955,12 +955,13 @@ async function startApplication(): Promise<void> {
           });
         }
 
-        if (sale.posted) {
-          return res.status(400).json({
-            success: false,
-            error: 'Sale has already been posted to Twitter'
-          });
-        }
+        // Comment out for testing - allow reposting already posted sales
+        // if (sale.posted) {
+        //   return res.status(400).json({
+        //     success: false,
+        //     error: 'Sale has already been posted to Twitter'
+        //   });
+        // }
 
         // Check rate limit first
         await rateLimitService.validateTweetPost();
@@ -1034,7 +1035,7 @@ async function startApplication(): Promise<void> {
         }
 
         // Get the sale from database
-        const unpostedSales = await databaseService.getUnpostedSales(100);
+        const unpostedSales = await databaseService.getRecentSales(500);
         const sale = unpostedSales.find(s => s.id === saleId);
         
         if (!sale) {
@@ -1094,7 +1095,7 @@ async function startApplication(): Promise<void> {
         }
 
         // Get the sale from database
-        const unpostedSales = await databaseService.getUnpostedSales(100);
+        const unpostedSales = await databaseService.getRecentSales(500);
         const sale = unpostedSales.find(s => s.id === saleId);
         
         if (!sale) {
@@ -1104,12 +1105,13 @@ async function startApplication(): Promise<void> {
           });
         }
 
-        if (sale.posted) {
-          return res.status(400).json({
-            success: false,
-            error: 'Sale has already been posted to Twitter'
-          });
-        }
+        // Comment out for testing - allow reposting already posted sales
+        // if (sale.posted) {
+        //   return res.status(400).json({
+        //     success: false,
+        //     error: 'Sale has already been posted to Twitter'
+        //   });
+        // }
 
         // Check rate limit first
         await rateLimitService.validateTweetPost();
@@ -1184,7 +1186,7 @@ async function startApplication(): Promise<void> {
         }
 
         // Get the registration from database
-        const unpostedRegistrations = await databaseService.getUnpostedRegistrations(100);
+        const unpostedRegistrations = await databaseService.getRecentRegistrations(500);
         const registration = unpostedRegistrations.find(r => r.id === registrationId);
         
         if (!registration) {
@@ -1244,7 +1246,7 @@ async function startApplication(): Promise<void> {
         }
 
         // Get the registration from database
-        const unpostedRegistrations = await databaseService.getUnpostedRegistrations(100);
+        const unpostedRegistrations = await databaseService.getRecentRegistrations(500);
         const registration = unpostedRegistrations.find(r => r.id === registrationId);
         
         if (!registration) {
@@ -1254,12 +1256,13 @@ async function startApplication(): Promise<void> {
           });
         }
 
-        if (registration.posted) {
-          return res.status(400).json({
-            success: false,
-            error: 'Registration has already been posted to Twitter'
-          });
-        }
+        // Comment out for testing - allow reposting already posted registrations
+        // if (registration.posted) {
+        //   return res.status(400).json({
+        //     success: false,
+        //     error: 'Registration has already been posted to Twitter'
+        //   });
+        // }
 
         // Check rate limit first
         await rateLimitService.validateTweetPost();
@@ -1333,7 +1336,7 @@ async function startApplication(): Promise<void> {
         }
 
         // Get the bid from database
-        const unpostedBids = await databaseService.getUnpostedBids(100);
+        const unpostedBids = await databaseService.getRecentBids(500);
         const bid = unpostedBids.find(b => b.id === bidId);
         
         if (!bid) {
@@ -1374,7 +1377,7 @@ async function startApplication(): Promise<void> {
         }
 
         // Get the bid from database
-        const unpostedBids = await databaseService.getUnpostedBids(100);
+        const unpostedBids = await databaseService.getRecentBids(500);
         const bid = unpostedBids.find(b => b.id === bidId);
         
         if (!bid) {
@@ -1429,12 +1432,12 @@ async function startApplication(): Promise<void> {
 
     app.get('/api/unposted-bids', async (req, res) => {
       try {
-        const limit = parseInt(req.query.limit as string) || 10;
-        const unpostedBids = await databaseService.getUnpostedBids(limit);
+        const limit = parseInt(req.query.limit as string) || 500; // Increased for testing
+        const recentBids = await databaseService.getRecentBids(limit); // Changed to get ALL bids
         res.json({
           success: true,
-          data: unpostedBids,
-          count: unpostedBids.length
+          data: recentBids,
+          count: recentBids.length
         });
       } catch (error: any) {
         res.status(500).json({
