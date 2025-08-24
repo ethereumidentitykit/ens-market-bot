@@ -10,11 +10,18 @@ export interface RateLimitStatus {
 }
 
 export class RateLimitService {
-  private readonly DAILY_LIMIT = 15; // 15 posts per 24 hours
+  private readonly DAILY_LIMIT = 100; // 100 posts per 24 hours (updated API plan)
   private databaseService: IDatabaseService;
 
   constructor(databaseService: IDatabaseService) {
     this.databaseService = databaseService;
+  }
+
+  /**
+   * Get the daily limit for tweet posts
+   */
+  getDailyLimit(): number {
+    return this.DAILY_LIMIT;
   }
 
   /**
@@ -154,10 +161,4 @@ export class RateLimitService {
     }
   }
 
-  /**
-   * Get the daily posting limit
-   */
-  getDailyLimit(): number {
-    return this.DAILY_LIMIT;
-  }
 }

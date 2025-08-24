@@ -966,7 +966,7 @@ function dashboard() {
         // New Tweet Generation Methods
         async loadUnpostedSales() {
             try {
-                const response = await fetch('/api/unposted-sales?limit=20');
+                const response = await fetch('/api/unposted-sales?limit=500'); // Increased for testing
                 const data = await response.json();
                 
                 if (data.success) {
@@ -983,7 +983,7 @@ function dashboard() {
 
         async loadUnpostedRegistrations() {
             try {
-                const response = await fetch('/api/unposted-registrations?limit=20');
+                const response = await fetch('/api/unposted-registrations?limit=500'); // Increased for testing
                 const data = await response.json();
                 
                 if (data.success) {
@@ -1026,7 +1026,7 @@ function dashboard() {
 
         async loadUnpostedBids() {
             try {
-                const response = await fetch('/api/unposted-bids?limit=20');
+                const response = await fetch('/api/unposted-bids?limit=500'); // Increased for testing
                 const data = await response.json();
                 
                 if (data.success) {
