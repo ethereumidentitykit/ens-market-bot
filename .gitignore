@@ -40,3 +40,4 @@ assets/emojis/unmapped/
 
 # Cursor IDE (private project notes and settings)
 .cursor/
+/test-images
