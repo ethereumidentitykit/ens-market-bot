@@ -191,9 +191,10 @@ export class MagicEdenService {
     try {
       const parts = tokenSetId.split(':');
       
-      if (parts.length >= 3 && parts[0] === 'token') {
+      // Handle both "token:" and "list:" formats
+      if (parts.length >= 3 && (parts[0] === 'token' || parts[0] === 'list')) {
         const tokenId = parts[2];
-        logger.debug(`🔍 Extracted token ID: ${tokenId} from ${tokenSetId}`);
+        logger.debug(`🔍 Extracted token ID: ${tokenId} from ${tokenSetId} (format: ${parts[0]})`);
         return tokenId;
       }
 
