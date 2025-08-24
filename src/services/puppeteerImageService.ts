@@ -546,14 +546,14 @@ export class PuppeteerImageService {
             ${imageType !== 'registration' ? `
             <!-- Seller Section -->
             <div class="seller-section">
-                <div class="seller-name">${data.sellerEns || 'seller'}</div>
+                <div class="seller-name">${sellerEnsWithEmojis}</div>
                 <img src="${sellerAvatarPath}" alt="Seller" class="seller-avatar" onerror="this.src='data:image/png;base64,${userPlaceholderBase64}'">
             </div>
             ` : ''}
 
             <!-- Buyer Section -->
             <div class="buyer-section">
-                <div class="buyer-name">${data.buyerEns || 'buyer'}</div>
+                <div class="buyer-name">${buyerEnsWithEmojis}</div>
                 <img src="${buyerAvatarPath}" alt="Buyer" class="buyer-avatar" onerror="this.src='data:image/png;base64,${userPlaceholderBase64}'">
             </div>
         </div>
