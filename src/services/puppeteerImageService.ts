@@ -364,8 +364,9 @@ export class PuppeteerImageService {
         let svgContent = svgResponse.data;
         logger.info(`📥 Downloaded NFT SVG (${svgContent.length} chars): ${svgContent.substring(0, 150)}...`);
         
-        // Skip emoji processing in NFT SVG for now - let font rendering handle it
-        logger.info(`🚫 Skipping NFT SVG emoji processing - using font rendering instead`);
+        // Process emojis in NFT SVG using our existing emojiMappingService (Apple SVGs)
+        logger.info(`🍎 Processing NFT SVG emojis with emojiMappingService (Apple SVGs)`);
+        svgContent = await emojiMappingService.replaceEmojisWithSvg(svgContent);
         
         // Convert SVG to PNG using SvgConverter
         const pngBuffer = await SvgConverter.convertSvgToPng(svgContent);

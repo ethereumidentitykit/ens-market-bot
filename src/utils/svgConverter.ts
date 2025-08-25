@@ -50,7 +50,7 @@ export class SvgConverter {
       const page = await browser.newPage();
       await page.setViewport({ width: 270, height: 270 });
       
-      // Pure SVG rendering - no font interference
+      // Clean SVG rendering - emojis already processed by emojiMappingService
       const html = `
         <!DOCTYPE html>
         <html>
@@ -85,7 +85,7 @@ export class SvgConverter {
       // Wait for SVG content to be ready
       await page.waitForSelector('.svg-container');
       
-      // Small delay to ensure SVG is ready
+      // Short delay for SVG content to be ready 
       await new Promise(resolve => setTimeout(resolve, 500));
       
       // Take screenshot
