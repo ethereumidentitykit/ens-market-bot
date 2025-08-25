@@ -8,6 +8,9 @@ export class SvgConverter {
    * Convert SVG to PNG using Puppeteer for accurate rendering of custom fonts and emojis
    */
   public static async convertSvgToPng(svgContent: string): Promise<Buffer> {
+    const startTime = Date.now();
+    logger.debug(`Starting SVG to PNG conversion (${svgContent.length} chars)`);
+    
     // Environment-aware Puppeteer setup
     const isVercel = process.env.VERCEL === '1';
     
@@ -106,7 +109,8 @@ export class SvgConverter {
       });
       
       await browser.close();
-      logger.info('Successfully converted SVG to PNG using Puppeteer');
+      const duration = Date.now() - startTime;
+      logger.info(`Successfully converted SVG to PNG using Puppeteer (${duration}ms)`);
       
       return Buffer.from(screenshot);
     } catch (error) {

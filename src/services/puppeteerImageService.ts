@@ -3,6 +3,7 @@ import { ImageData } from '../types/imageTypes';
 import { IDatabaseService } from '../types';
 import { emojiMappingService } from './emojiMappingService';
 import { RealImageData } from './realDataImageService';
+import { SvgConverter } from '../utils/svgConverter';
 import * as fs from 'fs';
 import * as path from 'path';
 import axios from 'axios';
@@ -213,11 +214,12 @@ export class PuppeteerImageService {
       });
 
       const imageBuffer = Buffer.from(response.data);
-      const base64 = imageBuffer.toString('base64');
       
       // Detect image type from response headers
       const contentType = response.headers['content-type'] || 'image/png';
       
+      // For regular avatar images (PNG, JPG, etc.), convert to base64
+      const base64 = imageBuffer.toString('base64');
       logger.debug(`Successfully loaded avatar: ${imageUrl} (${contentType})`);
       return `data:${contentType};base64,${base64}`;
       
@@ -346,15 +348,37 @@ export class PuppeteerImageService {
     // Use actual images or fallbacks
     const templateImagePath = `data:image/png;base64,${backgroundImageBase64}`;
     
-    // Load NFT image with fallback chain: original URL → ENS metadata service → placeholder
-    let ensNftImagePath = `data:image/png;base64,${ensPlaceholderBase64}`;
+    // Convert NFT SVG to PNG (all NFT images are SVG format)
+    let nftImageBase64 = `data:image/png;base64,${ensPlaceholderBase64}`; // Default fallback
     if (data.nftImageUrl) {
-      ensNftImagePath = await this.loadNftImageWithFallbacks(data.nftImageUrl, data.ensName, ensPlaceholderBase64);
+      try {
+        logger.debug(`Processing NFT SVG image: ${data.nftImageUrl.substring(0, 100)}...`);
+        
+        // Download the SVG content
+        const svgResponse = await axios.get(data.nftImageUrl, {
+          timeout: 10000,
+          headers: { 'User-Agent': 'ENS-TwitterBot/1.0' }
+        });
+        
+        const svgContent = svgResponse.data;
+        logger.debug(`Downloaded NFT SVG (${svgContent.length} chars), converting to PNG...`);
+        
+        // Convert SVG to PNG using SvgConverter
+        const pngBuffer = await SvgConverter.convertSvgToPng(svgContent);
+        const pngBase64 = pngBuffer.toString('base64');
+        
+        nftImageBase64 = `data:image/png;base64,${pngBase64}`;
+        logger.debug(`Successfully converted NFT SVG to PNG`);
+      } catch (error: any) {
+        logger.warn(`Failed to process NFT SVG image: ${data.nftImageUrl}`, error.message);
+        // Falls back to placeholder
+      }
     }
     
-    // Convert avatar URLs to base64 data URLs (like other images)
+    // Convert avatar URLs to base64 data URLs (SEQUENTIAL to prevent resource exhaustion)
     let sellerAvatarPath = `data:image/png;base64,${userPlaceholderBase64}`;
     if (data.sellerAvatar) {
+      logger.debug(`Processing seller avatar: ${data.sellerAvatar.substring(0, 100)}...`);
       const sellerAvatarBase64 = await this.loadRemoteImageAsBase64(data.sellerAvatar);
       if (sellerAvatarBase64) {
         sellerAvatarPath = sellerAvatarBase64;
@@ -364,6 +388,7 @@ export class PuppeteerImageService {
     
     let buyerAvatarPath = `data:image/png;base64,${userPlaceholderBase64}`;
     if (data.buyerAvatar) {
+      logger.debug(`Processing buyer avatar: ${data.buyerAvatar.substring(0, 100)}...`);
       const buyerAvatarBase64 = await this.loadRemoteImageAsBase64(data.buyerAvatar);
       if (buyerAvatarBase64) {
         buyerAvatarPath = buyerAvatarBase64;
@@ -371,10 +396,31 @@ export class PuppeteerImageService {
       }
     }
     
-    // Replace emojis in text fields with SVG elements
-    const ensNameWithEmojis = await emojiMappingService.replaceEmojisWithSvg(data.ensName);
-    const sellerEnsWithEmojis = await emojiMappingService.replaceEmojisWithSvg(data.sellerEns || 'seller');
-    const buyerEnsWithEmojis = await emojiMappingService.replaceEmojisWithSvg(data.buyerEns || 'buyer');
+    // Replace emojis in text fields with SVG elements (with error handling)
+    let ensNameWithEmojis = data.ensName;
+    let sellerEnsWithEmojis = data.sellerEns || 'seller';
+    let buyerEnsWithEmojis = data.buyerEns || 'buyer';
+    
+    try {
+      ensNameWithEmojis = await emojiMappingService.replaceEmojisWithSvg(data.ensName);
+      logger.debug(`Processed ENS name emojis: ${data.ensName} -> ${ensNameWithEmojis.length} chars`);
+    } catch (error) {
+      logger.error(`Failed to process ENS name emojis for "${data.ensName}":`, error);
+    }
+    
+    try {
+      sellerEnsWithEmojis = await emojiMappingService.replaceEmojisWithSvg(data.sellerEns || 'seller');
+      logger.debug(`Processed seller emojis: ${data.sellerEns} -> ${sellerEnsWithEmojis.length} chars`);
+    } catch (error) {
+      logger.error(`Failed to process seller emojis for "${data.sellerEns}":`, error);
+    }
+    
+    try {
+      buyerEnsWithEmojis = await emojiMappingService.replaceEmojisWithSvg(data.buyerEns || 'buyer');
+      logger.debug(`Processed buyer emojis: ${data.buyerEns} -> ${buyerEnsWithEmojis.length} chars`);
+    } catch (error) {
+      logger.error(`Failed to process buyer emojis for "${data.buyerEns}":`, error);
+    }
     
     return `
     <!DOCTYPE html>
@@ -430,7 +476,7 @@ export class PuppeteerImageService {
                 height: 455px;
                 border-radius: 19px;
                 object-fit: cover;
-                background-image: url("${ensNftImagePath}");
+                background-image: url("${nftImageBase64}");
                 background-size: cover;
                 background-position: center;
                 background-repeat: no-repeat;
@@ -527,10 +573,9 @@ export class PuppeteerImageService {
             <!-- Background Template -->
             <div class="background"></div>
 
-            <!-- ENS NFT Image -->
-            <img src="${ensNftImagePath}" alt="ENS NFT" class="ens-nft" 
-                 onerror="this.src='data:image/png;base64,${ensPlaceholderBase64}'; console.log('NFT image failed to load:', this.getAttribute('original-src') || '${ensNftImagePath}');"
-                 onload="console.log('NFT image loaded successfully:', this.src);"
+            <!-- ENS NFT Image (Converted PNG) -->
+            <img src="${nftImageBase64}" alt="ENS NFT" class="ens-nft" 
+                 onload="console.log('NFT image loaded successfully');"
             >
 
             <!-- USD Price -->
@@ -546,14 +591,14 @@ export class PuppeteerImageService {
             ${imageType !== 'registration' ? `
             <!-- Seller Section -->
             <div class="seller-section">
-                <div class="seller-name">${data.sellerEns || 'seller'}</div>
+                <div class="seller-name">${sellerEnsWithEmojis}</div>
                 <img src="${sellerAvatarPath}" alt="Seller" class="seller-avatar" onerror="this.src='data:image/png;base64,${userPlaceholderBase64}'">
             </div>
             ` : ''}
 
             <!-- Buyer Section -->
             <div class="buyer-section">
-                <div class="buyer-name">${data.buyerEns || 'buyer'}</div>
+                <div class="buyer-name">${buyerEnsWithEmojis}</div>
                 <img src="${buyerAvatarPath}" alt="Buyer" class="buyer-avatar" onerror="this.src='data:image/png;base64,${userPlaceholderBase64}'">
             </div>
         </div>
