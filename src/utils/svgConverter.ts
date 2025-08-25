@@ -50,10 +50,7 @@ export class SvgConverter {
       const page = await browser.newPage();
       await page.setViewport({ width: 270, height: 270 });
       
-      // Create a data URL from the SVG
-      const svgDataUrl = `data:image/svg+xml;base64,${Buffer.from(svgContent).toString('base64')}`;
-      
-      // Navigate to a simple HTML page with the SVG
+      // Direct SVG content embedding (preserves original emoji rendering)
       const html = `
         <!DOCTYPE html>
         <html>
@@ -67,39 +64,28 @@ export class SvgConverter {
                 display: flex;
                 align-items: center;
                 justify-content: center;
+                background: transparent;
               }
-              img {
+              .svg-container {
                 width: 270px;
                 height: 270px;
-                object-fit: contain;
               }
             </style>
           </head>
           <body>
-            <img src="${svgDataUrl}" alt="ENS Image" />
+            <div class="svg-container">
+              ${svgContent}
+            </div>
           </body>
         </html>
       `;
       
       await page.setContent(html);
       
-      // Wait for image to load
-      await page.waitForSelector('img');
-      await (page as any).evaluate(() => {
-        return new Promise((resolve) => {
-          const img = document.querySelector('img');
-          if (img && (img as any).complete) {
-            resolve(true);
-          } else if (img) {
-            (img as any).onload = () => resolve(true);
-            (img as any).onerror = () => resolve(true);
-          } else {
-            resolve(true);
-          }
-        });
-      });
+      // Wait for SVG content to be ready
+      await page.waitForSelector('.svg-container');
       
-      // Small delay to ensure fonts are loaded
+      // Small delay to ensure SVG is fully rendered
       await new Promise(resolve => setTimeout(resolve, 500));
       
       // Take screenshot
