@@ -361,19 +361,19 @@ export class PuppeteerImageService {
           headers: { 'User-Agent': 'ENS-TwitterBot/1.0' }
         });
         
-        let svgContent = svgResponse.data;
+        const svgContent = svgResponse.data;
         logger.info(`📥 Downloaded NFT SVG (${svgContent.length} chars): ${svgContent.substring(0, 150)}...`);
         
-        // Process emojis in NFT SVG using our existing emojiMappingService (Apple SVGs)
-        logger.info(`🍎 Processing NFT SVG emojis with emojiMappingService (Apple SVGs)`);
-        svgContent = await emojiMappingService.replaceEmojisWithSvg(svgContent);
+        // Parse SVG to extract background and text, rebuild as HTML
+        const htmlContent = await this.convertSvgToHtmlWithEmojis(svgContent);
+        logger.info(`🔄 Converted SVG to HTML overlay with emoji processing`);
         
-        // Convert SVG to PNG using SvgConverter
-        const pngBuffer = await SvgConverter.convertSvgToPng(svgContent);
+        // Convert HTML to PNG using SvgConverter
+        const pngBuffer = await SvgConverter.convertSvgToPng(htmlContent);
         const pngBase64 = pngBuffer.toString('base64');
         
         nftImageBase64 = `data:image/png;base64,${pngBase64}`;
-        logger.info(`✅ Successfully converted NFT SVG to PNG`);
+        logger.info(`✅ Successfully converted NFT to PNG with Apple emojis`);
       } catch (error: any) {
         logger.warn(`❌ Failed to process NFT SVG image: ${data.nftImageUrl}`, error.message);
         // Falls back to placeholder
@@ -829,5 +829,112 @@ export class PuppeteerImageService {
       transactionHash: '0xtest123456789abcdef',
       timestamp: new Date()
     };
+  }
+
+  /**
+   * Convert ENS SVG to HTML with proper emoji processing
+   * Extracts background image and text, rebuilds as HTML where emojiMappingService works
+   */
+  private static async convertSvgToHtmlWithEmojis(svgContent: string): Promise<string> {
+    logger.info(`🔍 Parsing SVG structure for HTML conversion`);
+    
+    // Extract background - could be a custom image OR use default ENS background
+    let backgroundStyle = '';
+    
+    // Check for image background (custom ENS avatar)
+    const imageMatch = svgContent.match(/<image[^>]*href="([^"]+)"/);
+    if (imageMatch) {
+      const backgroundImage = imageMatch[1];
+      backgroundStyle = `background: url('${backgroundImage}') no-repeat center/cover;`;
+      logger.info(`📷 Found custom background image`);
+    } else {
+      // Use default ENS gradient background image
+      const defaultBgPath = path.join(__dirname, '../../assets/ens-default-background.png');
+      const defaultBgBase64 = fs.readFileSync(defaultBgPath, 'base64');
+      backgroundStyle = `background: url('data:image/png;base64,${defaultBgBase64}') no-repeat center/cover;`;
+      logger.info(`🎨 Using default ENS background image`);
+    }
+    
+    // Extract all <path> elements (ENS logo)
+    const pathMatches = Array.from(svgContent.matchAll(/<path[^>]*d="([^"]+)"[^>]*fill="([^"]*)"[^>]*\/>/g));
+    logger.info(`🎨 Found ${pathMatches.length} path elements (ENS logo)`);
+    
+    // Build SVG for paths (ENS logo)
+    let svgPaths = '';
+    if (pathMatches.length > 0) {
+      const pathElements = pathMatches.map(match => 
+        `<path d="${match[1]}" fill="${match[2] || 'white'}" />`
+      ).join('\n');
+      
+      svgPaths = `
+        <svg style="position: absolute; top: 0; left: 0; width: 270px; height: 270px;" 
+             viewBox="0 0 270 270" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <filter id="dropShadow" color-interpolation-filters="sRGB">
+              <feDropShadow dx="0" dy="1" stdDeviation="2" flood-opacity="0.225"/>
+            </filter>
+          </defs>
+          <g filter="url(#dropShadow)">
+            ${pathElements}
+          </g>
+        </svg>
+      `;
+    }
+    
+    // Extract text elements with ALL attributes
+    const textRegex = /<text[^>]*>([^<]+)<\/text>/g;
+    const textAttrRegex = /(\w+)="([^"]+)"/g;
+    let textMatch;
+    let htmlTextElements = [];
+    
+    while ((textMatch = textRegex.exec(svgContent)) !== null) {
+      const fullTextElement = textMatch[0];
+      const textContent = textMatch[1];
+      
+      // Extract all attributes
+      let attrs: any = {};
+      let attrMatch;
+      while ((attrMatch = textAttrRegex.exec(fullTextElement)) !== null) {
+        attrs[attrMatch[1]] = attrMatch[2];
+      }
+      
+      const x = attrs.x || '0';
+      const y = attrs.y || '0';
+      const fontSize = attrs['font-size'] || attrs.fontSize || '32px';
+      const fill = attrs.fill || 'white';
+      
+      logger.info(`  📍 Text at (${x}, ${y}): "${textContent}" [size: ${fontSize}]`);
+      
+      // Process emojis using our mapping service
+      const processedText = await emojiMappingService.replaceEmojisWithSvg(textContent);
+      logger.info(`  ✅ Processed: ${processedText.length > 100 ? processedText.substring(0, 100) + '...' : processedText}`);
+      
+      // Create positioned div with correct font properties
+      // Adjust inline SVG emoji styling for proper baseline alignment
+      const alignedText = processedText.replace(/style="[^"]*"/g, 
+        'style="display: inline-block; vertical-align: text-bottom; width: 1em; height: 1em; margin: 0 0.05em;"'
+      );
+      
+      htmlTextElements.push(`
+        <div style="position: absolute; left: ${x}px; top: ${y}px; 
+                    font-family: Satoshi, system-ui, sans-serif;
+                    font-size: ${fontSize}; font-weight: 700; color: ${fill};
+                    line-height: 1; 
+                    filter: drop-shadow(0px 1px 2px rgba(0,0,0,0.225));">
+          ${alignedText}
+        </div>
+      `);
+    }
+    
+    // Build complete HTML with background, logo, and text
+    const html = `
+      <div style="width: 270px; height: 270px; position: relative; overflow: hidden; ${backgroundStyle}">
+        ${svgPaths}
+        ${htmlTextElements.join('')}
+      </div>
+    `;
+    
+    logger.info(`✨ Built HTML overlay with ${pathMatches.length} paths and ${htmlTextElements.length} text elements`);
+    return html;
   }
 }
