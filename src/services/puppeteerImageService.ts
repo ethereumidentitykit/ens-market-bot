@@ -4,6 +4,7 @@ import { IDatabaseService } from '../types';
 import { emojiMappingService } from './emojiMappingService';
 import { RealImageData } from './realDataImageService';
 import { SvgConverter } from '../utils/svgConverter';
+import { UnicodeEmojiService } from './unicodeEmojiService';
 import * as fs from 'fs';
 import * as path from 'path';
 import axios from 'axios';
@@ -352,7 +353,7 @@ export class PuppeteerImageService {
     let nftImageBase64 = `data:image/png;base64,${ensPlaceholderBase64}`; // Default fallback
     if (data.nftImageUrl) {
       try {
-        logger.debug(`Processing NFT SVG image: ${data.nftImageUrl.substring(0, 100)}...`);
+        logger.info(`🖼️ Processing NFT image: ${data.nftImageUrl}`);
         
         // Download the SVG content
         const svgResponse = await axios.get(data.nftImageUrl, {
@@ -360,19 +361,24 @@ export class PuppeteerImageService {
           headers: { 'User-Agent': 'ENS-TwitterBot/1.0' }
         });
         
-        const svgContent = svgResponse.data;
-        logger.debug(`Downloaded NFT SVG (${svgContent.length} chars), converting to PNG...`);
+        let svgContent = svgResponse.data;
+        logger.info(`📥 Downloaded NFT SVG (${svgContent.length} chars): ${svgContent.substring(0, 150)}...`);
+        
+        // Skip emoji processing in NFT SVG for now - let font rendering handle it
+        logger.info(`🚫 Skipping NFT SVG emoji processing - using font rendering instead`);
         
         // Convert SVG to PNG using SvgConverter
         const pngBuffer = await SvgConverter.convertSvgToPng(svgContent);
         const pngBase64 = pngBuffer.toString('base64');
         
         nftImageBase64 = `data:image/png;base64,${pngBase64}`;
-        logger.debug(`Successfully converted NFT SVG to PNG`);
+        logger.info(`✅ Successfully converted NFT SVG to PNG`);
       } catch (error: any) {
-        logger.warn(`Failed to process NFT SVG image: ${data.nftImageUrl}`, error.message);
+        logger.warn(`❌ Failed to process NFT SVG image: ${data.nftImageUrl}`, error.message);
         // Falls back to placeholder
       }
+    } else {
+      logger.info(`ℹ️  No NFT image URL provided, using placeholder`);
     }
     
     // Convert avatar URLs to base64 data URLs (SEQUENTIAL to prevent resource exhaustion)
@@ -401,25 +407,41 @@ export class PuppeteerImageService {
     let sellerEnsWithEmojis = data.sellerEns || 'seller';
     let buyerEnsWithEmojis = data.buyerEns || 'buyer';
     
+    logger.info(`🏷️ Processing emojis in names:`);
+    logger.info(`  📛 ENS: "${data.ensName}"`);
+    logger.info(`  👤 Seller: "${data.sellerEns || 'seller'}"`);  
+    logger.info(`  🛒 Buyer: "${data.buyerEns || 'buyer'}"`);
+    
     try {
       ensNameWithEmojis = await emojiMappingService.replaceEmojisWithSvg(data.ensName);
-      logger.debug(`Processed ENS name emojis: ${data.ensName} -> ${ensNameWithEmojis.length} chars`);
+      logger.info(`✅ ENS name emoji processing: "${data.ensName}" -> ${ensNameWithEmojis.length} chars`);
+      if (ensNameWithEmojis !== data.ensName) {
+        logger.info(`  🔄 Emojis were replaced in ENS name`);
+      } else {
+        logger.info(`  ⏸️ No emojis found in ENS name`);
+      }
     } catch (error) {
-      logger.error(`Failed to process ENS name emojis for "${data.ensName}":`, error);
+      logger.error(`❌ Failed to process ENS name emojis for "${data.ensName}":`, error);
     }
     
     try {
       sellerEnsWithEmojis = await emojiMappingService.replaceEmojisWithSvg(data.sellerEns || 'seller');
-      logger.debug(`Processed seller emojis: ${data.sellerEns} -> ${sellerEnsWithEmojis.length} chars`);
+      logger.info(`✅ Seller emoji processing: "${data.sellerEns}" -> ${sellerEnsWithEmojis.length} chars`);
+      if (sellerEnsWithEmojis !== (data.sellerEns || 'seller')) {
+        logger.info(`  🔄 Emojis were replaced in seller name`);
+      }
     } catch (error) {
-      logger.error(`Failed to process seller emojis for "${data.sellerEns}":`, error);
+      logger.error(`❌ Failed to process seller emojis for "${data.sellerEns}":`, error);
     }
     
     try {
       buyerEnsWithEmojis = await emojiMappingService.replaceEmojisWithSvg(data.buyerEns || 'buyer');
-      logger.debug(`Processed buyer emojis: ${data.buyerEns} -> ${buyerEnsWithEmojis.length} chars`);
+      logger.info(`✅ Buyer emoji processing: "${data.buyerEns}" -> ${buyerEnsWithEmojis.length} chars`);
+      if (buyerEnsWithEmojis !== (data.buyerEns || 'buyer')) {
+        logger.info(`  🔄 Emojis were replaced in buyer name`);
+      }
     } catch (error) {
-      logger.error(`Failed to process buyer emojis for "${data.buyerEns}":`, error);
+      logger.error(`❌ Failed to process buyer emojis for "${data.buyerEns}":`, error);
     }
     
     return `
@@ -708,6 +730,84 @@ export class PuppeteerImageService {
     
     logger.info(`Image saved to: ${filePath}`);
     return filePath;
+  }
+
+  /**
+   * Replace Unicode emojis in SVG content with Apple emoji SVGs
+   */
+  private static async replaceEmojisInSvg(svgContent: string): Promise<string> {
+    let result = svgContent;
+    
+    logger.info(`🔍 Starting emoji replacement in NFT SVG content (${svgContent.length} chars):`);
+    logger.info(`📄 SVG content preview: ${svgContent.substring(0, 200)}...`);
+    
+    // Use sophisticated Unicode emoji detection (handles ZWJ sequences properly)
+    const emojis = UnicodeEmojiService.detectEmojis(result);
+    
+    logger.info(`🎯 UnicodeEmojiService detected ${emojis.length} emojis in NFT SVG:`);
+    emojis.forEach((emojiInfo, index) => {
+      const codePoints = emojiInfo.emoji.split('').map(c => 
+        '\\u{' + c.codePointAt(0)!.toString(16).toUpperCase() + '}'
+      ).join('');
+      logger.info(`  ${index + 1}. "${emojiInfo.emoji}" at position ${emojiInfo.position} (${codePoints}) - ${emojiInfo.description}`);
+    });
+    
+    if (emojis.length === 0) {
+      logger.info(`⚠️  No emojis detected in NFT SVG content`);
+      return result;
+    }
+    
+    // Process emojis in reverse order (by position) to avoid index shifting
+    const sortedEmojis = emojis.sort((a, b) => b.position - a.position);
+    
+    let replacementCount = 0;
+    for (const emojiInfo of sortedEmojis) {
+      logger.info(`🔄 Processing NFT SVG emoji "${emojiInfo.emoji}" at position ${emojiInfo.position}...`);
+      
+      const appleSvgContent = await emojiMappingService.getEmojiSvg(emojiInfo.emoji);
+      if (appleSvgContent) {
+        // Calculate end position
+        const endPosition = emojiInfo.position + emojiInfo.emoji.length;
+        
+        // Log the replacement context
+        const beforeContext = result.substring(Math.max(0, emojiInfo.position - 10), emojiInfo.position);
+        const afterContext = result.substring(endPosition, Math.min(result.length, endPosition + 10));
+        logger.info(`🔀 Replacing "${emojiInfo.emoji}" in context: "${beforeContext}[${emojiInfo.emoji}]${afterContext}"`);
+        
+        // Extract just the SVG path/shape content from the Apple emoji (remove <svg> wrapper)
+        let emojiSvgContent = appleSvgContent;
+        
+        // Remove the outer <svg> wrapper and extract inner content
+        const svgMatch = emojiSvgContent.match(/<svg[^>]*>(.*?)<\/svg>/s);
+        if (svgMatch) {
+          const innerContent = svgMatch[1];
+          // Create a tspan with inline SVG for text compatibility  
+          emojiSvgContent = `<tspan><svg viewBox="0 0 64 64" width="1em" height="1em" style="display: inline-block; vertical-align: -0.125em;">${innerContent}</svg></tspan>`;
+        } else {
+          // Fallback: use the emoji as-is (Unicode)
+          logger.warn(`⚠️ Could not extract SVG content from Apple emoji, keeping Unicode: "${emojiInfo.emoji}"`);
+          continue;
+        }
+        
+        // Replace the emoji
+        result = result.substring(0, emojiInfo.position) + emojiSvgContent + result.substring(endPosition);
+        replacementCount++;
+        
+        logger.info(`✅ Successfully replaced NFT SVG emoji "${emojiInfo.emoji}" (${emojiInfo.description}) with inline Apple SVG`);
+      } else {
+        logger.warn(`❌ No Apple SVG found for NFT emoji "${emojiInfo.emoji}" (${emojiInfo.description})`);
+        logger.info(`🔍 Checking if emojiMappingService supports this emoji...`);
+        const isSupported = await emojiMappingService.isEmojiSupported(emojiInfo.emoji);
+        logger.info(`📋 emojiMappingService.isEmojiSupported("${emojiInfo.emoji}"): ${isSupported}`);
+      }
+    }
+    
+    logger.info(`🎉 NFT SVG emoji replacement complete: ${replacementCount}/${emojis.length} emojis replaced`);
+    if (replacementCount > 0) {
+      logger.info(`📄 Final NFT SVG content preview: ${result.substring(0, 200)}...`);
+    }
+    
+    return result;
   }
 
   /**

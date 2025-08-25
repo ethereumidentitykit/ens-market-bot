@@ -41,11 +41,7 @@ export class SvgConverter {
           '--no-first-run',
           '--no-zygote',
           '--single-process',
-          '--disable-gpu',
-          // Font rendering improvements for emoji support
-          '--enable-font-antialiasing',
-          '--font-render-hinting=none',
-          '--disable-features=VizDisplayCompositor'
+          '--disable-gpu'
         ]
       });
     }
@@ -54,14 +50,12 @@ export class SvgConverter {
       const page = await browser.newPage();
       await page.setViewport({ width: 270, height: 270 });
       
-      // SVG content with proper emoji font rendering
+      // Pure SVG rendering - no font interference
       const html = `
         <!DOCTYPE html>
         <html>
           <head>
             <style>
-              @import url('https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap');
-              
               body {
                 margin: 0;
                 padding: 0;
@@ -71,18 +65,10 @@ export class SvgConverter {
                 align-items: center;
                 justify-content: center;
                 background: transparent;
-                /* Ensure emojis render properly with Apple/Noto fallbacks */
-                font-family: 'Apple Color Emoji', 'Noto Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'EmojiOne Color', sans-serif;
               }
               .svg-container {
                 width: 270px;
                 height: 270px;
-                /* Apply font family to SVG content too */
-                font-family: 'Apple Color Emoji', 'Noto Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'EmojiOne Color', sans-serif;
-              }
-              /* Ensure all text elements in SVG get emoji fonts */
-              svg text, svg tspan {
-                font-family: 'Apple Color Emoji', 'Noto Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'EmojiOne Color', sans-serif !important;
               }
             </style>
           </head>
@@ -99,8 +85,8 @@ export class SvgConverter {
       // Wait for SVG content to be ready
       await page.waitForSelector('.svg-container');
       
-      // Wait for Google Fonts to load and SVG to fully render with emoji fonts
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Small delay to ensure SVG is ready
+      await new Promise(resolve => setTimeout(resolve, 500));
       
       // Take screenshot
       const screenshot = await page.screenshot({
