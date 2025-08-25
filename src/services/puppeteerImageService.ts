@@ -867,11 +867,11 @@ export class PuppeteerImageService {
       ).join('\n');
       
       svgPaths = `
-        <svg style="position: absolute; top: 0; left: 0; width: 270px; height: 270px;" 
+        <svg style="position: absolute; top: 0; left: 0; width: 270px; height: 270px;"
              viewBox="0 0 270 270" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <filter id="dropShadow" color-interpolation-filters="sRGB">
-              <feDropShadow dx="0" dy="1" stdDeviation="2" flood-opacity="0.225"/>
+              <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.5"/>
             </filter>
           </defs>
           <g filter="url(#dropShadow)">
@@ -924,7 +924,7 @@ export class PuppeteerImageService {
                     font-family: 'Inter', sans-serif;
                     font-size: ${fontSize}; font-weight: 500; color: ${fill};
                     line-height: 1; 
-                    filter: drop-shadow(0px 1px 2px rgba(0,0,0,0.225));">
+                    filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.4));">
           ${alignedText}
         </div>
       `);
