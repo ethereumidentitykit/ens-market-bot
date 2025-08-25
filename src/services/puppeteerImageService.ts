@@ -900,7 +900,7 @@ export class PuppeteerImageService {
       
       const x = attrs.x || '0';
       const y = attrs.y || '0';
-      const fontSize = attrs['font-size'] || attrs.fontSize || '32px';
+      const fontSize = attrs['font-size'] || attrs.fontSize || '30px';
       const fill = attrs.fill || 'white';
       
       logger.info(`  📍 Text at (${x}, ${y}): "${textContent}" [size: ${fontSize}]`);
@@ -910,15 +910,19 @@ export class PuppeteerImageService {
       logger.info(`  ✅ Processed: ${processedText.length > 100 ? processedText.substring(0, 100) + '...' : processedText}`);
       
       // Create positioned div with correct font properties
-      // Adjust inline SVG emoji styling for proper baseline alignment
+      // Adjust inline SVG emoji styling for proper baseline alignment (moved up 2px)
       const alignedText = processedText.replace(/style="[^"]*"/g, 
-        'style="display: inline-block; vertical-align: text-bottom; width: 1em; height: 1em; margin: 0 0.05em;"'
+        'style="display: inline-block; vertical-align: text-bottom; width: 1em; height: 1em; margin: 0 0.05em; transform: translateY(-3px);"'
       );
       
+      // Parse font size to adjust y position (SVG uses baseline, HTML uses top)
+      const fontSizeNum = parseFloat(fontSize);
+      const adjustedY = parseFloat(y) - (fontSizeNum * 0.87); // Approximate baseline offset
+      
       htmlTextElements.push(`
-        <div style="position: absolute; left: ${x}px; top: ${y}px; 
-                    font-family: Satoshi, system-ui, sans-serif;
-                    font-size: ${fontSize}; font-weight: 700; color: ${fill};
+        <div style="position: absolute; left: ${x}px; top: ${adjustedY}px; 
+                    font-family: 'Inter', sans-serif;
+                    font-size: ${fontSize}; font-weight: 500; color: ${fill};
                     line-height: 1; 
                     filter: drop-shadow(0px 1px 2px rgba(0,0,0,0.225));">
           ${alignedText}
@@ -927,7 +931,12 @@ export class PuppeteerImageService {
     }
     
     // Build complete HTML with background, logo, and text
+    // Load Inter font from Google Fonts with weight 500
     const html = `
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@500&display=swap" rel="stylesheet">
+      <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@500&display=swap');
+      </style>
       <div style="width: 270px; height: 270px; position: relative; overflow: hidden; ${backgroundStyle}">
         ${svgPaths}
         ${htmlTextElements.join('')}
