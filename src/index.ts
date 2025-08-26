@@ -16,7 +16,7 @@ import { SchedulerService } from './services/schedulerService';
 import { TwitterService } from './services/twitterService';
 import { NewTweetFormatter } from './services/newTweetFormatter';
 import { RateLimitService } from './services/rateLimitService';
-import { EthIdentityService } from './services/ethIdentityService';
+import { ENSWorkerService } from './services/ensWorkerService';
 import { APIToggleService } from './services/apiToggleService';
 import { AutoTweetService } from './services/autoTweetService';
 import { WorldTimeService } from './services/worldTimeService';
@@ -40,7 +40,7 @@ async function startApplication(): Promise<void> {
     const twitterService = new TwitterService();
     const newTweetFormatter = new NewTweetFormatter(databaseService, alchemyService);
     const rateLimitService = new RateLimitService(databaseService);
-    const ethIdentityService = new EthIdentityService();
+    const ethIdentityService = new ENSWorkerService();
     const worldTimeService = new WorldTimeService();
     const autoTweetService = new AutoTweetService(newTweetFormatter, twitterService, rateLimitService, databaseService, worldTimeService);
     const schedulerService = new SchedulerService(salesProcessingService, bidsProcessingService, autoTweetService, databaseService);

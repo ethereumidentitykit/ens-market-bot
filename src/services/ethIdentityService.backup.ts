@@ -38,6 +38,8 @@ export interface ResolvedProfile {
 /**
  * Service for resolving Ethereum addresses to ENS names using EthIdentityKit API
  * API Documentation: https://ethidentitykit.com/docs/api/users/account
+ * 
+ * *** BACKUP VERSION - Use ENSWorkerService for current implementation ***
  */
 export class EthIdentityService {
   private readonly baseUrl = 'http://api.ethfollow.xyz/api/v1';

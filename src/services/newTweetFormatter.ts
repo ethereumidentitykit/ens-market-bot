@@ -1,6 +1,6 @@
 import { ProcessedSale, ENSRegistration, ENSBid } from '../types';
 import { logger } from '../utils/logger';
-import { EthIdentityService, EthIdentityAccount } from './ethIdentityService';
+import { ENSWorkerService, ENSWorkerAccount } from './ensWorkerService';
 import { RealDataImageService, RealImageData } from './realDataImageService';
 import { ImageData } from '../types/imageTypes';
 import { PuppeteerImageService } from './puppeteerImageService';
@@ -27,7 +27,7 @@ export interface GeneratedTweet {
  */
 export class NewTweetFormatter {
   private readonly MAX_TWEET_LENGTH = 280;
-  private readonly ethIdentityService = new EthIdentityService();
+  private readonly ethIdentityService = new ENSWorkerService();
 
   constructor(
     private databaseService?: IDatabaseService,
@@ -257,9 +257,9 @@ export class NewTweetFormatter {
   /**
    * Get full account data for an address
    */
-  private async getAccountData(address: string): Promise<EthIdentityAccount | null> {
+  private async getAccountData(address: string): Promise<ENSWorkerAccount | null> {
     try {
-      const response = await fetch(`http://api.ethfollow.xyz/api/v1/users/${address}/account`);
+      const response = await fetch(`https://ens.ethfollow.xyz/u/${address}`);
       if (!response.ok) {
         return null;
       }
@@ -275,7 +275,7 @@ export class NewTweetFormatter {
    */
   private async formatRegistrationTweetText(
     registration: ENSRegistration, 
-    ownerAccount: EthIdentityAccount | null
+    ownerAccount: ENSWorkerAccount | null
   ): Promise<string> {
     // Header: Emoji + Registered
     const header = '🏛️ REGISTERED 🏛️';
@@ -321,7 +321,7 @@ export class NewTweetFormatter {
    */
   private async formatBidTweetText(
     bid: ENSBid, 
-    bidderAccount: EthIdentityAccount | null
+    bidderAccount: ENSWorkerAccount | null
   ): Promise<string> {
     // Header: ✋ OFFER ✋
     const header = '✋ OFFER ✋';
@@ -461,8 +461,8 @@ export class NewTweetFormatter {
    */
   private formatTweetText(
     sale: ProcessedSale, 
-    buyerAccount: EthIdentityAccount | null, 
-    sellerAccount: EthIdentityAccount | null
+    buyerAccount: ENSWorkerAccount | null, 
+    sellerAccount: ENSWorkerAccount | null
   ): string {
     // Header: Emoji + SOLD
     const header = '💰 SOLD 💰';
@@ -542,13 +542,13 @@ export class NewTweetFormatter {
    * - "@twitterhandle" (if only Twitter exists - shouldn't happen but handled)
    * - "0xabcd...efg1" (truncated address fallback)
    */
-  private getDisplayHandle(account: EthIdentityAccount | null, fallbackAddress: string): string {
+  private getDisplayHandle(account: ENSWorkerAccount | null, fallbackAddress: string): string {
     if (!account) {
       return this.shortenAddress(fallbackAddress);
     }
 
-    const ensName = account.ens?.name;
-    const twitterRecord = account.ens?.records?.['com.twitter'];
+    const ensName = account.name;
+    const twitterRecord = account.records?.['com.twitter'];
     
     // Clean the Twitter handle if it exists
     const cleanedTwitter = twitterRecord ? this.cleanTwitterHandle(twitterRecord) : null;
@@ -575,12 +575,12 @@ export class NewTweetFormatter {
    * - "ensname.eth" (if ENS exists)
    * - "0xabcd...efg1" (truncated address fallback)
    */
-  private getImageDisplayHandle(account: EthIdentityAccount | null, fallbackAddress: string): string {
+  private getImageDisplayHandle(account: ENSWorkerAccount | null, fallbackAddress: string): string {
     if (!account) {
       return this.shortenAddress(fallbackAddress);
     }
 
-    const ensName = account.ens?.name;
+    const ensName = account.name;
     
     if (ensName) {
       // Only return ENS name (no Twitter handle for images)
@@ -594,7 +594,7 @@ export class NewTweetFormatter {
   /**
    * Convert ENS registration to image data format for image generation
    */
-  private async convertRegistrationToImageData(registration: ENSRegistration, ownerAccount: EthIdentityAccount | null): Promise<RealImageData> {
+  private async convertRegistrationToImageData(registration: ENSRegistration, ownerAccount: ENSWorkerAccount | null): Promise<RealImageData> {
     logger.info(`Converting registration to image data: ${registration.transactionHash}`);
     
     // Parse ETH price
@@ -622,7 +622,7 @@ export class NewTweetFormatter {
     
     // Get owner display info (ENS only for images)
     const ownerHandle = this.getImageDisplayHandle(ownerAccount, registration.ownerAddress);
-    const ownerAvatar = ownerAccount?.ens?.avatar || ownerAccount?.ens?.records?.avatar;
+    const ownerAvatar = ownerAccount?.avatar || ownerAccount?.records?.avatar;
     
     const imageData: RealImageData = {
       priceEth,
@@ -652,7 +652,7 @@ export class NewTweetFormatter {
   /**
    * Convert bid data to the structured format needed by image generation
    */
-  private async convertBidToImageData(bid: ENSBid, bidderAccount: EthIdentityAccount | null): Promise<RealImageData> {
+  private async convertBidToImageData(bid: ENSBid, bidderAccount: ENSWorkerAccount | null): Promise<RealImageData> {
     logger.info(`Converting bid to image data: ${bid.bidId}`);
     
     // Parse ETH price
@@ -720,7 +720,7 @@ export class NewTweetFormatter {
     
     // Get bidder display info (ENS only for images)
     const bidderHandle = this.getImageDisplayHandle(bidderAccount, bid.makerAddress);
-    const bidderAvatar = bidderAccount?.ens?.avatar || bidderAccount?.ens?.records?.avatar;
+    const bidderAvatar = bidderAccount?.avatar || bidderAccount?.records?.avatar;
     
     // Try to get Owner using Alchemy API
     let currentOwnerEns = '';
@@ -738,7 +738,7 @@ export class NewTweetFormatter {
           // Get profile info for the owner (ENS only for images)
           const ownerAccount = await this.getAccountData(ownerAddress);
           currentOwnerEns = this.getImageDisplayHandle(ownerAccount, ownerAddress);
-          currentOwnerAvatar = ownerAccount?.ens?.avatar || ownerAccount?.ens?.records?.avatar;
+          currentOwnerAvatar = ownerAccount?.avatar || ownerAccount?.records?.avatar;
           
           logger.debug(`Owner display: ${currentOwnerEns}, Avatar URL: ${currentOwnerAvatar}`);
         } else {

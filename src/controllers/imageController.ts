@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { PuppeteerImageService } from '../services/puppeteerImageService';
 import { RealDataImageService } from '../services/realDataImageService';
-import { EthIdentityService } from '../services/ethIdentityService';
+import { ENSWorkerService } from '../services/ensWorkerService';
 import { logger } from '../utils/logger';
 import * as path from 'path';
 

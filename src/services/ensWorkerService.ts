@@ -1,23 +1,32 @@
 import axios from 'axios';
 import { logger } from '../utils/logger';
 
-export interface EthIdentityAccount {
+export interface ENSWorkerAccount {
+  name: string;
   address: string;
-  ens?: {
-    name: string;
+  avatar?: string;
+  header?: string;
+  display: string;
+  records?: {
     avatar?: string;
-    records?: {
-      name?: string;
-      description?: string;
-      avatar?: string;
-      'com.twitter'?: string;
-      'com.discord'?: string;
-      email?: string;
-      url?: string;
-      'org.telegram'?: string;
-    };
-    updated_at?: string;
+    'com.discord'?: string;
+    'com.github'?: string;
+    'com.twitter'?: string;
+    description?: string;
+    email?: string;
+    header?: string;
+    'network.dm3.profile'?: string;
+    'org.telegram'?: string;
+    status?: string;
+    url?: string;
   };
+  chains?: {
+    btc?: string;
+    eth?: string;
+  };
+  fresh?: number;
+  resolver?: string;
+  errors?: any;
 }
 
 export interface ResolvedName {
@@ -36,11 +45,11 @@ export interface ResolvedProfile {
 }
 
 /**
- * Service for resolving Ethereum addresses to ENS names using EthIdentityKit API
- * API Documentation: https://ethidentitykit.com/docs/api/users/account
+ * Service for resolving Ethereum addresses to ENS names using ENS Worker API
+ * API Documentation: https://ens.ethfollow.xyz/u/{address}
  */
-export class EthIdentityService {
-  private readonly baseUrl = 'http://api.ethfollow.xyz/api/v1';
+export class ENSWorkerService {
+  private readonly baseUrl = 'https://ens.ethfollow.xyz/u';
   private readonly cache = new Map<string, ResolvedName>();
   private readonly cacheTimeout = 5 * 60 * 1000; // 5 minutes cache
 
@@ -57,10 +66,10 @@ export class EthIdentityService {
     }
 
     try {
-      logger.debug(`Resolving address: ${address}`);
+      logger.debug(`Resolving address with ENS Worker: ${address}`);
       
-      const response = await axios.get<EthIdentityAccount>(
-        `${this.baseUrl}/users/${address}/account?cache=fresh`,
+      const response = await axios.get<ENSWorkerAccount>(
+        `${this.baseUrl}/${address}`,
         {
           timeout: 10000, // 10 second timeout
           headers: {
@@ -74,8 +83,8 @@ export class EthIdentityService {
       const resolved: ResolvedName = {
         address: normalizedAddress,
         displayName: this.getDisplayName(account),
-        ensName: account.ens?.name,
-        hasEns: !!account.ens?.name
+        ensName: account.name,
+        hasEns: !!account.name
       };
 
       // Cache the result
@@ -90,7 +99,7 @@ export class EthIdentityService {
       return resolved;
 
     } catch (error: any) {
-      logger.warn(`Failed to resolve address ${address}:`, error.message);
+      logger.warn(`Failed to resolve address ${address} with ENS Worker:`, error.message);
       
       // Return fallback with shortened address
       const fallback: ResolvedName = {
@@ -116,10 +125,10 @@ export class EthIdentityService {
     const normalizedAddress = address.toLowerCase();
     
     try {
-      logger.debug(`Getting profile for address: ${address}`);
+      logger.debug(`Getting profile with ENS Worker for address: ${address}`);
       
-      const response = await axios.get<EthIdentityAccount>(
-        `${this.baseUrl}/users/${address}/account?cache=fresh`,
+      const response = await axios.get<ENSWorkerAccount>(
+        `${this.baseUrl}/${address}`,
         {
           timeout: 10000, // 10 second timeout
           headers: {
@@ -131,22 +140,22 @@ export class EthIdentityService {
 
       const account = response.data;
       
-      // Get avatar from ENS records
-      const avatar = account.ens?.avatar || account.ens?.records?.avatar;
+      // Get avatar from direct field or records
+      const avatar = account.avatar || account.records?.avatar;
       
       const profile: ResolvedProfile = {
         address: normalizedAddress,
         displayName: this.getDisplayName(account),
-        ensName: account.ens?.name,
+        ensName: account.name,
         avatar: avatar,
-        hasEns: !!account.ens?.name
+        hasEns: !!account.name
       };
 
       logger.debug(`Got profile ${address} -> ${profile.displayName} (ENS: ${profile.hasEns}, Avatar: ${!!profile.avatar})`);
       return profile;
 
     } catch (error: any) {
-      logger.warn(`Failed to get profile for address ${address}:`, error.message);
+      logger.warn(`Failed to get profile for address ${address} with ENS Worker:`, error.message);
       
       // Return fallback with shortened address
       const fallback: ResolvedProfile = {
@@ -182,7 +191,7 @@ export class EthIdentityService {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
       } catch (error: any) {
-        logger.error(`Failed to resolve address batch:`, error.message);
+        logger.error(`Failed to resolve address batch with ENS Worker:`, error.message);
         // Add fallbacks for failed batch
         batch.forEach(address => {
           results.push({
@@ -200,14 +209,14 @@ export class EthIdentityService {
   /**
    * Get the best display name for an account
    */
-  private getDisplayName(account: EthIdentityAccount): string {
-    // Priority: ENS name > ENS display name > shortened address
-    if (account.ens?.name) {
-      return account.ens.name;
+  private getDisplayName(account: ENSWorkerAccount): string {
+    // Priority: display name > ENS name > shortened address
+    if (account.display && account.display !== account.address) {
+      return account.display;
     }
     
-    if (account.ens?.records?.name) {
-      return account.ens.records.name;
+    if (account.name) {
+      return account.name;
     }
     
     return this.shortenAddress(account.address);
@@ -226,7 +235,7 @@ export class EthIdentityService {
    */
   clearCache(): void {
     this.cache.clear();
-    logger.info('EthIdentity cache cleared');
+    logger.info('ENS Worker cache cleared');
   }
 
   /**
@@ -236,6 +245,49 @@ export class EthIdentityService {
     return {
       size: this.cache.size,
       addresses: Array.from(this.cache.keys())
+    };
+  }
+
+  /**
+   * Get additional ENS records from the profile
+   */
+  async getENSRecords(address: string): Promise<ENSWorkerAccount['records'] | null> {
+    try {
+      const response = await axios.get<ENSWorkerAccount>(
+        `${this.baseUrl}/${address}`,
+        {
+          timeout: 10000,
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'ENS-Sales-Bot/1.0'
+          }
+        }
+      );
+
+      return response.data.records || null;
+    } catch (error: any) {
+      logger.warn(`Failed to get ENS records for address ${address}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Get social media handles from ENS records
+   */
+  async getSocialHandles(address: string): Promise<{
+    twitter?: string;
+    discord?: string;
+    github?: string;
+    telegram?: string;
+  }> {
+    const records = await this.getENSRecords(address);
+    if (!records) return {};
+
+    return {
+      twitter: records['com.twitter'],
+      discord: records['com.discord'],
+      github: records['com.github'],
+      telegram: records['org.telegram']
     };
   }
 }

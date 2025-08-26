@@ -1,6 +1,6 @@
 import { IDatabaseService } from '../types';
 import { ProcessedSale } from '../types';
-import { EthIdentityService, ResolvedProfile } from './ethIdentityService';
+import { ENSWorkerService, ResolvedProfile } from './ensWorkerService';
 import { ImageData } from '../types/imageTypes';
 import { PuppeteerImageService } from './puppeteerImageService';
 import { logger } from '../utils/logger';
@@ -27,7 +27,7 @@ export interface RealImageData {
 export class RealDataImageService {
   constructor(
     private databaseService: IDatabaseService,
-    private ethIdentityService: EthIdentityService
+    private ethIdentityService: ENSWorkerService
   ) {}
 
   /**
