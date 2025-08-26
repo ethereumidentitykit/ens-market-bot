@@ -142,6 +142,11 @@ export interface Config {
   nodeEnv: string;
   logLevel: string;
   wethPriceMultiplier: number;
+  siwe: {
+    adminWhitelist: string[];
+    sessionSecret: string;
+    domain: string;
+  };
 }
 
 // Twitter Post Record
