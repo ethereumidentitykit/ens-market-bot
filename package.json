@@ -30,7 +30,6 @@
     "typescript": "^5.9.2"
   },
   "dependencies": {
-    "@adraffy/ens-normalize": "^1.11.0",
     "@sparticuz/chromium": "^138.0.2",
     "@types/pg": "^8.15.5",
     "axios": "^1.11.0",
@@ -38,13 +37,10 @@
     "crypto-js": "^4.2.0",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
-    "node-fetch": "^2.7.0",
-    "nouislider": "^15.8.1",
     "ntp-client": "^0.5.3",
     "oauth-1.0a": "^2.2.6",
     "pg": "^8.16.3",
     "puppeteer": "^24.16.1",
-    "puppeteer-core": "^24.16.1",
-    "svg2img": "^1.0.0-beta.2"
+    "puppeteer-core": "^24.16.1"
   }
 }
