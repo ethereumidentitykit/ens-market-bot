@@ -14,6 +14,7 @@ import { BidsProcessingService } from './services/bidsProcessingService';
 import { MagicEdenService } from './services/magicEdenService';
 import { SchedulerService } from './services/schedulerService';
 import { TwitterService } from './services/twitterService';
+import { TweetFormatter } from './services/tweetFormatter';
 import { NewTweetFormatter } from './services/newTweetFormatter';
 import { RateLimitService } from './services/rateLimitService';
 import { EthIdentityService } from './services/ethIdentityService';
@@ -38,6 +39,7 @@ async function startApplication(): Promise<void> {
     const magicEdenService = new MagicEdenService();
     const bidsProcessingService = new BidsProcessingService(magicEdenService, databaseService, alchemyService);
     const twitterService = new TwitterService();
+    const tweetFormatter = new TweetFormatter();
     const newTweetFormatter = new NewTweetFormatter(databaseService, alchemyService);
     const rateLimitService = new RateLimitService(databaseService);
     const ethIdentityService = new EthIdentityService();
@@ -820,7 +822,7 @@ async function startApplication(): Promise<void> {
         const sale = unpostedSales[0];
 
         // Format the tweet with name resolution
-        const formattedTweet = await newTweetFormatter.generateTweet(sale);
+        const formattedTweet = await tweetFormatter.formatSaleWithNames(sale);
         
         if (!formattedTweet.isValid) {
           return res.status(400).json({
@@ -831,11 +833,11 @@ async function startApplication(): Promise<void> {
         }
 
         // Post to Twitter
-        const tweetResult = await twitterService.postTweet(formattedTweet.text);
+        const tweetResult = await twitterService.postTweet(formattedTweet.content);
         
         if (tweetResult.success && tweetResult.tweetId) {
           // Record successful post in rate limiter
-          await rateLimitService.recordTweetPost(tweetResult.tweetId, formattedTweet.text, sale.id);
+          await rateLimitService.recordTweetPost(tweetResult.tweetId, formattedTweet.content, sale.id);
           
           // Mark sale as posted in database
           await databaseService.markAsPosted(sale.id!, tweetResult.tweetId);
@@ -847,7 +849,7 @@ async function startApplication(): Promise<void> {
             success: true,
             data: {
               tweetId: tweetResult.tweetId,
-              tweetContent: formattedTweet.text,
+              tweetContent: formattedTweet.content,
               characterCount: formattedTweet.characterCount,
               saleId: sale.id,
               rateLimitStatus
@@ -856,7 +858,7 @@ async function startApplication(): Promise<void> {
         } else {
           // Record failed post
           await rateLimitService.recordFailedTweetPost(
-            formattedTweet.text, 
+            formattedTweet.content, 
             tweetResult.error || 'Unknown error',
             sale.id
           );
@@ -865,7 +867,7 @@ async function startApplication(): Promise<void> {
             success: false,
             error: 'Failed to post tweet',
             twitterError: tweetResult.error,
-            tweetContent: formattedTweet.text
+            tweetContent: formattedTweet.content
           });
         }
       } catch (error: any) {
@@ -898,7 +900,7 @@ async function startApplication(): Promise<void> {
         }
 
         // Generate tweet previews with name resolution
-        const previews = await newTweetFormatter.previewTweet(sale);
+        const previews = await tweetFormatter.previewFormatsWithNames(sale);
         
         res.json({
           success: true,
@@ -965,7 +967,7 @@ async function startApplication(): Promise<void> {
         await rateLimitService.validateTweetPost();
 
         // Format the tweet with name resolution
-        const formattedTweet = await newTweetFormatter.generateTweet(sale);
+        const formattedTweet = await tweetFormatter.formatSaleWithNames(sale);
         
         if (!formattedTweet.isValid) {
           return res.status(400).json({
@@ -976,11 +978,11 @@ async function startApplication(): Promise<void> {
         }
 
         // Post to Twitter
-        const tweetResult = await twitterService.postTweet(formattedTweet.text);
+        const tweetResult = await twitterService.postTweet(formattedTweet.content);
         
         if (tweetResult.success && tweetResult.tweetId) {
           // Record successful post in rate limiter
-          await rateLimitService.recordTweetPost(tweetResult.tweetId, formattedTweet.text, saleId);
+          await rateLimitService.recordTweetPost(tweetResult.tweetId, formattedTweet.content, saleId);
           
           // Mark as posted in database
           await databaseService.markAsPosted(saleId, tweetResult.tweetId);
@@ -992,7 +994,7 @@ async function startApplication(): Promise<void> {
             success: true,
             data: {
               tweetId: tweetResult.tweetId,
-              tweetContent: formattedTweet.text,
+              tweetContent: formattedTweet.content,
               characterCount: formattedTweet.characterCount,
               saleId: saleId,
               rateLimitStatus
@@ -1001,7 +1003,7 @@ async function startApplication(): Promise<void> {
         } else {
           // Record failed post
           await rateLimitService.recordFailedTweetPost(
-            formattedTweet.text, 
+            formattedTweet.content, 
             tweetResult.error || 'Unknown error',
             saleId
           );
@@ -1010,7 +1012,7 @@ async function startApplication(): Promise<void> {
             success: false,
             error: 'Failed to post tweet',
             twitterError: tweetResult.error,
-            tweetContent: formattedTweet.text
+            tweetContent: formattedTweet.content
           });
         }
       } catch (error: any) {
