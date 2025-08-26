@@ -703,26 +703,7 @@ export class DatabaseService implements IDatabaseService {
     }
   }
 
-  /**
-   * Clean up old generated images (keep only last 100)
-   */
-  async cleanupOldImages(): Promise<void> {
-    if (!this.pool) throw new Error('Database not initialized');
-    
-    try {
-      await this.pool.query(`
-        DELETE FROM generated_images 
-        WHERE id NOT IN (
-          SELECT id FROM generated_images 
-          ORDER BY created_at DESC 
-          LIMIT 100
-        )
-      `);
-      logger.info('Cleaned up old generated images');
-    } catch (error: any) {
-      logger.error('Failed to cleanup old images:', error.message);
-    }
-  }
+
 
   // Price Tier methods
   async getPriceTiers(transactionType?: string): Promise<PriceTier[]> {

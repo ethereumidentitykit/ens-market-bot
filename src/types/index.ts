@@ -183,7 +183,7 @@ export interface IDatabaseService {
   // Image storage methods
   storeGeneratedImage(filename: string, imageBuffer: Buffer, contentType?: string): Promise<void>;
   getGeneratedImage(filename: string): Promise<{ buffer: Buffer; contentType: string } | null>;
-  cleanupOldImages(): Promise<void>;
+
   // ENS registration methods
   insertRegistration(registration: Omit<ENSRegistration, 'id'>): Promise<number>;
   isRegistrationProcessed(tokenId: string): Promise<boolean>;

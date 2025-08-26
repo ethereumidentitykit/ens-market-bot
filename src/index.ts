@@ -151,48 +151,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    // Debug endpoint to check Moralis configuration
-    app.get('/api/debug/moralis', async (req, res) => {
-      try {
-        const hasApiKey = !!config.moralis?.apiKey;
-        const apiKeyLength = config.moralis?.apiKey?.length || 0;
-        const baseUrl = config.moralis?.baseUrl;
-        
-        // Try a simple API call
-        let apiTestResult = null;
-        try {
-          // Use first contract from our configuration for testing
-          const testContract = MONITORED_CONTRACTS[0].address;
-          const testResult = await moralisService.getNFTTrades(testContract, 1);
-          apiTestResult = {
-            success: true,
-            resultCount: testResult?.trades?.length || 0,
-            hasResult: !!testResult?.trades
-          };
-        } catch (error: any) {
-          apiTestResult = {
-            success: false,
-            error: error.message
-          };
-        }
-        
-        res.json({
-          success: true,
-          debug: {
-            hasApiKey,
-            apiKeyLength,
-            baseUrl,
-            environment: config.nodeEnv,
-            apiTestResult
-          }
-        });
-      } catch (error: any) {
-        res.status(500).json({
-          success: false,
-          error: error.message
-        });
-      }
-    });
+
 
     // Processing endpoints
     app.get('/api/process-sales', async (req, res) => {
