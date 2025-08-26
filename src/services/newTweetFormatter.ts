@@ -255,19 +255,10 @@ export class NewTweetFormatter {
   }
 
   /**
-   * Get full account data for an address
+   * Get full account data for an address using ENS Worker service
    */
   private async getAccountData(address: string): Promise<ENSWorkerAccount | null> {
-    try {
-      const response = await fetch(`https://ens.ethfollow.xyz/u/${address}`);
-      if (!response.ok) {
-        return null;
-      }
-      return await response.json();
-    } catch (error) {
-      logger.warn(`Failed to get account data for ${address}:`, error);
-      return null;
-    }
+    return await this.ethIdentityService.getFullAccountData(address);
   }
 
   /**

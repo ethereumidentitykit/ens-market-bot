@@ -49,7 +49,7 @@ export interface ResolvedProfile {
  * API Documentation: https://ens.ethfollow.xyz/u/{address}
  */
 export class ENSWorkerService {
-  private readonly baseUrl = 'https://ens.ethfollow.xyz/u';
+  private readonly baseUrl = 'https://enstate-prod-us-east-1.up.railway.app/u';
   private readonly cache = new Map<string, ResolvedName>();
   private readonly cacheTimeout = 5 * 60 * 1000; // 5 minutes cache
 
@@ -71,7 +71,7 @@ export class ENSWorkerService {
       const response = await axios.get<ENSWorkerAccount>(
         `${this.baseUrl}/${address}`,
         {
-          timeout: 10000, // 10 second timeout
+          timeout: 30000, // 10 second timeout
           headers: {
             'Accept': 'application/json',
             'User-Agent': 'ENS-Sales-Bot/1.0'
@@ -130,7 +130,7 @@ export class ENSWorkerService {
       const response = await axios.get<ENSWorkerAccount>(
         `${this.baseUrl}/${address}`,
         {
-          timeout: 10000, // 10 second timeout
+          timeout: 30000, // 10 second timeout
           headers: {
             'Accept': 'application/json',
             'User-Agent': 'ENS-Sales-Bot/1.0'
@@ -256,7 +256,7 @@ export class ENSWorkerService {
       const response = await axios.get<ENSWorkerAccount>(
         `${this.baseUrl}/${address}`,
         {
-          timeout: 10000,
+          timeout: 30000,
           headers: {
             'Accept': 'application/json',
             'User-Agent': 'ENS-Sales-Bot/1.0'
@@ -289,5 +289,33 @@ export class ENSWorkerService {
       github: records['com.github'],
       telegram: records['org.telegram']
     };
+  }
+
+  /**
+   * Get full account data (for compatibility with existing code that needs records)
+   */
+  async getFullAccountData(address: string): Promise<ENSWorkerAccount | null> {
+    const normalizedAddress = address.toLowerCase();
+    
+    try {
+      logger.debug(`Getting full account data with ENS Worker for address: ${address}`);
+      
+      const response = await axios.get<ENSWorkerAccount>(
+        `${this.baseUrl}/${address}`,
+        {
+          timeout: 30000, // 30 second timeout
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'ENS-Sales-Bot/1.0'
+          }
+        }
+      );
+
+      return response.data;
+
+    } catch (error: any) {
+      logger.warn(`Failed to get full account data for address ${address} with ENS Worker:`, error.message);
+      return null;
+    }
   }
 }
