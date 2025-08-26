@@ -1,7 +1,9 @@
 import express from 'express';
+import session from 'express-session';
 import path from 'path';
 import CryptoJS from 'crypto-js';
 import axios from 'axios';
+import { generateNonce } from 'siwe';
 import { config, validateConfig } from './utils/config';
 import { logger } from './utils/logger';
 import { MONITORED_CONTRACTS } from './config/contracts';
@@ -20,6 +22,7 @@ import { ENSWorkerService } from './services/ensWorkerService';
 import { APIToggleService } from './services/apiToggleService';
 import { AutoTweetService } from './services/autoTweetService';
 import { WorldTimeService } from './services/worldTimeService';
+import { SiweService } from './services/siweService';
 
 async function startApplication(): Promise<void> {
   try {
@@ -42,6 +45,7 @@ async function startApplication(): Promise<void> {
     const rateLimitService = new RateLimitService(databaseService);
     const ethIdentityService = new ENSWorkerService();
     const worldTimeService = new WorldTimeService();
+    const siweService = new SiweService(databaseService);
     const autoTweetService = new AutoTweetService(newTweetFormatter, twitterService, rateLimitService, databaseService, worldTimeService);
     const schedulerService = new SchedulerService(salesProcessingService, bidsProcessingService, autoTweetService, databaseService);
 
@@ -63,6 +67,19 @@ async function startApplication(): Promise<void> {
     // Middleware
     app.use(express.json());
     app.use(express.static(path.join(__dirname, '../public')));
+    
+    // Session configuration for SIWE authentication
+    app.use(session({
+      secret: config.siwe.sessionSecret,
+      resave: false,
+      saveUninitialized: false,
+      cookie: { 
+        secure: config.nodeEnv === 'production',
+        httpOnly: true,
+        maxAge: 24 * 60 * 60 * 1000 // 24 hours
+      },
+      name: 'ens-bot-session'
+    }));
 
     // Basic health check endpoint
     app.get('/health', (req, res) => {
@@ -73,6 +90,122 @@ async function startApplication(): Promise<void> {
         contracts: config.contracts.length,
         contractAddresses: config.contracts
       });
+    });
+
+    // SIWE Authentication Routes
+
+    // Generate nonce for SIWE message
+    app.get('/api/siwe/nonce', (req, res) => {
+      try {
+        const nonce = generateNonce();
+        req.session.nonce = nonce;
+        res.json({ nonce });
+        logger.info(`Generated SIWE nonce: ${nonce}`);
+      } catch (error: any) {
+        logger.error('Error generating SIWE nonce:', error.message);
+        res.status(500).json({ error: 'Failed to generate nonce' });
+      }
+    });
+
+    // Verify SIWE signature and create session
+    app.post('/api/siwe/verify', async (req, res) => {
+      try {
+        const { message, signature } = req.body;
+        const nonce = req.session.nonce;
+
+        if (!message || !signature) {
+          return res.status(400).json({ error: 'Message and signature required' });
+        }
+
+        if (!nonce) {
+          return res.status(400).json({ error: 'Nonce not found. Please generate a new nonce.' });
+        }
+
+        // Verify SIWE signature
+        const result = await siweService.verifyMessage(message, signature, nonce);
+        
+        if (!result.success || !result.address) {
+          return res.status(401).json({ error: result.error || 'Invalid signature' });
+        }
+
+        // Check whitelist
+        if (!siweService.isWhitelisted(result.address)) {
+          logger.warn(`SIWE login attempt by non-whitelisted address: ${result.address}`);
+          return res.status(403).json({ error: 'Address not authorized for admin access' });
+        }
+
+        // Create session
+        const sessionId = await siweService.createSession(result.address);
+        req.session.siweSessionId = sessionId;
+        req.session.address = result.address;
+        
+        // Clear nonce
+        delete req.session.nonce;
+        
+        res.json({ 
+          success: true, 
+          address: result.address,
+          message: 'Successfully authenticated'
+        });
+
+        logger.info(`✅ SIWE authentication successful for ${result.address}`);
+      } catch (error: any) {
+        logger.error('Error verifying SIWE signature:', error.message);
+        res.status(500).json({ error: 'Authentication failed' });
+      }
+    });
+
+    // Get current session info
+    app.get('/api/siwe/me', async (req, res) => {
+      try {
+        const sessionId = req.session.siweSessionId;
+        
+        if (!sessionId) {
+          return res.status(401).json({ error: 'Not authenticated' });
+        }
+
+        const isValid = await siweService.validateSession(sessionId);
+        if (!isValid) {
+          // Clear invalid session
+          req.session.destroy((err) => {
+            if (err) logger.error('Error destroying session:', err);
+          });
+          return res.status(401).json({ error: 'Session expired' });
+        }
+
+        res.json({ 
+          authenticated: true,
+          address: req.session.address,
+          sessionId: sessionId
+        });
+      } catch (error: any) {
+        logger.error('Error checking SIWE session:', error.message);
+        res.status(500).json({ error: 'Session check failed' });
+      }
+    });
+
+    // Logout endpoint
+    app.post('/api/siwe/logout', async (req, res) => {
+      try {
+        const sessionId = req.session.siweSessionId;
+        
+        if (sessionId) {
+          await siweService.deleteSession(sessionId);
+          logger.info(`🚪 SIWE session ${sessionId} logged out`);
+        }
+        
+        req.session.destroy((err) => {
+          if (err) {
+            logger.error('Error destroying session:', err);
+            return res.status(500).json({ error: 'Logout failed' });
+          }
+          
+          res.json({ success: true, message: 'Logged out successfully' });
+        });
+      } catch (error: any) {
+        logger.error('Error during SIWE logout:', error.message);
+        res.status(500).json({ error: 'Logout failed' });
+      }
     });
 
     // Get contract configuration

@@ -160,6 +160,15 @@ export interface TwitterPost {
   errorMessage?: string;
 }
 
+// SIWE Session Record
+export interface SiweSession {
+  id?: number;
+  address: string;
+  sessionId: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
 // Database Interface
 export interface IDatabaseService {
   initialize(): Promise<void>;
@@ -209,6 +218,12 @@ export interface IDatabaseService {
   getPriceTierForAmount(transactionType: string, usdAmount: number): Promise<PriceTier | null>;
   getLastProcessedBidTimestamp(): Promise<number>;
   setLastProcessedBidTimestamp(timestamp: number): Promise<void>;
+  
+  // SIWE admin session methods
+  createAdminSession(session: Omit<SiweSession, 'id'>): Promise<void>;
+  getAdminSession(sessionId: string): Promise<SiweSession | null>;
+  deleteAdminSession(sessionId: string): Promise<void>;
+  cleanupExpiredSessions(): Promise<void>;
 }
 
 // ENS Bids Types
