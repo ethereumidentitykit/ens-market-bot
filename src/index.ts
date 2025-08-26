@@ -2005,39 +2005,159 @@ async function startApplication(): Promise<void> {
       }
     }
 
+    // Contract format detection
+    interface ContractFormat {
+      type: 'legacy' | 'enhanced' | 'referral';
+      description: string;
+    }
+
+    const CONTRACT_FORMATS: Record<string, ContractFormat> = {
+      '0x283af0b28c62c092c9727f1ee09c02ca627eb7f5': {
+        type: 'legacy',
+        description: 'ENS ETH Registrar Controller (Legacy)'
+      },
+      '0x253553366da8546fc250f225fe3d25d0c782303b': {
+        type: 'enhanced',
+        description: 'ENS ETH Registrar Controller (v2)'
+      },
+      '0x59e16fccd424cc24e280be16e11bcd56fb0ce547': {
+        type: 'referral',
+        description: 'ENS ETH Registrar Controller (v3)'
+      }
+    };
+
+    function getContractFormat(contractAddress: string): ContractFormat {
+      const format = CONTRACT_FORMATS[contractAddress.toLowerCase()];
+      return format || { type: 'legacy', description: 'Unknown (defaulting to legacy)' };
+    }
+
+    // Multi-format data extraction interface
+    interface ExtractedRegistrationData {
+      ensName: string;
+      cost: string;
+      contractFormat: 'legacy' | 'enhanced' | 'referral';
+      baseCost?: string;
+      premium?: string;
+    }
+
     // Helper functions for decoding ENS registration data
-    function extractEnsNameFromData(data: string): string {
-      try {
-        // Remove 0x prefix
-        const cleanData = data.slice(2);
-        
-        // The name is at offset 0x60 (96 bytes from start)
-        // First get the length of the string (next 32 bytes after offset)
-        const lengthHex = cleanData.slice(192, 256); // 96*2 to get to offset, then next 32 bytes
-        const length = parseInt(lengthHex, 16);
-        
-        // Then get the actual string data
-        const nameHex = cleanData.slice(256, 256 + (length * 2));
-        const nameBuffer = Buffer.from(nameHex, 'hex');
-        return nameBuffer.toString('utf8');
-      } catch (error) {
-        logger.error('Error extracting ENS name from data:', error);
-        return 'unknown';
+    function extractRegistrationData(data: string, contractAddress: string): ExtractedRegistrationData {
+      const format = getContractFormat(contractAddress);
+      logger.info(`Processing ${format.description} format for contract: ${contractAddress}`);
+      
+      switch (format.type) {
+        case 'legacy':
+          return extractLegacyFormatData(data);
+        case 'enhanced':
+          return extractEnhancedFormatData(data);
+        case 'referral':
+          return extractReferralFormatData(data);
+        default:
+          logger.warn(`Unknown contract format, defaulting to legacy for: ${contractAddress}`);
+          return extractLegacyFormatData(data);
       }
     }
 
-    function extractCostFromData(data: string): string {
+    function extractLegacyFormatData(data: string): ExtractedRegistrationData {
       try {
-        // Remove 0x prefix
-        const cleanData = data.slice(2);
+        const cleanData = data.slice(2); // Remove 0x prefix
         
-        // Cost is in the second 32-byte slot (bytes 32-64)
-        const costHex = cleanData.slice(64, 128);
-        const costBigInt = BigInt('0x' + costHex);
-        return costBigInt.toString();
+        // Legacy format: [offset][cost][expires][stringLength][stringData]
+        const costHex = cleanData.slice(64, 128); // Position 2
+        const cost = BigInt('0x' + costHex).toString();
+        
+        // Extract ENS name with proper offset handling
+        const nameOffset = parseInt(cleanData.slice(0, 64), 16) * 2;
+        const nameLength = parseInt(cleanData.slice(nameOffset, nameOffset + 64), 16);
+        const nameHex = cleanData.slice(nameOffset + 64, nameOffset + 64 + nameLength * 2);
+        const nameBuffer = Buffer.from(nameHex, 'hex');
+        const ensName = nameBuffer.toString('utf8').replace(/\0/g, ''); // Remove null bytes
+        
+        return {
+          ensName,
+          cost,
+          contractFormat: 'legacy'
+        };
       } catch (error) {
-        logger.error('Error extracting cost from data:', error);
-        return '0';
+        logger.error('Error extracting legacy format data:', error);
+        return {
+          ensName: 'unknown',
+          cost: '0',
+          contractFormat: 'legacy'
+        };
+      }
+    }
+
+    function extractEnhancedFormatData(data: string): ExtractedRegistrationData {
+      try {
+        const cleanData = data.slice(2); // Remove 0x prefix
+        
+        // Enhanced format: [offset][baseCost][premium][expires][stringLength][stringData]
+        const baseCostHex = cleanData.slice(64, 128);   // Position 2
+        const premiumHex = cleanData.slice(128, 192);   // Position 3
+        
+        const baseCost = BigInt('0x' + baseCostHex);
+        const premium = BigInt('0x' + premiumHex);
+        const totalCost = baseCost + premium;
+        
+        // Extract ENS name with proper offset handling
+        const nameOffset = parseInt(cleanData.slice(0, 64), 16) * 2;
+        const nameLength = parseInt(cleanData.slice(nameOffset, nameOffset + 64), 16);
+        const nameHex = cleanData.slice(nameOffset + 64, nameOffset + 64 + nameLength * 2);
+        const nameBuffer = Buffer.from(nameHex, 'hex');
+        const ensName = nameBuffer.toString('utf8').replace(/\0/g, ''); // Remove null bytes
+        
+        return {
+          ensName,
+          cost: totalCost.toString(),
+          contractFormat: 'enhanced',
+          baseCost: baseCost.toString(),
+          premium: premium.toString()
+        };
+      } catch (error) {
+        logger.error('Error extracting enhanced format data:', error);
+        return {
+          ensName: 'unknown',
+          cost: '0',
+          contractFormat: 'enhanced'
+        };
+      }
+    }
+
+    function extractReferralFormatData(data: string): ExtractedRegistrationData {
+      try {
+        const cleanData = data.slice(2); // Remove 0x prefix
+        
+        // Referral format: [offset][baseCost][premium][expires][referrer][stringLength][stringData]
+        const baseCostHex = cleanData.slice(64, 128);   // Position 2
+        const premiumHex = cleanData.slice(128, 192);   // Position 3
+        // Note: expires at position 4, referrer at position 5
+        
+        const baseCost = BigInt('0x' + baseCostHex);
+        const premium = BigInt('0x' + premiumHex);
+        const totalCost = baseCost + premium;
+        
+        // Extract ENS name with proper offset handling
+        const nameOffset = parseInt(cleanData.slice(0, 64), 16) * 2;
+        const nameLength = parseInt(cleanData.slice(nameOffset, nameOffset + 64), 16);
+        const nameHex = cleanData.slice(nameOffset + 64, nameOffset + 64 + nameLength * 2);
+        const nameBuffer = Buffer.from(nameHex, 'hex');
+        const ensName = nameBuffer.toString('utf8').replace(/\0/g, ''); // Remove null bytes
+        
+        return {
+          ensName,
+          cost: totalCost.toString(),
+          contractFormat: 'referral',
+          baseCost: baseCost.toString(),
+          premium: premium.toString()
+        };
+      } catch (error) {
+        logger.error('Error extracting referral format data:', error);
+        return {
+          ensName: 'unknown',
+          cost: '0',
+          contractFormat: 'referral'
+        };
       }
     }
 
@@ -2102,17 +2222,19 @@ async function startApplication(): Promise<void> {
                 data: log.data
               });
               
-              // Extract ENS data from webhook
-              const ensName = extractEnsNameFromData(log.data);
+              // Extract ENS data from webhook using multi-format detection
+              const extractedData = extractRegistrationData(log.data, eventData.contractAddress);
               const tokenId = log.topic1; // This is the keccak256 hash of the ENS name
               const ownerAddress = log.topic2?.replace('0x000000000000000000000000', '0x'); // Remove leading zeros padding
-              const cost = extractCostFromData(log.data);
               
               logger.info('📝 Extracted ENS registration data:', {
-                ensName,
+                ensName: extractedData.ensName,
                 tokenId,
                 ownerAddress,
-                cost: cost ? `${cost} wei` : 'unknown',
+                cost: `${extractedData.cost} wei`,
+                contractFormat: extractedData.contractFormat,
+                baseCost: extractedData.baseCost ? `${extractedData.baseCost} wei` : undefined,
+                premium: extractedData.premium ? `${extractedData.premium} wei` : undefined,
                 transactionHash: eventData.transactionHash
               });
 
@@ -2127,11 +2249,11 @@ async function startApplication(): Promise<void> {
                   description: ensMetadata.description
                 });
               } else {
-                logger.warn('⚠️ Failed to fetch ENS metadata for', ensName);
+                logger.warn('⚠️ Failed to fetch ENS metadata for', extractedData.ensName);
               }
               
               // Convert cost from wei to ETH
-              const costInWei = BigInt(cost);
+              const costInWei = BigInt(extractedData.cost);
               const costInEth = (Number(costInWei) / 1e18).toFixed(6);
               
               // Get current ETH price in USD for cost calculation
@@ -2150,7 +2272,7 @@ async function startApplication(): Promise<void> {
               // Check if this registration is already processed
               const isProcessed = await databaseService.isRegistrationProcessed(tokenId);
               if (isProcessed) {
-                logger.info(`⚠️ ENS registration ${ensName} already processed, skipping...`);
+                logger.info(`⚠️ ENS registration ${extractedData.ensName} already processed, skipping...`);
                 return;
               }
 
@@ -2159,10 +2281,10 @@ async function startApplication(): Promise<void> {
                 transactionHash: eventData.transactionHash,
                 contractAddress: eventData.contractAddress,
                 tokenId,
-                ensName,
-                fullName: ensMetadata?.name || `${ensName}.eth`,
+                ensName: extractedData.ensName,
+                fullName: ensMetadata?.name || `${extractedData.ensName}.eth`,
                 ownerAddress,
-                costWei: cost,
+                costWei: extractedData.cost,
                 costEth: costInEth,
                 costUsd: costUsd,
                 blockNumber: parseInt(eventData.blockNumber),
