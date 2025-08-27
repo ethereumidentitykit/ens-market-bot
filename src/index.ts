@@ -94,15 +94,22 @@ async function startApplication(): Promise<void> {
       createTableIfMissing: true
     });
 
+    // Detect if we should use secure cookies
+    // In production: only if actually using HTTPS (not just NODE_ENV=production)
+    // This handles localhost testing with production flag
+    const useSecureCookies = config.nodeEnv === 'production' && !config.siwe.domain.includes('localhost');
+    
+    logger.info(`Session config: secure=${useSecureCookies}, sameSite=${useSecureCookies ? 'none' : 'lax'}, env=${config.nodeEnv}, domain=${config.siwe.domain}`);
+    
     app.use(session({
       store: pgSessionStore,
       secret: config.siwe.sessionSecret,
       resave: false,
       saveUninitialized: true, // Save session even before any data is stored
       cookie: { 
-        secure: config.nodeEnv === 'production',
+        secure: useSecureCookies,
         httpOnly: true,
-        sameSite: config.nodeEnv === 'production' ? 'none' : 'lax', // 'none' requires secure:true
+        sameSite: useSecureCookies ? 'none' : 'lax', // 'none' only with secure
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
         // Don't set domain - let Express handle it automatically
         path: '/'
@@ -135,11 +142,13 @@ async function startApplication(): Promise<void> {
         if (!origin) return callback(null, true);
         
         // In production, only allow specific origins
-        if (config.nodeEnv === 'production') {
+        if (config.nodeEnv === 'production' && !origin.includes('localhost')) {
           const allowedOrigins = [
             `https://${config.siwe.domain}`,
             `http://${config.siwe.domain}`,
-            // Add your frontend URLs here if different from domain
+            // Also allow the domain with www
+            `https://www.${config.siwe.domain}`,
+            `http://www.${config.siwe.domain}`,
           ];
           
           if (allowedOrigins.includes(origin)) {
@@ -149,7 +158,7 @@ async function startApplication(): Promise<void> {
             callback(new Error('Not allowed by CORS'));
           }
         } else {
-          // In development, allow localhost
+          // In development or localhost, allow
           callback(null, true);
         }
       },
@@ -180,6 +189,10 @@ async function startApplication(): Promise<void> {
       try {
         const nonce = generateNonce();
         req.session.nonce = nonce;
+        
+        // Debug logging
+        logger.info(`Session debug - ID: ${req.sessionID}, Cookie sent: ${!!req.headers.cookie}, Secure: ${req.secure}`);
+        
         // Explicitly save session to ensure nonce is persisted
         req.session.save((err) => {
           if (err) {
@@ -200,12 +213,16 @@ async function startApplication(): Promise<void> {
       try {
         const { message, signature } = req.body;
         const nonce = req.session.nonce;
+        
+        // Debug logging
+        logger.info(`Verify debug - Session ID: ${req.sessionID}, Has nonce: ${!!nonce}, Cookie sent: ${!!req.headers.cookie}`);
 
         if (!message || !signature) {
           return res.status(400).json({ error: 'Message and signature required' });
         }
 
         if (!nonce) {
+          logger.warn(`No nonce in session. Session data: ${JSON.stringify(req.session)}`);
           return res.status(400).json({ error: 'Nonce not found. Please generate a new nonce.' });
         }
 

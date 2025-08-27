@@ -1,6 +1,21 @@
 // Dashboard JavaScript using Alpine.js
 function dashboard() {
+    // Helper function to ensure credentials are always included
+    async function fetchWithCredentials(url, options = {}) {
+        return fetch(url, {
+            ...options,
+            credentials: 'include', // Always include cookies for authentication
+            headers: {
+                'Content-Type': 'application/json',
+                ...(options.headers || {})
+            }
+        });
+    }
+    
     return {
+        // Use the wrapped fetch for all API calls
+        fetch: fetchWithCredentials,
+        
         // Authentication State
         isAuthenticated: false,
         walletConnected: false,
@@ -468,7 +483,7 @@ function dashboard() {
         async checkAuthStatus() {
             this.checking = true;
             try {
-                const response = await fetch('/api/siwe/me');
+                const response = await this.fetch('/api/siwe/me');
                 const result = await response.json();
                 
                 if (result.authenticated) {
@@ -1853,7 +1868,9 @@ function dashboard() {
 
             try {
                 // Step 1: Get nonce from backend
-                const nonceResponse = await fetch('/api/siwe/nonce');
+                const nonceResponse = await fetch('/api/siwe/nonce', {
+                    credentials: 'include' // CRITICAL for cookies to work with CORS
+                });
                 if (!nonceResponse.ok) {
                     throw new Error('Failed to get nonce from server');
                 }
@@ -1886,6 +1903,7 @@ Issued At: ${issuedAt}`;
                 // Step 5: Verify signature with backend
                 const loginResponse = await fetch('/api/siwe/verify', {
                     method: 'POST',
+                    credentials: 'include', // CRITICAL for cookies to work with CORS
                     headers: {
                         'Content-Type': 'application/json'
                     },
@@ -1921,7 +1939,10 @@ Issued At: ${issuedAt}`;
 
         async logout() {
             try {
-                await fetch('/api/siwe/logout', { method: 'POST' });
+                await fetch('/api/siwe/logout', { 
+                    method: 'POST',
+                    credentials: 'include' // Required for cookies with CORS
+                });
                 
                 // Reset authentication state
                 this.isAuthenticated = false;
