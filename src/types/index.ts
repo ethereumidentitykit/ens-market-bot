@@ -1,3 +1,5 @@
+import { Pool } from 'pg';
+
 // NFT Sales API Response Types
 export interface NFTSale {
   marketplace: string;
@@ -142,6 +144,11 @@ export interface Config {
   nodeEnv: string;
   logLevel: string;
   wethPriceMultiplier: number;
+  siwe: {
+    adminWhitelist: string[];
+    sessionSecret: string;
+    domain: string;
+  };
 }
 
 // Twitter Post Record
@@ -155,8 +162,18 @@ export interface TwitterPost {
   errorMessage?: string;
 }
 
+// SIWE Session Record
+export interface SiweSession {
+  id?: number;
+  address: string;
+  sessionId: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
 // Database Interface
 export interface IDatabaseService {
+  pgPool: Pool; // Connection pool for external libraries like connect-pg-simple
   initialize(): Promise<void>;
   insertSale(sale: Omit<ProcessedSale, 'id'>): Promise<number>;
   isSaleProcessed(tokenId: string): Promise<boolean>;
@@ -204,6 +221,12 @@ export interface IDatabaseService {
   getPriceTierForAmount(transactionType: string, usdAmount: number): Promise<PriceTier | null>;
   getLastProcessedBidTimestamp(): Promise<number>;
   setLastProcessedBidTimestamp(timestamp: number): Promise<void>;
+  
+  // SIWE admin session methods
+  createAdminSession(session: Omit<SiweSession, 'id'>): Promise<void>;
+  getAdminSession(sessionId: string): Promise<SiweSession | null>;
+  deleteAdminSession(sessionId: string): Promise<void>;
+  cleanupExpiredSessions(): Promise<void>;
 }
 
 // ENS Bids Types

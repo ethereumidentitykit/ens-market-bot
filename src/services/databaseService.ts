@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
-import { ProcessedSale, IDatabaseService, TwitterPost, ENSRegistration, ENSBid, PriceTier } from '../types';
+import { ProcessedSale, IDatabaseService, TwitterPost, ENSRegistration, ENSBid, PriceTier, SiweSession } from '../types';
 
 /**
  * PostgreSQL database service 
@@ -9,6 +9,14 @@ import { ProcessedSale, IDatabaseService, TwitterPost, ENSRegistration, ENSBid, 
  */
 export class DatabaseService implements IDatabaseService {
   private pool: Pool | null = null;
+
+  /**
+   * Get the connection pool for use with external libraries like connect-pg-simple
+   */
+  get pgPool(): Pool {
+    if (!this.pool) throw new Error('Database not initialized');
+    return this.pool;
+  }
 
   /**
    * Initialize the PostgreSQL connection
@@ -266,6 +274,22 @@ export class DatabaseService implements IDatabaseService {
       // Create index for rate limiting queries
       await this.pool.query(`
         CREATE INDEX IF NOT EXISTS idx_twitter_posts_posted_at ON twitter_posts(posted_at);
+      `);
+
+      // Create admin_sessions table for SIWE authentication
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS admin_sessions (
+          id SERIAL PRIMARY KEY,
+          address VARCHAR(42) NOT NULL,
+          session_id VARCHAR(255) NOT NULL UNIQUE,
+          created_at TIMESTAMP NOT NULL,
+          expires_at TIMESTAMP NOT NULL
+        )
+      `);
+
+      // Create index for session lookup
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_admin_sessions_session_id ON admin_sessions(session_id);
       `);
 
       logger.info('PostgreSQL tables created successfully');
@@ -1167,6 +1191,74 @@ export class DatabaseService implements IDatabaseService {
       await this.pool.end();
       this.pool = null;
       logger.info('PostgreSQL connection pool closed');
+    }
+  }
+
+  // SIWE Admin Session Management Methods
+
+  /**
+   * Create a new admin session
+   */
+  async createAdminSession(session: Omit<SiweSession, 'id'>): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    const query = `
+      INSERT INTO admin_sessions (address, session_id, created_at, expires_at)
+      VALUES ($1, $2, $3, $4)
+    `;
+    
+    await this.pool.query(query, [
+      session.address,
+      session.sessionId,
+      session.createdAt,
+      session.expiresAt
+    ]);
+  }
+
+  /**
+   * Get an admin session by session ID
+   */
+  async getAdminSession(sessionId: string): Promise<SiweSession | null> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    const query = 'SELECT * FROM admin_sessions WHERE session_id = $1';
+    const result = await this.pool.query(query, [sessionId]);
+    
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      address: row.address,
+      sessionId: row.session_id,
+      createdAt: row.created_at,
+      expiresAt: row.expires_at
+    };
+  }
+
+  /**
+   * Delete an admin session
+   */
+  async deleteAdminSession(sessionId: string): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    const query = 'DELETE FROM admin_sessions WHERE session_id = $1';
+    await this.pool.query(query, [sessionId]);
+  }
+
+  /**
+   * Clean up expired admin sessions
+   */
+  async cleanupExpiredSessions(): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    const query = 'DELETE FROM admin_sessions WHERE expires_at < NOW()';
+    const result = await this.pool.query(query);
+    
+    if (result.rowCount && result.rowCount > 0) {
+      logger.info(`Cleaned up ${result.rowCount} expired admin session(s)`);
     }
   }
 }

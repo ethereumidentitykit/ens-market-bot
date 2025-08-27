@@ -8,6 +8,8 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.7.1/nouislider.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.7.1/nouislider.min.js"></script>
+    <!-- Ethers.js for SIWE wallet connection -->
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
     <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
     <style>
         [x-cloak] { display: none !important; }
@@ -56,25 +58,105 @@
 </head>
 <body class="bg-gray-50 min-h-screen">
     <div x-data="dashboard()" x-init="init()" class="min-h-screen">
+        
+        <!-- SIWE Authentication Screen -->
+        <div x-show="!isAuthenticated" x-cloak class="min-h-screen bg-gray-900 flex items-center justify-center">
+            <div class="bg-white rounded-lg shadow-xl p-8 max-w-md w-full mx-4">
+                <div class="text-center">
+                    <i class="fas fa-robot text-blue-600 text-4xl mb-4"></i>
+                    <h1 class="text-2xl font-bold text-gray-900 mb-2">ENS Market Bot</h1>
+                    <p class="text-gray-600 mb-6">Admin Dashboard</p>
+                    
+                    <!-- Wallet Connection -->
+                    <div x-show="!walletConnected" class="mb-6">
+                        <button @click="connectWallet()" 
+                                :disabled="connecting"
+                                class="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white font-medium py-3 px-6 rounded-lg transition-colors flex items-center justify-center">
+                            <i class="fas fa-wallet mr-2"></i>
+                            <span x-text="connecting ? 'Connecting...' : 'Connect Wallet'"></span>
+                        </button>
+                        <p class="text-sm text-gray-500 mt-2">Connect with MetaMask or compatible wallet</p>
+                    </div>
+
+                    <!-- SIWE Sign In -->
+                    <div x-show="walletConnected && !isAuthenticated" class="mb-6">
+                        <div class="bg-gray-50 rounded-lg p-4 mb-4">
+                            <p class="text-sm text-gray-600 mb-1">Connected Wallet:</p>
+                            <p class="font-mono text-sm text-gray-900" x-text="connectedAddress"></p>
+                        </div>
+                        <button @click="signIn()" 
+                                :disabled="signing"
+                                class="w-full bg-green-600 hover:bg-green-700 disabled:bg-green-400 disabled:cursor-not-allowed text-white font-medium py-3 px-6 rounded-lg transition-colors flex items-center justify-center">
+                            <i class="fas fa-signature mr-2"></i>
+                            <span x-text="signing ? 'Signing Message...' : 'Sign In with Ethereum'"></span>
+                        </button>
+                        <p class="text-sm text-gray-500 mt-2">You'll be asked to sign a message to prove ownership</p>
+                    </div>
+
+                    <!-- Loading State -->
+                    <div x-show="checking" class="mb-6">
+                        <div class="flex items-center justify-center">
+                            <i class="fas fa-spinner fa-spin text-gray-400 mr-2"></i>
+                            <span class="text-gray-600">Checking authentication...</span>
+                        </div>
+                    </div>
+
+                    <!-- Error Messages -->
+                    <div x-show="authError" class="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+                        <div class="flex items-center">
+                            <i class="fas fa-exclamation-circle text-red-500 mr-2"></i>
+                            <span class="text-red-700 text-sm" x-text="authError"></span>
+                        </div>
+                    </div>
+
+                    <!-- Whitelist Info -->
+                    <div class="text-xs text-gray-500 mt-6">
+                        <i class="fas fa-shield-alt mr-1"></i>
+                        Only whitelisted addresses can access this dashboard
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Existing Dashboard Content (only shown when authenticated) -->
+        <div x-show="isAuthenticated" x-cloak>
         <!-- Navigation Tabs -->
         <nav class="bg-gray-800 border-b border-gray-700">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="flex space-x-8">
-                    <button 
-                        @click="currentView = 'classic'"
-                        :class="currentView === 'classic' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300'"
-                        class="py-4 px-1 border-b-2 font-medium text-sm transition-colors duration-200"
-                    >
-                        Classic Dashboard
-                    </button>
+                <div class="flex justify-between items-center">
+                    <!-- Navigation Tabs -->
+                    <div class="flex space-x-8">
+                        <button 
+                            @click="currentView = 'classic'"
+                            :class="currentView === 'classic' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300'"
+                            class="py-4 px-1 border-b-2 font-medium text-sm transition-colors duration-200"
+                        >
+                            Classic Dashboard
+                        </button>
 
-                    <button 
-                        @click="currentView = 'database'"
-                        :class="currentView === 'database' ? 'border-green-500 text-green-400' : 'border-transparent text-gray-400 hover:text-gray-300'"
-                        class="py-4 px-1 border-b-2 font-medium text-sm transition-colors duration-200"
-                    >
-                        Database
-                    </button>
+                        <button 
+                            @click="currentView = 'database'"
+                            :class="currentView === 'database' ? 'border-green-500 text-green-400' : 'border-transparent text-gray-400 hover:text-gray-300'"
+                            class="py-4 px-1 border-b-2 font-medium text-sm transition-colors duration-200"
+                        >
+                            Database
+                        </button>
+                    </div>
+
+                    <!-- User Info & Logout -->
+                    <div class="flex items-center space-x-4">
+                        <div class="text-gray-300 text-sm">
+                            <i class="fas fa-user mr-1"></i>
+                            <span x-text="connectedAddress ? connectedAddress.slice(0, 6) + '...' + connectedAddress.slice(-4) : 'Unknown'"></span>
+                        </div>
+                        <button 
+                            @click="logout()"
+                            class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 flex items-center"
+                        >
+                            <i class="fas fa-sign-out-alt mr-2"></i>
+                            Logout
+                        </button>
+                    </div>
                 </div>
             </div>
         </nav>
@@ -2247,6 +2329,7 @@
                 </div>
             </div>
         </div>
+        </div> <!-- End of authenticated dashboard content -->
     </div>
 
     <script src="/js/dashboard.js"></script>
