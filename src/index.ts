@@ -74,6 +74,10 @@ async function startApplication(): Promise<void> {
     // Initialize Express app
     const app = express();
 
+    // Trust Cloudflare proxy (required for secure cookies to work)
+    // This tells Express to trust X-Forwarded-Proto header from Cloudflare
+    app.set('trust proxy', 1);
+
     // Make services available to controllers
     app.locals.databaseService = databaseService;
     app.locals.ethIdentityService = ethIdentityService;
@@ -98,9 +102,9 @@ async function startApplication(): Promise<void> {
       cookie: { 
         secure: config.nodeEnv === 'production',
         httpOnly: true,
-        sameSite: 'none', // Prevent CSRF attacks
+        sameSite: config.nodeEnv === 'production' ? 'none' : 'lax', // 'none' requires secure:true
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
-        domain: config.nodeEnv === 'production' ? config.siwe.domain : undefined,
+        // Don't set domain - let Express handle it automatically
         path: '/'
       },
       name: 'ens-bot-session'
