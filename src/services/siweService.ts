@@ -26,23 +26,6 @@ export class SiweService {
   }
 
   /**
-   * Create a SIWE message for user to sign
-   * Uses strict EIP-4361 format - critical for wallet recognition
-   */
-  createMessage(address: string, nonce: string): SiweMessage {
-    return new SiweMessage({
-      domain: config.siwe.domain,
-      address: address,
-      statement: 'Sign in to ENS Market Bot Admin Dashboard',
-      uri: `https://${config.siwe.domain}`,
-      version: '1',
-      chainId: 1, // Ethereum mainnet
-      nonce: nonce,
-      expirationTime: new Date(Date.now() + 10 * 60 * 1000).toISOString(), // 10 minutes
-    });
-  }
-
-  /**
    * Verify a signed SIWE message and validate nonce
    * Critical: Uses official SIWE library for proper EIP-4361 verification
    */

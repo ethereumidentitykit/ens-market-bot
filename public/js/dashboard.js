@@ -1863,8 +1863,7 @@ function dashboard() {
                 const checksumAddress = this.checksumAddress(this.connectedAddress);
 
                 // Step 3: Create SIWE message with strict EIP-4361 format
-                // TEMPORARY TEST: Use real domain to check if MetaMask recognizes it
-                const domain = 'example.com';  // Real domain for testing
+                const domain = window.location.hostname;
                 const issuedAt = new Date().toISOString();
                 
                 const message = `${domain} wants you to sign in with your Ethereum account:
@@ -1872,7 +1871,7 @@ ${checksumAddress}
 
 Sign in to ENS Market Bot Admin Dashboard
 
-URI: https://example.com
+URI: ${window.location.origin}
 Version: 1
 Chain ID: 1
 Nonce: ${nonce}
