@@ -24,6 +24,10 @@ import { AutoTweetService } from './services/autoTweetService';
 import { WorldTimeService } from './services/worldTimeService';
 import { SiweService } from './services/siweService';
 import pgSession from 'connect-pg-simple';
+import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import { createAuthMiddleware, createOptionalAuthMiddleware, createAuthRateLimiter } from './middleware/auth';
 
 // Extend express-session types
 declare module 'express-session' {
@@ -94,10 +98,65 @@ async function startApplication(): Promise<void> {
       cookie: { 
         secure: config.nodeEnv === 'production',
         httpOnly: true,
-        maxAge: 24 * 60 * 60 * 1000 // 24 hours
+        sameSite: 'strict', // Prevent CSRF attacks
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        domain: config.nodeEnv === 'production' ? config.siwe.domain : undefined,
+        path: '/'
       },
       name: 'ens-bot-session'
     }));
+
+    // Security headers
+    app.use(helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
+          scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.ethers.io", "https://unpkg.com"],
+          imgSrc: ["'self'", "data:", "https:", "http:"],
+          connectSrc: ["'self'"],
+          fontSrc: ["'self'", "https://cdn.jsdelivr.net"],
+        },
+      },
+      hsts: {
+        maxAge: 31536000,
+        includeSubDomains: true,
+      }
+    }));
+
+    // CORS configuration  
+    app.use(cors({
+      origin: function(origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl)
+        if (!origin) return callback(null, true);
+        
+        // In production, only allow specific origins
+        if (config.nodeEnv === 'production') {
+          const allowedOrigins = [
+            `https://${config.siwe.domain}`,
+            `http://${config.siwe.domain}`,
+            // Add your frontend URLs here if different from domain
+          ];
+          
+          if (allowedOrigins.includes(origin)) {
+            callback(null, true);
+          } else {
+            logger.warn(`CORS blocked request from origin: ${origin}`);
+            callback(new Error('Not allowed by CORS'));
+          }
+        } else {
+          // In development, allow localhost
+          callback(null, true);
+        }
+      },
+      credentials: true,
+      optionsSuccessStatus: 200
+    }));
+
+    // Create auth middleware instances
+    const requireAuth = createAuthMiddleware(siweService);
+    const optionalAuth = createOptionalAuthMiddleware(siweService);
+    const authRateLimiter = createAuthRateLimiter();
 
     // Basic health check endpoint
     app.get('/health', (req, res) => {
@@ -113,12 +172,12 @@ async function startApplication(): Promise<void> {
     // SIWE Authentication Routes
 
     // Generate nonce for SIWE message
-    app.get('/api/siwe/nonce', (req, res) => {
+    app.get('/api/siwe/nonce', authRateLimiter, (req, res) => {
       try {
         const nonce = generateNonce();
         req.session.nonce = nonce;
         res.json({ nonce });
-        logger.info(`Generated SIWE nonce: ${nonce}`);
+        logger.info('Generated SIWE nonce'); // Removed sensitive data
       } catch (error: any) {
         logger.error('Error generating SIWE nonce:', error.message);
         res.status(500).json({ error: 'Failed to generate nonce' });
@@ -126,7 +185,7 @@ async function startApplication(): Promise<void> {
     });
 
     // Verify SIWE signature and create session
-    app.post('/api/siwe/verify', async (req, res) => {
+    app.post('/api/siwe/verify', authRateLimiter, async (req, res) => {
       try {
         const { message, signature } = req.body;
         const nonce = req.session.nonce;
@@ -148,7 +207,7 @@ async function startApplication(): Promise<void> {
 
         // Check whitelist
         if (!siweService.isWhitelisted(result.address)) {
-          logger.warn(`SIWE login attempt by non-whitelisted address: ${result.address}`);
+          logger.warn('SIWE login attempt by non-whitelisted address'); // Removed address
           return res.status(403).json({ error: 'Address not authorized for admin access' });
         }
 
@@ -166,7 +225,7 @@ async function startApplication(): Promise<void> {
           message: 'Successfully authenticated'
         });
 
-        logger.info(`✅ SIWE authentication successful for ${result.address}`);
+        logger.info('✅ SIWE authentication successful'); // Removed address
       } catch (error: any) {
         logger.error('Error verifying SIWE signature:', error.message);
         res.status(500).json({ error: 'Authentication failed' });
@@ -209,7 +268,7 @@ async function startApplication(): Promise<void> {
         
         if (sessionId) {
           await siweService.deleteSession(sessionId);
-          logger.info(`🚪 SIWE session ${sessionId} logged out`);
+          logger.info('🚪 SIWE session logged out'); // Removed sessionId
         }
         
         req.session.destroy((err) => {
@@ -235,7 +294,7 @@ async function startApplication(): Promise<void> {
     });
 
     // Test API endpoint
-    app.get('/api/test-moralis', async (req, res) => {
+    app.get('/api/test-moralis', requireAuth, async (req, res) => {
       try {
         const isConnected = await moralisService.testConnection();
         res.json({
@@ -251,7 +310,7 @@ async function startApplication(): Promise<void> {
     });
 
     // Test Alchemy ETH price endpoint
-    app.get('/api/test-alchemy-price', async (req, res) => {
+    app.get('/api/test-alchemy-price', requireAuth, async (req, res) => {
       try {
         const startTime = Date.now();
         const ethPrice = await alchemyService.getETHPriceUSD();
@@ -276,7 +335,7 @@ async function startApplication(): Promise<void> {
     });
 
     // Manual fetch endpoint for testing
-    app.get('/api/fetch-sales', async (req, res) => {
+    app.get('/api/fetch-sales', requireAuth, async (req, res) => {
       try {
         const { contractAddress, limit } = req.query;
         
@@ -303,7 +362,7 @@ async function startApplication(): Promise<void> {
     });
 
     // Debug endpoint to check Moralis configuration
-    app.get('/api/debug/moralis', async (req, res) => {
+    app.get('/api/debug/moralis', requireAuth, async (req, res) => {
       try {
         const hasApiKey = !!config.moralis?.apiKey;
         const apiKeyLength = config.moralis?.apiKey?.length || 0;
@@ -346,7 +405,7 @@ async function startApplication(): Promise<void> {
     });
 
     // Processing endpoints
-    app.get('/api/process-sales', async (req, res) => {
+    app.get('/api/process-sales', requireAuth, async (req, res) => {
       try {
         const results = await salesProcessingService.processNewSales();
         res.json({
@@ -444,7 +503,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.get('/api/stats', async (req, res) => {
+    app.get('/api/stats', requireAuth, async (req, res) => {
       try {
         const stats = await salesProcessingService.getProcessingStats();
         res.json({
@@ -459,7 +518,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.get('/api/unposted-sales', async (req, res) => {
+    app.get('/api/unposted-sales', requireAuth, async (req, res) => {
       try {
         const limit = parseInt(req.query.limit as string) || 500; // Increased for testing
         const recentSales = await databaseService.getRecentSales(limit); // Changed to get ALL sales
@@ -476,7 +535,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.get('/api/unposted-registrations', async (req, res) => {
+    app.get('/api/unposted-registrations', requireAuth, async (req, res) => {
       try {
         const limit = parseInt(req.query.limit as string) || 500; // Increased for testing
         const recentRegistrations = await databaseService.getRecentRegistrations(limit); // Changed to get ALL registrations
@@ -494,7 +553,7 @@ async function startApplication(): Promise<void> {
     });
 
     // Scheduler endpoints
-    app.get('/api/scheduler/status', (req, res) => {
+    app.get('/api/scheduler/status', requireAuth, (req, res) => {
       try {
         const status = schedulerService.getStatus();
         res.json({
@@ -509,7 +568,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.post('/api/scheduler/start', async (req, res) => {
+    app.post('/api/scheduler/start', requireAuth, async (req, res) => {
       try {
         await schedulerService.start();
         res.json({
@@ -524,7 +583,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.post('/api/scheduler/stop', async (req, res) => {
+    app.post('/api/scheduler/stop', requireAuth, async (req, res) => {
       try {
         await schedulerService.stop();
         res.json({
@@ -539,7 +598,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.post('/api/scheduler/force-stop', async (req, res) => {
+    app.post('/api/scheduler/force-stop', requireAuth, async (req, res) => {
       try {
         await schedulerService.forceStop();
         res.json({
@@ -554,7 +613,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.post('/api/scheduler/reset-errors', (req, res) => {
+    app.post('/api/scheduler/reset-errors', requireAuth, (req, res) => {
       try {
         schedulerService.resetErrorCounter();
         res.json({
@@ -576,7 +635,7 @@ async function startApplication(): Promise<void> {
     await apiToggleService.initialize(databaseService);
 
     // Admin API Toggle endpoints
-    app.post('/api/admin/toggle-twitter', async (req, res) => {
+    app.post('/api/admin/toggle-twitter', requireAuth, async (req, res) => {
       try {
         const { enabled } = req.body;
         if (typeof enabled !== 'boolean') {
@@ -605,7 +664,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.post('/api/admin/toggle-moralis', async (req, res) => {
+    app.post('/api/admin/toggle-moralis', requireAuth, async (req, res) => {
       try {
         const { enabled } = req.body;
         if (typeof enabled !== 'boolean') {
@@ -632,7 +691,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.post('/api/admin/toggle-magic-eden', async (req, res) => {
+    app.post('/api/admin/toggle-magic-eden', requireAuth, async (req, res) => {
       try {
         const { enabled } = req.body;
         if (typeof enabled !== 'boolean') {
@@ -659,7 +718,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.post('/api/admin/toggle-auto-posting', async (req, res) => {
+    app.post('/api/admin/toggle-auto-posting', requireAuth, async (req, res) => {
       try {
         const { enabled } = req.body;
         if (typeof enabled !== 'boolean') {
@@ -686,7 +745,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.get('/api/admin/toggle-status', (req, res) => {
+    app.get('/api/admin/toggle-status', requireAuth, (req, res) => {
       const state = apiToggleService.getState();
       res.json({
         success: true,
@@ -735,7 +794,7 @@ async function startApplication(): Promise<void> {
     });
     
     // Auto-post settings endpoints - transaction-specific
-    app.get('/api/admin/autopost-settings', async (req, res) => {
+    app.get('/api/admin/autopost-settings', requireAuth, async (req, res) => {
       try {
         // Load transaction-specific settings from database
         const salesSettings = {
@@ -779,7 +838,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.post('/api/admin/autopost-settings', async (req, res) => {
+    app.post('/api/admin/autopost-settings', requireAuth, async (req, res) => {
       try {
         const { transactionType, settings } = req.body;
         
@@ -855,7 +914,7 @@ async function startApplication(): Promise<void> {
     });
 
     // Twitter API endpoints
-    app.get('/api/twitter/test', async (req, res) => {
+    app.get('/api/twitter/test', requireAuth, async (req, res) => {
       try {
         const configValidation = twitterService.validateConfig();
         if (!configValidation.valid) {
@@ -880,7 +939,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.post('/api/twitter/test-post', async (req, res) => {
+    app.post('/api/twitter/test-post', requireAuth, async (req, res) => {
       try {
         const configValidation = twitterService.validateConfig();
         if (!configValidation.valid) {
@@ -908,7 +967,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.get('/api/twitter/config-status', (req, res) => {
+    app.get('/api/twitter/config-status', requireAuth, (req, res) => {
       try {
         const configValidation = twitterService.validateConfig();
         res.json({
@@ -930,7 +989,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.get('/api/twitter/rate-limit-status', async (req, res) => {
+    app.get('/api/twitter/rate-limit-status', requireAuth, async (req, res) => {
       try {
         const rateLimitInfo = await rateLimitService.getDetailedRateLimitInfo();
         res.json({
@@ -945,7 +1004,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.post('/api/twitter/send-test-tweet', async (req, res) => {
+    app.post('/api/twitter/send-test-tweet', requireAuth, async (req, res) => {
       try {
         const configValidation = twitterService.validateConfig();
         if (!configValidation.valid) {
@@ -1027,7 +1086,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.get('/api/twitter/preview-tweet/:saleId', async (req, res) => {
+    app.get('/api/twitter/preview-tweet/:saleId', requireAuth, async (req, res) => {
       try {
         const saleId = parseInt(req.params.saleId);
         if (isNaN(saleId)) {
@@ -1074,7 +1133,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.post('/api/twitter/post-sale/:saleId', async (req, res) => {
+    app.post('/api/twitter/post-sale/:saleId', requireAuth, async (req, res) => {
       try {
         const configValidation = twitterService.validateConfig();
         if (!configValidation.valid) {
@@ -1173,7 +1232,7 @@ async function startApplication(): Promise<void> {
     });
 
     // New Tweet Generation API endpoints
-    app.get('/api/tweet/generate/:saleId', async (req, res) => {
+    app.get('/api/tweet/generate/:saleId', requireAuth, async (req, res) => {
       try {
         const saleId = parseInt(req.params.saleId);
         if (isNaN(saleId)) {
@@ -1224,7 +1283,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.post('/api/tweet/send/:saleId', async (req, res) => {
+    app.post('/api/tweet/send/:saleId', requireAuth, async (req, res) => {
       try {
         const configValidation = twitterService.validateConfig();
         if (!configValidation.valid) {
@@ -1324,7 +1383,7 @@ async function startApplication(): Promise<void> {
     });
 
     // Registration Tweet Generation API endpoints
-    app.get('/api/registration/tweet/generate/:registrationId', async (req, res) => {
+    app.get('/api/registration/tweet/generate/:registrationId', requireAuth, async (req, res) => {
       try {
         const registrationId = parseInt(req.params.registrationId);
         if (isNaN(registrationId)) {
@@ -1375,7 +1434,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.post('/api/registration/tweet/send/:registrationId', async (req, res) => {
+    app.post('/api/registration/tweet/send/:registrationId', requireAuth, async (req, res) => {
       try {
         const configValidation = twitterService.validateConfig();
         if (!configValidation.valid) {
@@ -1474,7 +1533,7 @@ async function startApplication(): Promise<void> {
     });
 
     // Bid Tweet Generation API endpoints
-    app.get('/api/bid/tweet/generate/:bidId', async (req, res) => {
+    app.get('/api/bid/tweet/generate/:bidId', requireAuth, async (req, res) => {
       try {
         const bidId = parseInt(req.params.bidId);
         if (isNaN(bidId)) {
@@ -1515,7 +1574,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.post('/api/bid/tweet/send/:bidId', async (req, res) => {
+    app.post('/api/bid/tweet/send/:bidId', requireAuth, async (req, res) => {
       try {
         const bidId = parseInt(req.params.bidId);
         if (isNaN(bidId)) {
@@ -1579,7 +1638,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.get('/api/unposted-bids', async (req, res) => {
+    app.get('/api/unposted-bids', requireAuth, async (req, res) => {
       try {
         const limit = parseInt(req.query.limit as string) || 500; // Increased for testing
         const recentBids = await databaseService.getRecentBids(limit); // Changed to get ALL bids
@@ -1597,7 +1656,7 @@ async function startApplication(): Promise<void> {
     });
 
     // Twitter History API endpoint
-    app.get('/api/twitter/history', async (req, res) => {
+    app.get('/api/twitter/history', requireAuth, async (req, res) => {
       try {
         const hoursBack = parseInt(req.query.hours as string) || 24;
         const tweetHistory = await databaseService.getRecentTweetPosts(hoursBack);
@@ -1620,17 +1679,17 @@ async function startApplication(): Promise<void> {
     });
 
     // Image Generation API endpoints
-    app.post('/api/image/generate-test', async (req, res) => {
+    app.post('/api/image/generate-test', requireAuth, async (req, res) => {
       const { ImageController } = await import('./controllers/imageController');
       await ImageController.generateTestImage(req, res);
     });
 
-    app.post('/api/image/generate-custom-sale', async (req, res) => {
+    app.post('/api/image/generate-custom-sale', requireAuth, async (req, res) => {
       const { ImageController } = await import('./controllers/imageController');
       await ImageController.generateCustomImage(req, res);
     });
 
-    app.post('/api/image/generate-custom-registration', async (req, res) => {
+    app.post('/api/image/generate-custom-registration', requireAuth, async (req, res) => {
       try {
         const { mockData } = req.body;
         
@@ -1694,7 +1753,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.post('/api/image/generate-custom-bid', async (req, res) => {
+    app.post('/api/image/generate-custom-bid', requireAuth, async (req, res) => {
       try {
         const { mockData } = req.body;
         
@@ -1747,7 +1806,7 @@ async function startApplication(): Promise<void> {
     // Serve generated images
     app.use('/generated-images', express.static(path.join(__dirname, '../data')));
 
-    app.get('/api/database/sales', async (req, res) => {
+    app.get('/api/database/sales', requireAuth, async (req, res) => {
       try {
         const page = parseInt(req.query.page as string) || 1;
         const limit = parseInt(req.query.limit as string) || 50;
@@ -1831,7 +1890,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.get('/api/database/registrations', async (req, res) => {
+    app.get('/api/database/registrations', requireAuth, async (req, res) => {
       try {
         const page = parseInt(req.query.page as string) || 1;
         const limit = parseInt(req.query.limit as string) || 25;
@@ -1916,7 +1975,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.get('/api/admin/bids', async (req, res) => {
+    app.get('/api/admin/bids', requireAuth, async (req, res) => {
       try {
         const page = parseInt(req.query.page as string) || 1;
         const limit = parseInt(req.query.limit as string) || 10;
@@ -2019,7 +2078,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.post('/api/database/reset', async (req, res) => {
+    app.post('/api/database/reset', requireAuth, async (req, res) => {
       try {
         logger.warn('Database reset requested - this will delete ALL data!');
         
@@ -2038,7 +2097,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.post('/api/database/migrate-schema', async (req, res) => {
+    app.post('/api/database/migrate-schema', requireAuth, async (req, res) => {
       try {
         logger.warn('Database schema migration requested - this will DROP and RECREATE tables!');
         
@@ -2057,7 +2116,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.post('/api/database/clear-sales', async (req, res) => {
+    app.post('/api/database/clear-sales', requireAuth, async (req, res) => {
       try {
         logger.warn('Sales table clear requested - this will delete all sales data!');
         
@@ -2077,7 +2136,7 @@ async function startApplication(): Promise<void> {
     });
 
     // Reset processing to start from recent blocks
-    app.post('/api/processing/reset-to-recent', async (req, res) => {
+    app.post('/api/processing/reset-to-recent', requireAuth, async (req, res) => {
       try {
         logger.warn('Resetting processing to start from recent blocks...');
         
@@ -2099,7 +2158,7 @@ async function startApplication(): Promise<void> {
     });
 
     // Serve generated images from database
-    app.get('/api/images/:filename', async (req, res) => {
+    app.get('/api/images/:filename', requireAuth, async (req, res) => {
       try {
         const { filename } = req.params;
         const imageData = await databaseService.getGeneratedImage(filename);

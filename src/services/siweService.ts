@@ -21,7 +21,10 @@ export class SiweService {
     const normalizedAddress = address.toLowerCase();
     const isAllowed = config.siwe.adminWhitelist.includes(normalizedAddress);
     
-    logger.info(`SIWE whitelist check for ${address}: ${isAllowed ? 'ALLOWED' : 'DENIED'}`);
+    // Only log denials or use debug level for routine checks
+    if (!isAllowed) {
+      logger.warn(`SIWE whitelist check DENIED for ${address}`);
+    }
     return isAllowed;
   }
 

@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import crypto from 'crypto';
 import { Config } from '../types';
 import { CONTRACT_ADDRESSES } from '../config/contracts';
 
@@ -32,7 +33,15 @@ export const config: Config = {
   wethPriceMultiplier: parseFloat(process.env.WETH_PRICE_MULTIPLIER || '1.0'),
   siwe: {
     adminWhitelist: process.env.ADMIN_WHITELIST?.split(',').map(addr => addr.toLowerCase().trim()) || [],
-    sessionSecret: process.env.SESSION_SECRET || 'fallback-secret-change-in-production',
+    sessionSecret: process.env.SESSION_SECRET || (() => {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('SESSION_SECRET must be set in production environment');
+      }
+      // Generate random secret for development only
+      const devSecret = crypto.randomBytes(32).toString('hex');
+      console.warn('⚠️  Using generated session secret for development. Set SESSION_SECRET in production!');
+      return devSecret;
+    })(),
     domain: process.env.SIWE_DOMAIN || 'localhost'
   }
 };
