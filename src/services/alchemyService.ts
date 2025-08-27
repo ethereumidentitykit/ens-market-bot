@@ -63,10 +63,10 @@ export class AlchemyService {
       return response.data;
 
     } catch (error: any) {
-      logger.error(`Failed to fetch NFT sales for contract ${contractAddress}:`, error.message);
+      logger.error(`[Alchemy API] Failed to fetch NFT sales for contract ${contractAddress}:`, error.message);
       
       if (error.response) {
-        logger.error('API response error:', {
+        logger.error('[Alchemy API] Response error:', {
           status: error.response.status,
           data: error.response.data
         });
@@ -120,7 +120,7 @@ export class AlchemyService {
       return allSales;
 
     } catch (error: any) {
-      logger.error(`Failed to fetch paginated sales for contract ${contractAddress}:`, error.message);
+      logger.error(`[Alchemy API] Failed to fetch paginated sales for contract ${contractAddress}:`, error.message);
       return allSales; // Return what we have so far
     }
   }
@@ -168,7 +168,7 @@ export class AlchemyService {
       
       return null;
     } catch (error: any) {
-      logger.error('Failed to get latest valid block:', error.message);
+      logger.error('[Alchemy API] Failed to get latest valid block:', error.message);
       return null;
     }
   }
@@ -199,10 +199,10 @@ export class AlchemyService {
       return owners;
 
     } catch (error: any) {
-      logger.error(`Failed to fetch owners for token ${tokenId}:`, error.message);
+      logger.error(`[Alchemy API] Failed to fetch owners for token ${tokenId} on contract ${contractAddress}:`, error.message);
       
       if (error.response) {
-        logger.error('API response error:', {
+        logger.error('[Alchemy API] Response error:', {
           status: error.response.status,
           data: error.response.data
         });
@@ -258,7 +258,7 @@ export class AlchemyService {
       
       return priceValue;
     } catch (error: any) {
-      logger.warn('Failed to fetch ETH price from Alchemy:', error.message);
+      logger.warn('[Alchemy API] Failed to fetch ETH price:', error.message);
       
       // Fallback to $4000 if API is unavailable
       const fallbackPrice = 4000;
@@ -327,11 +327,11 @@ export class AlchemyService {
         logger.info('Alchemy API connection test successful');
         return true;
       } else {
-        logger.error('Alchemy API connection test failed');
+        logger.error('[Alchemy API] Connection test failed - no response');
         return false;
       }
     } catch (error: any) {
-      logger.error('Alchemy API connection test failed:', error.message);
+      logger.error('[Alchemy API] Connection test failed:', error.message);
       return false;
     }
   }

@@ -397,7 +397,7 @@ export class NewTweetFormatter {
           currentOwnerLine = `Owner: ${ownerHandle}`;
         }
       } catch (error: any) {
-        logger.warn('Failed to fetch Owner for bid tweet:', error.message);
+        logger.warn('[Alchemy API] Failed to fetch Owner for bid tweet:', error.message);
       }
     }
     
@@ -736,7 +736,7 @@ export class NewTweetFormatter {
           logger.debug(`No owners found for token ${bid.tokenId}`);
         }
       } catch (error: any) {
-        logger.warn(`Failed to get Owner for token ${bid.tokenId}:`, error.message);
+        logger.warn(`[Alchemy API] Failed to get Owner for token ${bid.tokenId}:`, error.message);
       }
     }
     
@@ -1127,7 +1127,7 @@ export class NewTweetFormatter {
           currentOwnerHandle = this.getDisplayHandle(ownerAccount, owners[0]);
         }
       } catch (error: any) {
-        logger.warn('Failed to fetch Owner for breakdown:', error.message);
+        logger.warn('[Alchemy API] Failed to fetch Owner for breakdown:', error.message);
       }
     }
     
