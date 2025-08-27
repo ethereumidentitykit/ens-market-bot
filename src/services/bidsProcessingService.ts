@@ -342,9 +342,15 @@ export class BidsProcessingService {
             logger.debug(`✅ ENS name resolved: ${ensName}`);
           }
         } catch (error) {
-          logger.debug(`⚠️  ENS name resolution failed, using default threshold`);
-          return parseFloat(defaultMin);
+          logger.debug(`🚫 ENS name resolution failed, rejecting bid without proper name`);
+          return 999; // Impossibly high threshold = always reject
         }
+      }
+
+      // Final check: reject if still no ENS name
+      if (!ensName) {
+        logger.debug(`🚫 No ENS name available, rejecting bid without proper name`);
+        return 999; // Impossibly high threshold = always reject
       }
 
       // Apply club-aware logic
