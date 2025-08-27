@@ -98,7 +98,7 @@ async function startApplication(): Promise<void> {
       cookie: { 
         secure: config.nodeEnv === 'production',
         httpOnly: true,
-        sameSite: 'strict', // Prevent CSRF attacks
+        sameSite: 'none', // Prevent CSRF attacks
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
         domain: config.nodeEnv === 'production' ? config.siwe.domain : undefined,
         path: '/'
