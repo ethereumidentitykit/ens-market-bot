@@ -24,6 +24,15 @@ import { AutoTweetService } from './services/autoTweetService';
 import { WorldTimeService } from './services/worldTimeService';
 import { SiweService } from './services/siweService';
 
+// Extend express-session types
+declare module 'express-session' {
+  interface SessionData {
+    nonce?: string;
+    siweSessionId?: string;
+    address?: string;
+  }
+}
+
 async function startApplication(): Promise<void> {
   try {
     // Validate configuration

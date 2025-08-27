@@ -1,6 +1,15 @@
 // Dashboard JavaScript using Alpine.js
 function dashboard() {
     return {
+        // Authentication State
+        isAuthenticated: false,
+        walletConnected: false,
+        connectedAddress: null,
+        connecting: false,
+        signing: false,
+        checking: false,
+        authError: '',
+        
         // View State
         currentView: 'classic', // 'classic' or 'database'
         databaseSubView: 'sales', // 'sales', 'registrations', or 'bids'
@@ -447,6 +456,36 @@ function dashboard() {
 
         // Initialize
         async init() {
+            // Check authentication status first
+            await this.checkAuthStatus();
+            
+            // Only load dashboard data if authenticated
+            if (this.isAuthenticated) {
+                await this.loadDashboardData();
+            }
+        },
+
+        async checkAuthStatus() {
+            this.checking = true;
+            try {
+                const response = await fetch('/api/siwe/me');
+                const result = await response.json();
+                
+                if (result.authenticated) {
+                    this.isAuthenticated = true;
+                    // Ensure the stored address is checksummed
+                    this.connectedAddress = this.checksumAddress(result.address);
+                    this.walletConnected = true;
+                }
+            } catch (error) {
+                console.error('Auth status check failed:', error);
+                // Not authenticated, show login screen
+            } finally {
+                this.checking = false;
+            }
+        },
+
+        async loadDashboardData() {
             await this.loadToggleStates();
             await this.loadAutoPostSettings();
             await this.loadPriceTiers();
@@ -1762,6 +1801,138 @@ function dashboard() {
         showMessage(text, type = 'info') {
             // You can implement this to show notifications
             console.log(`${type.toUpperCase()}: ${text}`);
+        },
+
+        // SIWE Authentication Methods
+
+        // Helper function for checksumming addresses (fallback if ethers not available)
+        checksumAddress(address) {
+            if (typeof ethers !== 'undefined') {
+                return ethers.utils.getAddress(address);
+            }
+            // Simple fallback - just ensure it starts with 0x and is 42 chars
+            if (address && address.length === 42 && address.startsWith('0x')) {
+                return address;
+            }
+            throw new Error('Invalid address format');
+        },
+
+        async connectWallet() {
+            if (!window.ethereum) {
+                this.authError = 'Please install MetaMask or another Web3 wallet to continue';
+                return;
+            }
+
+            this.connecting = true;
+            this.authError = '';
+
+            try {
+                // Request account access
+                const accounts = await window.ethereum.request({
+                    method: 'eth_requestAccounts'
+                });
+
+                if (accounts.length > 0) {
+                    // Store checksummed address immediately
+                    this.connectedAddress = this.checksumAddress(accounts[0]);
+                    this.walletConnected = true;
+                } else {
+                    this.authError = 'No wallet accounts found';
+                }
+            } catch (error) {
+                this.authError = 'Failed to connect wallet: ' + (error.message || 'Unknown error');
+                console.error('Wallet connection failed:', error);
+            } finally {
+                this.connecting = false;
+            }
+        },
+
+        async signIn() {
+            this.signing = true;
+            this.authError = '';
+
+            try {
+                // Step 1: Get nonce from backend
+                const nonceResponse = await fetch('/api/siwe/nonce');
+                if (!nonceResponse.ok) {
+                    throw new Error('Failed to get nonce from server');
+                }
+                const { nonce } = await nonceResponse.json();
+
+                // Step 2: Ensure address is properly checksummed (EIP-55)
+                const checksumAddress = this.checksumAddress(this.connectedAddress);
+
+                // Step 3: Create SIWE message with strict EIP-4361 format
+                // TEMPORARY TEST: Use real domain to check if MetaMask recognizes it
+                const domain = 'example.com';  // Real domain for testing
+                const issuedAt = new Date().toISOString();
+                
+                const message = `${domain} wants you to sign in with your Ethereum account:
+${checksumAddress}
+
+URI: https://example.com
+Version: 1
+Chain ID: 1
+Nonce: ${nonce}
+Issued At: ${issuedAt}`;
+
+                // Step 4: Sign the message
+                const signature = await window.ethereum.request({
+                    method: 'personal_sign',
+                    params: [message, checksumAddress]
+                });
+
+                // Step 5: Verify signature with backend
+                const loginResponse = await fetch('/api/siwe/verify', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ message, signature })
+                });
+
+                const result = await loginResponse.json();
+
+                if (result.success) {
+                    this.isAuthenticated = true;
+                    this.connectedAddress = checksumAddress; // Use checksummed address for display
+                    this.authError = '';
+                    
+                    // Load dashboard data now that we're authenticated
+                    await this.loadDashboardData();
+                } else {
+                    this.authError = result.error || 'Authentication failed';
+                }
+
+            } catch (error) {
+                if (error.code === 4001) {
+                    this.authError = 'You rejected the signature request';
+                } else if (error.message.includes('User denied')) {
+                    this.authError = 'Signature was cancelled';
+                } else {
+                    this.authError = 'Failed to sign in: ' + (error.message || 'Unknown error');
+                }
+                console.error('Sign in failed:', error);
+            } finally {
+                this.signing = false;
+            }
+        },
+
+        async logout() {
+            try {
+                await fetch('/api/siwe/logout', { method: 'POST' });
+                
+                // Reset authentication state
+                this.isAuthenticated = false;
+                this.walletConnected = false;
+                this.connectedAddress = null;
+                this.authError = '';
+                
+                // Reload page to reset dashboard state
+                window.location.reload();
+            } catch (error) {
+                console.error('Logout failed:', error);
+            }
         }
     };
 }

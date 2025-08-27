@@ -17,7 +17,7 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "@types/cron": "^2.4.3",
+
     "@types/crypto-js": "^4.2.2",
     "@types/express": "^5.0.3",
     "@types/express-session": "^1.18.2",

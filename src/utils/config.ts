@@ -33,7 +33,7 @@ export const config: Config = {
   siwe: {
     adminWhitelist: process.env.ADMIN_WHITELIST?.split(',').map(addr => addr.toLowerCase().trim()) || [],
     sessionSecret: process.env.SESSION_SECRET || 'fallback-secret-change-in-production',
-    domain: process.env.SIWE_DOMAIN || 'localhost:3000'
+    domain: process.env.SIWE_DOMAIN || 'example.com'  // TEMP: Real domain test
   }
 };
 
