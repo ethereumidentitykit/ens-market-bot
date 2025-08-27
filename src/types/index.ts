@@ -1,3 +1,5 @@
+import { Pool } from 'pg';
+
 // NFT Sales API Response Types
 export interface NFTSale {
   marketplace: string;
@@ -171,6 +173,7 @@ export interface SiweSession {
 
 // Database Interface
 export interface IDatabaseService {
+  pgPool: Pool; // Connection pool for external libraries like connect-pg-simple
   initialize(): Promise<void>;
   insertSale(sale: Omit<ProcessedSale, 'id'>): Promise<number>;
   isSaleProcessed(tokenId: string): Promise<boolean>;

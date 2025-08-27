@@ -23,6 +23,7 @@ import { APIToggleService } from './services/apiToggleService';
 import { AutoTweetService } from './services/autoTweetService';
 import { WorldTimeService } from './services/worldTimeService';
 import { SiweService } from './services/siweService';
+import pgSession from 'connect-pg-simple';
 
 // Extend express-session types
 declare module 'express-session' {
@@ -77,8 +78,16 @@ async function startApplication(): Promise<void> {
     app.use(express.json());
     app.use(express.static(path.join(__dirname, '../public')));
     
-    // Session configuration for SIWE authentication
+    // Session configuration for SIWE authentication using PostgreSQL
+    const PgSession = pgSession(session);
+    const pgSessionStore = new PgSession({
+      pool: databaseService.pgPool, // Reuse our existing connection pool
+      tableName: 'session', // Standard express-session table
+      createTableIfMissing: true
+    });
+
     app.use(session({
+      store: pgSessionStore,
       secret: config.siwe.sessionSecret,
       resave: false,
       saveUninitialized: false,

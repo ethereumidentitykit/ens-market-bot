@@ -11,6 +11,14 @@ export class DatabaseService implements IDatabaseService {
   private pool: Pool | null = null;
 
   /**
+   * Get the connection pool for use with external libraries like connect-pg-simple
+   */
+  get pgPool(): Pool {
+    if (!this.pool) throw new Error('Database not initialized');
+    return this.pool;
+  }
+
+  /**
    * Initialize the PostgreSQL connection
    */
   async initialize(): Promise<void> {
