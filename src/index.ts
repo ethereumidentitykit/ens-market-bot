@@ -94,7 +94,7 @@ async function startApplication(): Promise<void> {
       store: pgSessionStore,
       secret: config.siwe.sessionSecret,
       resave: false,
-      saveUninitialized: false,
+      saveUninitialized: true, // Save session even before any data is stored
       cookie: { 
         secure: config.nodeEnv === 'production',
         httpOnly: true,
@@ -176,8 +176,15 @@ async function startApplication(): Promise<void> {
       try {
         const nonce = generateNonce();
         req.session.nonce = nonce;
-        res.json({ nonce });
-        logger.info('Generated SIWE nonce'); // Removed sensitive data
+        // Explicitly save session to ensure nonce is persisted
+        req.session.save((err) => {
+          if (err) {
+            logger.error('Failed to save session with nonce:', err);
+            return res.status(500).json({ error: 'Failed to save session' });
+          }
+          res.json({ nonce });
+          logger.info('Generated SIWE nonce'); // Removed sensitive data
+        });
       } catch (error: any) {
         logger.error('Error generating SIWE nonce:', error.message);
         res.status(500).json({ error: 'Failed to generate nonce' });

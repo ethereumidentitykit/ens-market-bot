@@ -115,13 +115,13 @@ export function createOptionalAuthMiddleware(siweService: SiweService) {
 
 /**
  * Rate limiting middleware specifically for authentication endpoints
- * Allows 1 attempt every 5 seconds, with a max of 180 attempts per 15 minutes
+ * Allows 1 attempt every 1 second, with a max of 900 attempts per 15 minutes
  */
 export function createAuthRateLimiter() {
   const attempts = new Map<string, { lastAttempt: number; count: number; windowStart: number }>();
-  const MIN_TIME_BETWEEN_ATTEMPTS = 5 * 1000; // 5 seconds between attempts
+  const MIN_TIME_BETWEEN_ATTEMPTS = 1 * 1000; // 1 second between attempts
   const WINDOW_MS = 15 * 60 * 1000; // 15 minute window
-  const MAX_ATTEMPTS_PER_WINDOW = 180; // 180 attempts per 15 minutes (allows for 1 every 5 seconds)
+  const MAX_ATTEMPTS_PER_WINDOW = 900; // 900 attempts per 15 minutes (allows for 1 every second)
   
   return function authRateLimit(req: Request, res: Response, next: NextFunction) {
     const identifier = req.ip || req.connection.remoteAddress || 'unknown';
@@ -150,14 +150,14 @@ export function createAuthRateLimiter() {
       return next();
     }
     
-    // Check if enough time has passed since last successful attempt (5 seconds)
-    const timeSinceLastSuccess = now - record.lastAttempt;
-    if (timeSinceLastSuccess < MIN_TIME_BETWEEN_ATTEMPTS) {
-      const secondsToWait = Math.ceil((MIN_TIME_BETWEEN_ATTEMPTS - timeSinceLastSuccess) / 1000);
-      logger.warn(`Rate limit: ${identifier} attempted auth too quickly (${timeSinceLastSuccess}ms since last successful attempt)`);
+    // Check if enough time has passed since last attempt (5 seconds)
+    const timeSinceLastAttempt = now - record.lastAttempt;
+    if (timeSinceLastAttempt < MIN_TIME_BETWEEN_ATTEMPTS) {
+      const secondsToWait = Math.ceil((MIN_TIME_BETWEEN_ATTEMPTS - timeSinceLastAttempt) / 1000);
+      logger.warn(`Rate limit: ${identifier} attempted auth too quickly (${timeSinceLastAttempt}ms since last attempt)`);
       return res.status(429).json({ 
         error: 'Too many attempts',
-        message: `Please wait ${secondsToWait} more seconds before trying again`
+        message: `Please wait ${secondsToWait} seconds before trying again`
       });
     }
     
