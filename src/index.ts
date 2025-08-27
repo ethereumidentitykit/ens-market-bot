@@ -996,7 +996,7 @@ async function startApplication(): Promise<void> {
           });
         }
 
-        const testMessage = `🤖 NFT Sales Bot Test Tweet - ${new Date().toISOString()}`;
+        const testMessage = `🤖 ENS Market Bot Test Tweet - ${new Date().toISOString()}`;
         const result = await twitterService.postTweet(testMessage);
         
         res.json({
@@ -2586,7 +2586,7 @@ async function startApplication(): Promise<void> {
     // API info endpoint
     app.get('/api', (req, res) => {
       res.json({
-        message: 'NFT Sales Twitter Bot - API',
+        message: 'ENS Sales Bot - API',
         version: '1.0.0',
         status: 'ready',
         endpoints: {
