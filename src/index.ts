@@ -74,13 +74,31 @@ async function startApplication(): Promise<void> {
     // Initialize Express app
     const app = express();
 
-    // Trust Cloudflare proxy (required for secure cookies to work)
-    // This tells Express to trust X-Forwarded-Proto header from Cloudflare
-    app.set('trust proxy', 1);
+    // Trust proxy - critical for Cloudflare
+    // This tells Express to trust X-Forwarded-Proto and other headers
+    app.set('trust proxy', true);  // Trust all proxies (needed for Cloudflare)
+    app.enable('trust proxy');  // Alternative way to ensure it's enabled
 
     // Make services available to controllers
     app.locals.databaseService = databaseService;
     app.locals.ethIdentityService = ethIdentityService;
+
+    // Middleware to detect HTTPS from Cloudflare headers
+    app.use((req, res, next) => {
+      // Cloudflare sets these headers
+      const cfVisitor = req.headers['cf-visitor'] as string;
+      const xForwardedProto = req.headers['x-forwarded-proto'];
+      
+      // Check if request came through HTTPS via Cloudflare
+      if (xForwardedProto === 'https' || (cfVisitor && cfVisitor.includes('"scheme":"https"'))) {
+        // Force Express to treat this as secure
+        Object.defineProperty(req, 'secure', {
+          get: () => true
+        });
+      }
+      
+      next();
+    });
 
     // Middleware
     app.use(express.json());
@@ -191,7 +209,7 @@ async function startApplication(): Promise<void> {
         req.session.nonce = nonce;
         
         // Debug logging
-        logger.info(`Session debug - ID: ${req.sessionID}, Cookie sent: ${!!req.headers.cookie}, Secure: ${req.secure}`);
+        logger.info(`Session debug - ID: ${req.sessionID}, Cookie sent: ${!!req.headers.cookie}, Secure: ${req.secure}, Proto: ${req.headers['x-forwarded-proto']}, CF: ${req.headers['cf-visitor'] ? 'yes' : 'no'}`);
         
         // Explicitly save session to ensure nonce is persisted
         req.session.save((err) => {
