@@ -284,7 +284,12 @@ export class BidsProcessingService {
       // For ETH/WETH bids, apply club-aware filtering
       if (bid.currencySymbol === 'WETH' || bid.currencySymbol === 'ETH') {
         const ethMinimum = await this.getEthMinimumForBid(bid);
-        return priceEth >= ethMinimum;
+        
+        // DEBUG: Log filtering decision for troubleshooting
+        const bidName = bid.ensName || bid.tokenId?.slice(-6) || 'unnamed';
+        logger.info(`🔍 BID FILTER: ${bidName} - ${priceEth} ETH vs ${ethMinimum} ETH minimum = ${passes ? 'PASS ✅' : 'REJECT ❌'}`);
+        
+        return passes;
       }
       
       // For stablecoins, use fixed USD minimums
@@ -308,9 +313,12 @@ export class BidsProcessingService {
   private async getEthMinimumForBid(bid: any): Promise<number> {
     try {
       // Simple database lookups for limits
-      const defaultMin = await this.databaseService.getSystemState('autopost_bids_min_eth_default') || '0.4';
-      const club10kMin = await this.databaseService.getSystemState('autopost_bids_min_eth_10k') || '1.0';
-      const club999Min = await this.databaseService.getSystemState('autopost_bids_min_eth_999') || '0.5';
+      const defaultMin = await this.databaseService.getSystemState('autopost_bids_min_eth_default') || '5';
+      const club10kMin = await this.databaseService.getSystemState('autopost_bids_min_eth_10k') || '5';
+      const club999Min = await this.databaseService.getSystemState('autopost_bids_min_eth_999') || '20';
+      
+      // DEBUG: Log the actual database values being used
+      logger.info(`🔍 BID THRESHOLDS: Default=${defaultMin}, 10k=${club10kMin}, 999=${club999Min}`);
       
       // Use Magic Eden name if available (80-90% of cases)
       let ensName = bid.ensName || '';
