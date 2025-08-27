@@ -150,14 +150,14 @@ export function createAuthRateLimiter() {
       return next();
     }
     
-    // Check if enough time has passed since last attempt (5 seconds)
-    const timeSinceLastAttempt = now - record.lastAttempt;
-    if (timeSinceLastAttempt < MIN_TIME_BETWEEN_ATTEMPTS) {
-      const secondsToWait = Math.ceil((MIN_TIME_BETWEEN_ATTEMPTS - timeSinceLastAttempt) / 1000);
-      logger.warn(`Rate limit: ${identifier} attempted auth too quickly (${timeSinceLastAttempt}ms since last attempt)`);
+    // Check if enough time has passed since last successful attempt (5 seconds)
+    const timeSinceLastSuccess = now - record.lastAttempt;
+    if (timeSinceLastSuccess < MIN_TIME_BETWEEN_ATTEMPTS) {
+      const secondsToWait = Math.ceil((MIN_TIME_BETWEEN_ATTEMPTS - timeSinceLastSuccess) / 1000);
+      logger.warn(`Rate limit: ${identifier} attempted auth too quickly (${timeSinceLastSuccess}ms since last successful attempt)`);
       return res.status(429).json({ 
         error: 'Too many attempts',
-        message: `Please wait ${secondsToWait} seconds before trying again`
+        message: `Please wait ${secondsToWait} more seconds before trying again`
       });
     }
     

@@ -171,8 +171,8 @@ async function startApplication(): Promise<void> {
 
     // SIWE Authentication Routes
 
-    // Generate nonce for SIWE message
-    app.get('/api/siwe/nonce', authRateLimiter, (req, res) => {
+    // Generate nonce for SIWE message (no rate limit - only verify needs it)
+    app.get('/api/siwe/nonce', (req, res) => {
       try {
         const nonce = generateNonce();
         req.session.nonce = nonce;
