@@ -1870,6 +1870,8 @@ function dashboard() {
                 const message = `${domain} wants you to sign in with your Ethereum account:
 ${checksumAddress}
 
+Sign in to ENS Market Bot Admin Dashboard
+
 URI: https://example.com
 Version: 1
 Chain ID: 1
