@@ -569,7 +569,7 @@ export class AutoTweetService {
     }
 
     // Check for incremental bid spam (5% threshold within 24 hours)
-    const recentHighBid = await this.getHighestRecentBid(bid.ensName);
+    const recentHighBid = bid.ensName ? await this.getHighestRecentBid(bid.ensName) : null;
     if (recentHighBid) {
       const threshold = recentHighBid * 1.05; // Require 5% higher
       if (bidEthValue <= threshold) {
