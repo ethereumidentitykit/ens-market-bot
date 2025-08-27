@@ -284,6 +284,7 @@ export class BidsProcessingService {
       // For ETH/WETH bids, apply club-aware filtering
       if (bid.currencySymbol === 'WETH' || bid.currencySymbol === 'ETH') {
         const ethMinimum = await this.getEthMinimumForBid(bid);
+        const passes = priceEth >= ethMinimum;
         
         // DEBUG: Log filtering decision for troubleshooting
         const bidName = bid.ensName || bid.tokenId?.slice(-6) || 'unnamed';
