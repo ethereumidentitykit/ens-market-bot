@@ -128,7 +128,7 @@ async function startApplication(): Promise<void> {
         secure: useSecureCookies,
         httpOnly: true,
         sameSite: useSecureCookies ? 'none' : 'lax', // 'none' only with secure
-        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
         // Don't set domain - let Express handle it automatically
         path: '/'
       },
