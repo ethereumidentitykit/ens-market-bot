@@ -590,6 +590,12 @@ export class AutoTweetService {
       );
 
       if (postResult.success && postResult.tweetId) {
+        // Record successful post in rate limiter
+        await this.rateLimitService.recordTweetPost(
+          postResult.tweetId,
+          tweetData.text
+        );
+
         // Mark bid as posted
         await this.databaseService.markBidAsPosted(bidId, postResult.tweetId);
 
