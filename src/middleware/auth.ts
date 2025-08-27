@@ -14,7 +14,7 @@ export function createAuthMiddleware(siweService: SiweService) {
       const address = req.session?.address;
 
       if (!sessionId || !address) {
-        logger.warn(`Unauthorized access attempt to ${req.path} - no session`);
+        logger.warn(`Unauthorized access attempt to ${req.path} - no session - IP: ${req.ip} - User-Agent: ${req.headers['user-agent'] || 'unknown'}`);
         return res.status(401).json({ 
           error: 'Authentication required',
           message: 'Please sign in with your wallet to access this resource'
@@ -25,7 +25,7 @@ export function createAuthMiddleware(siweService: SiweService) {
       const isValid = await siweService.validateSession(sessionId);
       
       if (!isValid) {
-        logger.warn(`Invalid session attempted access to ${req.path} - session: ${sessionId}`);
+        logger.warn(`Invalid session attempted access to ${req.path} - IP: ${req.ip} - User-Agent: ${req.headers['user-agent'] || 'unknown'}`);
         
         // Clear invalid session
         req.session.destroy((err) => {
@@ -42,7 +42,7 @@ export function createAuthMiddleware(siweService: SiweService) {
 
       // Double-check whitelist (defense in depth)
       if (!siweService.isWhitelisted(address)) {
-        logger.warn(`Non-whitelisted address ${address} attempted access to ${req.path} with valid session`);
+        logger.warn(`Non-whitelisted address ${address} attempted access to ${req.path} with valid session - IP: ${req.ip} - User-Agent: ${req.headers['user-agent'] || 'unknown'}`);
         
         // This shouldn't happen if authentication worked properly, but check anyway
         req.session.destroy((err) => {
@@ -154,7 +154,7 @@ export function createAuthRateLimiter() {
     const timeSinceLastAttempt = now - record.lastAttempt;
     if (timeSinceLastAttempt < MIN_TIME_BETWEEN_ATTEMPTS) {
       const secondsToWait = Math.ceil((MIN_TIME_BETWEEN_ATTEMPTS - timeSinceLastAttempt) / 1000);
-      logger.warn(`Rate limit: ${identifier} attempted auth too quickly (${timeSinceLastAttempt}ms since last attempt)`);
+      logger.warn(`Rate limit: ${identifier} attempted auth too quickly (${timeSinceLastAttempt}ms since last attempt) - User-Agent: ${req.headers['user-agent'] || 'unknown'}`);
       return res.status(429).json({ 
         error: 'Too many attempts',
         message: `Please wait ${secondsToWait} seconds before trying again`
@@ -164,7 +164,7 @@ export function createAuthRateLimiter() {
     // Check if they've exceeded the max attempts in the current window
     if (record.count >= MAX_ATTEMPTS_PER_WINDOW) {
       const minutesLeft = Math.ceil((WINDOW_MS - (now - record.windowStart)) / 60000);
-      logger.warn(`Rate limit: ${identifier} exceeded max attempts in window (${record.count} attempts)`);
+      logger.warn(`Rate limit: ${identifier} exceeded max attempts in window (${record.count} attempts) - User-Agent: ${req.headers['user-agent'] || 'unknown'}`);
       return res.status(429).json({ 
         error: 'Too many attempts',
         message: `You've exceeded the maximum attempts. Please wait ${minutesLeft} minutes`
