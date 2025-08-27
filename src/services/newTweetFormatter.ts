@@ -388,9 +388,9 @@ export class NewTweetFormatter {
     
     // Line 4: Owner (fetch the current NFT owner)
     let currentOwnerLine = 'Owner: Unknown';
-    if (this.alchemyService && bid.tokenId) {
+    if (this.alchemyService && bid.tokenId && bid.contractAddress) {
       try {
-        const owners = await this.alchemyService.getOwnersForToken('0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85', bid.tokenId);
+        const owners = await this.alchemyService.getOwnersForToken(bid.contractAddress, bid.tokenId);
         if (owners && owners.length > 0) {
           const ownerAccount = await this.getAccountData(owners[0]);
           const ownerHandle = this.getDisplayHandle(ownerAccount, owners[0]);
@@ -1119,9 +1119,9 @@ export class NewTweetFormatter {
     
     // Fetch Owner for breakdown (same logic as in tweet text)
     let currentOwnerHandle = 'Unknown';
-    if (this.alchemyService && bid.tokenId) {
+    if (this.alchemyService && bid.tokenId && bid.contractAddress) {
       try {
-        const owners = await this.alchemyService.getOwnersForToken('0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85', bid.tokenId);
+        const owners = await this.alchemyService.getOwnersForToken(bid.contractAddress, bid.tokenId);
         if (owners && owners.length > 0) {
           const ownerAccount = await this.getAccountData(owners[0]);
           currentOwnerHandle = this.getDisplayHandle(ownerAccount, owners[0]);
