@@ -1894,10 +1894,16 @@ Chain ID: 1
 Nonce: ${nonce}
 Issued At: ${issuedAt}`;
 
+                // Convert message from utf8 to hex
+                const encoder = new TextEncoder();
+                const bytes = encoder.encode(message);
+                const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+                const msg = `0x${hex}`;
+
                 // Step 4: Sign the message
                 const signature = await window.ethereum.request({
                     method: 'personal_sign',
-                    params: [message, checksumAddress]
+                    params: [msg, checksumAddress]
                 });
 
                 // Step 5: Verify signature with backend
