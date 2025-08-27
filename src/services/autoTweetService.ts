@@ -568,6 +568,21 @@ export class AutoTweetService {
       };
     }
 
+    // Check for incremental bid spam (5% threshold within 24 hours)
+    const recentHighBid = await this.getHighestRecentBid(bid.ensName);
+    if (recentHighBid) {
+      const threshold = recentHighBid * 1.05; // Require 5% higher
+      if (bidEthValue <= threshold) {
+        return {
+          success: false,
+          bidId,
+          skipped: true,
+          reason: `Incremental bid: ${bidEthValue} ETH <= ${threshold.toFixed(3)} ETH (5% threshold from recent ${recentHighBid} ETH bid)`,
+          type: 'bid'
+        };
+      }
+    }
+
     try {
       // Generate tweet content and image
       logger.info(`🔄 Generating tweet for bid ${bid.bidId}`);
@@ -676,6 +691,36 @@ export class AutoTweetService {
     } catch (error: any) {
       logger.warn(`Error determining ETH minimum for bid:`, error.message);
       return settings.minEthDefault;
+    }
+  }
+
+  /**
+   * Get highest recent bid for an ENS name within 24 hours (only posted bids)
+   */
+  private async getHighestRecentBid(ensName: string): Promise<number | null> {
+    try {
+      if (!ensName) return null;
+      
+      // Get recent posted bids for this ENS name in the last 24 hours
+      const query = `
+        SELECT MAX(CAST(price_decimal AS DECIMAL)) as highest_bid
+        FROM ens_bids 
+        WHERE ens_name = $1 
+          AND created_at_api >= NOW() - INTERVAL '24 hours'
+          AND posted = TRUE
+      `;
+      
+      const result = await this.databaseService.pgPool?.query(query, [ensName]);
+      const highestBid = result?.rows?.[0]?.highest_bid;
+      
+      if (highestBid && !isNaN(parseFloat(highestBid))) {
+        return parseFloat(highestBid);
+      }
+      
+      return null;
+    } catch (error: any) {
+      logger.error(`Error getting highest recent bid for ${ensName}:`, error.message);
+      return null; // On error, allow the bid through
     }
   }
 
