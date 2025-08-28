@@ -39,6 +39,21 @@ export class MagicEdenService {
   }
 
   /**
+   * Clean ENS name by removing any data after .eth
+   * Magic Eden/OpenSea append normalization warnings after the .eth suffix
+   */
+  private cleanEnsName(ensName: string): string {
+    if (!ensName) return ensName;
+    
+    const ethIndex = ensName.toLowerCase().indexOf('.eth');
+    if (ethIndex !== -1) {
+      return ensName.substring(0, ethIndex + 4); // Include ".eth"
+    }
+    
+    return ensName; // Return as-is if no .eth found
+  }
+
+  /**
    * Get active bids using cursor-based pagination
    * Always fetches newest first - doesn't rely on API filtering
    */
@@ -254,8 +269,8 @@ export class MagicEdenService {
       validFrom: magicEdenBid.validFrom,
       validUntil: magicEdenBid.validUntil,
       processedAt: new Date().toISOString(),
-      // Extract Magic Eden metadata when available (handle null values)
-      ensName: (magicEdenBid.criteria?.data?.token?.name && magicEdenBid.criteria.data.token.name !== 'null') ? magicEdenBid.criteria.data.token.name : undefined,
+      // Extract Magic Eden metadata when available (handle null values and clean trailing warnings)
+      ensName: (magicEdenBid.criteria?.data?.token?.name && magicEdenBid.criteria.data.token.name !== 'null') ? this.cleanEnsName(magicEdenBid.criteria.data.token.name) : undefined,
       nftImage: (magicEdenBid.criteria?.data?.token?.image && magicEdenBid.criteria.data.token.image !== 'null') ? magicEdenBid.criteria.data.token.image : undefined
     };
   }
