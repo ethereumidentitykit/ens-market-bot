@@ -27,6 +27,11 @@ export interface GeneratedTweet {
  */
 export class NewTweetFormatter {
   private readonly MAX_TWEET_LENGTH = 280;
+  
+  // Club detection patterns
+  private readonly CLUB_10K_PATTERN = /^\d{4}\.eth$/;  // e.g., 1234.eth
+  private readonly CLUB_999_PATTERN = /^\d{3}\.eth$/;  // e.g., 123.eth
+  private readonly EMOJI_ONLY_PATTERN = /^(?!^\d+\.eth$)(?:[\p{Emoji}\p{Emoji_Modifier}\p{Emoji_Component}\p{Emoji_Presentation}\p{Extended_Pictographic}]|\u200D|\uFE0F)+\.eth$/u;  // Only emoji sequences + .eth, exclude plain digits
   private readonly ethIdentityService = new ENSWorkerService();
 
   constructor(
@@ -303,8 +308,12 @@ export class NewTweetFormatter {
     // Line 4: Vision.io marketplace link
     const visionUrl = this.buildVisionioUrl(ensName);
     
+    // Check for club mention
+    const clubMention = this.getClubMention(ensName);
+    const ccLine = clubMention ? `\ncc ${clubMention}` : '';
+    
     // Combine all lines with double line breaks (except between price and owner)
-    return `${header}\n\n${ensName}\n\n${priceLine}\n${ownerLine}\n\n${visionUrl}`;
+    return `${header}\n\n${ensName}\n\n${priceLine}\n${ownerLine}\n\n${visionUrl}${ccLine}`;
   }
 
   /**
@@ -408,8 +417,12 @@ export class NewTweetFormatter {
     // Line 6: Vision.io marketplace link
     const visionUrl = this.buildVisionioUrl(ensName);
     
+    // Check for club mention
+    const clubMention = this.getClubMention(ensName);
+    const ccLine = clubMention ? `\ncc ${clubMention}` : '';
+    
     // Combine all lines (added line break between price and bidder, removed break between bidder and Owner)
-    return `${header}\n\n${ensName}\n\n${priceLine}\n\n${bidderLine}\n${currentOwnerLine}\n\n${validLine}\n\n${visionUrl}`;
+    return `${header}\n\n${ensName}\n\n${priceLine}\n\n${bidderLine}\n${currentOwnerLine}\n\n${validLine}\n\n${visionUrl}${ccLine}`;
   }
 
 
@@ -477,8 +490,29 @@ export class NewTweetFormatter {
     // Line 5: Vision.io marketplace link
     const visionUrl = this.buildVisionioUrl(ensName);
     
+    // Check for club mention
+    const clubMention = this.getClubMention(ensName);
+    const ccLine = clubMention ? `\ncc ${clubMention}` : '';
+    
     // Combine all lines with double line breaks
-    return `${header}\n\n${ensName}\n\n${priceLine}\n${sellerLine}\n${buyerLine}\n\n${visionUrl}`;
+    return `${header}\n\n${ensName}\n\n${priceLine}\n${sellerLine}\n${buyerLine}\n\n${visionUrl}${ccLine}`;
+  }
+
+  /**
+   * Get club mention for ENS name if applicable
+   */
+  private getClubMention(ensName: string): string | null {
+    if (!ensName) return null;
+    
+    if (this.CLUB_999_PATTERN.test(ensName)) {
+      return '@ENS999club';
+    } else if (this.CLUB_10K_PATTERN.test(ensName)) {
+      return '@10kClubOfficial';
+    } else if (this.EMOJI_ONLY_PATTERN.test(ensName)) {
+      return '@EthmojiClub';
+    }
+    
+    return null;
   }
 
   /**
@@ -980,6 +1014,9 @@ export class NewTweetFormatter {
     const buyerHandle = this.getDisplayHandle(buyerAccount, sale.buyerAddress);
     const sellerHandle = this.getDisplayHandle(sellerAccount, sale.sellerAddress);
     
+    // Check for club mention
+    const clubMention = this.getClubMention(ensName);
+    
     const breakdown = {
       header: '💰 SOLD 💰',
       ensName: ensName,
@@ -987,6 +1024,7 @@ export class NewTweetFormatter {
       sellerLine: `Seller: ${sellerHandle}`,
       buyerLine: `Buyer: ${buyerHandle}`,
       visionUrl: this.buildVisionioUrl(ensName),
+      ccLine: clubMention ? `cc ${clubMention}` : '',
       buyerHandle: buyerHandle,
       sellerHandle: sellerHandle
     };
@@ -1020,12 +1058,16 @@ export class NewTweetFormatter {
     const priceUsd = registration.costUsd ? `($${parseFloat(registration.costUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})` : '';
     const ownerHandle = this.getDisplayHandle(ownerAccount, registration.ownerAddress);
     
+    // Check for club mention
+    const clubMention = this.getClubMention(ensName);
+    
     const breakdown = {
       header: '🏛️ REGISTERED 🏛️',
       ensName: ensName,
       priceLine: priceUsd ? `Price: ${priceUsd.replace(/[()]/g, '')} (${priceEth} ETH)` : `Price: ${priceEth} ETH`,
       ownerLine: `New Owner: ${ownerHandle}`,
       visionUrl: this.buildVisionioUrl(ensName),
+      ccLine: clubMention ? `cc ${clubMention}` : '',
       ownerHandle: ownerHandle
     };
 
@@ -1131,6 +1173,9 @@ export class NewTweetFormatter {
       }
     }
     
+    // Check for club mention
+    const clubMention = this.getClubMention(ensName);
+    
     const breakdown = {
       header: '✋ OFFER ✋',
       ensName: ensName,
@@ -1139,6 +1184,7 @@ export class NewTweetFormatter {
       currentOwnerLine: `Owner: ${currentOwnerHandle}`,
       validLine: `Valid: ${duration}`,
       visionUrl: visionUrl,
+      ccLine: clubMention ? `cc ${clubMention}` : '',
       bidderHandle: bidderHandle,
       currentOwnerHandle: currentOwnerHandle
     };
