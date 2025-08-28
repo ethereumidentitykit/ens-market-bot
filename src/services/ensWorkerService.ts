@@ -71,7 +71,7 @@ export class ENSWorkerService {
       const response = await axios.get<ENSWorkerAccount>(
         `${this.baseUrl}/${address}`,
         {
-          timeout: 30000, // 10 second timeout
+          timeout: 10000, // 10 second timeout
           headers: {
             'Accept': 'application/json',
             'User-Agent': 'ENS-Sales-Bot/1.0'
@@ -130,7 +130,7 @@ export class ENSWorkerService {
       const response = await axios.get<ENSWorkerAccount>(
         `${this.baseUrl}/${address}`,
         {
-          timeout: 30000, // 10 second timeout
+          timeout: 10000, // 10 second timeout
           headers: {
             'Accept': 'application/json',
             'User-Agent': 'ENS-Sales-Bot/1.0'
@@ -256,7 +256,7 @@ export class ENSWorkerService {
       const response = await axios.get<ENSWorkerAccount>(
         `${this.baseUrl}/${address}`,
         {
-          timeout: 30000,
+          timeout: 10000,
           headers: {
             'Accept': 'application/json',
             'User-Agent': 'ENS-Sales-Bot/1.0'
@@ -303,7 +303,7 @@ export class ENSWorkerService {
       const response = await axios.get<ENSWorkerAccount>(
         `${this.baseUrl}/${address}`,
         {
-          timeout: 30000, // 30 second timeout
+          timeout: 10000, // 30 second timeout
           headers: {
             'Accept': 'application/json',
             'User-Agent': 'ENS-Sales-Bot/1.0'
