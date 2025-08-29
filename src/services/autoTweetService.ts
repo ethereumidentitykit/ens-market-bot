@@ -285,6 +285,9 @@ export class AutoTweetService {
   private async processSingleRegistration(registration: ENSRegistration, settings: AutoPostSettings): Promise<PostResult> {
     const registrationId = registration.id!;
 
+    // 🔍 DEBUG: Log registration data for VPS debugging
+    logger.info(`🔍 DEBUG Processing registration ${registrationId}: name="${registration.ensName}", costEth="${registration.costEth}"`);
+
     // Check if registration is too old (use registrations-specific settings)
     if (!(await this.isWithinRegistrationTimeLimit(registration, settings.registrations.maxAgeHours))) {
       return {
@@ -299,6 +302,9 @@ export class AutoTweetService {
     // Check if registration meets ETH minimum requirements (use registrations-specific settings)
     const registrationEthValue = parseFloat(registration.costEth || '0');
     const ethMinimum = this.getEthMinimumForRegistration(registration, settings.registrations);
+    
+    // 🔍 DEBUG: Log parsed ETH values and thresholds
+    logger.info(`🔍 DEBUG Parsed values: ethValue=${registrationEthValue}, ethMinimum=${ethMinimum}, category="${this.getRegistrationCategoryName(registration)}"`);
     
     if (registrationEthValue < ethMinimum) {
       return {
