@@ -941,7 +941,7 @@ export class DatabaseService implements IDatabaseService {
       const result = await this.pool.query(`
         SELECT * FROM ens_registrations 
         WHERE posted = FALSE 
-        ORDER BY block_number ASC 
+        ORDER BY block_number DESC 
         LIMIT $1
       `, [limit]);
 
