@@ -6,6 +6,7 @@ import { ImageData } from '../types/imageTypes';
 import { PuppeteerImageService } from './puppeteerImageService';
 import { IDatabaseService } from '../types';
 import { AlchemyService } from './alchemyService';
+import { ClubService } from './clubService';
 
 export interface GeneratedTweet {
   text: string;
@@ -27,17 +28,21 @@ export interface GeneratedTweet {
  */
 export class NewTweetFormatter {
   private readonly MAX_TWEET_LENGTH = 280;
-  
-  // Club detection patterns
-  private readonly CLUB_10K_PATTERN = /^\d{4}\.eth$/;  // e.g., 1234.eth
-  private readonly CLUB_999_PATTERN = /^\d{3}\.eth$/;  // e.g., 123.eth
-  private readonly EMOJI_ONLY_PATTERN = /^(?!^\d+\.eth$)(?:[\p{Emoji}\p{Emoji_Modifier}\p{Emoji_Component}\p{Emoji_Presentation}\p{Extended_Pictographic}]|\u200D|\uFE0F)+\.eth$/u;  // Only emoji sequences + .eth, exclude plain digits
   private readonly ethIdentityService = new ENSWorkerService();
+  private readonly clubService = new ClubService();
 
   constructor(
     private databaseService?: IDatabaseService,
     private alchemyService?: AlchemyService
-  ) {}
+  ) {
+    logger.info('[NewTweetFormatter] Constructor called - ClubService should be initialized');
+    // Add a small delay to let ClubService initialize, then check status
+    setTimeout(() => {
+      logger.info(`[NewTweetFormatter] ClubService initialized: ${this.clubService.isInitialized()}`);
+      const stats = this.clubService.getStats();
+      logger.info(`[NewTweetFormatter] ClubService stats: ${JSON.stringify(stats)}`);
+    }, 1000);
+  }
 
   /**
    * Generate a complete tweet with text and image for an ENS registration
@@ -273,13 +278,11 @@ export class NewTweetFormatter {
     registration: ENSRegistration, 
     ownerAccount: ENSWorkerAccount | null
   ): Promise<string> {
-    // Header: Emoji + Registered
-    const header = '🏛️ REGISTERED 🏛️';
-    
-    // Line 1: ENS name (use fullName if available, otherwise ensName)
+    // Header: 🏛️ REGISTERED: name.eth
     const ensName = registration.fullName || registration.ensName || 'Unknown ENS';
+    const header = `🏛️ REGISTERED: ${ensName}`;
     
-    // Line 2: Price in ETH and USD (recalculate USD with fresh ETH rate)
+    // Price line: For: $X (Y ETH) (recalculate USD with fresh ETH rate)
     const priceEth = parseFloat(registration.costEth || '0').toFixed(2);
     const priceEthValue = parseFloat(registration.costEth || '0');
     
@@ -289,31 +292,37 @@ export class NewTweetFormatter {
         const freshEthPriceUsd = await this.alchemyService.getETHPriceUSD();
         if (freshEthPriceUsd) {
           const calculatedUsd = priceEthValue * freshEthPriceUsd;
-          priceUsd = `($${calculatedUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`;
+          priceUsd = `$${calculatedUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
         }
       } catch (error: any) {
         logger.warn('Failed to recalculate USD for registration tweet text, using database value:', error.message);
-        priceUsd = registration.costUsd ? `($${parseFloat(registration.costUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})` : '';
+        priceUsd = registration.costUsd ? `$${parseFloat(registration.costUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
       }
     } else {
-      priceUsd = registration.costUsd ? `($${parseFloat(registration.costUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})` : '';
+      priceUsd = registration.costUsd ? `$${parseFloat(registration.costUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
     }
     
-    const priceLine = priceUsd ? `Price: ${priceUsd.replace(/[()]/g, '')} (${priceEth} ETH)` : `Price: ${priceEth} ETH`;
+    const priceLine = priceUsd ? `For: ${priceUsd} (${priceEth} ETH)` : `For: ${priceEth} ETH`;
     
-    // Line 3: New Owner
+    // Minter line
     const ownerHandle = this.getDisplayHandle(ownerAccount, registration.ownerAddress);
-    const ownerLine = `New Owner: ${ownerHandle}`;
+    const ownerLine = `Minter: ${ownerHandle}`;
     
-    // Line 4: Vision.io marketplace link
+    // Club line (show club name with handle properly paired)
+    const formattedClubString = this.clubService.getFormattedClubString(ensName);
+    const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
+    
+    // Vision.io link
     const visionUrl = this.buildVisionioUrl(ensName);
     
-    // Check for club mention
-    const clubMention = this.getClubMention(ensName);
-    const ccLine = clubMention ? `\ncc ${clubMention}` : '';
+    // Combine all lines
+    let tweet = `${header}\n\n${priceLine}\n\n${ownerLine}`;
+    if (clubLine) {
+      tweet += `\n${clubLine}`;
+    }
+    tweet += `\n\n${visionUrl}`;
     
-    // Combine all lines with double line breaks (except between price and owner)
-    return `${header}\n\n${ensName}\n\n${priceLine}\n${ownerLine}\n\n${visionUrl}${ccLine}`;
+    return tweet;
   }
 
   /**
@@ -323,9 +332,6 @@ export class NewTweetFormatter {
     bid: ENSBid, 
     bidderAccount: ENSWorkerAccount | null
   ): Promise<string> {
-    // Header: ✋ OFFER ✋
-    const header = '✋ OFFER ✋';
-    
     // Line 1: ENS name - use stored name from database, with ENS service fallback
     let ensName = bid.ensName;
     
@@ -369,7 +375,10 @@ export class NewTweetFormatter {
       logger.warn(`❌ No ENS name could be resolved for bid ${bid.bidId}, using fallback: ${ensName}`);
     }
     
-    // Line 2: Price with currency display (recalculate USD with fresh ETH rate)
+    // Header: ✋ OFFER: name.eth
+    const header = `✋ OFFER: ${ensName}`;
+    
+    // Price line: For: $X (Y ETH) (recalculate USD with fresh ETH rate)
     const currencyDisplay = this.getCurrencyDisplayName(bid.currencySymbol);
     const priceDecimal = parseFloat(bid.priceDecimal).toFixed(2);
     
@@ -389,13 +398,17 @@ export class NewTweetFormatter {
       priceUsd = bid.priceUsd ? `$${parseFloat(bid.priceUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
     }
     
-    const priceLine = priceUsd ? `Price: ${priceUsd} (${priceDecimal} ${currencyDisplay})` : `Price: ${priceDecimal} ${currencyDisplay}`;
+    const priceLine = priceUsd ? `For: ${priceUsd} (${priceDecimal} ${currencyDisplay})` : `For: ${priceDecimal} ${currencyDisplay}`;
     
-    // Line 3: Bidder (changed from "From")
+    // Valid duration line
+    const duration = this.calculateBidDuration(bid.validFrom, bid.validUntil);
+    const validLine = `Valid: ${duration}`;
+    
+    // Bidder line
     const bidderHandle = this.getDisplayHandle(bidderAccount, bid.makerAddress);
     const bidderLine = `Bidder: ${bidderHandle}`;
     
-    // Line 4: Owner (fetch the current NFT owner)
+    // Owner line (fetch the current NFT owner)
     let currentOwnerLine = 'Owner: Unknown';
     if (this.alchemyService && bid.tokenId && bid.contractAddress) {
       try {
@@ -410,19 +423,21 @@ export class NewTweetFormatter {
       }
     }
     
-    // Line 5: Valid duration - dynamic calculation
-    const duration = this.calculateBidDuration(bid.validFrom, bid.validUntil);
-    const validLine = `Valid: ${duration}`;
+    // Club line (show club name with handle properly paired)
+    const formattedClubString = this.clubService.getFormattedClubString(ensName);
+    const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
     
-    // Line 6: Vision.io marketplace link
+    // Vision.io link
     const visionUrl = this.buildVisionioUrl(ensName);
     
-    // Check for club mention
-    const clubMention = this.getClubMention(ensName);
-    const ccLine = clubMention ? `\ncc ${clubMention}` : '';
+    // Combine all lines
+    let tweet = `${header}\n\n${priceLine}\n\n${validLine}\n${bidderLine}\n${currentOwnerLine}`;
+    if (clubLine) {
+      tweet += `\n${clubLine}`;
+    }
+    tweet += `\n\n${visionUrl}`;
     
-    // Combine all lines (added line break between price and bidder, removed break between bidder and Owner)
-    return `${header}\n\n${ensName}\n\n${priceLine}\n\n${bidderLine}\n${currentOwnerLine}\n\n${validLine}\n\n${visionUrl}${ccLine}`;
+    return tweet;
   }
 
 
@@ -468,51 +483,56 @@ export class NewTweetFormatter {
     buyerAccount: ENSWorkerAccount | null, 
     sellerAccount: ENSWorkerAccount | null
   ): string {
-    // Header: Emoji + SOLD
-    const header = '💰 SOLD 💰';
-    
-    // Line 1: ENS name
+    // Header: 💰 SOLD: name.eth
     const ensName = sale.nftName || 'Unknown ENS';
+    const header = `💰 SOLD: ${ensName}`;
     
-    // Line 2: Price in USD and ETH (USD first, ETH in brackets) - 2 decimal places for USD in tweets
+    // Price line: For: $X (Y ETH) - 2 decimal places for USD in tweets
     const priceEth = parseFloat(sale.priceEth).toFixed(2);
     const priceUsd = sale.priceUsd ? `$${parseFloat(sale.priceUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
-    const priceLine = priceUsd ? `Price: ${priceUsd} (${priceEth} ETH)` : `Price: ${priceEth} ETH`;
+    const priceLine = priceUsd ? `For: ${priceUsd} (${priceEth} ETH)` : `For: ${priceEth} ETH`;
     
-    // Line 3: Seller
+    // Buyer and Seller lines
+    const buyerHandle = this.getDisplayHandle(buyerAccount, sale.buyerAddress);
     const sellerHandle = this.getDisplayHandle(sellerAccount, sale.sellerAddress);
+    const buyerLine = `Buyer: ${buyerHandle}`;
     const sellerLine = `Seller: ${sellerHandle}`;
     
-    // Line 4: Buyer
-    const buyerHandle = this.getDisplayHandle(buyerAccount, sale.buyerAddress);
-    const buyerLine = `Buyer: ${buyerHandle}`;
+    // Club line (show club name with handle properly paired)
+    logger.info(`[NewTweetFormatter] Getting club info for sale: ${ensName}`);
+    logger.info(`[NewTweetFormatter] ClubService instance exists: ${!!this.clubService}`);
+    logger.info(`[NewTweetFormatter] ClubService initialized: ${this.clubService?.isInitialized()}`);
+    const formattedClubString = this.clubService.getFormattedClubString(ensName);
+    const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
+    logger.info(`[NewTweetFormatter] Sale club line result: "${clubLine}"`);
     
-    // Line 5: Vision.io marketplace link
+    // Vision.io link
     const visionUrl = this.buildVisionioUrl(ensName);
     
-    // Check for club mention
-    const clubMention = this.getClubMention(ensName);
-    const ccLine = clubMention ? `\ncc ${clubMention}` : '';
+    // Combine all lines
+    let tweet = `${header}\n\n${priceLine}\n\n${buyerLine}\n${sellerLine}`;
+    if (clubLine) {
+      tweet += `\n${clubLine}`;
+    }
+    tweet += `\n\n${visionUrl}`;
     
-    // Combine all lines with double line breaks
-    return `${header}\n\n${ensName}\n\n${priceLine}\n${sellerLine}\n${buyerLine}\n\n${visionUrl}${ccLine}`;
+    return tweet;
   }
 
   /**
    * Get club mention for ENS name if applicable
+   * Supports multiple clubs with comma separation
    */
   private getClubMention(ensName: string): string | null {
-    if (!ensName) return null;
-    
-    if (this.CLUB_999_PATTERN.test(ensName)) {
-      return '@ENS999club';
-    } else if (this.CLUB_10K_PATTERN.test(ensName)) {
-      return '@10kClubOfficial';
-    } else if (this.EMOJI_ONLY_PATTERN.test(ensName)) {
-      return '@EthmojiClub';
-    }
-    
-    return null;
+    return this.clubService.getClubMention(ensName);
+  }
+
+  /**
+   * Get human-readable club name for ENS name if applicable
+   * Supports multiple clubs with comma separation
+   */
+  private getClubName(ensName: string): string | null {
+    return this.clubService.getClubName(ensName);
   }
 
   /**
@@ -531,7 +551,7 @@ export class NewTweetFormatter {
     // This ensures complex emojis (like 👩‍🎓 with Zero Width Joiners) work in clickable links
     const encodedName = encodeURIComponent(cleanName);
     
-    return `https://vision.io/name/ens/${encodedName}.eth`;
+    return `https://vision.io/name/${encodedName}.eth`;
   }
 
   /**
@@ -864,20 +884,20 @@ export class NewTweetFormatter {
     }
 
     // Check for required elements in registration format
-    if (!content.includes('🏛️ REGISTERED 🏛️')) {
-      errors.push('Registration tweet should include "🏛️ Registered" header');
+    if (!content.includes('🏛️ REGISTERED:')) {
+      errors.push('Registration tweet should include "🏛️ REGISTERED:" header');
     }
 
-    if (!content.includes('Price:')) {
-      errors.push('Registration tweet should include "Price:" label');
+    if (!content.includes('For:')) {
+      errors.push('Registration tweet should include "For:" label');
     }
 
     if (!content.includes('ETH')) {
       errors.push('Registration tweet should include price in ETH');
     }
 
-    if (!content.includes('New Owner:')) {
-      errors.push('Registration tweet should include "New Owner:" label');
+    if (!content.includes('Minter:')) {
+      errors.push('Registration tweet should include "Minter:" label');
     }
 
     if (!content.includes('vision.io')) {
@@ -905,12 +925,12 @@ export class NewTweetFormatter {
     }
 
     // Check for required elements in bid format
-    if (!content.includes('✋ OFFER ✋')) {
-      errors.push('Bid tweet should include "✋ OFFER ✋" header');
+    if (!content.includes('✋ OFFER:')) {
+      errors.push('Bid tweet should include "✋ OFFER:" header');
     }
 
-    if (!content.includes('Price:')) {
-      errors.push('Bid tweet should include "Price:" label');
+    if (!content.includes('For:')) {
+      errors.push('Bid tweet should include "For:" label');
     }
 
     if (!content.includes('Bidder:')) {
@@ -952,12 +972,12 @@ export class NewTweetFormatter {
     }
 
     // Check for required elements in new format
-    if (!content.includes('💰 SOLD 💰')) {
-      errors.push('Tweet should include "💰 SOLD 💰" header');
+    if (!content.includes('💰 SOLD:')) {
+      errors.push('Tweet should include "💰 SOLD:" header');
     }
 
-    if (!content.includes('Price:')) {
-      errors.push('Tweet should include "Price:" label');
+    if (!content.includes('For:')) {
+      errors.push('Tweet should include "For:" label');
     }
 
     if (!content.includes('ETH')) {
@@ -1015,16 +1035,21 @@ export class NewTweetFormatter {
     const sellerHandle = this.getDisplayHandle(sellerAccount, sale.sellerAddress);
     
     // Check for club mention
-    const clubMention = this.getClubMention(ensName);
+    logger.info(`[NewTweetFormatter] Preview - Getting club info for: ${ensName}`);
+    logger.info(`[NewTweetFormatter] Preview - ClubService instance exists: ${!!this.clubService}`);
+    logger.info(`[NewTweetFormatter] Preview - ClubService initialized: ${this.clubService?.isInitialized()}`);
+    const formattedClubString = this.clubService.getFormattedClubString(ensName);
+    const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
+    logger.info(`[NewTweetFormatter] Preview club line result: "${clubLine}"`);
     
     const breakdown = {
-      header: '💰 SOLD 💰',
+      header: `💰 SOLD: ${ensName}`,
       ensName: ensName,
-      priceLine: priceUsd ? `Price: ${priceUsd} (${priceEth} ETH)` : `Price: ${priceEth} ETH`,
-      sellerLine: `Seller: ${sellerHandle}`,
+      priceLine: priceUsd ? `For: ${priceUsd} (${priceEth} ETH)` : `For: ${priceEth} ETH`,
       buyerLine: `Buyer: ${buyerHandle}`,
+      sellerLine: `Seller: ${sellerHandle}`,
+      clubLine: clubLine,
       visionUrl: this.buildVisionioUrl(ensName),
-      ccLine: clubMention ? `cc ${clubMention}` : '',
       buyerHandle: buyerHandle,
       sellerHandle: sellerHandle
     };
@@ -1059,15 +1084,16 @@ export class NewTweetFormatter {
     const ownerHandle = this.getDisplayHandle(ownerAccount, registration.ownerAddress);
     
     // Check for club mention
-    const clubMention = this.getClubMention(ensName);
+    const formattedClubString = this.clubService.getFormattedClubString(ensName);
+    const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
     
     const breakdown = {
-      header: '🏛️ REGISTERED 🏛️',
+      header: `🏛️ REGISTERED: ${ensName}`,
       ensName: ensName,
-      priceLine: priceUsd ? `Price: ${priceUsd.replace(/[()]/g, '')} (${priceEth} ETH)` : `Price: ${priceEth} ETH`,
-      ownerLine: `New Owner: ${ownerHandle}`,
+      priceLine: priceUsd ? `For: ${priceUsd.replace(/[()]/g, '')} (${priceEth} ETH)` : `For: ${priceEth} ETH`,
+      ownerLine: `Minter: ${ownerHandle}`,
+      clubLine: clubLine,
       visionUrl: this.buildVisionioUrl(ensName),
-      ccLine: clubMention ? `cc ${clubMention}` : '',
       ownerHandle: ownerHandle
     };
 
@@ -1174,17 +1200,18 @@ export class NewTweetFormatter {
     }
     
     // Check for club mention
-    const clubMention = this.getClubMention(ensName);
+    const formattedClubString = this.clubService.getFormattedClubString(ensName);
+    const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
     
     const breakdown = {
-      header: '✋ OFFER ✋',
+      header: `✋ OFFER: ${ensName}`,
       ensName: ensName,
-      priceLine: priceUsd ? `Price: ${priceUsd} (${priceDecimal} ${currencyDisplay})` : `Price: ${priceDecimal} ${currencyDisplay}`,
+      priceLine: priceUsd ? `For: ${priceUsd} (${priceDecimal} ${currencyDisplay})` : `For: ${priceDecimal} ${currencyDisplay}`,
+      validLine: `Valid: ${duration}`,
       bidderLine: `Bidder: ${bidderHandle}`,
       currentOwnerLine: `Owner: ${currentOwnerHandle}`,
-      validLine: `Valid: ${duration}`,
+      clubLine: clubLine,
       visionUrl: visionUrl,
-      ccLine: clubMention ? `cc ${clubMention}` : '',
       bidderHandle: bidderHandle,
       currentOwnerHandle: currentOwnerHandle
     };
