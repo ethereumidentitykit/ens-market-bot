@@ -34,7 +34,15 @@ export class NewTweetFormatter {
   constructor(
     private databaseService?: IDatabaseService,
     private alchemyService?: AlchemyService
-  ) {}
+  ) {
+    logger.info('[NewTweetFormatter] Constructor called - ClubService should be initialized');
+    // Add a small delay to let ClubService initialize, then check status
+    setTimeout(() => {
+      logger.info(`[NewTweetFormatter] ClubService initialized: ${this.clubService.isInitialized()}`);
+      const stats = this.clubService.getStats();
+      logger.info(`[NewTweetFormatter] ClubService stats: ${JSON.stringify(stats)}`);
+    }, 1000);
+  }
 
   /**
    * Generate a complete tweet with text and image for an ENS registration
@@ -491,8 +499,12 @@ export class NewTweetFormatter {
     const sellerLine = `Seller: ${sellerHandle}`;
     
     // Club line (show club name with handle properly paired)
+    logger.info(`[NewTweetFormatter] Getting club info for sale: ${ensName}`);
+    logger.info(`[NewTweetFormatter] ClubService instance exists: ${!!this.clubService}`);
+    logger.info(`[NewTweetFormatter] ClubService initialized: ${this.clubService?.isInitialized()}`);
     const formattedClubString = this.clubService.getFormattedClubString(ensName);
     const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
+    logger.info(`[NewTweetFormatter] Sale club line result: "${clubLine}"`);
     
     // Vision.io link
     const visionUrl = this.buildVisionioUrl(ensName);
@@ -1023,8 +1035,12 @@ export class NewTweetFormatter {
     const sellerHandle = this.getDisplayHandle(sellerAccount, sale.sellerAddress);
     
     // Check for club mention
+    logger.info(`[NewTweetFormatter] Preview - Getting club info for: ${ensName}`);
+    logger.info(`[NewTweetFormatter] Preview - ClubService instance exists: ${!!this.clubService}`);
+    logger.info(`[NewTweetFormatter] Preview - ClubService initialized: ${this.clubService?.isInitialized()}`);
     const formattedClubString = this.clubService.getFormattedClubString(ensName);
     const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
+    logger.info(`[NewTweetFormatter] Preview club line result: "${clubLine}"`);
     
     const breakdown = {
       header: `💰 SOLD: ${ensName}`,

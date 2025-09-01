@@ -39,6 +39,7 @@ export class ClubService {
   private initialized = false;
 
   constructor() {
+    logger.info('[ClubService] Constructor called - initializing club data...');
     this.initializeClubData();
   }
 
@@ -48,6 +49,7 @@ export class ClubService {
   private async initializeClubData(): Promise<void> {
     try {
       const configPath = path.join(process.cwd(), 'assets', 'clubs', 'config.json');
+      logger.info(`[ClubService] Loading config from: ${configPath}`);
       
       // Check if config file exists
       if (!fs.existsSync(configPath)) {
@@ -59,6 +61,7 @@ export class ClubService {
       // Load configuration
       const configData = fs.readFileSync(configPath, 'utf8');
       const config: ClubConfig = JSON.parse(configData);
+      logger.info(`[ClubService] Config loaded: ${config.patternClubs?.length || 0} pattern clubs, ${config.fileBasedClubs?.length || 0} file-based clubs`);
 
       // Load pattern-based clubs and compile their regexes
       for (const club of config.patternClubs || []) {
@@ -103,15 +106,22 @@ export class ClubService {
 
       // Parse file (handle both .txt and .csv formats)
       const lines = fileContent.split('\n');
+      const sampleNames: string[] = [];
+      
       for (const line of lines) {
         const trimmed = line.trim();
         if (trimmed && !trimmed.startsWith('#')) { // Skip empty lines and comments
           // Handle CSV files (take first column) or plain text files
           const ensName = trimmed.includes(',') ? trimmed.split(',')[0].trim() : trimmed;
           
-          // Ensure .eth suffix
-          const normalizedName = ensName.endsWith('.eth') ? ensName : `${ensName}.eth`;
+          // Ensure .eth suffix and normalize to lowercase for case-insensitive matching
+          const normalizedName = ensName.endsWith('.eth') ? ensName.toLowerCase() : `${ensName.toLowerCase()}.eth`;
           ensNames.add(normalizedName);
+          
+          // Collect first few names for debugging
+          if (sampleNames.length < 5) {
+            sampleNames.push(normalizedName);
+          }
         }
       }
 
@@ -124,6 +134,14 @@ export class ClubService {
       });
 
       logger.info(`Loaded ${ensNames.size} names for ${club.name} from ${filePath}`);
+      logger.info(`[ClubService] Sample names from ${club.name}: [${sampleNames.join(', ')}]`);
+      
+      // Check if edward.eth is specifically in this club (normalized check)
+      if (ensNames.has('edward.eth')) {
+        logger.info(`[ClubService] ✅ edward.eth found in ${club.name}`);
+      } else {
+        logger.info(`[ClubService] edward.eth NOT found in ${club.name}`);
+      }
     } catch (error: any) {
       logger.error(`Failed to load club file for ${club.name}:`, error.message);
     }
@@ -136,26 +154,36 @@ export class ClubService {
   public getClubInfo(ensName: string): ClubInfo[] {
     if (!ensName) return [];
 
+    // Normalize search term to lowercase for case-insensitive matching
+    const normalizedEnsName = ensName.toLowerCase();
+    logger.info(`[ClubService] Checking clubs for ENS name: ${ensName} (normalized: ${normalizedEnsName})`);
     const clubs: ClubInfo[] = [];
 
-    // Check pattern-based clubs from config
+    // Check pattern-based clubs from config (patterns should match original case for flexibility)
     for (const club of this.patternClubs) {
       const regex = this.compiledPatterns.get(club.name);
       if (regex && regex.test(ensName)) {
+        logger.info(`[ClubService] Pattern match found: ${club.name} for ${ensName}`);
         clubs.push({ name: club.name, handle: club.handle });
       }
     }
 
-    // Check file-based clubs
+    // Check file-based clubs using normalized name
+    logger.info(`[ClubService] Checking ${this.clubDataSets.size} file-based clubs for ${normalizedEnsName}`);
     for (const [clubKey, nameSet] of this.clubDataSets) {
-      if (nameSet.has(ensName)) {
+      logger.info(`[ClubService] Checking ${clubKey} club (${nameSet.size} names) for ${normalizedEnsName}`);
+      if (nameSet.has(normalizedEnsName)) {
         const clubInfo = this.clubMetadata.get(clubKey);
         if (clubInfo) {
+          logger.info(`[ClubService] File-based match found: ${clubInfo.name} for ${ensName}`);
           clubs.push(clubInfo);
         }
+      } else {
+        logger.info(`[ClubService] No match in ${clubKey} for ${normalizedEnsName}`);
       }
     }
 
+    logger.info(`[ClubService] Total clubs found for ${ensName}: ${clubs.length}`);
     return clubs;
   }
 
@@ -192,17 +220,27 @@ export class ClubService {
    */
   public getFormattedClubString(ensName: string): string | null {
     const clubs = this.getClubInfo(ensName);
-    if (clubs.length === 0) return null;
+    logger.info(`[ClubService] getFormattedClubString for ${ensName}: found ${clubs.length} clubs`);
+    
+    if (clubs.length === 0) {
+      logger.info(`[ClubService] No clubs found for ${ensName}, returning null`);
+      return null;
+    }
     
     const clubStrings = clubs.map(club => {
       if (club.handle && club.handle.trim() !== '') {
-        return `${club.name} ${club.handle}`;
+        const formatted = `${club.name} ${club.handle}`;
+        logger.info(`[ClubService] Formatted club with handle: ${formatted}`);
+        return formatted;
       } else {
+        logger.info(`[ClubService] Formatted club without handle: ${club.name}`);
         return club.name;
       }
     });
     
-    return clubStrings.join(', ');
+    const result = clubStrings.join(', ');
+    logger.info(`[ClubService] Final formatted club string for ${ensName}: "${result}"`);
+    return result;
   }
 
   /**
