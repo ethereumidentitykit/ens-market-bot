@@ -162,12 +162,17 @@ export class ClubService {
   /**
    * Get comma-separated club handles for an ENS name
    * Compatible with existing newTweetFormatter methods
+   * Filters out clubs with empty handles
    */
   public getClubMention(ensName: string): string | null {
     const clubs = this.getClubInfo(ensName);
     if (clubs.length === 0) return null;
     
-    return clubs.map(club => club.handle).join(', ');
+    // Filter out clubs with empty handles
+    const clubsWithHandles = clubs.filter(club => club.handle && club.handle.trim() !== '');
+    if (clubsWithHandles.length === 0) return null;
+    
+    return clubsWithHandles.map(club => club.handle).join(', ');
   }
 
   /**
@@ -179,6 +184,25 @@ export class ClubService {
     if (clubs.length === 0) return null;
     
     return clubs.map(club => club.name).join(', ');
+  }
+
+  /**
+   * Get formatted club string with names and handles properly paired
+   * Format: "999 Club @ENS999club, Pokemon Club @PokemonENS"
+   */
+  public getFormattedClubString(ensName: string): string | null {
+    const clubs = this.getClubInfo(ensName);
+    if (clubs.length === 0) return null;
+    
+    const clubStrings = clubs.map(club => {
+      if (club.handle && club.handle.trim() !== '') {
+        return `${club.name} ${club.handle}`;
+      } else {
+        return club.name;
+      }
+    });
+    
+    return clubStrings.join(', ');
   }
 
   /**

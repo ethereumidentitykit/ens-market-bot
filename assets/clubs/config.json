@@ -2,12 +2,12 @@
   "patternClubs": [
     {
       "name": "999 Club",
-      "handle": "@ENS999club",
+      "handle": "@999club",
       "pattern": "^\\d{3}\\.eth$"
     },
     {
       "name": "10k Club", 
-      "handle": "@10kClubOfficial",
+      "handle": "@10kclub",
       "pattern": "^\\d{4}\\.eth$"
     },
     {
@@ -17,21 +17,21 @@
     }
   ],
   "fileBasedClubs": [
-    {
-      "name": "Pokemon Club",
-      "handle": "@PokemonENS",
-      "filename": "assets/clubs/Pokemon ENS"
-    },
+          {
+        "name": "Pokemon Club",
+        "handle": "@pokemonens",
+        "filename": "assets/clubs/Pokemon ENS"
+      },
     {
       "name": "Surname Club", 
       "handle": "@SurnameENS",
       "filename": "assets/clubs/1ksurnames.txt"
     },
-    {
-      "name": "Forename Club",
-      "handle": "@ForenameENS", 
-      "filename": "assets/clubs/1kforenames.txt"
-    },
+          {
+        "name": "Top 1K First Names",
+        "handle": "", 
+        "filename": "assets/clubs/1kforenames.txt"
+      },
     {
       "name": "Pre-Punk Club",
       "handle": "@PrePunkENS",

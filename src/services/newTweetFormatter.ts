@@ -300,9 +300,9 @@ export class NewTweetFormatter {
     const ownerHandle = this.getDisplayHandle(ownerAccount, registration.ownerAddress);
     const ownerLine = `Minter: ${ownerHandle}`;
     
-    // Club line (only if match found)
-    const clubMention = this.getClubMention(ensName);
-    const clubLine = clubMention ? `Club: ${this.getClubName(ensName)} ${clubMention}` : '';
+    // Club line (show club name with handle properly paired)
+    const formattedClubString = this.clubService.getFormattedClubString(ensName);
+    const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
     
     // Vision.io link
     const visionUrl = this.buildVisionioUrl(ensName);
@@ -415,9 +415,9 @@ export class NewTweetFormatter {
       }
     }
     
-    // Club line (only if match found)
-    const clubMention = this.getClubMention(ensName);
-    const clubLine = clubMention ? `Club: ${this.getClubName(ensName)} ${clubMention}` : '';
+    // Club line (show club name with handle properly paired)
+    const formattedClubString = this.clubService.getFormattedClubString(ensName);
+    const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
     
     // Vision.io link
     const visionUrl = this.buildVisionioUrl(ensName);
@@ -490,9 +490,9 @@ export class NewTweetFormatter {
     const buyerLine = `Buyer: ${buyerHandle}`;
     const sellerLine = `Seller: ${sellerHandle}`;
     
-    // Club line (only if match found)
-    const clubMention = this.getClubMention(ensName);
-    const clubLine = clubMention ? `Club: ${this.getClubName(ensName)} ${clubMention}` : '';
+    // Club line (show club name with handle properly paired)
+    const formattedClubString = this.clubService.getFormattedClubString(ensName);
+    const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
     
     // Vision.io link
     const visionUrl = this.buildVisionioUrl(ensName);
@@ -1023,8 +1023,8 @@ export class NewTweetFormatter {
     const sellerHandle = this.getDisplayHandle(sellerAccount, sale.sellerAddress);
     
     // Check for club mention
-    const clubMention = this.getClubMention(ensName);
-    const clubName = this.getClubName(ensName);
+    const formattedClubString = this.clubService.getFormattedClubString(ensName);
+    const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
     
     const breakdown = {
       header: `💰 SOLD: ${ensName}`,
@@ -1032,7 +1032,7 @@ export class NewTweetFormatter {
       priceLine: priceUsd ? `For: ${priceUsd} (${priceEth} ETH)` : `For: ${priceEth} ETH`,
       buyerLine: `Buyer: ${buyerHandle}`,
       sellerLine: `Seller: ${sellerHandle}`,
-      clubLine: clubMention ? `Club: ${clubName} ${clubMention}` : '',
+      clubLine: clubLine,
       visionUrl: this.buildVisionioUrl(ensName),
       buyerHandle: buyerHandle,
       sellerHandle: sellerHandle
@@ -1068,15 +1068,15 @@ export class NewTweetFormatter {
     const ownerHandle = this.getDisplayHandle(ownerAccount, registration.ownerAddress);
     
     // Check for club mention
-    const clubMention = this.getClubMention(ensName);
-    const clubName = this.getClubName(ensName);
+    const formattedClubString = this.clubService.getFormattedClubString(ensName);
+    const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
     
     const breakdown = {
       header: `🏛️ REGISTERED: ${ensName}`,
       ensName: ensName,
       priceLine: priceUsd ? `For: ${priceUsd.replace(/[()]/g, '')} (${priceEth} ETH)` : `For: ${priceEth} ETH`,
       ownerLine: `Minter: ${ownerHandle}`,
-      clubLine: clubMention ? `Club: ${clubName} ${clubMention}` : '',
+      clubLine: clubLine,
       visionUrl: this.buildVisionioUrl(ensName),
       ownerHandle: ownerHandle
     };
@@ -1184,8 +1184,8 @@ export class NewTweetFormatter {
     }
     
     // Check for club mention
-    const clubMention = this.getClubMention(ensName);
-    const clubName = this.getClubName(ensName);
+    const formattedClubString = this.clubService.getFormattedClubString(ensName);
+    const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
     
     const breakdown = {
       header: `✋ OFFER: ${ensName}`,
@@ -1194,7 +1194,7 @@ export class NewTweetFormatter {
       validLine: `Valid: ${duration}`,
       bidderLine: `Bidder: ${bidderHandle}`,
       currentOwnerLine: `Owner: ${currentOwnerHandle}`,
-      clubLine: clubMention ? `Club: ${clubName} ${clubMention}` : '',
+      clubLine: clubLine,
       visionUrl: visionUrl,
       bidderHandle: bidderHandle,
       currentOwnerHandle: currentOwnerHandle
