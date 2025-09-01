@@ -429,7 +429,7 @@ export class DatabaseService implements IDatabaseService {
           verified_collection as "verifiedCollection"
         FROM processed_sales 
         WHERE posted = FALSE 
-          AND block_timestamp > NOW() - INTERVAL $2 || ' hours'
+          AND block_timestamp > NOW() - INTERVAL '1 hour' * $2
         ORDER BY block_number DESC 
         LIMIT $1
       `, [limit, safeMaxAgeHours]);
@@ -958,7 +958,7 @@ export class DatabaseService implements IDatabaseService {
       const result = await this.pool.query(`
         SELECT * FROM ens_registrations 
         WHERE posted = FALSE 
-          AND block_timestamp > NOW() - INTERVAL $2 || ' hours'
+          AND block_timestamp > NOW() - INTERVAL '1 hour' * $2
         ORDER BY block_number DESC 
         LIMIT $1
       `, [limit, safeMaxAgeHours]);
@@ -1124,7 +1124,7 @@ export class DatabaseService implements IDatabaseService {
       const result = await this.pool.query(`
         SELECT * FROM ens_bids 
         WHERE posted = FALSE
-          AND created_at_api > NOW() - INTERVAL $2 || ' hours'
+          AND created_at_api > NOW() - INTERVAL '1 hour' * $2
         ORDER BY created_at_api DESC 
         LIMIT $1
       `, [limit, safeMaxAgeHours]);
