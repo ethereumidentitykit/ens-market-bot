@@ -6,6 +6,7 @@ import { ImageData } from '../types/imageTypes';
 import { PuppeteerImageService } from './puppeteerImageService';
 import { IDatabaseService } from '../types';
 import { AlchemyService } from './alchemyService';
+import { ClubService } from './clubService';
 
 export interface GeneratedTweet {
   text: string;
@@ -27,12 +28,8 @@ export interface GeneratedTweet {
  */
 export class NewTweetFormatter {
   private readonly MAX_TWEET_LENGTH = 280;
-  
-  // Club detection patterns
-  private readonly CLUB_10K_PATTERN = /^\d{4}\.eth$/;  // e.g., 1234.eth
-  private readonly CLUB_999_PATTERN = /^\d{3}\.eth$/;  // e.g., 123.eth
-  private readonly EMOJI_ONLY_PATTERN = /^(?!^\d+\.eth$)(?:[\p{Emoji}\p{Emoji_Modifier}\p{Emoji_Component}\p{Emoji_Presentation}\p{Extended_Pictographic}]|\u200D|\uFE0F)+\.eth$/u;  // Only emoji sequences + .eth, exclude plain digits
   private readonly ethIdentityService = new ENSWorkerService();
+  private readonly clubService = new ClubService();
 
   constructor(
     private databaseService?: IDatabaseService,
@@ -512,36 +509,18 @@ export class NewTweetFormatter {
 
   /**
    * Get club mention for ENS name if applicable
+   * Supports multiple clubs with comma separation
    */
   private getClubMention(ensName: string): string | null {
-    if (!ensName) return null;
-    
-    if (this.CLUB_999_PATTERN.test(ensName)) {
-      return '@ENS999club';
-    } else if (this.CLUB_10K_PATTERN.test(ensName)) {
-      return '@10kClubOfficial';
-    } else if (this.EMOJI_ONLY_PATTERN.test(ensName)) {
-      return '@EthmojiClub';
-    }
-    
-    return null;
+    return this.clubService.getClubMention(ensName);
   }
 
   /**
    * Get human-readable club name for ENS name if applicable
+   * Supports multiple clubs with comma separation
    */
   private getClubName(ensName: string): string | null {
-    if (!ensName) return null;
-    
-    if (this.CLUB_999_PATTERN.test(ensName)) {
-      return '999 Club';
-    } else if (this.CLUB_10K_PATTERN.test(ensName)) {
-      return '10k Club';
-    } else if (this.EMOJI_ONLY_PATTERN.test(ensName)) {
-      return 'Emoji Club';
-    }
-    
-    return null;
+    return this.clubService.getClubName(ensName);
   }
 
   /**

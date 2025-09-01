@@ -10,6 +10,7 @@ import { NewTweetFormatter } from './newTweetFormatter';
 import { TwitterService } from './twitterService';
 import { RateLimitService } from './rateLimitService';
 import { WorldTimeService } from './worldTimeService';
+import { ClubService } from './clubService';
 
 export interface TransactionSpecificSettings {
   enabled: boolean;
@@ -45,10 +46,7 @@ export class AutoTweetService {
   private rateLimitService: RateLimitService;
   private databaseService: IDatabaseService;
   private worldTimeService: WorldTimeService;
-
-  // Category detection patterns
-  private readonly CLUB_10K_PATTERN = /^\d{4}\.eth$/;  // e.g., 1234.eth
-  private readonly CLUB_999_PATTERN = /^\d{3}\.eth$/;  // e.g., 123.eth
+  private clubService: ClubService;
 
   constructor(
     newTweetFormatter: NewTweetFormatter,
@@ -63,6 +61,7 @@ export class AutoTweetService {
     this.rateLimitService = rateLimitService;
     this.databaseService = databaseService;
     this.worldTimeService = worldTimeService;
+    this.clubService = new ClubService();
   }
 
   /**
@@ -420,14 +419,18 @@ export class AutoTweetService {
    */
   private getEthMinimumForSale(sale: ProcessedSale, settings: TransactionSpecificSettings): number {
     const nftName = sale.nftName || '';
+    const clubs = this.clubService.getClubInfo(nftName);
     
-    if (this.CLUB_999_PATTERN.test(nftName)) {
-      return settings.minEth999Club;
-    } else if (this.CLUB_10K_PATTERN.test(nftName)) {
-      return settings.minEth10kClub;
-    } else {
-      return settings.minEthDefault;
+    // Check for premium clubs with special thresholds (in priority order)
+    for (const club of clubs) {
+      if (club.name === '999 Club') {
+        return settings.minEth999Club;
+      } else if (club.name === '10k Club') {
+        return settings.minEth10kClub;
+      }
     }
+    
+    return settings.minEthDefault;
   }
 
   /**
@@ -435,14 +438,16 @@ export class AutoTweetService {
    */
   private getCategoryName(sale: ProcessedSale): string {
     const nftName = sale.nftName || '';
+    const clubs = this.clubService.getClubInfo(nftName);
     
-    if (this.CLUB_999_PATTERN.test(nftName)) {
-      return '999 Club';
-    } else if (this.CLUB_10K_PATTERN.test(nftName)) {
-      return '10k Club';
-    } else {
-      return 'Standard';
+    // Return the first premium club found, or standard
+    for (const club of clubs) {
+      if (club.name === '999 Club' || club.name === '10k Club') {
+        return club.name;
+      }
     }
+    
+    return clubs.length > 0 ? clubs[0].name : 'Standard';
   }
 
   /**
@@ -450,14 +455,18 @@ export class AutoTweetService {
    */
   private getEthMinimumForRegistration(registration: ENSRegistration, settings: TransactionSpecificSettings): number {
     const ensName = registration.fullName || registration.ensName || '';
+    const clubs = this.clubService.getClubInfo(ensName);
     
-    if (this.CLUB_999_PATTERN.test(ensName)) {
-      return settings.minEth999Club;
-    } else if (this.CLUB_10K_PATTERN.test(ensName)) {
-      return settings.minEth10kClub;
-    } else {
-      return settings.minEthDefault; // Use registration-specific default
+    // Check for premium clubs with special thresholds (in priority order)
+    for (const club of clubs) {
+      if (club.name === '999 Club') {
+        return settings.minEth999Club;
+      } else if (club.name === '10k Club') {
+        return settings.minEth10kClub;
+      }
     }
+    
+    return settings.minEthDefault;
   }
 
   /**
@@ -465,14 +474,16 @@ export class AutoTweetService {
    */
   private getRegistrationCategoryName(registration: ENSRegistration): string {
     const ensName = registration.fullName || registration.ensName || '';
+    const clubs = this.clubService.getClubInfo(ensName);
     
-    if (this.CLUB_999_PATTERN.test(ensName)) {
-      return '999 Club registration';
-    } else if (this.CLUB_10K_PATTERN.test(ensName)) {
-      return '10k Club registration';
-    } else {
-      return 'Standard registration';
+    // Return the first premium club found, or standard
+    for (const club of clubs) {
+      if (club.name === '999 Club' || club.name === '10k Club') {
+        return `${club.name} registration`;
+      }
     }
+    
+    return clubs.length > 0 ? `${clubs[0].name} registration` : 'Standard registration';
   }
 
   /**
@@ -660,10 +671,10 @@ export class AutoTweetService {
    */
   private async getEthMinimumForBid(bid: ENSBid, settings: TransactionSpecificSettings): Promise<number> {
     try {
-      // Get ENS name from bid (requires live lookup)
-      let ensName = '';
+      // Get ENS name from bid (use stored name first, fallback to live lookup)
+      let ensName = bid.ensName || '';
       
-      if (bid.tokenId) {
+      if (!ensName && bid.tokenId) {
         try {
           const ensContract = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
           const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
@@ -679,14 +690,19 @@ export class AutoTweetService {
         }
       }
 
-      // Apply club-aware logic (same patterns as sales/registrations)
-      if (this.CLUB_999_PATTERN.test(ensName)) {
-        return settings.minEth999Club;
-      } else if (this.CLUB_10K_PATTERN.test(ensName)) {
-        return settings.minEth10kClub;
-      } else {
-        return settings.minEthDefault; // Use bids-specific default
+      // Apply club-aware logic using ClubService
+      const clubs = this.clubService.getClubInfo(ensName);
+      
+      // Check for premium clubs with special thresholds (in priority order)
+      for (const club of clubs) {
+        if (club.name === '999 Club') {
+          return settings.minEth999Club;
+        } else if (club.name === '10k Club') {
+          return settings.minEth10kClub;
+        }
       }
+      
+      return settings.minEthDefault;
 
     } catch (error: any) {
       logger.warn(`Error determining ETH minimum for bid:`, error.message);
@@ -729,9 +745,10 @@ export class AutoTweetService {
    */
   private async getBidCategoryName(bid: ENSBid): Promise<string> {
     try {
-      let ensName = '';
+      // Get ENS name from bid (use stored name first, fallback to live lookup)
+      let ensName = bid.ensName || '';
       
-      if (bid.tokenId) {
+      if (!ensName && bid.tokenId) {
         try {
           const ensContract = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
           const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
@@ -746,13 +763,17 @@ export class AutoTweetService {
         }
       }
 
-      if (this.CLUB_999_PATTERN.test(ensName)) {
-        return '999 Club bid';
-      } else if (this.CLUB_10K_PATTERN.test(ensName)) {
-        return '10k Club bid';
-      } else {
-        return 'Standard bid';
+      // Apply club-aware logic using ClubService
+      const clubs = this.clubService.getClubInfo(ensName);
+      
+      // Return the first premium club found, or standard
+      for (const club of clubs) {
+        if (club.name === '999 Club' || club.name === '10k Club') {
+          return `${club.name} bid`;
+        }
       }
+      
+      return clubs.length > 0 ? `${clubs[0].name} bid` : 'Standard bid';
 
     } catch (error: any) {
       return 'Standard bid';
