@@ -20,6 +20,11 @@ export class SchedulerService {
   private lastRunStats: any = null;
   private consecutiveErrors: number = 0;
   private maxConsecutiveErrors: number = 5;
+  
+  // Processing locks to prevent race conditions
+  private isProcessingSales: boolean = false;
+  private isProcessingRegistrations: boolean = false;
+  private isProcessingBids: boolean = false;
 
   constructor(
     salesProcessingService: SalesProcessingService,
@@ -234,6 +239,12 @@ export class SchedulerService {
       return;
     }
 
+    if (this.isProcessingSales) {
+      logger.info('⏳ Sales sync skipped - previous batch still processing');
+      return;
+    }
+
+    this.isProcessingSales = true;
     const startTime = new Date();
     logger.info('Starting sales sync...');
 
@@ -312,6 +323,8 @@ export class SchedulerService {
         // For now, just log the critical error
         logger.error('🚨 SCHEDULER STOPPED DUE TO REPEATED FAILURES - Manual intervention required');
       }
+    } finally {
+      this.isProcessingSales = false;
     }
   }
 
@@ -324,6 +337,12 @@ export class SchedulerService {
       return;
     }
 
+    if (this.isProcessingRegistrations) {
+      logger.info('⏳ Registration sync skipped - previous batch still processing');
+      return;
+    }
+
+    this.isProcessingRegistrations = true;
     const startTime = new Date();
     logger.info('Starting registration sync...');
 
@@ -368,6 +387,8 @@ export class SchedulerService {
 
     } catch (error: any) {
       logger.error(`Registration sync failed:`, error.message);
+    } finally {
+      this.isProcessingRegistrations = false;
     }
   }
 
@@ -380,6 +401,12 @@ export class SchedulerService {
       return;
     }
 
+    if (this.isProcessingBids) {
+      logger.info('⏳ Bid sync skipped - previous batch still processing');
+      return;
+    }
+
+    this.isProcessingBids = true;
     const startTime = new Date();
     logger.info('Starting bid sync...');
 
@@ -439,6 +466,8 @@ export class SchedulerService {
         logger.error(`Maximum consecutive errors (${this.maxConsecutiveErrors}) reached. Stopping scheduler.`);
         this.stop();
       }
+    } finally {
+      this.isProcessingBids = false;
     }
   }
 
