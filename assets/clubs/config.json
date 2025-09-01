@@ -33,9 +33,9 @@
         "filename": "assets/clubs/1kforenames.txt"
       },
     {
-      "name": "Pre-Punk Club",
+      "name": "PrePunk",
       "handle": "@PrePunkENS",
-      "filename": "assets/clubs/pre-punk-club.csv"
+      "filename": "assets/clubs/prepunk.txt"
     }
   ]
 }
