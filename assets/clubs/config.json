@@ -1,22 +1,22 @@
 {
   "patternClubs": [
     {
-      "name": "999 Club",
+      "name": "999",
       "handle": "@999club",
       "pattern": "^\\d{3}\\.eth$"
     },
     {
-      "name": "10k Club", 
-      "handle": "@10kclub",
+      "name": "10k", 
+      "handle": "@10kClubOfficial",
       "pattern": "^\\d{4}\\.eth$"
     },
     {
-      "name": "Emoji Club",
+      "name": "Emojis",
       "handle": "@EthmojiClub", 
       "pattern": "^(?!^\\d+\\.eth$)(?:[\\p{Emoji}\\p{Emoji_Modifier}\\p{Emoji_Component}\\p{Emoji_Presentation}\\p{Extended_Pictographic}]|\\u200D|\\uFE0F)+\\.eth$"
     },
     {
-      "name": "3L Club",
+      "name": "3 Letter",
       "handle": "@ENSletters",
       "pattern": "^[a-z]{3}\\.eth$"
     }
@@ -24,12 +24,12 @@
   "fileBasedClubs": [
           {
         "name": "Pokemon",
-        "handle": "@pokemonens",
+        "handle": "@PokemonENS",
         "filename": "assets/clubs/pokemon.txt"
       },
       {
         "name": "1k Last Names", 
-        "handle": "@SurnameENS",
+        "handle": "",
         "filename": "assets/clubs/1ksurnames.txt",
         "includeLineNumber": true
       },
@@ -41,7 +41,7 @@
       },
       {
         "name": "PrePunks",
-        "handle": "@PrePunkENS",
+        "handle": "@PrePunkOfficial",
         "filename": "assets/clubs/prepunk.txt",
         "includeLineNumber": true
       }
