@@ -14,6 +14,11 @@
       "name": "Emoji Club",
       "handle": "@EthmojiClub", 
       "pattern": "^(?!^\\d+\\.eth$)(?:[\\p{Emoji}\\p{Emoji_Modifier}\\p{Emoji_Component}\\p{Emoji_Presentation}\\p{Extended_Pictographic}]|\\u200D|\\uFE0F)+\\.eth$"
+    },
+    {
+      "name": "3L Club",
+      "handle": "@ENSletters",
+      "pattern": "^[a-z]{3}\\.eth$"
     }
   ],
   "fileBasedClubs": [
