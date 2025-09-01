@@ -2,6 +2,7 @@ import express from 'express';
 import session from 'express-session';
 import path from 'path';
 import CryptoJS from 'crypto-js';
+import { gunzipSync } from 'zlib';
 import axios from 'axios';
 import { generateNonce } from 'siwe';
 import { config, validateConfig } from './utils/config';
@@ -100,8 +101,13 @@ async function startApplication(): Promise<void> {
       next();
     });
 
-    // Middleware
-    app.use(express.json());
+    // Middleware - skip JSON parsing for salesv2 webhook
+    app.use((req, res, next) => {
+      if (req.path === '/webhook/salesv2') {
+        return next(); // Skip JSON parsing for salesv2 webhook
+      }
+      return express.json()(req, res, next);
+    });
     app.use(express.static(path.join(__dirname, '../public')));
     
     // Session configuration for SIWE authentication using PostgreSQL
@@ -2583,6 +2589,227 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    // QuickNode Sales Webhook - salesv2 (manual body capture for no content-type)
+    app.post('/webhook/salesv2', (req, res) => {
+      // Capture raw body manually since QuickNode doesn't send Content-Type
+      let rawBody = Buffer.alloc(0);
+      
+      req.on('data', (chunk) => {
+        rawBody = Buffer.concat([rawBody, chunk]);
+      });
+      
+      req.on('end', async () => {
+        try {
+          logger.info('🚀 QuickNode Sales webhook received (salesv2)');
+          
+          // Log raw request details for debugging
+          logger.info('Request method:', req.method);
+          logger.info('Request headers:', JSON.stringify(req.headers, null, 2));
+          logger.info('Raw body length:', rawBody.length);
+          logger.info('Content-Type:', req.headers['content-type'] || 'not specified');
+          logger.info('Content-Encoding:', req.headers['content-encoding'] || 'not specified');
+          
+          // Check if body exists
+          if (rawBody.length > 0) {
+            logger.info('Raw body (first 100 chars):', rawBody.toString('utf8').substring(0, 100));
+          }
+        
+          // Handle the webhook data using manually captured rawBody
+          let webhookData;
+          
+          // Check if body is empty
+          if (rawBody.length === 0) {
+            logger.warn('⚠️ Webhook received with empty body');
+            return res.status(200).json({ 
+              success: true, 
+              message: 'Webhook received but body is empty',
+              type: 'empty_body'
+            });
+          }
+          
+          // Handle potential gzip compression
+          let processedBody: Buffer = rawBody;
+          try {
+            // Check if content is gzipped
+            if (req.headers['content-encoding'] === 'gzip') {
+              logger.info('🗜️ Decompressing gzipped content');
+              const decompressed = gunzipSync(rawBody);
+              processedBody = Buffer.from(decompressed);
+            } else {
+              // Try to detect gzip by magic bytes
+              if (rawBody.length >= 2 && rawBody[0] === 0x1f && rawBody[1] === 0x8b) {
+                logger.info('🗜️ Detected gzip magic bytes, decompressing...');
+                const decompressed = gunzipSync(rawBody);
+                processedBody = Buffer.from(decompressed);
+              }
+            }
+          } catch (gzipError: any) {
+            logger.warn('⚠️ Failed to decompress (not gzipped?):', gzipError.message);
+            processedBody = rawBody;
+          }
+        
+        // Convert buffer to string and then parse as JSON
+        try {
+          const bodyString = processedBody.toString('utf8');
+          logger.info('Full processed body string:', bodyString);
+          
+          // Try to parse as JSON
+          webhookData = JSON.parse(bodyString);
+          logger.info('📝 Successfully parsed body as JSON');
+          logger.info('Parsed webhook data:', JSON.stringify(webhookData, null, 2));
+          
+        } catch (parseError: any) {
+          logger.error('❌ Failed to parse body as JSON:', parseError);
+          logger.error('Full processed body content:', processedBody.toString('utf8'));
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid JSON in request body',
+            rawBody: processedBody.toString('utf8'),
+            parseError: parseError.message || 'Unknown parse error'
+          });
+        }
+        
+        // Check if we have orderFulfilled data
+        if (!webhookData.orderFulfilled || !Array.isArray(webhookData.orderFulfilled)) {
+          logger.warn('No orderFulfilled data found in webhook');
+          return res.status(200).json({ 
+            success: true, 
+            message: 'Webhook received but no orderFulfilled data to process',
+            type: 'no_orders'
+          });
+        }
+        
+        logger.info(`📦 Processing ${webhookData.orderFulfilled.length} orderFulfilled events`);
+        
+        // Process each order fulfilled event
+        for (let i = 0; i < webhookData.orderFulfilled.length; i++) {
+          const order = webhookData.orderFulfilled[i];
+          
+          logger.info(`🔍 Processing order ${i + 1}/${webhookData.orderFulfilled.length}:`);
+          logger.info(`Order details:`, {
+            orderHash: order.orderHash,
+            txHash: order.txHash,
+            blockNumber: order.blockNumber,
+            contract: order.contract,
+            contractLabel: order.contractLabel,
+            offerer: order.offerer,
+            recipient: order.recipient,
+            zone: order.zone,
+            logIndex: order.logIndex
+          });
+          
+          // Log offer details
+          logger.info(`💰 Offer details:`, {
+            offerRaw: order.offerRaw,
+            offerCount: order.offer?.length || 0,
+            offers: order.offer?.map((offer: any, idx: number) => ({
+              index: idx,
+              itemType: offer.itemType,
+              token: offer.token,
+              identifier: offer.identifier,
+              amount: offer.amount
+            }))
+          });
+          
+          // Log consideration details
+          logger.info(`💸 Consideration details:`, {
+            considerationRaw: order.considerationRaw,
+            considerationCount: order.consideration?.length || 0,
+            considerations: order.consideration?.map((cons: any, idx: number) => ({
+              index: idx,
+              itemType: cons.itemType,
+              token: cons.token,
+              identifier: cons.identifier,
+              amount: cons.amount,
+              recipient: cons.recipient
+            }))
+          });
+          
+          // Look for ENS tokens specifically
+          const ensTokens = [
+            ...order.offer?.filter((item: any) => 
+              item.token === '0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147eA85' || // ENS OG Registry
+              item.token === '0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401'    // ENS NameWrapper
+            ) || [],
+            ...order.consideration?.filter((item: any) => 
+              item.token === '0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147eA85' || // ENS OG Registry
+              item.token === '0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401'    // ENS NameWrapper
+            ) || []
+          ];
+          
+          if (ensTokens.length > 0) {
+            logger.info(`🏷️ ENS tokens found in order:`, {
+              ensTokenCount: ensTokens.length,
+              ensTokens: ensTokens.map((token: any) => ({
+                token: token.token,
+                tokenId: token.identifier,
+                amount: token.amount,
+                itemType: token.itemType
+              }))
+            });
+          } else {
+            logger.info('ℹ️ No ENS tokens detected in this order');
+          }
+          
+          // Look for ETH/WETH payment amounts
+          const ethPayments = [
+            ...order.offer?.filter((item: any) => 
+              item.token === '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' || // WETH
+              item.itemType === 0 // Native ETH
+            ) || [],
+            ...order.consideration?.filter((item: any) => 
+              item.token === '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' || // WETH
+              item.itemType === 0 // Native ETH
+            ) || []
+          ];
+          
+          if (ethPayments.length > 0) {
+            logger.info(`💎 ETH/WETH payments found:`, {
+              paymentCount: ethPayments.length,
+              payments: ethPayments.map((payment: any) => ({
+                token: payment.token || 'Native ETH',
+                amount: payment.amount,
+                amountEth: (Number(payment.amount) / 1e18).toFixed(6),
+                itemType: payment.itemType,
+                recipient: payment.recipient
+              }))
+            });
+          }
+        }
+        
+          // Return success response
+          res.status(200).json({ 
+            success: true, 
+            message: 'QuickNode sales webhook processed successfully',
+            type: 'salesv2',
+            ordersProcessed: webhookData.orderFulfilled.length
+          });
+          
+        } catch (error: any) {
+          logger.error('❌ QuickNode sales webhook error:');
+          logger.error('Error message:', error.message || 'No error message');
+          logger.error('Error stack:', error.stack || 'No stack trace');
+          logger.error('Full error object:', JSON.stringify(error, null, 2));
+          
+          res.status(500).json({
+            success: false,
+            error: 'QuickNode sales webhook processing failed',
+            message: error.message || 'Unknown error occurred',
+            errorType: error.name || 'Unknown'
+          });
+        }
+      });
+      
+      req.on('error', (err) => {
+        logger.error('❌ QuickNode webhook request error:', err);
+        res.status(500).json({
+          success: false,
+          error: 'Request error',
+          message: err.message
+        });
+      });
+    });
+
     // API info endpoint
     app.get('/api', (req, res) => {
       res.json({
@@ -2596,6 +2823,10 @@ async function startApplication(): Promise<void> {
           processSales: '/api/process-sales',
           stats: '/api/stats',
           unpostedSales: '/api/unposted-sales?limit=10'
+        },
+        webhooks: {
+          ensRegistrations: '/webhook/ens-registrations',
+          salesv2: '/webhook/salesv2'
         }
       });
     });
