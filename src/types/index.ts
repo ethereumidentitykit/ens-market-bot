@@ -205,7 +205,7 @@ export interface IDatabaseService {
   insertRegistration(registration: Omit<ENSRegistration, 'id'>): Promise<number>;
   isRegistrationProcessed(tokenId: string): Promise<boolean>;
   getRecentRegistrations(limit?: number): Promise<ENSRegistration[]>;
-  getUnpostedRegistrations(limit?: number): Promise<ENSRegistration[]>;
+  getUnpostedRegistrations(limit?: number, maxAgeHours?: number): Promise<ENSRegistration[]>;
   markRegistrationAsPosted(id: number, tweetId: string): Promise<void>;
   
   // ENS bids methods

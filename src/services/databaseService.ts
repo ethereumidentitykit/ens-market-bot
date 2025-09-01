@@ -934,17 +934,26 @@ export class DatabaseService implements IDatabaseService {
     }
   }
 
-  async getUnpostedRegistrations(limit: number = 10): Promise<ENSRegistration[]> {
+  async getUnpostedRegistrations(limit: number = 10, maxAgeHours: number = 3): Promise<ENSRegistration[]> {
     if (!this.pool) throw new Error('Database not initialized');
+
+    // Safety fallback: if maxAgeHours is invalid (0, null, undefined, etc.), use 24 hours
+    const safeMaxAgeHours = maxAgeHours && maxAgeHours > 0 ? maxAgeHours : 24;
+    
+    if (safeMaxAgeHours !== maxAgeHours) {
+      logger.warn(`Invalid maxAgeHours (${maxAgeHours}), using 24-hour fallback`);
+    }
 
     try {
       const result = await this.pool.query(`
         SELECT * FROM ens_registrations 
         WHERE posted = FALSE 
+          AND block_timestamp > NOW() - INTERVAL $2 || ' hours'
         ORDER BY block_number DESC 
         LIMIT $1
-      `, [limit]);
+      `, [limit, safeMaxAgeHours]);
 
+      logger.debug(`getUnpostedRegistrations: Found ${result.rows.length} registrations within ${safeMaxAgeHours} hours`);
       return this.mapRegistrationRows(result.rows);
     } catch (error: any) {
       logger.error('Failed to get unposted ENS registrations:', error.message);

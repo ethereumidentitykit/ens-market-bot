@@ -347,15 +347,17 @@ export class SchedulerService {
     logger.info('Starting registration sync...');
 
     try {
-      // Auto-post unposted registrations if enabled
-      const unpostedRegistrations = await this.databaseService.getUnpostedRegistrations(10);
+      // Load auto-posting settings first to get age limits
+      const autoPostSettings = await this.autoTweetService.getSettings();
+      
+      // Auto-post unposted registrations if enabled (with age filtering at database level)
+      const unpostedRegistrations = await this.databaseService.getUnpostedRegistrations(10, autoPostSettings.registrations.maxAgeHours);
       let registrationAutoPostResults: PostResult[] = [];
       
       if (unpostedRegistrations.length > 0) {
-        const autoPostSettings = await this.autoTweetService.getSettings();
         // Check global AND registrations-specific toggles
         if (autoPostSettings.enabled && autoPostSettings.registrations.enabled) {
-          logger.info(`🏛️ Auto-posting ${unpostedRegistrations.length} unposted registrations...`);
+          logger.info(`🏛️ Auto-posting ${unpostedRegistrations.length} unposted registrations (within ${autoPostSettings.registrations.maxAgeHours}h)...`);
           registrationAutoPostResults = await this.autoTweetService.processNewRegistrations(unpostedRegistrations, autoPostSettings);
           
           const posted = registrationAutoPostResults.filter(r => r.success).length;
@@ -366,6 +368,8 @@ export class SchedulerService {
         } else {
           logger.debug(`🏛️ Skipping registrations auto-posting - Global: ${autoPostSettings.enabled}, Registrations: ${autoPostSettings.registrations.enabled}`);
         }
+      } else {
+        logger.debug(`🏛️ No unposted registrations found within ${autoPostSettings.registrations.maxAgeHours} hours`);
       }
 
       const duration = Date.now() - startTime.getTime();
