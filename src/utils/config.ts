@@ -43,6 +43,9 @@ export const config: Config = {
       return devSecret;
     })(),
     domain: process.env.SIWE_DOMAIN || 'localhost'
+  },
+  quicknode: {
+    webhookSecret: process.env.QUICKNODE_SECRET || ''
   }
 };
 
@@ -61,5 +64,12 @@ export function validateConfig(): void {
   } else {
     const addresses = process.env.ADMIN_WHITELIST.split(',');
     console.log(`🔐 SIWE admin whitelist configured with ${addresses.length} address(es)`);
+  }
+  
+  // Validate QuickNode webhook secret
+  if (!process.env.QUICKNODE_SECRET) {
+    console.warn('⚠️  No QUICKNODE_SECRET set - webhook signature verification will be disabled');
+  } else {
+    console.log('🔐 QuickNode webhook secret configured for signature verification');
   }
 }

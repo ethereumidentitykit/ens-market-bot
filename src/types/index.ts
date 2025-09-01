@@ -149,6 +149,9 @@ export interface Config {
     sessionSecret: string;
     domain: string;
   };
+  quicknode: {
+    webhookSecret: string;
+  };
 }
 
 // Twitter Post Record

@@ -3,6 +3,7 @@ import session from 'express-session';
 import path from 'path';
 import CryptoJS from 'crypto-js';
 import { gunzipSync } from 'zlib';
+import { createHmac } from 'crypto';
 import axios from 'axios';
 import { generateNonce } from 'siwe';
 import { config, validateConfig } from './utils/config';
@@ -2612,6 +2613,62 @@ async function startApplication(): Promise<void> {
           // Check if body exists
           if (rawBody.length > 0) {
             logger.info('Raw body (first 100 chars):', rawBody.toString('utf8').substring(0, 100));
+          }
+        
+          // QuickNode Webhook Security Verification
+          const qnSignature = req.headers['x-qn-signature'] as string;
+          const qnNonce = req.headers['x-qn-nonce'] as string;
+          const qnTimestamp = req.headers['x-qn-timestamp'] as string;
+          const quickNodeSecret = config.quicknode.webhookSecret;
+          
+          if (qnSignature && qnNonce && qnTimestamp) {
+            if (!quickNodeSecret) {
+              logger.warn('⚠️ QUICKNODE_SECRET not configured - skipping signature verification');
+            }
+            try {
+              // Create the string to sign: nonce + timestamp + raw_payload (QuickNode format)
+              const bodyString = rawBody.toString('utf8');
+              const stringToSign = qnNonce + qnTimestamp + bodyString;
+              
+              // Only verify signature if secret is configured
+              if (quickNodeSecret) {
+                // Create expected signature using HMAC-SHA256
+                const expectedSignature = createHmac('sha256', quickNodeSecret)
+                  .update(stringToSign)
+                  .digest('hex');
+                
+                logger.info('🔐 QuickNode signature verification:', {
+                  provided: qnSignature,
+                  expected: expectedSignature,
+                  timestamp: qnTimestamp,
+                  nonce: qnNonce,
+                  stringToSign: stringToSign.substring(0, 200) + (stringToSign.length > 200 ? '...' : ''),
+                  stringLength: stringToSign.length,
+                  matches: qnSignature === expectedSignature
+                });
+                
+                if (qnSignature !== expectedSignature) {
+                  logger.error('❌ QuickNode webhook signature verification failed!');
+                  return res.status(401).json({
+                    success: false,
+                    error: 'Webhook signature verification failed',
+                    message: 'Invalid QuickNode signature'
+                  });
+                }
+                
+                logger.info('✅ QuickNode webhook signature verified successfully');
+              }
+              
+            } catch (sigError: any) {
+              logger.error('❌ QuickNode signature verification error:', sigError);
+              return res.status(500).json({
+                success: false,
+                error: 'Signature verification error',
+                message: sigError.message
+              });
+            }
+          } else {
+            logger.warn('⚠️ QuickNode webhook missing security headers');
           }
         
           // Handle the webhook data using manually captured rawBody
