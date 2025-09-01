@@ -28,13 +28,13 @@
         "filename": "assets/clubs/pokemon.txt"
       },
       {
-        "name": "1k Last Names", 
+        "name": "Top 1k Last Names", 
         "handle": "",
         "filename": "assets/clubs/1ksurnames.txt",
         "includeLineNumber": true
       },
           {
-        "name": "1k First Names",
+        "name": "Top 1k First Names",
         "handle": "", 
         "filename": "assets/clubs/1kforenames.txt",
         "includeLineNumber": true
