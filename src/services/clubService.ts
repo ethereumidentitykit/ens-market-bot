@@ -133,7 +133,7 @@ export class ClubService {
           // Collect first few names for debugging
           if (sampleNames.length < 5) {
             const formattedLineNumber = club.includeLineNumber ? currentLineNumber.toLocaleString('en-US') : null;
-            const debugName = formattedLineNumber ? `${normalizedName} #${formattedLineNumber}` : normalizedName;
+            const debugName = formattedLineNumber ? `${normalizedName}: #${formattedLineNumber}` : normalizedName;
             sampleNames.push(debugName);
           }
         }
@@ -207,7 +207,7 @@ export class ClubService {
           
           const formattedLogLineNumber = lineNumber ? lineNumber.toLocaleString('en-US') : null;
           const logMessage = formattedLogLineNumber 
-            ? `File-based match found: ${clubInfo.name} #${formattedLogLineNumber} for ${ensName}`
+            ? `File-based match found: ${clubInfo.name}: #${formattedLogLineNumber} for ${ensName}`
             : `File-based match found: ${clubInfo.name} for ${ensName}`;
           logger.info(`[ClubService] ${logMessage}`);
           
@@ -265,7 +265,7 @@ export class ClubService {
     const clubStrings = clubs.map(club => {
       // Build club name with optional line number (formatted with commas)
       const formattedLineNumber = club.lineNumber ? club.lineNumber.toLocaleString('en-US') : null;
-      const clubNameWithNumber = formattedLineNumber ? `${club.name} #${formattedLineNumber}` : club.name;
+      const clubNameWithNumber = formattedLineNumber ? `${club.name}: #${formattedLineNumber}` : club.name;
       
       if (club.handle && club.handle.trim() !== '') {
         const formatted = `${clubNameWithNumber} ${club.handle}`;
