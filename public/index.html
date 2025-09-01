@@ -285,7 +285,7 @@
                         <button 
                             @click="toggleAutoPosting()"
                             :disabled="loading || !apiToggles.twitterEnabled"
-                            :class="autoPostSettings.enabled ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-500 hover:bg-gray-600'"
+                            :class="autoPostSettings.enabled ? 'bg-green-500 hover:bg-green-600' : 'bg-red-500 hover:bg-red-600'"
                             class="relative inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             <i :class="autoPostSettings.enabled ? 'fas fa-play' : 'fas fa-pause'" class="mr-2"></i>
@@ -296,7 +296,7 @@
                                         <!-- Transaction-Specific Settings Grid -->
                     <div class="space-y-3">
                         <!-- Sales Auto-Posting -->
-                        <div class="bg-white/10 backdrop-blur rounded-lg p-3">
+                        <div :class="autoPostSettings.sales?.enabled ? 'bg-green-500/30 border border-green-500/40' : 'bg-red-500/30 border border-red-500/40'" class="backdrop-blur rounded-lg p-3 transition-colors">
                             <div class="flex items-center justify-between mb-3">
                                 <div class="flex items-center">
                                     <i class="fas fa-dollar-sign text-green-400 mr-2"></i>
@@ -305,7 +305,7 @@
                                 <button 
                                     @click="toggleTransactionAutoPost('sales')"
                                     :disabled="loading || !apiToggles.twitterEnabled"
-                                    :class="autoPostSettings.sales?.enabled ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-500 hover:bg-gray-600'"
+                                    :class="autoPostSettings.sales?.enabled ? 'bg-green-500 hover:bg-green-600' : 'bg-red-500 hover:bg-red-600'"
                                     class="px-2 py-1 rounded text-xs font-medium text-white transition-colors disabled:opacity-50"
                                 >
                                     <span x-text="autoPostSettings.sales?.enabled ? 'ON' : 'OFF'"></span>
@@ -333,7 +333,7 @@
                         </div>
 
                         <!-- Registrations Auto-Posting -->
-                        <div class="bg-white/10 backdrop-blur rounded-lg p-3">
+                        <div :class="autoPostSettings.registrations?.enabled ? 'bg-green-500/30 border border-green-500/40' : 'bg-red-500/30 border border-red-500/40'" class="backdrop-blur rounded-lg p-3 transition-colors">
                             <div class="flex items-center justify-between mb-3">
                                 <div class="flex items-center">
                                     <i class="fas fa-building text-blue-400 mr-2"></i>
@@ -342,7 +342,7 @@
                                 <button 
                                     @click="toggleTransactionAutoPost('registrations')"
                                     :disabled="loading || !apiToggles.twitterEnabled"
-                                    :class="autoPostSettings.registrations?.enabled ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-500 hover:bg-gray-600'"
+                                    :class="autoPostSettings.registrations?.enabled ? 'bg-green-500 hover:bg-green-600' : 'bg-red-500 hover:bg-red-600'"
                                     class="px-2 py-1 rounded text-xs font-medium text-white transition-colors disabled:opacity-50"
                                 >
                                     <span x-text="autoPostSettings.registrations?.enabled ? 'ON' : 'OFF'"></span>
@@ -370,7 +370,7 @@
                         </div>
 
                         <!-- Bids Auto-Posting -->
-                        <div class="bg-white/10 backdrop-blur rounded-lg p-3">
+                        <div :class="autoPostSettings.bids?.enabled ? 'bg-green-500/30 border border-green-500/40' : 'bg-red-500/30 border border-red-500/40'" class="backdrop-blur rounded-lg p-3 transition-colors">
                             <div class="flex items-center justify-between mb-3">
                                 <div class="flex items-center">
                                     <i class="fas fa-hand-paper text-orange-400 mr-2"></i>
@@ -379,7 +379,7 @@
                                 <button 
                                     @click="toggleTransactionAutoPost('bids')"
                                     :disabled="loading || !apiToggles.twitterEnabled"
-                                    :class="autoPostSettings.bids?.enabled ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-500 hover:bg-gray-600'"
+                                    :class="autoPostSettings.bids?.enabled ? 'bg-green-500 hover:bg-green-600' : 'bg-red-500 hover:bg-red-600'"
                                     class="px-2 py-1 rounded text-xs font-medium text-white transition-colors disabled:opacity-50"
                                 >
                                     <span x-text="autoPostSettings.bids?.enabled ? 'ON' : 'OFF'"></span>
