@@ -178,7 +178,7 @@ export interface IDatabaseService {
   insertSale(sale: Omit<ProcessedSale, 'id'>): Promise<number>;
   isSaleProcessed(tokenId: string): Promise<boolean>;
   getRecentSales(limit?: number): Promise<ProcessedSale[]>;
-  getUnpostedSales(limit?: number): Promise<ProcessedSale[]>;
+  getUnpostedSales(limit?: number, maxAgeHours?: number): Promise<ProcessedSale[]>;
   markAsPosted(id: number, tweetId: string): Promise<void>;
   getSystemState(key: string): Promise<string | null>;
   setSystemState(key: string, value: string): Promise<void>;
@@ -212,7 +212,7 @@ export interface IDatabaseService {
   insertBid(bid: Omit<ENSBid, 'id'>): Promise<number>;
   isBidProcessed(bidId: string): Promise<boolean>;
   getRecentBids(limit?: number): Promise<ENSBid[]>;
-  getUnpostedBids(limit?: number): Promise<ENSBid[]>;
+  getUnpostedBids(limit?: number, maxAgeHours?: number): Promise<ENSBid[]>;
   markBidAsPosted(id: number, tweetId: string): Promise<void>;
   
   // Price tier methods

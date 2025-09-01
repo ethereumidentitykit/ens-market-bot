@@ -410,10 +410,10 @@ export class SalesProcessingService {
    * Get sales ready for Twitter posting
    * Returns unposted sales in chronological order
    */
-  async getSalesForPosting(limit: number = 5): Promise<ProcessedSale[]> {
+  async getSalesForPosting(limit: number = 5, maxAgeHours: number = 1): Promise<ProcessedSale[]> {
     try {
-      const unpostedSales = await this.databaseService.getUnpostedSales(limit);
-      logger.info(`Found ${unpostedSales.length} sales ready for posting`);
+      const unpostedSales = await this.databaseService.getUnpostedSales(limit, maxAgeHours);
+      logger.info(`Found ${unpostedSales.length} sales ready for posting (within ${maxAgeHours}h)`);
       return unpostedSales;
     } catch (error: any) {
       logger.error('Failed to get sales for posting:', error.message);

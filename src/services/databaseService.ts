@@ -405,8 +405,15 @@ export class DatabaseService implements IDatabaseService {
   /**
    * Get sales that haven't been posted to Twitter yet
    */
-  async getUnpostedSales(limit: number = 10): Promise<ProcessedSale[]> {
+  async getUnpostedSales(limit: number = 10, maxAgeHours: number = 1): Promise<ProcessedSale[]> {
     if (!this.pool) throw new Error('Database not initialized');
+
+    // Safety fallback: if maxAgeHours is invalid (0, null, undefined, etc.), use 24 hours
+    const safeMaxAgeHours = maxAgeHours && maxAgeHours > 0 ? maxAgeHours : 24;
+    
+    if (safeMaxAgeHours !== maxAgeHours) {
+      logger.warn(`Invalid sales maxAgeHours (${maxAgeHours}), using 24-hour fallback`);
+    }
 
     try {
       const result = await this.pool.query(`
@@ -422,9 +429,12 @@ export class DatabaseService implements IDatabaseService {
           verified_collection as "verifiedCollection"
         FROM processed_sales 
         WHERE posted = FALSE 
+          AND block_timestamp > NOW() - INTERVAL $2 || ' hours'
         ORDER BY block_number DESC 
         LIMIT $1
-      `, [limit]);
+      `, [limit, safeMaxAgeHours]);
+
+      logger.debug(`getUnpostedSales: Found ${result.rows.length} sales within ${safeMaxAgeHours} hours`);
 
       return result.rows.map(row => ({
         ...row,
@@ -1100,16 +1110,26 @@ export class DatabaseService implements IDatabaseService {
   /**
    * Get unposted ENS bids for tweet generation
    */
-  async getUnpostedBids(limit: number = 10): Promise<ENSBid[]> {
+  async getUnpostedBids(limit: number = 10, maxAgeHours: number = 24): Promise<ENSBid[]> {
     if (!this.pool) throw new Error('Database not initialized');
+
+    // Safety fallback: if maxAgeHours is invalid (0, null, undefined, etc.), use 24 hours
+    const safeMaxAgeHours = maxAgeHours && maxAgeHours > 0 ? maxAgeHours : 24;
+    
+    if (safeMaxAgeHours !== maxAgeHours) {
+      logger.warn(`Invalid bids maxAgeHours (${maxAgeHours}), using 24-hour fallback`);
+    }
 
     try {
       const result = await this.pool.query(`
         SELECT * FROM ens_bids 
         WHERE posted = FALSE
+          AND created_at_api > NOW() - INTERVAL $2 || ' hours'
         ORDER BY created_at_api DESC 
         LIMIT $1
-      `, [limit]);
+      `, [limit, safeMaxAgeHours]);
+
+      logger.debug(`getUnpostedBids: Found ${result.rows.length} bids within ${safeMaxAgeHours} hours`);
 
       return this.mapBidRows(result.rows);
     } catch (error: any) {

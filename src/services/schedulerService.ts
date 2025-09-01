@@ -418,15 +418,17 @@ export class SchedulerService {
       // Step 1: Process new bids from Magic Eden API
       const processingResult = await this.bidsProcessingService.processNewBids();
       
-      // Step 2: Auto-post unposted bids if enabled
-      const unpostedBids = await this.databaseService.getUnpostedBids(10);
+      // Load auto-posting settings first to get age limits
+      const autoPostSettings = await this.autoTweetService.getSettings();
+      
+      // Step 2: Auto-post unposted bids if enabled (with age filtering at database level)
+      const unpostedBids = await this.databaseService.getUnpostedBids(10, autoPostSettings.bids.maxAgeHours);
       let bidAutoPostResults: PostResult[] = [];
       
       if (unpostedBids.length > 0) {
-        const autoPostSettings = await this.autoTweetService.getSettings();
         // Check global AND bids-specific toggles
         if (autoPostSettings.enabled && autoPostSettings.bids.enabled) {
-          logger.info(`✋ Auto-posting ${unpostedBids.length} unposted bids...`);
+          logger.info(`✋ Auto-posting ${unpostedBids.length} unposted bids (within ${autoPostSettings.bids.maxAgeHours}h)...`);
           bidAutoPostResults = await this.autoTweetService.processNewBids(unpostedBids, autoPostSettings);
           
           const posted = bidAutoPostResults.filter(r => r.success).length;
@@ -437,6 +439,8 @@ export class SchedulerService {
         } else {
           logger.debug(`✋ Skipping bids auto-posting - Global: ${autoPostSettings.enabled}, Bids: ${autoPostSettings.bids.enabled}`);
         }
+      } else {
+        logger.debug(`✋ No unposted bids found within ${autoPostSettings.bids.maxAgeHours} hours`);
       }
 
       const duration = Date.now() - startTime.getTime();
