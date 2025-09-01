@@ -18,24 +18,27 @@
   ],
   "fileBasedClubs": [
           {
-        "name": "Pokemon Club",
+        "name": "Pokemon",
         "handle": "@pokemonens",
-        "filename": "assets/clubs/Pokemon ENS"
+        "filename": "assets/clubs/pokemon.txt"
       },
-    {
-      "name": "Surname Club", 
-      "handle": "@SurnameENS",
-      "filename": "assets/clubs/1ksurnames.txt"
-    },
+      {
+        "name": "1k Last Names", 
+        "handle": "@SurnameENS",
+        "filename": "assets/clubs/1ksurnames.txt",
+        "includeLineNumber": true
+      },
           {
-        "name": "Top 1K First Names",
+        "name": "1k First Names",
         "handle": "", 
-        "filename": "assets/clubs/1kforenames.txt"
+        "filename": "assets/clubs/1kforenames.txt",
+        "includeLineNumber": true
       },
-    {
-      "name": "PrePunk",
-      "handle": "@PrePunkENS",
-      "filename": "assets/clubs/prepunk.txt"
-    }
+      {
+        "name": "PrePunks",
+        "handle": "@PrePunkENS",
+        "filename": "assets/clubs/prepunk.txt",
+        "includeLineNumber": true
+      }
   ]
 }

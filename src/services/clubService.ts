@@ -5,6 +5,7 @@ import * as path from 'path';
 export interface ClubInfo {
   name: string;
   handle: string;
+  lineNumber?: number; // Optional line number for ranked clubs
 }
 
 export interface PatternClub {
@@ -17,6 +18,7 @@ export interface FileBasedClub {
   name: string;
   handle: string;
   filename: string;
+  includeLineNumber?: boolean; // Optional: include line number for ranked clubs
 }
 
 export interface ClubConfig {
@@ -36,6 +38,7 @@ export class ClubService {
   // File-based clubs (loaded from config)  
   private clubDataSets: Map<string, Set<string>> = new Map();
   private clubMetadata: Map<string, ClubInfo> = new Map();
+  private clubLineNumbers: Map<string, Map<string, number>> = new Map(); // Maps club -> (name -> lineNumber)
   private initialized = false;
 
   constructor() {
@@ -107,10 +110,14 @@ export class ClubService {
       // Parse file (handle both .txt and .csv formats)
       const lines = fileContent.split('\n');
       const sampleNames: string[] = [];
+      const lineNumberMap = new Map<string, number>();
+      let currentLineNumber = 0;
       
       for (const line of lines) {
         const trimmed = line.trim();
         if (trimmed && !trimmed.startsWith('#')) { // Skip empty lines and comments
+          currentLineNumber++; // Track actual data line numbers (excluding empty/comment lines)
+          
           // Handle CSV files (take first column) or plain text files
           const ensName = trimmed.includes(',') ? trimmed.split(',')[0].trim() : trimmed;
           
@@ -118,9 +125,16 @@ export class ClubService {
           const normalizedName = ensName.endsWith('.eth') ? ensName.toLowerCase() : `${ensName.toLowerCase()}.eth`;
           ensNames.add(normalizedName);
           
+          // Store line number if this club uses line number tracking
+          if (club.includeLineNumber) {
+            lineNumberMap.set(normalizedName, currentLineNumber);
+          }
+          
           // Collect first few names for debugging
           if (sampleNames.length < 5) {
-            sampleNames.push(normalizedName);
+            const formattedLineNumber = club.includeLineNumber ? currentLineNumber.toLocaleString('en-US') : null;
+            const debugName = formattedLineNumber ? `${normalizedName} #${formattedLineNumber}` : normalizedName;
+            sampleNames.push(debugName);
           }
         }
       }
@@ -132,6 +146,12 @@ export class ClubService {
         name: club.name,
         handle: club.handle
       });
+      
+      // Store line number mapping if enabled
+      if (club.includeLineNumber && lineNumberMap.size > 0) {
+        this.clubLineNumbers.set(clubKey, lineNumberMap);
+        logger.info(`[ClubService] Line number tracking enabled for ${club.name} (${lineNumberMap.size} entries)`);
+      }
 
       logger.info(`Loaded ${ensNames.size} names for ${club.name} from ${filePath}`);
       logger.info(`[ClubService] Sample names from ${club.name}: [${sampleNames.join(', ')}]`);
@@ -175,8 +195,23 @@ export class ClubService {
       if (nameSet.has(normalizedEnsName)) {
         const clubInfo = this.clubMetadata.get(clubKey);
         if (clubInfo) {
-          logger.info(`[ClubService] File-based match found: ${clubInfo.name} for ${ensName}`);
-          clubs.push(clubInfo);
+          // Check if this club has line number tracking
+          const lineNumberMap = this.clubLineNumbers.get(clubKey);
+          const lineNumber = lineNumberMap?.get(normalizedEnsName);
+          
+          const clubInfoWithLine: ClubInfo = {
+            name: clubInfo.name,
+            handle: clubInfo.handle,
+            ...(lineNumber && { lineNumber })
+          };
+          
+          const formattedLogLineNumber = lineNumber ? lineNumber.toLocaleString('en-US') : null;
+          const logMessage = formattedLogLineNumber 
+            ? `File-based match found: ${clubInfo.name} #${formattedLogLineNumber} for ${ensName}`
+            : `File-based match found: ${clubInfo.name} for ${ensName}`;
+          logger.info(`[ClubService] ${logMessage}`);
+          
+          clubs.push(clubInfoWithLine);
         }
       } else {
         logger.info(`[ClubService] No match in ${clubKey} for ${normalizedEnsName}`);
@@ -228,13 +263,17 @@ export class ClubService {
     }
     
     const clubStrings = clubs.map(club => {
+      // Build club name with optional line number (formatted with commas)
+      const formattedLineNumber = club.lineNumber ? club.lineNumber.toLocaleString('en-US') : null;
+      const clubNameWithNumber = formattedLineNumber ? `${club.name} #${formattedLineNumber}` : club.name;
+      
       if (club.handle && club.handle.trim() !== '') {
-        const formatted = `${club.name} ${club.handle}`;
+        const formatted = `${clubNameWithNumber} ${club.handle}`;
         logger.info(`[ClubService] Formatted club with handle: ${formatted}`);
         return formatted;
       } else {
-        logger.info(`[ClubService] Formatted club without handle: ${club.name}`);
-        return club.name;
+        logger.info(`[ClubService] Formatted club without handle: ${clubNameWithNumber}`);
+        return clubNameWithNumber;
       }
     });
     
@@ -256,6 +295,7 @@ export class ClubService {
   public getStats(): {
     patternClubs: number;
     fileBasedClubs: number;
+    clubsWithLineNumbers: number;
     totalNamesLoaded: number;
   } {
     let totalNames = 0;
@@ -266,6 +306,7 @@ export class ClubService {
     return {
       patternClubs: this.patternClubs.length,
       fileBasedClubs: this.clubDataSets.size,
+      clubsWithLineNumbers: this.clubLineNumbers.size,
       totalNamesLoaded: totalNames
     };
   }
