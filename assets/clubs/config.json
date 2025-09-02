@@ -3,7 +3,7 @@
     {
       "id": "999_club",
       "name": "999",
-      "handle": "@999club",
+      "handle": "@ens999club",
       "pattern": "^\\d{3}\\.eth$"
     },
     {
