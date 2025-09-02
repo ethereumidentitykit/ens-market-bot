@@ -173,6 +173,20 @@ export class QuickNodeSalesService {
         return null;
       }
 
+      // Find the seller: the recipient of the largest ETH payment (main sale amount)
+      // In Seaport, the seller gets the main payment, marketplace gets fees
+      const mainPayment = ethPayments.reduce((max, payment) => 
+        BigInt(payment.amount) > BigInt(max.amount) ? payment : max
+      );
+      
+      const sellerAddress = mainPayment.recipient.toLowerCase();
+      const buyerAddress = order.recipient.toLowerCase();
+
+      // Validation: buyer and seller should be different
+      if (buyerAddress === sellerAddress) {
+        logger.warn(`⚠️ Buyer and seller are the same address: ${buyerAddress} - this may indicate a self-transfer or parsing error`);
+      }
+
       // Convert hex block number to decimal
       const blockNumber = parseInt(order.blockNumber, 16);
       
@@ -184,8 +198,8 @@ export class QuickNodeSalesService {
         transactionHash: order.txHash,
         contractAddress: ensToken.token.toLowerCase(),
         tokenId: ensToken.identifier,
-        buyerAddress: order.recipient.toLowerCase(),
-        sellerAddress: order.offerer.toLowerCase(),
+        buyerAddress,
+        sellerAddress,
         priceEth,
         blockNumber,
         blockTimestamp
