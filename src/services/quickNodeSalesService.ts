@@ -231,7 +231,9 @@ export class QuickNodeSalesService {
       let nftImage: string | undefined;
       let nftDescription: string | undefined;
       let collectionName: string | undefined;
+      let openSeaSuccess = false;
 
+      logger.info(`🔍 Enriching ${saleData.tokenId} - trying OpenSea first...`);
       try {
         const openSeaData = await this.openSeaService.getSimplifiedMetadata(
           saleData.contractAddress,
@@ -243,14 +245,18 @@ export class QuickNodeSalesService {
           nftImage = openSeaData.image;
           nftDescription = openSeaData.description;
           collectionName = openSeaData.collection;
-          logger.debug(`✅ OpenSea metadata retrieved for ${nftName}`);
+          openSeaSuccess = true;
+          logger.info(`✅ OpenSea metadata success: ${nftName} (${collectionName})`);
+        } else {
+          logger.warn(`⚠️ OpenSea returned null for ${saleData.tokenId}`);
         }
       } catch (error: any) {
-        logger.warn(`OpenSea metadata failed for ${saleData.tokenId}: ${error.message}`);
+        logger.warn(`❌ OpenSea metadata failed for ${saleData.tokenId}: ${error.message}`);
       }
 
       // 3. Fallback to ENS Metadata service if OpenSea failed
       if (!nftName || !nftImage) {
+        logger.warn(`⚠️ Falling back to ENS Metadata API for ${saleData.tokenId} (OpenSea incomplete)`);
         try {
           const ensData = await this.ensMetadataService.getMetadata(
             saleData.contractAddress,
@@ -258,13 +264,23 @@ export class QuickNodeSalesService {
           );
           
           if (ensData) {
+            const beforeName = nftName;
+            const beforeImage = nftImage;
             nftName = nftName || ensData.name;
             nftImage = nftImage || ensData.image;
             nftDescription = nftDescription || ensData.description;
-            logger.debug(`✅ ENS metadata retrieved as fallback for ${nftName}`);
+            
+            const fieldsFromEns = [];
+            if (!beforeName && nftName) fieldsFromEns.push('name');
+            if (!beforeImage && nftImage) fieldsFromEns.push('image');
+            if (nftDescription && !openSeaSuccess) fieldsFromEns.push('description');
+            
+            logger.info(`✅ ENS metadata fallback success: ${nftName} (provided: ${fieldsFromEns.join(', ')})`);
+          } else {
+            logger.error(`❌ ENS metadata fallback returned null for ${saleData.tokenId}`);
           }
         } catch (error: any) {
-          logger.warn(`ENS metadata fallback failed for ${saleData.tokenId}: ${error.message}`);
+          logger.error(`❌ ENS metadata fallback failed for ${saleData.tokenId}: ${error.message}`);
         }
       }
 
@@ -274,7 +290,11 @@ export class QuickNodeSalesService {
         return null;
       }
 
-      // 5. Build ProcessedSale object
+      // 5. Log enrichment summary
+      const enrichmentSource = openSeaSuccess ? 'OpenSea' : 'ENS Metadata (fallback)';
+      logger.info(`📋 Enrichment complete for ${nftName}: source=${enrichmentSource}, hasImage=${!!nftImage}, hasDescription=${!!nftDescription}, priceUSD=${priceUsd || 'N/A'}`);
+
+      // 6. Build ProcessedSale object
       const processedSale: Omit<ProcessedSale, 'id'> = {
         transactionHash: saleData.transactionHash,
         contractAddress: saleData.contractAddress,
