@@ -214,22 +214,14 @@ export class QuickNodeSalesService {
     try {
       logger.debug(`Enriching sale data for token ${saleData.tokenId}`);
 
-      // 1. Get USD price using Alchemy service
-      let priceUsd: string | undefined;
-      try {
-        const ethPriceUsd = await this.alchemyService.getETHPriceUSD();
-        if (ethPriceUsd) {
-          const usdValue = parseFloat(saleData.priceEth) * ethPriceUsd;
-          priceUsd = usdValue.toFixed(2);
-        }
-      } catch (error: any) {
-        logger.warn(`Failed to get USD price: ${error.message}`);
-      }
+      // 1. Get USD price using Alchemy service (with caching and $4000 fallback)
+      const ethPriceUsd = await this.alchemyService.getETHPriceUSD();
+      const usdValue = parseFloat(saleData.priceEth) * ethPriceUsd!; // ethPriceUsd never null due to fallback
+      const priceUsd = usdValue.toFixed(2);
 
       // 2. Try OpenSea first for metadata
       let nftName: string | undefined;
       let nftImage: string | undefined;
-      let nftDescription: string | undefined;
       let collectionName: string | undefined;
       let openSeaSuccess = false;
 
@@ -243,7 +235,6 @@ export class QuickNodeSalesService {
         if (openSeaData) {
           nftName = openSeaData.name;
           nftImage = openSeaData.image;
-          nftDescription = openSeaData.description;
           collectionName = openSeaData.collection;
           openSeaSuccess = true;
           logger.info(`✅ OpenSea metadata success: ${nftName} (${collectionName})`);
@@ -268,12 +259,10 @@ export class QuickNodeSalesService {
             const beforeImage = nftImage;
             nftName = nftName || ensData.name;
             nftImage = nftImage || ensData.image;
-            nftDescription = nftDescription || ensData.description;
             
             const fieldsFromEns = [];
             if (!beforeName && nftName) fieldsFromEns.push('name');
             if (!beforeImage && nftImage) fieldsFromEns.push('image');
-            if (nftDescription && !openSeaSuccess) fieldsFromEns.push('description');
             
             logger.info(`✅ ENS metadata fallback success: ${nftName} (provided: ${fieldsFromEns.join(', ')})`);
           } else {
@@ -292,7 +281,7 @@ export class QuickNodeSalesService {
 
       // 5. Log enrichment summary
       const enrichmentSource = openSeaSuccess ? 'OpenSea' : 'ENS Metadata (fallback)';
-      logger.info(`📋 Enrichment complete for ${nftName}: source=${enrichmentSource}, hasImage=${!!nftImage}, hasDescription=${!!nftDescription}, priceUSD=${priceUsd || 'N/A'}`);
+      logger.info(`📋 Enrichment complete for ${nftName}: metadata=${enrichmentSource}, hasImage=${!!nftImage}, priceUSD=$${priceUsd} (Alchemy)`);
 
       // 6. Build ProcessedSale object
       const processedSale: Omit<ProcessedSale, 'id'> = {
@@ -308,11 +297,11 @@ export class QuickNodeSalesService {
         blockTimestamp: saleData.blockTimestamp,
         processedAt: new Date().toISOString(),
         posted: false,
-        // Enriched metadata
+        // Enriched metadata (no description)
         collectionName: collectionName || 'ENS',
         nftName,
         nftImage,
-        nftDescription,
+        nftDescription: undefined, // Explicitly don't store description
         verifiedCollection: true // ENS is always verified
       };
 
