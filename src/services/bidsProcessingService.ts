@@ -359,16 +359,21 @@ export class BidsProcessingService {
       // Apply club-aware logic using ClubService
       const clubs = this.clubService.getClubInfo(ensName);
       
+      logger.info(`🔍 BID FILTER: ${ensName} - clubs detected: [${clubs.map(c => c.name).join(', ') || 'none'}]`);
+      
       // Check for premium clubs with special thresholds (in priority order)
       for (const club of clubs) {
         if (club.id === '999_club') {
+          logger.info(`🎯 BID FILTER: ${ensName} - 999 Club detected, minimum: ${club999Min} ETH`);
           return parseFloat(club999Min);
         } else if (club.id === '10k_club') {
+          logger.info(`🎯 BID FILTER: ${ensName} - 10k Club detected, minimum: ${club10kMin} ETH`);
           return parseFloat(club10kMin);
         }
       }
       
       // Default minimum for other names
+      logger.info(`🎯 BID FILTER: ${ensName} - default minimum: ${defaultMin} ETH`);
       return parseFloat(defaultMin);
 
     } catch (error: any) {
