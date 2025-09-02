@@ -955,6 +955,24 @@ export class DatabaseService implements IDatabaseService {
     }
 
     try {
+      // Add debug query to see what's in the database
+      const debugResult = await this.pool.query(`
+        SELECT id, ens_name, block_timestamp, posted, 
+               NOW() as current_time,
+               NOW() - INTERVAL '1 hour' * $1 as cutoff_time,
+               block_timestamp > NOW() - INTERVAL '1 hour' * $1 as within_range
+        FROM ens_registrations 
+        WHERE posted = FALSE 
+        ORDER BY id DESC 
+        LIMIT 3
+      `, [safeMaxAgeHours]);
+      
+      logger.info(`DEBUG: Last 3 unposted registrations:`);
+      debugResult.rows.forEach(row => {
+        logger.info(`  ID ${row.id}: ${row.ens_name}, posted=${row.posted}, timestamp=${row.block_timestamp}, within_range=${row.within_range}`);
+        logger.info(`    Current: ${row.current_time}, Cutoff: ${row.cutoff_time}`);
+      });
+
       const result = await this.pool.query(`
         SELECT * FROM ens_registrations 
         WHERE posted = FALSE 
