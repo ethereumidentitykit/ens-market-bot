@@ -129,6 +129,41 @@ export class OpenSeaService {
   }
 
   /**
+   * Get token owner from OpenSea API
+   * @param contractAddress - NFT contract address
+   * @param tokenId - Token ID (decimal format)
+   * @returns Owner address or null if failed/not found
+   */
+  async getTokenOwner(contractAddress: string, tokenId: string): Promise<string | null> {
+    try {
+      const nft = await this.getNFTMetadata(contractAddress, tokenId);
+      
+      if (!nft || !nft.owners || nft.owners.length === 0) {
+        logger.debug(`No owners found in OpenSea data for ${contractAddress}/${tokenId}`);
+        return null;
+      }
+
+      // For ENS tokens, there should typically be only one owner
+      // If multiple owners, take the first one with quantity > 0
+      const primaryOwner = nft.owners.find(owner => owner.quantity > 0);
+      
+      if (primaryOwner) {
+        logger.debug(`Found owner via OpenSea: ${primaryOwner.address} (quantity: ${primaryOwner.quantity})`);
+        return primaryOwner.address;
+      }
+
+      // Fallback to first owner if no quantity info
+      const firstOwner = nft.owners[0];
+      logger.debug(`Using first owner from OpenSea: ${firstOwner.address}`);
+      return firstOwner.address;
+
+    } catch (error: any) {
+      logger.warn(`Failed to get token owner from OpenSea for ${contractAddress}/${tokenId}: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
    * Get simplified metadata for our use case
    * @param contractAddress - NFT contract address  
    * @param tokenId - Token ID (decimal format)

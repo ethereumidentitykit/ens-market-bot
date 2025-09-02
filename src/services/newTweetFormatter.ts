@@ -6,6 +6,7 @@ import { ImageData } from '../types/imageTypes';
 import { PuppeteerImageService } from './puppeteerImageService';
 import { IDatabaseService } from '../types';
 import { AlchemyService } from './alchemyService';
+import { OpenSeaService } from './openSeaService';
 import { ClubService } from './clubService';
 
 export interface GeneratedTweet {
@@ -33,7 +34,8 @@ export class NewTweetFormatter {
 
   constructor(
     private databaseService?: IDatabaseService,
-    private alchemyService?: AlchemyService
+    private alchemyService?: AlchemyService,
+    private openSeaService?: OpenSeaService
   ) {
     logger.info('[NewTweetFormatter] Constructor called - ClubService should be initialized');
     // Add a small delay to let ClubService initialize, then check status
@@ -408,18 +410,41 @@ export class NewTweetFormatter {
     const bidderHandle = this.getDisplayHandle(bidderAccount, bid.makerAddress);
     const bidderLine = `Bidder: ${bidderHandle}`;
     
-    // Owner line (fetch the current NFT owner)
+    // Owner line (fetch the current NFT owner using OpenSea first, Alchemy fallback)
     let currentOwnerLine = 'Owner: Unknown';
-    if (this.alchemyService && bid.tokenId && bid.contractAddress) {
-      try {
-        const owners = await this.alchemyService.getOwnersForToken(bid.contractAddress, bid.tokenId);
-        if (owners && owners.length > 0) {
-          const ownerAccount = await this.getAccountData(owners[0]);
-          const ownerHandle = this.getDisplayHandle(ownerAccount, owners[0]);
-          currentOwnerLine = `Owner: ${ownerHandle}`;
+    if (bid.tokenId && bid.contractAddress) {
+      let ownerAddress: string | null = null;
+      
+      // Try OpenSea first
+      if (this.openSeaService) {
+        try {
+          ownerAddress = await this.openSeaService.getTokenOwner(bid.contractAddress, bid.tokenId);
+        } catch (error: any) {
+          logger.warn('[OpenSea API] Failed to fetch Owner for bid tweet:', error.message);
         }
-      } catch (error: any) {
-        logger.warn('[Alchemy API] Failed to fetch Owner for bid tweet:', error.message);
+      }
+      
+      // Fallback to Alchemy
+      if (!ownerAddress && this.alchemyService) {
+        try {
+          const owners = await this.alchemyService.getOwnersForToken(bid.contractAddress, bid.tokenId);
+          if (owners && owners.length > 0) {
+            ownerAddress = owners[0];
+          }
+        } catch (error: any) {
+          logger.warn('[Alchemy API] Failed to fetch Owner for bid tweet:', error.message);
+        }
+      }
+      
+      // Get display handle if owner found
+      if (ownerAddress) {
+        try {
+          const ownerAccount = await this.getAccountData(ownerAddress);
+          const ownerHandle = this.getDisplayHandle(ownerAccount, ownerAddress);
+          currentOwnerLine = `Owner: ${ownerHandle}`;
+        } catch (error: any) {
+          logger.warn('Failed to get owner display handle:', error.message);
+        }
       }
     }
     
@@ -767,30 +792,57 @@ export class NewTweetFormatter {
     const bidderHandle = this.getImageDisplayHandle(bidderAccount, bid.makerAddress);
     const bidderAvatar = bidderAccount?.avatar || bidderAccount?.records?.avatar;
     
-    // Try to get Owner using Alchemy API
+    // Try to get Owner using OpenSea API first, then Alchemy fallback
     let currentOwnerEns = '';
     let currentOwnerAvatar: string | undefined;
     
-    if (this.alchemyService && bid.tokenId && bid.contractAddress) {
-      try {
-        logger.debug(`Looking up Owner for token ${bid.tokenId}`);
-        const owners = await this.alchemyService.getOwnersForToken(bid.contractAddress, bid.tokenId);
-        
-        if (owners.length > 0) {
-          const ownerAddress = owners[0]; // ENS tokens typically have only one owner
-          logger.debug(`Found Owner: ${ownerAddress}`);
+    if (bid.tokenId && bid.contractAddress) {
+      let ownerAddress: string | null = null;
+      
+      // Try OpenSea first
+      if (this.openSeaService) {
+        try {
+          logger.debug(`Looking up Owner for token ${bid.tokenId} via OpenSea`);
+          ownerAddress = await this.openSeaService.getTokenOwner(bid.contractAddress, bid.tokenId);
           
-          // Get profile info for the owner (ENS only for images)
+          if (ownerAddress) {
+            logger.debug(`Found Owner via OpenSea: ${ownerAddress}`);
+          } else {
+            logger.debug(`No owner found via OpenSea for token ${bid.tokenId}`);
+          }
+        } catch (error: any) {
+          logger.warn(`[OpenSea API] Failed to get Owner for token ${bid.tokenId}:`, error.message);
+        }
+      }
+      
+      // Fallback to Alchemy if OpenSea failed
+      if (!ownerAddress && this.alchemyService) {
+        try {
+          logger.debug(`Falling back to Alchemy for Owner lookup of token ${bid.tokenId}`);
+          const owners = await this.alchemyService.getOwnersForToken(bid.contractAddress, bid.tokenId);
+          
+          if (owners.length > 0) {
+            ownerAddress = owners[0]; // ENS tokens typically have only one owner
+            logger.debug(`Found Owner via Alchemy fallback: ${ownerAddress}`);
+          } else {
+            logger.debug(`No owners found via Alchemy for token ${bid.tokenId}`);
+          }
+        } catch (error: any) {
+          logger.warn(`[Alchemy API] Failed to get Owner for token ${bid.tokenId}:`, error.message);
+        }
+      }
+      
+      // If we found an owner, get their profile info
+      if (ownerAddress) {
+        try {
           const ownerAccount = await this.getAccountData(ownerAddress);
           currentOwnerEns = this.getImageDisplayHandle(ownerAccount, ownerAddress);
           currentOwnerAvatar = ownerAccount?.avatar || ownerAccount?.records?.avatar;
           
           logger.debug(`Owner display: ${currentOwnerEns}, Avatar URL: ${currentOwnerAvatar}`);
-        } else {
-          logger.debug(`No owners found for token ${bid.tokenId}`);
+        } catch (error: any) {
+          logger.warn(`Failed to get profile data for owner ${ownerAddress}:`, error.message);
         }
-      } catch (error: any) {
-        logger.warn(`[Alchemy API] Failed to get Owner for token ${bid.tokenId}:`, error.message);
       }
     }
     
@@ -1185,17 +1237,40 @@ export class NewTweetFormatter {
     const duration = this.calculateBidDuration(bid.validFrom, bid.validUntil);
     const visionUrl = this.buildVisionioUrl(ensName);
     
-    // Fetch Owner for breakdown (same logic as in tweet text)
+    // Fetch Owner for breakdown (using OpenSea first, Alchemy fallback)
     let currentOwnerHandle = 'Unknown';
-    if (this.alchemyService && bid.tokenId && bid.contractAddress) {
-      try {
-        const owners = await this.alchemyService.getOwnersForToken(bid.contractAddress, bid.tokenId);
-        if (owners && owners.length > 0) {
-          const ownerAccount = await this.getAccountData(owners[0]);
-          currentOwnerHandle = this.getDisplayHandle(ownerAccount, owners[0]);
+    if (bid.tokenId && bid.contractAddress) {
+      let ownerAddress: string | null = null;
+      
+      // Try OpenSea first
+      if (this.openSeaService) {
+        try {
+          ownerAddress = await this.openSeaService.getTokenOwner(bid.contractAddress, bid.tokenId);
+        } catch (error: any) {
+          logger.warn('[OpenSea API] Failed to fetch Owner for breakdown:', error.message);
         }
-      } catch (error: any) {
-        logger.warn('[Alchemy API] Failed to fetch Owner for breakdown:', error.message);
+      }
+      
+      // Fallback to Alchemy
+      if (!ownerAddress && this.alchemyService) {
+        try {
+          const owners = await this.alchemyService.getOwnersForToken(bid.contractAddress, bid.tokenId);
+          if (owners && owners.length > 0) {
+            ownerAddress = owners[0];
+          }
+        } catch (error: any) {
+          logger.warn('[Alchemy API] Failed to fetch Owner for breakdown:', error.message);
+        }
+      }
+      
+      // Get display handle if owner found
+      if (ownerAddress) {
+        try {
+          const ownerAccount = await this.getAccountData(ownerAddress);
+          currentOwnerHandle = this.getDisplayHandle(ownerAccount, ownerAddress);
+        } catch (error: any) {
+          logger.warn('Failed to get owner display handle for breakdown:', error.message);
+        }
       }
     }
     

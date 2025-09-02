@@ -53,6 +53,7 @@ async function startApplication(): Promise<void> {
     // Initialize services
     const moralisService = new MoralisService();
     const alchemyService = new AlchemyService();
+    const openSeaService = new OpenSeaService();
     
     // Initialize PostgreSQL database service
     const databaseService: IDatabaseService = new DatabaseService();
@@ -61,12 +62,11 @@ async function startApplication(): Promise<void> {
     const magicEdenService = new MagicEdenService();
     const bidsProcessingService = new BidsProcessingService(magicEdenService, databaseService, alchemyService);
     const twitterService = new TwitterService();
-    const newTweetFormatter = new NewTweetFormatter(databaseService, alchemyService);
+    const newTweetFormatter = new NewTweetFormatter(databaseService, alchemyService, openSeaService);
     const rateLimitService = new RateLimitService(databaseService);
     const ethIdentityService = new ENSWorkerService();
     const worldTimeService = new WorldTimeService();
     const siweService = new SiweService(databaseService);
-    const openSeaService = new OpenSeaService();
     const ensMetadataService = new ENSMetadataService();
     const quickNodeSalesService = new QuickNodeSalesService(databaseService, openSeaService, ensMetadataService, alchemyService);
     const autoTweetService = new AutoTweetService(newTweetFormatter, twitterService, rateLimitService, databaseService, worldTimeService);
