@@ -403,6 +403,46 @@ export class DatabaseService implements IDatabaseService {
   }
 
   /**
+   * Get a specific sale by ID
+   */
+  async getSaleById(id: number): Promise<ProcessedSale | null> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        SELECT 
+          id, transaction_hash as "transactionHash", contract_address as "contractAddress",
+          token_id as "tokenId", marketplace, buyer_address as "buyerAddress",
+          seller_address as "sellerAddress", price_eth as "priceEth", price_usd as "priceUsd",
+          block_number as "blockNumber", block_timestamp as "blockTimestamp",
+          processed_at as "processedAt", tweet_id as "tweetId", posted,
+          collection_name as "collectionName", collection_logo as "collectionLogo",
+          nft_name as "nftName", nft_image as "nftImage", nft_description as "nftDescription",
+          marketplace_logo as "marketplaceLogo", current_usd_value as "currentUsdValue",
+          verified_collection as "verifiedCollection"
+        FROM processed_sales 
+        WHERE id = $1
+      `, [id]);
+
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      const row = result.rows[0];
+      return {
+        ...row,
+        priceEth: row.priceEth.toString(),
+        priceUsd: row.priceUsd ? row.priceUsd.toString() : undefined,
+        blockTimestamp: row.blockTimestamp.toISOString(),
+        processedAt: row.processedAt.toISOString()
+      };
+    } catch (error: any) {
+      logger.error('Failed to get sale by ID:', error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Get sales that haven't been posted to Twitter yet
    */
   async getUnpostedSales(limit: number = 10, maxAgeHours: number = 1): Promise<ProcessedSale[]> {

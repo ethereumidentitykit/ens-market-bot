@@ -184,6 +184,7 @@ export interface IDatabaseService {
   insertSale(sale: Omit<ProcessedSale, 'id'>): Promise<number>;
   isSaleProcessed(tokenId: string): Promise<boolean>;
   getRecentSales(limit?: number): Promise<ProcessedSale[]>;
+  getSaleById(id: number): Promise<ProcessedSale | null>;
   getUnpostedSales(limit?: number, maxAgeHours?: number): Promise<ProcessedSale[]>;
   markAsPosted(id: number, tweetId: string): Promise<void>;
   getSystemState(key: string): Promise<string | null>;

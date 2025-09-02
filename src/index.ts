@@ -28,6 +28,7 @@ import { SiweService } from './services/siweService';
 import { QuickNodeSalesService } from './services/quickNodeSalesService';
 import { OpenSeaService } from './services/openSeaService';
 import { ENSMetadataService } from './services/ensMetadataService';
+import { DatabaseEventService } from './services/databaseEventService';
 import pgSession from 'connect-pg-simple';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -70,6 +71,13 @@ async function startApplication(): Promise<void> {
     const quickNodeSalesService = new QuickNodeSalesService(databaseService, openSeaService, ensMetadataService, alchemyService);
     const autoTweetService = new AutoTweetService(newTweetFormatter, twitterService, rateLimitService, databaseService, worldTimeService);
     const schedulerService = new SchedulerService(salesProcessingService, bidsProcessingService, autoTweetService, databaseService);
+    
+    // Initialize database event service for real-time processing
+    const databaseEventService = new DatabaseEventService(
+      autoTweetService,
+      databaseService,
+      process.env.DATABASE_URL!
+    );
 
     // Initialize database
     await databaseService.initialize();
@@ -845,6 +853,24 @@ async function startApplication(): Promise<void> {
         });
       } catch (error: any) {
         logger.error('Failed to check database triggers:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.get('/api/admin/event-service-status', requireAuth, (req, res) => {
+      try {
+        const status = databaseEventService.getStatus();
+        
+        res.json({
+          success: true,
+          eventService: status,
+          timestamp: new Date().toISOString()
+        });
+      } catch (error: any) {
+        logger.error('Failed to get event service status:', error.message);
         res.status(500).json({
           success: false,
           error: error.message
@@ -2846,15 +2872,26 @@ async function startApplication(): Promise<void> {
     });
 
     // Start server
-    const server = app.listen(config.port, () => {
+    const server = app.listen(config.port, async () => {
       logger.info(`Server running on port ${config.port}`);
       logger.info(`Environment: ${config.nodeEnv}`);
       logger.info(`Monitoring contracts: ${config.contracts.join(', ')}`);
+      
+      // Start database event service for real-time processing
+      try {
+        await databaseEventService.start();
+        logger.info('🚀 Real-time database event processing started');
+      } catch (error: any) {
+        logger.error('Failed to start database event service:', error.message);
+      }
     });
 
     // Graceful shutdown handling
     const shutdown = async (): Promise<void> => {
       logger.info('Shutting down gracefully...');
+      
+      // Stop database event service first
+      await databaseEventService.stop();
       
       // Gracefully stop scheduler without persisting state (allows resume after restart)
       await schedulerService.gracefulShutdown();
