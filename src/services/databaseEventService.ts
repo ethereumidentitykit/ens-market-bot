@@ -323,11 +323,24 @@ export class DatabaseEventService {
     try {
       logger.info('🔍 Checking for unposted sales from previous session...');
 
-      // Get the 5 newest unposted sales (most recent first)
-      const unpostedSales = await this.databaseService.getUnpostedSales(5, 24); // 24 hour window
+      // Get auto-post settings to use the same time filters
+      const autoPostSettings = await this.autoTweetService.getSettings();
+      
+      logger.info(`🔍 Using auto-posting time window: ${autoPostSettings.sales.maxAgeHours} hours (enabled: ${autoPostSettings.enabled}/${autoPostSettings.sales.enabled})`);
+      
+      // Get the 5 newest unposted sales using auto-posting time window
+      const unpostedSales = await this.databaseService.getUnpostedSales(5, autoPostSettings.sales.maxAgeHours);
+
+      // Debug: Also check without time filter to see if there are ANY unposted sales
+      const allUnpostedSales = await this.databaseService.getUnpostedSales(5, 999); // Very large time window
+      logger.info(`🔍 Debug: Found ${allUnpostedSales.length} unposted sales total (any age), ${unpostedSales.length} within ${autoPostSettings.sales.maxAgeHours}h window`);
 
       if (unpostedSales.length === 0) {
-        logger.info('✅ No unposted sales found - clean startup');
+        if (allUnpostedSales.length > 0) {
+          logger.info(`⏰ Found ${allUnpostedSales.length} unposted sales but they're older than ${autoPostSettings.sales.maxAgeHours}h - outside auto-posting window`);
+        } else {
+          logger.info('✅ No unposted sales found - clean startup');
+        }
         return;
       }
 
