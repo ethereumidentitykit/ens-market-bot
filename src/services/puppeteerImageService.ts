@@ -405,13 +405,14 @@ export class PuppeteerImageService {
     
     // Replace emojis in text fields with SVG elements (with error handling)
     let ensNameWithEmojis = data.ensName;
-    let sellerEnsWithEmojis = data.sellerEns || 'seller';
+    // When owner/seller lookup fails, show 'unknown' for all transaction types
+    let sellerEnsWithEmojis = data.sellerEns || 'unknown';
     let buyerEnsWithEmojis = data.buyerEns || 'buyer';
     
-    logger.info(`🏷️ Processing emojis in names:`);
+        logger.info(`🏷️ Processing emojis in names:`);
     logger.info(`  📛 ENS: "${data.ensName}"`);
-    logger.info(`  👤 Seller: "${data.sellerEns || 'seller'}"`);  
-    logger.info(`  🛒 Buyer: "${data.buyerEns || 'buyer'}"`);
+    logger.info(`  👤 Seller: "${data.sellerEns || 'unknown'}"`);  
+    logger.info(`  🛒 Buyer: "${data.buyerEns || 'buyer'}"`);  
     
     try {
       ensNameWithEmojis = await emojiMappingService.replaceEmojisWithSvg(data.ensName);
@@ -426,9 +427,9 @@ export class PuppeteerImageService {
     }
     
     try {
-      sellerEnsWithEmojis = await emojiMappingService.replaceEmojisWithSvg(data.sellerEns || 'seller');
+      sellerEnsWithEmojis = await emojiMappingService.replaceEmojisWithSvg(data.sellerEns || 'unknown');
       logger.info(`✅ Seller emoji processing: "${data.sellerEns}" -> ${sellerEnsWithEmojis.length} chars`);
-      if (sellerEnsWithEmojis !== (data.sellerEns || 'seller')) {
+      if (sellerEnsWithEmojis !== (data.sellerEns || 'unknown')) {
         logger.info(`  🔄 Emojis were replaced in seller name`);
       }
     } catch (error) {
