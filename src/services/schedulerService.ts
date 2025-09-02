@@ -252,60 +252,55 @@ export class SchedulerService {
       // Refresh NTP time cache before processing
       await this.autoTweetService.refreshTimeCache();
       
-      // Step 1: Process new sales from Moralis (store in database only)
-      const moralisResult = await this.salesProcessingService.processNewSales();
-      logger.info(`📊 Moralis processing complete: ${moralisResult.newSales} new sales stored in database`);
+      // Process new sales
+      const result = await this.salesProcessingService.processNewSales();
       
-      // Step 2: Process all unposted sales (includes both Moralis and QuickNode sales)
+      // Auto-post new sales if enabled
       let autoPostResults: PostResult[] = [];
       
-      const autoPostSettings = await this.autoTweetService.getSettings();
-      if (autoPostSettings.enabled && autoPostSettings.sales.enabled) {
-        // Get all unposted sales from database (unified approach)
-        const unpostedSales = await this.databaseService.getUnpostedSales(50, autoPostSettings.sales.maxAgeHours);
-        
-        if (unpostedSales.length > 0) {
-          logger.info(`🤖 Processing ${unpostedSales.length} unposted sales (Moralis + QuickNode)...`);
-          autoPostResults = await this.autoTweetService.processNewSales(unpostedSales, autoPostSettings);
+      if (result.newSales > 0 && result.processedSales.length > 0) {
+        const autoPostSettings = await this.autoTweetService.getSettings();
+        // Check global AND sales-specific toggles
+        if (autoPostSettings.enabled && autoPostSettings.sales.enabled) {
+          logger.info(`🤖 Auto-posting ${result.processedSales.length} new sales...`);
+          autoPostResults = await this.autoTweetService.processNewSales(result.processedSales, autoPostSettings);
           
           const posted = autoPostResults.filter(r => r.success).length;
           const skipped = autoPostResults.filter(r => r.skipped).length;
           const failed = autoPostResults.filter(r => !r.success && !r.skipped).length;
           
-          logger.info(`🐦 Unified sales auto-posting results: ${posted} posted, ${skipped} skipped, ${failed} failed`);
+          logger.info(`🐦 Sales auto-posting results: ${posted} posted, ${skipped} skipped, ${failed} failed`);
         } else {
-          logger.debug(`📭 No unposted sales found to process`);
+          logger.debug(`🤖 Skipping sales auto-posting - Global: ${autoPostSettings.enabled}, Sales: ${autoPostSettings.sales.enabled}`);
         }
-      } else {
-        logger.debug(`🤖 Skipping sales auto-posting - Global: ${autoPostSettings.enabled}, Sales: ${autoPostSettings.sales.enabled}`);
       }
       
       this.lastRunTime = startTime;
-      this.lastRunStats = { ...moralisResult, autoPostResults };
+      this.lastRunStats = { ...result, autoPostResults };
       this.consecutiveErrors = 0; // Reset error counter on success
 
       const duration = Date.now() - startTime.getTime();
       const salesPosted = autoPostResults.filter(r => r.success).length;
       
       logger.info(`Sales sync completed in ${duration}ms:`, {
-        fetched: moralisResult.fetched,
-        newSales: moralisResult.newSales,
-        duplicates: moralisResult.duplicates,
-        errors: moralisResult.errors,
+        fetched: result.fetched,
+        newSales: result.newSales,
+        duplicates: result.duplicates,
+        errors: result.errors,
         salesAutoPosted: salesPosted
       });
 
       // Log notable events
-      if (moralisResult.newSales > 0) {
-        logger.info(`📈 Found ${moralisResult.newSales} new sales from Moralis`);
+      if (result.newSales > 0) {
+        logger.info(`📈 Found ${result.newSales} new sales to process`);
       }
       
       if (salesPosted > 0) {
-        logger.info(`🐦 Posted ${salesPosted} sale tweets (unified processing)`);
+        logger.info(`🐦 Posted ${salesPosted} sale tweets`);
       }
       
-      if (moralisResult.errors > 0) {
-        logger.warn(`⚠️ Encountered ${moralisResult.errors} errors during Moralis processing`);
+      if (result.errors > 0) {
+        logger.warn(`⚠️ Encountered ${result.errors} errors during processing`);
       }
 
     } catch (error: any) {

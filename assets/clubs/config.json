@@ -1,49 +1,57 @@
 {
   "patternClubs": [
     {
+      "id": "999_club",
       "name": "999",
       "handle": "@999club",
       "pattern": "^\\d{3}\\.eth$"
     },
     {
+      "id": "10k_club",
       "name": "10k", 
       "handle": "@10kClubOfficial",
       "pattern": "^\\d{4}\\.eth$"
     },
     {
+      "id": "emojis",
       "name": "Emojis",
       "handle": "@EthmojiClub", 
       "pattern": "^(?!^\\d+\\.eth$)(?:[\\p{Emoji}\\p{Emoji_Modifier}\\p{Emoji_Component}\\p{Emoji_Presentation}\\p{Extended_Pictographic}]|\\u200D|\\uFE0F)+\\.eth$"
     },
     {
+      "id": "3_letter",
       "name": "3 Letter",
       "handle": "@ENSletters",
       "pattern": "^[a-z]{3}\\.eth$"
     }
   ],
   "fileBasedClubs": [
-          {
-        "name": "Pokemon",
-        "handle": "@PokemonENS",
-        "filename": "assets/clubs/pokemon.txt"
-      },
-      {
-        "name": "Top 1k Last Names", 
-        "handle": "",
-        "filename": "assets/clubs/1ksurnames.txt",
-        "includeLineNumber": true
-      },
-          {
-        "name": "Top 1k First Names",
-        "handle": "", 
-        "filename": "assets/clubs/1kforenames.txt",
-        "includeLineNumber": true
-      },
-      {
-        "name": "PrePunks",
-        "handle": "@PrePunkOfficial",
-        "filename": "assets/clubs/prepunk.txt",
-        "includeLineNumber": true
-      }
-  ]
+        {
+      "id": "pokemon",
+      "name": "Pokemon",
+      "handle": "@PokemonENS",
+      "filename": "assets/clubs/pokemon.txt"
+    },
+    {
+      "id": "top_1k_surnames",
+      "name": "Top 1k Last Names", 
+      "handle": "",
+      "filename": "assets/clubs/1ksurnames.txt",
+      "includeLineNumber": true
+    },
+        {
+      "id": "top_1k_forenames",
+      "name": "Top 1k First Names",
+      "handle": "", 
+      "filename": "assets/clubs/1kforenames.txt",
+      "includeLineNumber": true
+    },
+    {
+      "id": "prepunks",
+      "name": "PrePunks",
+      "handle": "@PrePunkOfficial",
+      "filename": "assets/clubs/prepunk.txt",
+      "includeLineNumber": true
+    }
+]
 }

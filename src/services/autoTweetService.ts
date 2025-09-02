@@ -434,9 +434,9 @@ export class AutoTweetService {
     
     // Check for premium clubs with special thresholds (in priority order)
     for (const club of clubs) {
-      if (club.name === '999 Club') {
+      if (club.id === '999_club') {
         return settings.minEth999Club;
-      } else if (club.name === '10k Club') {
+      } else if (club.id === '10k_club') {
         return settings.minEth10kClub;
       }
     }
@@ -453,7 +453,7 @@ export class AutoTweetService {
     
     // Return the first premium club found, or standard
     for (const club of clubs) {
-      if (club.name === '999 Club' || club.name === '10k Club') {
+      if (club.id === '999_club' || club.id === '10k_club') {
         return club.name;
       }
     }
@@ -470,9 +470,9 @@ export class AutoTweetService {
     
     // Check for premium clubs with special thresholds (in priority order)
     for (const club of clubs) {
-      if (club.name === '999 Club') {
+      if (club.id === '999_club') {
         return settings.minEth999Club;
-      } else if (club.name === '10k Club') {
+      } else if (club.id === '10k_club') {
         return settings.minEth10kClub;
       }
     }
@@ -489,7 +489,7 @@ export class AutoTweetService {
     
     // Return the first premium club found, or standard
     for (const club of clubs) {
-      if (club.name === '999 Club' || club.name === '10k Club') {
+      if (club.id === '999_club' || club.id === '10k_club') {
         return `${club.name} registration`;
       }
     }
@@ -706,9 +706,9 @@ export class AutoTweetService {
       
       // Check for premium clubs with special thresholds (in priority order)
       for (const club of clubs) {
-        if (club.name === '999 Club') {
+        if (club.id === '999_club') {
           return settings.minEth999Club;
-        } else if (club.name === '10k Club') {
+        } else if (club.id === '10k_club') {
           return settings.minEth10kClub;
         }
       }
@@ -779,7 +779,7 @@ export class AutoTweetService {
       
       // Return the first premium club found, or standard
       for (const club of clubs) {
-        if (club.name === '999 Club' || club.name === '10k Club') {
+        if (club.id === '999_club' || club.id === '10k_club') {
           return `${club.name} bid`;
         }
       }
