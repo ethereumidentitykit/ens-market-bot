@@ -277,7 +277,7 @@ export class ClubService {
     const clubStrings = clubs.map(club => {
       // Build club name with optional line number (formatted with commas)
       const formattedLineNumber = club.lineNumber ? club.lineNumber.toLocaleString('en-US') : null;
-      const clubNameWithNumber = formattedLineNumber ? `${club.name}: #${formattedLineNumber}` : club.name;
+      const clubNameWithNumber = formattedLineNumber ? `${club.name} #${formattedLineNumber}` : club.name;
       
       if (club.handle && club.handle.trim() !== '') {
         const formatted = `${clubNameWithNumber} ${club.handle}`;
