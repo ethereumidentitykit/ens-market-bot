@@ -812,6 +812,46 @@ async function startApplication(): Promise<void> {
       });
     });
 
+    // Database trigger setup for real-time processing
+    app.post('/api/admin/setup-triggers', requireAuth, async (req, res) => {
+      try {
+        logger.info('🔧 Setting up database triggers for real-time sale processing...');
+        
+        await databaseService.setupSaleNotificationTriggers();
+        
+        res.json({
+          success: true,
+          message: 'Database triggers setup successfully',
+          timestamp: new Date().toISOString()
+        });
+      } catch (error: any) {
+        logger.error('Failed to setup database triggers:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.get('/api/admin/check-triggers', requireAuth, async (req, res) => {
+      try {
+        const isSetup = await databaseService.checkSaleNotificationTriggers();
+        
+        res.json({
+          success: true,
+          triggersSetup: isSetup,
+          message: isSetup ? 'Triggers are properly configured' : 'Triggers need to be set up',
+          timestamp: new Date().toISOString()
+        });
+      } catch (error: any) {
+        logger.error('Failed to check database triggers:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     // Price Tier API endpoints
     app.get('/api/price-tiers', async (req, res) => {
       try {

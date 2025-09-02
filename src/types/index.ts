@@ -233,6 +233,10 @@ export interface IDatabaseService {
   getAdminSession(sessionId: string): Promise<SiweSession | null>;
   deleteAdminSession(sessionId: string): Promise<void>;
   cleanupExpiredSessions(): Promise<void>;
+  
+  // Real-time notification trigger methods
+  setupSaleNotificationTriggers(): Promise<void>;
+  checkSaleNotificationTriggers(): Promise<boolean>;
 }
 
 // ENS Bids Types
