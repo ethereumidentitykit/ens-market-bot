@@ -176,7 +176,8 @@ export class QuickNodeSalesService {
       // Convert hex block number to decimal
       const blockNumber = parseInt(order.blockNumber, 16);
       
-      // Create ISO timestamp (we'll get actual block timestamp later if needed)
+      // Use current timestamp as fallback (matches existing sales processing behavior)
+      // TODO: Could fetch actual block timestamp from Alchemy if needed for accuracy
       const blockTimestamp = new Date().toISOString();
 
       return {
