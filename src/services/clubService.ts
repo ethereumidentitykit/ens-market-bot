@@ -114,31 +114,36 @@ export class ClubService {
       const lines = fileContent.split('\n');
       const sampleNames: string[] = [];
       const lineNumberMap = new Map<string, number>();
-      let currentLineNumber = 0;
       
-      for (const line of lines) {
+      for (let fileLineNumber = 1; fileLineNumber <= lines.length; fileLineNumber++) {
+        const line = lines[fileLineNumber - 1]; // Convert to 0-based index
         const trimmed = line.trim();
-        if (trimmed && !trimmed.startsWith('#')) { // Skip empty lines and comments
-          currentLineNumber++; // Track actual data line numbers (excluding empty/comment lines)
+        
+        // Skip comment lines but process both data lines AND blank lines (missing entries)
+        if (!trimmed.startsWith('#')) {
           
-          // Handle CSV files (take first column) or plain text files
-          const ensName = trimmed.includes(',') ? trimmed.split(',')[0].trim() : trimmed;
-          
-          // Ensure .eth suffix and normalize to lowercase for case-insensitive matching
-          const normalizedName = ensName.endsWith('.eth') ? ensName.toLowerCase() : `${ensName.toLowerCase()}.eth`;
-          ensNames.add(normalizedName);
-          
-          // Store line number if this club uses line number tracking
-          if (club.includeLineNumber) {
-            lineNumberMap.set(normalizedName, currentLineNumber);
+          // If line has data, store it
+          if (trimmed) {
+            // Handle CSV files (take first column) or plain text files
+            const ensName = trimmed.includes(',') ? trimmed.split(',')[0].trim() : trimmed;
+            
+            // Ensure .eth suffix and normalize to lowercase for case-insensitive matching
+            const normalizedName = ensName.endsWith('.eth') ? ensName.toLowerCase() : `${ensName.toLowerCase()}.eth`;
+            ensNames.add(normalizedName);
+            
+            // Store TRUE file line number (includes missing entries as blank lines)
+            if (club.includeLineNumber) {
+              lineNumberMap.set(normalizedName, fileLineNumber);
+            }
+            
+            // Collect first few names for debugging
+            if (sampleNames.length < 5) {
+              const formattedLineNumber = club.includeLineNumber ? fileLineNumber.toLocaleString('en-US') : null;
+              const debugName = formattedLineNumber ? `${normalizedName}: #${formattedLineNumber}` : normalizedName;
+              sampleNames.push(debugName);
+            }
           }
-          
-          // Collect first few names for debugging
-          if (sampleNames.length < 5) {
-            const formattedLineNumber = club.includeLineNumber ? currentLineNumber.toLocaleString('en-US') : null;
-            const debugName = formattedLineNumber ? `${normalizedName}: #${formattedLineNumber}` : normalizedName;
-            sampleNames.push(debugName);
-          }
+          // Note: blank lines (missing entries) are acknowledged but not stored in the dataset
         }
       }
 
@@ -154,7 +159,9 @@ export class ClubService {
       // Store line number mapping if enabled
       if (club.includeLineNumber && lineNumberMap.size > 0) {
         this.clubLineNumbers.set(clubKey, lineNumberMap);
-        logger.info(`[ClubService] Line number tracking enabled for ${club.name} (${lineNumberMap.size} entries)`);
+        const totalLines = lines.length;
+        const blankLines = totalLines - ensNames.size;
+        logger.info(`[ClubService] Line number tracking enabled for ${club.name} (${lineNumberMap.size} entries, ${blankLines} missing/blank)`);
       }
 
       logger.info(`Loaded ${ensNames.size} names for ${club.name} from ${filePath}`);
