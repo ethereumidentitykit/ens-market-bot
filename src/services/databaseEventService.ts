@@ -109,7 +109,7 @@ export class DatabaseEventService {
 
       // Create fresh connection
       this.client = new Client({
-        connectionString: process.env.DATABASE_URL,
+        connectionString: process.env.POSTGRES_URL || process.env.DATABASE_URL,
         keepAlive: true,
         keepAliveInitialDelayMillis: 10000,
       });

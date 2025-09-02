@@ -76,7 +76,7 @@ async function startApplication(): Promise<void> {
     const databaseEventService = new DatabaseEventService(
       autoTweetService,
       databaseService,
-      process.env.DATABASE_URL!
+      process.env.POSTGRES_URL || process.env.DATABASE_URL!
     );
 
     // Initialize database
