@@ -252,56 +252,31 @@ export class SchedulerService {
       // Refresh NTP time cache before processing
       await this.autoTweetService.refreshTimeCache();
       
-      // Step 1: Process new sales from Moralis (store in database only)
+      // Process new sales from Moralis (store in database only)
+      // Tweet processing is now handled by DatabaseEventService via NOTIFY/LISTEN
       const moralisResult = await this.salesProcessingService.processNewSales();
       logger.info(`📊 Moralis processing complete: ${moralisResult.newSales} new sales stored in database`);
       
-      // Step 2: Process all unposted sales (includes both Moralis and QuickNode sales)
-      let autoPostResults: PostResult[] = [];
-      
-      const autoPostSettings = await this.autoTweetService.getSettings();
-      if (autoPostSettings.enabled && autoPostSettings.sales.enabled) {
-        // Get all unposted sales from database (unified approach)
-        const unpostedSales = await this.databaseService.getUnpostedSales(50, autoPostSettings.sales.maxAgeHours);
-        
-        if (unpostedSales.length > 0) {
-          logger.info(`🤖 Processing ${unpostedSales.length} unposted sales (Moralis + QuickNode)...`);
-          autoPostResults = await this.autoTweetService.processNewSales(unpostedSales, autoPostSettings);
-          
-          const posted = autoPostResults.filter(r => r.success).length;
-          const skipped = autoPostResults.filter(r => r.skipped).length;
-          const failed = autoPostResults.filter(r => !r.success && !r.skipped).length;
-          
-          logger.info(`🐦 Unified sales auto-posting results: ${posted} posted, ${skipped} skipped, ${failed} failed`);
-        } else {
-          logger.debug(`📭 No unposted sales found to process`);
-        }
-      } else {
-        logger.debug(`🤖 Skipping sales auto-posting - Global: ${autoPostSettings.enabled}, Sales: ${autoPostSettings.sales.enabled}`);
+      if (moralisResult.newSales > 0) {
+        logger.info(`⚡ DatabaseEventService will handle instant tweet processing for ${moralisResult.newSales} new sales`);
       }
       
       this.lastRunTime = startTime;
-      this.lastRunStats = { ...moralisResult, autoPostResults };
+      this.lastRunStats = moralisResult;
       this.consecutiveErrors = 0; // Reset error counter on success
 
       const duration = Date.now() - startTime.getTime();
-      const salesPosted = autoPostResults.filter(r => r.success).length;
       
       logger.info(`Sales sync completed in ${duration}ms:`, {
         fetched: moralisResult.fetched,
         newSales: moralisResult.newSales,
         duplicates: moralisResult.duplicates,
-        errors: moralisResult.errors,
-        salesAutoPosted: salesPosted
+        errors: moralisResult.errors
       });
 
       // Log notable events
       if (moralisResult.newSales > 0) {
-        logger.info(`📈 Found ${moralisResult.newSales} new sales from Moralis`);
-      }
-      
-      if (salesPosted > 0) {
-        logger.info(`🐦 Posted ${salesPosted} sale tweets (unified processing)`);
+        logger.info(`📈 Found ${moralisResult.newSales} new sales from Moralis - DatabaseEventService will handle instant posting`);
       }
       
       if (moralisResult.errors > 0) {

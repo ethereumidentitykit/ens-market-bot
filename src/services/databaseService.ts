@@ -34,6 +34,9 @@ export class DatabaseService implements IDatabaseService {
       // Create tables if they don't exist
       await this.createTables();
       
+      // Auto-setup database triggers for real-time processing
+      await this.setupSaleNotificationTriggers();
+      
       logger.info('PostgreSQL database initialized successfully');
     } catch (error: any) {
       logger.error('Failed to initialize PostgreSQL database:', error.message);
