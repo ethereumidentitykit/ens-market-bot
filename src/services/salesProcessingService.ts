@@ -274,7 +274,6 @@ export class SalesProcessingService {
     duplicates: number;
     filtered: number;
     errors: number;
-    processedSales: ProcessedSale[];
   }> {
     const stats = {
       fetched: 0,
@@ -282,7 +281,6 @@ export class SalesProcessingService {
       duplicates: 0,
       filtered: 0,
       errors: 0,
-      processedSales: [] as ProcessedSale[],
     };
 
     try {
@@ -352,14 +350,10 @@ export class SalesProcessingService {
           const processedSale = await this.convertToProcessedSale(sale);
           const saleId = await this.databaseService.insertSale(processedSale);
           
-          // Create sale with ID and add to results
-          const saleWithId: ProcessedSale = { ...processedSale, id: saleId };
-          stats.processedSales.push(saleWithId);
-          
           stats.newSales++;
           highestProcessedBlockNumber = Math.max(highestProcessedBlockNumber, sale.blockNumber);
 
-          logger.debug(`Processed new sale: ${sale.transactionHash} for ${processedSale.priceEth} ETH`);
+          logger.info(`✅ Moralis sale stored in DB: ${processedSale.nftName || sale.tokenId} (${processedSale.priceEth} ETH) - ID: ${saleId}`);
 
         } catch (error: any) {
           stats.errors++;
@@ -469,8 +463,8 @@ export class SalesProcessingService {
       fetched: number;
       newSales: number;
       duplicates: number;
+      filtered: number;
       errors: number;
-      processedSales: ProcessedSale[];
     };
     error?: string;
   }> {
