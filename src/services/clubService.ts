@@ -3,18 +3,21 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 export interface ClubInfo {
+  id: string;
   name: string;
   handle: string;
   lineNumber?: number; // Optional line number for ranked clubs
 }
 
 export interface PatternClub {
+  id: string;
   name: string;
   handle: string;
   pattern: string;
 }
 
 export interface FileBasedClub {
+  id: string;
   name: string;
   handle: string;
   filename: string;
@@ -143,6 +146,7 @@ export class ClubService {
       const clubKey = `${club.name.toLowerCase().replace(/\s+/g, '_')}`;
       this.clubDataSets.set(clubKey, ensNames);
       this.clubMetadata.set(clubKey, {
+        id: club.id,
         name: club.name,
         handle: club.handle
       });
@@ -184,7 +188,7 @@ export class ClubService {
       const regex = this.compiledPatterns.get(club.name);
       if (regex && regex.test(ensName)) {
         logger.info(`[ClubService] Pattern match found: ${club.name} for ${ensName}`);
-        clubs.push({ name: club.name, handle: club.handle });
+        clubs.push({ id: club.id, name: club.name, handle: club.handle });
       }
     }
 
@@ -200,6 +204,7 @@ export class ClubService {
           const lineNumber = lineNumberMap?.get(normalizedEnsName);
           
           const clubInfoWithLine: ClubInfo = {
+            id: clubInfo.id,
             name: clubInfo.name,
             handle: clubInfo.handle,
             ...(lineNumber && { lineNumber })

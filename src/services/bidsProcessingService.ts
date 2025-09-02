@@ -2,6 +2,7 @@ import { MagicEdenService } from './magicEdenService';
 import { IDatabaseService, ENSBid, BidProcessingStats, MagicEdenBid } from '../types';
 import { logger } from '../utils/logger';
 import { AlchemyService } from './alchemyService';
+import { ClubService } from './clubService';
 import axios from 'axios';
 
 interface ENSMetadata {
@@ -16,6 +17,7 @@ export class BidsProcessingService {
   private magicEdenService: MagicEdenService;
   private databaseService: IDatabaseService;
   private alchemyService: AlchemyService; // For ETH price
+  private clubService: ClubService;
 
   constructor(
     magicEdenService: MagicEdenService, 
@@ -25,6 +27,7 @@ export class BidsProcessingService {
     this.magicEdenService = magicEdenService;
     this.databaseService = databaseService;
     this.alchemyService = alchemyService;
+    this.clubService = new ClubService();
   }
 
 
@@ -353,16 +356,20 @@ export class BidsProcessingService {
         return 999; // Impossibly high threshold = always reject
       }
 
-      // Apply club-aware logic
-      const patterns = this.getClubPatterns();
-
-      if (patterns.CLUB_999_PATTERN.test(ensName)) {
-        return parseFloat(club999Min);
-      } else if (patterns.CLUB_10K_PATTERN.test(ensName)) {
-        return parseFloat(club10kMin);
-      } else {
-        return parseFloat(defaultMin);
+      // Apply club-aware logic using ClubService
+      const clubs = this.clubService.getClubInfo(ensName);
+      
+      // Check for premium clubs with special thresholds (in priority order)
+      for (const club of clubs) {
+        if (club.id === '999_club') {
+          return parseFloat(club999Min);
+        } else if (club.id === '10k_club') {
+          return parseFloat(club10kMin);
+        }
       }
+      
+      // Default minimum for other names
+      return parseFloat(defaultMin);
 
     } catch (error: any) {
       logger.warn(`Error determining ETH minimum for bid:`, error.message);
@@ -370,15 +377,7 @@ export class BidsProcessingService {
     }
   }
 
-  /**
-   * Get club detection patterns (same as AutoTweetService)
-   */
-  private getClubPatterns() {
-    return {
-      CLUB_10K_PATTERN: /^\d{4}\.eth$/, // e.g., 1234.eth
-      CLUB_999_PATTERN: /^\d{3}\.eth$/  // e.g., 123.eth
-    };
-  }
+
 
 
 
