@@ -25,6 +25,9 @@ import { APIToggleService } from './services/apiToggleService';
 import { AutoTweetService } from './services/autoTweetService';
 import { WorldTimeService } from './services/worldTimeService';
 import { SiweService } from './services/siweService';
+import { QuickNodeSalesService } from './services/quickNodeSalesService';
+import { OpenSeaService } from './services/openSeaService';
+import { ENSMetadataService } from './services/ensMetadataService';
 import pgSession from 'connect-pg-simple';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -62,6 +65,9 @@ async function startApplication(): Promise<void> {
     const ethIdentityService = new ENSWorkerService();
     const worldTimeService = new WorldTimeService();
     const siweService = new SiweService(databaseService);
+    const openSeaService = new OpenSeaService();
+    const ensMetadataService = new ENSMetadataService();
+    const quickNodeSalesService = new QuickNodeSalesService(databaseService, openSeaService, ensMetadataService, alchemyService);
     const autoTweetService = new AutoTweetService(newTweetFormatter, twitterService, rateLimitService, databaseService, worldTimeService);
     const schedulerService = new SchedulerService(salesProcessingService, bidsProcessingService, autoTweetService, databaseService);
 
@@ -2736,110 +2742,21 @@ async function startApplication(): Promise<void> {
           });
         }
         
-        logger.info(`📦 Processing ${webhookData.orderFulfilled.length} orderFulfilled events`);
-        
-        // Process each order fulfilled event
-        for (let i = 0; i < webhookData.orderFulfilled.length; i++) {
-          const order = webhookData.orderFulfilled[i];
-          
-          logger.info(`🔍 Processing order ${i + 1}/${webhookData.orderFulfilled.length}:`);
-          logger.info(`Order details:`, {
-            orderHash: order.orderHash,
-            txHash: order.txHash,
-            blockNumber: order.blockNumber,
-            contract: order.contract,
-            contractLabel: order.contractLabel,
-            offerer: order.offerer,
-            recipient: order.recipient,
-            zone: order.zone,
-            logIndex: order.logIndex
-          });
-          
-          // Log offer details
-          logger.info(`💰 Offer details:`, {
-            offerRaw: order.offerRaw,
-            offerCount: order.offer?.length || 0,
-            offers: order.offer?.map((offer: any, idx: number) => ({
-              index: idx,
-              itemType: offer.itemType,
-              token: offer.token,
-              identifier: offer.identifier,
-              amount: offer.amount
-            }))
-          });
-          
-          // Log consideration details
-          logger.info(`💸 Consideration details:`, {
-            considerationRaw: order.considerationRaw,
-            considerationCount: order.consideration?.length || 0,
-            considerations: order.consideration?.map((cons: any, idx: number) => ({
-              index: idx,
-              itemType: cons.itemType,
-              token: cons.token,
-              identifier: cons.identifier,
-              amount: cons.amount,
-              recipient: cons.recipient
-            }))
-          });
-          
-          // Look for ENS tokens specifically
-          const ensTokens = [
-            ...order.offer?.filter((item: any) => 
-              item.token === '0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147eA85' || // ENS OG Registry
-              item.token === '0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401'    // ENS NameWrapper
-            ) || [],
-            ...order.consideration?.filter((item: any) => 
-              item.token === '0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147eA85' || // ENS OG Registry
-              item.token === '0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401'    // ENS NameWrapper
-            ) || []
-          ];
-          
-          if (ensTokens.length > 0) {
-            logger.info(`🏷️ ENS tokens found in order:`, {
-              ensTokenCount: ensTokens.length,
-              ensTokens: ensTokens.map((token: any) => ({
-                token: token.token,
-                tokenId: token.identifier,
-                amount: token.amount,
-                itemType: token.itemType
-              }))
-            });
-          } else {
-            logger.info('ℹ️ No ENS tokens detected in this order');
-          }
-          
-          // Look for ETH/WETH payment amounts
-          const ethPayments = [
-            ...order.offer?.filter((item: any) => 
-              item.token === '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' || // WETH
-              item.itemType === 0 // Native ETH
-            ) || [],
-            ...order.consideration?.filter((item: any) => 
-              item.token === '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' || // WETH
-              item.itemType === 0 // Native ETH
-            ) || []
-          ];
-          
-          if (ethPayments.length > 0) {
-            logger.info(`💎 ETH/WETH payments found:`, {
-              paymentCount: ethPayments.length,
-              payments: ethPayments.map((payment: any) => ({
-                token: payment.token || 'Native ETH',
-                amount: payment.amount,
-                amountEth: (Number(payment.amount) / 1e18).toFixed(6),
-                itemType: payment.itemType,
-                recipient: payment.recipient
-              }))
-            });
-          }
-        }
+        // Process webhook data using QuickNodeSalesService
+        const results = await quickNodeSalesService.processWebhookData(webhookData);
         
           // Return success response
           res.status(200).json({ 
             success: true, 
             message: 'QuickNode sales webhook processed successfully',
             type: 'salesv2',
-            ordersProcessed: webhookData.orderFulfilled.length
+            results: {
+              ordersReceived: webhookData.orderFulfilled.length,
+              processed: results.processed,
+              stored: results.stored,
+              skipped: results.skipped,
+              errors: results.errors
+            }
           });
           
         } catch (error: any) {
