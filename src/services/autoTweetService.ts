@@ -179,6 +179,17 @@ export class AutoTweetService {
   private async processSingleSale(sale: ProcessedSale, settings: AutoPostSettings): Promise<PostResult> {
     const saleId = sale.id!;
 
+    // Check if sale has already been posted
+    if (sale.posted) {
+      return {
+        success: false,
+        saleId,
+        skipped: true,
+        reason: 'Sale already posted to Twitter',
+        type: 'sale'
+      };
+    }
+
     // Check if sale is too old (use sales-specific settings)
     if (!(await this.isWithinTimeLimit(sale, settings.sales.maxAgeHours))) {
       return {

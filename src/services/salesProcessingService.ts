@@ -337,7 +337,7 @@ export class SalesProcessingService {
           
           if (isAlreadyProcessed) {
             stats.duplicates++;
-            logger.debug(`Skipping duplicate sale: ${sale.transactionHash}`);
+            logger.info(`🚀 QuickNode beat Moralis! Sale already processed: ${sale.transactionHash} (${sale.tokenId})`);
             continue;
           }
 
