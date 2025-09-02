@@ -2,6 +2,8 @@ import express from 'express';
 import session from 'express-session';
 import path from 'path';
 import CryptoJS from 'crypto-js';
+import { gunzipSync } from 'zlib';
+import { createHmac } from 'crypto';
 import axios from 'axios';
 import { generateNonce } from 'siwe';
 import { config, validateConfig } from './utils/config';
@@ -23,6 +25,10 @@ import { APIToggleService } from './services/apiToggleService';
 import { AutoTweetService } from './services/autoTweetService';
 import { WorldTimeService } from './services/worldTimeService';
 import { SiweService } from './services/siweService';
+import { QuickNodeSalesService } from './services/quickNodeSalesService';
+import { OpenSeaService } from './services/openSeaService';
+import { ENSMetadataService } from './services/ensMetadataService';
+import { DatabaseEventService } from './services/databaseEventService';
 import pgSession from 'connect-pg-simple';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -60,8 +66,18 @@ async function startApplication(): Promise<void> {
     const ethIdentityService = new ENSWorkerService();
     const worldTimeService = new WorldTimeService();
     const siweService = new SiweService(databaseService);
+    const openSeaService = new OpenSeaService();
+    const ensMetadataService = new ENSMetadataService();
+    const quickNodeSalesService = new QuickNodeSalesService(databaseService, openSeaService, ensMetadataService, alchemyService);
     const autoTweetService = new AutoTweetService(newTweetFormatter, twitterService, rateLimitService, databaseService, worldTimeService);
     const schedulerService = new SchedulerService(salesProcessingService, bidsProcessingService, autoTweetService, databaseService);
+    
+    // Initialize database event service for real-time processing
+    const databaseEventService = new DatabaseEventService(
+      autoTweetService,
+      databaseService,
+      process.env.DATABASE_URL!
+    );
 
     // Initialize database
     await databaseService.initialize();
@@ -100,8 +116,13 @@ async function startApplication(): Promise<void> {
       next();
     });
 
-    // Middleware
-    app.use(express.json());
+    // Middleware - skip JSON parsing for salesv2 webhook
+    app.use((req, res, next) => {
+      if (req.path === '/webhook/salesv2') {
+        return next(); // Skip JSON parsing for salesv2 webhook
+      }
+      return express.json()(req, res, next);
+    });
     app.use(express.static(path.join(__dirname, '../public')));
     
     // Session configuration for SIWE authentication using PostgreSQL
@@ -797,6 +818,64 @@ async function startApplication(): Promise<void> {
         success: true,
         ...state
       });
+    });
+
+    // Database trigger setup for real-time processing
+    app.post('/api/admin/setup-triggers', requireAuth, async (req, res) => {
+      try {
+        logger.info('🔧 Setting up database triggers for real-time sale processing...');
+        
+        await databaseService.setupSaleNotificationTriggers();
+        
+        res.json({
+          success: true,
+          message: 'Database triggers setup successfully',
+          timestamp: new Date().toISOString()
+        });
+      } catch (error: any) {
+        logger.error('Failed to setup database triggers:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.get('/api/admin/check-triggers', requireAuth, async (req, res) => {
+      try {
+        const isSetup = await databaseService.checkSaleNotificationTriggers();
+        
+        res.json({
+          success: true,
+          triggersSetup: isSetup,
+          message: isSetup ? 'Triggers are properly configured' : 'Triggers need to be set up',
+          timestamp: new Date().toISOString()
+        });
+      } catch (error: any) {
+        logger.error('Failed to check database triggers:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.get('/api/admin/event-service-status', requireAuth, (req, res) => {
+      try {
+        const status = databaseEventService.getStatus();
+        
+        res.json({
+          success: true,
+          eventService: status,
+          timestamp: new Date().toISOString()
+        });
+      } catch (error: any) {
+        logger.error('Failed to get event service status:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
     });
 
     // Price Tier API endpoints
@@ -2583,6 +2662,194 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    // QuickNode Sales Webhook - salesv2 (manual body capture for no content-type)
+    app.post('/webhook/salesv2', (req, res) => {
+      // Capture raw body manually since QuickNode doesn't send Content-Type
+      let rawBody = Buffer.alloc(0);
+      
+      req.on('data', (chunk) => {
+        rawBody = Buffer.concat([rawBody, chunk]);
+      });
+      
+      req.on('end', async () => {
+        try {
+          logger.info('🚀 QuickNode Sales webhook received (salesv2)');
+          
+          // Log raw request details for debugging
+          logger.info('Request method:', req.method);
+          logger.info('Request headers:', JSON.stringify(req.headers, null, 2));
+          logger.info('Raw body length:', rawBody.length);
+          logger.info('Content-Type:', req.headers['content-type'] || 'not specified');
+          logger.info('Content-Encoding:', req.headers['content-encoding'] || 'not specified');
+          
+          // Check if body exists
+          if (rawBody.length > 0) {
+            logger.info('Raw body (first 100 chars):', rawBody.toString('utf8').substring(0, 100));
+          }
+        
+          // QuickNode Webhook Security Verification
+          const qnSignature = req.headers['x-qn-signature'] as string;
+          const qnNonce = req.headers['x-qn-nonce'] as string;
+          const qnTimestamp = req.headers['x-qn-timestamp'] as string;
+          const quickNodeSecret = config.quicknode.webhookSecret;
+          
+          if (qnSignature && qnNonce && qnTimestamp) {
+            if (!quickNodeSecret) {
+              logger.warn('⚠️ QUICKNODE_SECRET not configured - skipping signature verification');
+            }
+            try {
+              // Create the string to sign: nonce + timestamp + raw_payload (QuickNode format)
+              const bodyString = rawBody.toString('utf8');
+              const stringToSign = qnNonce + qnTimestamp + bodyString;
+              
+              // Only verify signature if secret is configured
+              if (quickNodeSecret) {
+                // Create expected signature using HMAC-SHA256
+                const expectedSignature = createHmac('sha256', quickNodeSecret)
+                  .update(stringToSign)
+                  .digest('hex');
+                
+                logger.info('🔐 QuickNode signature verification:', {
+                  provided: qnSignature,
+                  expected: expectedSignature,
+                  timestamp: qnTimestamp,
+                  nonce: qnNonce,
+                  stringToSign: stringToSign.substring(0, 200) + (stringToSign.length > 200 ? '...' : ''),
+                  stringLength: stringToSign.length,
+                  matches: qnSignature === expectedSignature
+                });
+                
+                if (qnSignature !== expectedSignature) {
+                  logger.error('❌ QuickNode webhook signature verification failed!');
+                  return res.status(401).json({
+                    success: false,
+                    error: 'Webhook signature verification failed',
+                    message: 'Invalid QuickNode signature'
+                  });
+                }
+                
+                logger.info('✅ QuickNode webhook signature verified successfully');
+              }
+              
+            } catch (sigError: any) {
+              logger.error('❌ QuickNode signature verification error:', sigError);
+              return res.status(500).json({
+                success: false,
+                error: 'Signature verification error',
+                message: sigError.message
+              });
+            }
+          } else {
+            logger.warn('⚠️ QuickNode webhook missing security headers');
+          }
+        
+          // Handle the webhook data using manually captured rawBody
+          let webhookData;
+          
+          // Check if body is empty
+          if (rawBody.length === 0) {
+            logger.warn('⚠️ Webhook received with empty body');
+            return res.status(200).json({ 
+              success: true, 
+              message: 'Webhook received but body is empty',
+              type: 'empty_body'
+            });
+          }
+          
+          // Handle potential gzip compression
+          let processedBody: Buffer = rawBody;
+          try {
+            // Check if content is gzipped
+            if (req.headers['content-encoding'] === 'gzip') {
+              logger.info('🗜️ Decompressing gzipped content');
+              const decompressed = gunzipSync(rawBody);
+              processedBody = Buffer.from(decompressed);
+            } else {
+              // Try to detect gzip by magic bytes
+              if (rawBody.length >= 2 && rawBody[0] === 0x1f && rawBody[1] === 0x8b) {
+                logger.info('🗜️ Detected gzip magic bytes, decompressing...');
+                const decompressed = gunzipSync(rawBody);
+                processedBody = Buffer.from(decompressed);
+              }
+            }
+          } catch (gzipError: any) {
+            logger.warn('⚠️ Failed to decompress (not gzipped?):', gzipError.message);
+            processedBody = rawBody;
+          }
+        
+        // Convert buffer to string and then parse as JSON
+        try {
+          const bodyString = processedBody.toString('utf8');
+          logger.info('Full processed body string:', bodyString);
+          
+          // Try to parse as JSON
+          webhookData = JSON.parse(bodyString);
+          logger.info('📝 Successfully parsed body as JSON');
+          logger.info('Parsed webhook data:', JSON.stringify(webhookData, null, 2));
+          
+        } catch (parseError: any) {
+          logger.error('❌ Failed to parse body as JSON:', parseError);
+          logger.error('Full processed body content:', processedBody.toString('utf8'));
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid JSON in request body',
+            rawBody: processedBody.toString('utf8'),
+            parseError: parseError.message || 'Unknown parse error'
+          });
+        }
+        
+        // Check if we have orderFulfilled data
+        if (!webhookData.orderFulfilled || !Array.isArray(webhookData.orderFulfilled)) {
+          logger.warn('No orderFulfilled data found in webhook');
+          return res.status(200).json({ 
+            success: true, 
+            message: 'Webhook received but no orderFulfilled data to process',
+            type: 'no_orders'
+          });
+        }
+        
+        // Process webhook data using QuickNodeSalesService
+        const results = await quickNodeSalesService.processWebhookData(webhookData);
+        
+          // Return success response
+          res.status(200).json({ 
+            success: true, 
+            message: 'QuickNode sales webhook processed successfully',
+            type: 'salesv2',
+            results: {
+              ordersReceived: webhookData.orderFulfilled.length,
+              processed: results.processed,
+              stored: results.stored,
+              skipped: results.skipped,
+              errors: results.errors
+            }
+          });
+          
+        } catch (error: any) {
+          logger.error('❌ QuickNode sales webhook error:');
+          logger.error('Error message:', error.message || 'No error message');
+          logger.error('Error stack:', error.stack || 'No stack trace');
+          logger.error('Full error object:', JSON.stringify(error, null, 2));
+          
+          res.status(500).json({
+            success: false,
+            error: 'QuickNode sales webhook processing failed',
+            message: error.message || 'Unknown error occurred',
+            errorType: error.name || 'Unknown'
+          });
+        }
+      });
+      
+      req.on('error', (err) => {
+        logger.error('❌ QuickNode webhook request error:', err);
+        res.status(500).json({
+          success: false,
+          error: 'Request error',
+          message: err.message
+        });
+      });
+    });
+
     // API info endpoint
     app.get('/api', (req, res) => {
       res.json({
@@ -2596,20 +2863,35 @@ async function startApplication(): Promise<void> {
           processSales: '/api/process-sales',
           stats: '/api/stats',
           unpostedSales: '/api/unposted-sales?limit=10'
+        },
+        webhooks: {
+          ensRegistrations: '/webhook/ens-registrations',
+          salesv2: '/webhook/salesv2'
         }
       });
     });
 
     // Start server
-    const server = app.listen(config.port, () => {
+    const server = app.listen(config.port, async () => {
       logger.info(`Server running on port ${config.port}`);
       logger.info(`Environment: ${config.nodeEnv}`);
       logger.info(`Monitoring contracts: ${config.contracts.join(', ')}`);
+      
+      // Start database event service for real-time processing
+      try {
+        await databaseEventService.start();
+        logger.info('🚀 Real-time database event processing started');
+      } catch (error: any) {
+        logger.error('Failed to start database event service:', error.message);
+      }
     });
 
     // Graceful shutdown handling
     const shutdown = async (): Promise<void> => {
       logger.info('Shutting down gracefully...');
+      
+      // Stop database event service first
+      await databaseEventService.stop();
       
       // Gracefully stop scheduler without persisting state (allows resume after restart)
       await schedulerService.gracefulShutdown();

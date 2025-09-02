@@ -1613,8 +1613,9 @@
                             <div class="col-span-3">ENS Name</div>
                             <div class="col-span-2">Price</div>
                             <div class="col-span-2">Block / Time</div>
+                            <div class="col-span-1">Status</div>
                             <div class="col-span-2">Fetched</div>
-                            <div class="col-span-3">Transaction</div>
+                            <div class="col-span-2">Transaction</div>
                         </div>
                     </div>
 
@@ -1649,13 +1650,22 @@
                                     </div>
                                 </div>
 
+                                <!-- Posted Status -->
+                                <div class="col-span-1 flex items-center">
+                                    <span 
+                                        :class="sale.posted ? 'bg-green-900 text-green-300 border-green-600' : 'bg-yellow-900 text-yellow-300 border-yellow-600'"
+                                        class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium border"
+                                        x-text="sale.posted ? 'Posted' : 'Unposted'"
+                                    ></span>
+                                </div>
+
                                 <!-- Fetched Time -->
                                 <div class="col-span-2 flex items-center">
                                     <span class="text-xs text-gray-400" x-text="getTimeAgo(sale.processedAt)"></span>
                                 </div>
 
                                 <!-- Transaction -->
-                                <div class="col-span-3 flex items-center">
+                                <div class="col-span-2 flex items-center">
                                     <a 
                                         :href="'https://etherscan.io/tx/' + sale.transactionHash" 
                                         target="_blank"

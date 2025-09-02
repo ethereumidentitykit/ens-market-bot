@@ -179,6 +179,17 @@ export class AutoTweetService {
   private async processSingleSale(sale: ProcessedSale, settings: AutoPostSettings): Promise<PostResult> {
     const saleId = sale.id!;
 
+    // Check if sale has already been posted
+    if (sale.posted) {
+      return {
+        success: false,
+        saleId,
+        skipped: true,
+        reason: 'Sale already posted to Twitter',
+        type: 'sale'
+      };
+    }
+
     // Check if sale is too old (use sales-specific settings)
     if (!(await this.isWithinTimeLimit(sale, settings.sales.maxAgeHours))) {
       return {
@@ -195,6 +206,7 @@ export class AutoTweetService {
     const saleEthValue = parseFloat(sale.priceEth);
     
     if (saleEthValue < ethMinimum) {
+      logger.info(`❌ SALE FILTER: ${sale.nftName} - ${sale.priceEth} ETH < ${ethMinimum} ETH minimum - REJECTED`);
       return {
         success: false,
         saleId,
@@ -203,6 +215,8 @@ export class AutoTweetService {
         type: 'sale'
       };
     }
+    
+    logger.info(`✅ SALE FILTER: ${sale.nftName} - ${sale.priceEth} ETH >= ${ethMinimum} ETH minimum - PASSED`);
 
     // Check rate limits
     const rateLimitCheck = await this.rateLimitService.canPostTweet();
@@ -245,6 +259,9 @@ export class AutoTweetService {
           tweetData.text,
           saleId
         );
+
+        // CRITICAL: Mark sale as posted in database to prevent duplicate posts
+        await this.databaseService.markAsPosted(saleId, postResult.tweetId);
 
         logger.info(`Successfully auto-posted sale ${saleId} - Tweet ID: ${postResult.tweetId}`);
         
@@ -421,15 +438,20 @@ export class AutoTweetService {
     const nftName = sale.nftName || '';
     const clubs = this.clubService.getClubInfo(nftName);
     
+    logger.info(`🔍 SALE FILTER: ${nftName} - clubs detected: [${clubs.map(c => c.name).join(', ') || 'none'}]`);
+    
     // Check for premium clubs with special thresholds (in priority order)
     for (const club of clubs) {
       if (club.id === '999_club') {
+        logger.info(`🎯 SALE FILTER: ${nftName} - 999 Club detected, minimum: ${settings.minEth999Club} ETH`);
         return settings.minEth999Club;
       } else if (club.id === '10k_club') {
+        logger.info(`🎯 SALE FILTER: ${nftName} - 10k Club detected, minimum: ${settings.minEth10kClub} ETH`);
         return settings.minEth10kClub;
       }
     }
     
+    logger.info(`🎯 SALE FILTER: ${nftName} - default minimum: ${settings.minEthDefault} ETH`);
     return settings.minEthDefault;
   }
 

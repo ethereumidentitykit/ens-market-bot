@@ -34,6 +34,9 @@ export class DatabaseService implements IDatabaseService {
       // Create tables if they don't exist
       await this.createTables();
       
+      // Auto-setup database triggers for real-time processing
+      await this.setupSaleNotificationTriggers();
+      
       logger.info('PostgreSQL database initialized successfully');
     } catch (error: any) {
       logger.error('Failed to initialize PostgreSQL database:', error.message);
@@ -398,6 +401,46 @@ export class DatabaseService implements IDatabaseService {
       }));
     } catch (error: any) {
       logger.error('Failed to get recent sales:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get a specific sale by ID
+   */
+  async getSaleById(id: number): Promise<ProcessedSale | null> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        SELECT 
+          id, transaction_hash as "transactionHash", contract_address as "contractAddress",
+          token_id as "tokenId", marketplace, buyer_address as "buyerAddress",
+          seller_address as "sellerAddress", price_eth as "priceEth", price_usd as "priceUsd",
+          block_number as "blockNumber", block_timestamp as "blockTimestamp",
+          processed_at as "processedAt", tweet_id as "tweetId", posted,
+          collection_name as "collectionName", collection_logo as "collectionLogo",
+          nft_name as "nftName", nft_image as "nftImage", nft_description as "nftDescription",
+          marketplace_logo as "marketplaceLogo", current_usd_value as "currentUsdValue",
+          verified_collection as "verifiedCollection"
+        FROM processed_sales 
+        WHERE id = $1
+      `, [id]);
+
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      const row = result.rows[0];
+      return {
+        ...row,
+        priceEth: row.priceEth.toString(),
+        priceUsd: row.priceUsd ? row.priceUsd.toString() : undefined,
+        blockTimestamp: row.blockTimestamp.toISOString(),
+        processedAt: row.processedAt.toISOString()
+      };
+    } catch (error: any) {
+      logger.error('Failed to get sale by ID:', error.message);
       throw error;
     }
   }
@@ -1309,6 +1352,91 @@ export class DatabaseService implements IDatabaseService {
     
     if (result.rowCount && result.rowCount > 0) {
       logger.info(`Cleaned up ${result.rowCount} expired admin session(s)`);
+    }
+  }
+
+  /**
+   * Set up PostgreSQL triggers for real-time sale notifications
+   * Creates trigger function and trigger for instant processing
+   */
+  async setupSaleNotificationTriggers(): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      // Step 1: Create the trigger function
+      const createFunctionQuery = `
+        CREATE OR REPLACE FUNCTION notify_new_sale() 
+        RETURNS TRIGGER AS $$
+        BEGIN
+          -- Only notify for unposted sales
+          IF NEW.posted = FALSE THEN
+            PERFORM pg_notify('new_sale', NEW.id::text);
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+      `;
+
+      await this.pool.query(createFunctionQuery);
+      logger.info('✅ Created notify_new_sale() trigger function');
+
+      // Step 2: Create the trigger (if it doesn't exist)
+      const createTriggerQuery = `
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_trigger WHERE tgname = 'new_sale_trigger'
+          ) THEN
+            CREATE TRIGGER new_sale_trigger 
+              AFTER INSERT ON processed_sales 
+              FOR EACH ROW EXECUTE FUNCTION notify_new_sale();
+          END IF;
+        END $$;
+      `;
+
+      await this.pool.query(createTriggerQuery);
+      logger.info('✅ Created new_sale_trigger on processed_sales table');
+
+      logger.info('🎯 Sale notification triggers setup complete - ready for real-time processing!');
+
+    } catch (error: any) {
+      logger.error('❌ Failed to setup sale notification triggers:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Check if sale notification triggers are properly set up
+   */
+  async checkSaleNotificationTriggers(): Promise<boolean> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      // Check if trigger function exists
+      const functionCheck = await this.pool.query(`
+        SELECT EXISTS (
+          SELECT 1 FROM pg_proc 
+          WHERE proname = 'notify_new_sale'
+        ) as function_exists;
+      `);
+
+      // Check if trigger exists
+      const triggerCheck = await this.pool.query(`
+        SELECT EXISTS (
+          SELECT 1 FROM pg_trigger 
+          WHERE tgname = 'new_sale_trigger'
+        ) as trigger_exists;
+      `);
+
+      const functionExists = functionCheck.rows[0].function_exists;
+      const triggerExists = triggerCheck.rows[0].trigger_exists;
+
+      logger.info(`🔍 Trigger status - Function: ${functionExists ? '✅' : '❌'}, Trigger: ${triggerExists ? '✅' : '❌'}`);
+
+      return functionExists && triggerExists;
+    } catch (error: any) {
+      logger.error('❌ Failed to check trigger status:', error.message);
+      return false;
     }
   }
 }

@@ -252,55 +252,35 @@ export class SchedulerService {
       // Refresh NTP time cache before processing
       await this.autoTweetService.refreshTimeCache();
       
-      // Process new sales
-      const result = await this.salesProcessingService.processNewSales();
+      // Process new sales from Moralis (store in database only)
+      // Tweet processing is now handled by DatabaseEventService via NOTIFY/LISTEN
+      const moralisResult = await this.salesProcessingService.processNewSales();
+      logger.info(`📊 Moralis processing complete: ${moralisResult.newSales} new sales stored in database`);
       
-      // Auto-post new sales if enabled
-      let autoPostResults: PostResult[] = [];
-      
-      if (result.newSales > 0 && result.processedSales.length > 0) {
-        const autoPostSettings = await this.autoTweetService.getSettings();
-        // Check global AND sales-specific toggles
-        if (autoPostSettings.enabled && autoPostSettings.sales.enabled) {
-          logger.info(`🤖 Auto-posting ${result.processedSales.length} new sales...`);
-          autoPostResults = await this.autoTweetService.processNewSales(result.processedSales, autoPostSettings);
-          
-          const posted = autoPostResults.filter(r => r.success).length;
-          const skipped = autoPostResults.filter(r => r.skipped).length;
-          const failed = autoPostResults.filter(r => !r.success && !r.skipped).length;
-          
-          logger.info(`🐦 Sales auto-posting results: ${posted} posted, ${skipped} skipped, ${failed} failed`);
-        } else {
-          logger.debug(`🤖 Skipping sales auto-posting - Global: ${autoPostSettings.enabled}, Sales: ${autoPostSettings.sales.enabled}`);
-        }
+      if (moralisResult.newSales > 0) {
+        logger.info(`⚡ DatabaseEventService will handle instant tweet processing for ${moralisResult.newSales} new sales`);
       }
       
       this.lastRunTime = startTime;
-      this.lastRunStats = { ...result, autoPostResults };
+      this.lastRunStats = moralisResult;
       this.consecutiveErrors = 0; // Reset error counter on success
 
       const duration = Date.now() - startTime.getTime();
-      const salesPosted = autoPostResults.filter(r => r.success).length;
       
       logger.info(`Sales sync completed in ${duration}ms:`, {
-        fetched: result.fetched,
-        newSales: result.newSales,
-        duplicates: result.duplicates,
-        errors: result.errors,
-        salesAutoPosted: salesPosted
+        fetched: moralisResult.fetched,
+        newSales: moralisResult.newSales,
+        duplicates: moralisResult.duplicates,
+        errors: moralisResult.errors
       });
 
       // Log notable events
-      if (result.newSales > 0) {
-        logger.info(`📈 Found ${result.newSales} new sales to process`);
+      if (moralisResult.newSales > 0) {
+        logger.info(`📈 Found ${moralisResult.newSales} new sales from Moralis - DatabaseEventService will handle instant posting`);
       }
       
-      if (salesPosted > 0) {
-        logger.info(`🐦 Posted ${salesPosted} sale tweets`);
-      }
-      
-      if (result.errors > 0) {
-        logger.warn(`⚠️ Encountered ${result.errors} errors during processing`);
+      if (moralisResult.errors > 0) {
+        logger.warn(`⚠️ Encountered ${moralisResult.errors} errors during Moralis processing`);
       }
 
     } catch (error: any) {

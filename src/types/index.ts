@@ -149,6 +149,12 @@ export interface Config {
     sessionSecret: string;
     domain: string;
   };
+  quicknode: {
+    webhookSecret: string;
+  };
+  opensea?: {
+    apiKey: string;
+  };
 }
 
 // Twitter Post Record
@@ -178,6 +184,7 @@ export interface IDatabaseService {
   insertSale(sale: Omit<ProcessedSale, 'id'>): Promise<number>;
   isSaleProcessed(tokenId: string): Promise<boolean>;
   getRecentSales(limit?: number): Promise<ProcessedSale[]>;
+  getSaleById(id: number): Promise<ProcessedSale | null>;
   getUnpostedSales(limit?: number, maxAgeHours?: number): Promise<ProcessedSale[]>;
   markAsPosted(id: number, tweetId: string): Promise<void>;
   getSystemState(key: string): Promise<string | null>;
@@ -227,6 +234,10 @@ export interface IDatabaseService {
   getAdminSession(sessionId: string): Promise<SiweSession | null>;
   deleteAdminSession(sessionId: string): Promise<void>;
   cleanupExpiredSessions(): Promise<void>;
+  
+  // Real-time notification trigger methods
+  setupSaleNotificationTriggers(): Promise<void>;
+  checkSaleNotificationTriggers(): Promise<boolean>;
 }
 
 // ENS Bids Types
