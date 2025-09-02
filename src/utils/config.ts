@@ -46,7 +46,10 @@ export const config: Config = {
   },
   quicknode: {
     webhookSecret: process.env.QUICKNODE_SECRET || ''
-  }
+  },
+  opensea: process.env.OPENSEA_API_KEY ? {
+    apiKey: process.env.OPENSEA_API_KEY,
+  } : undefined
 };
 
 // Validate required configuration

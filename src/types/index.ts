@@ -152,6 +152,9 @@ export interface Config {
   quicknode: {
     webhookSecret: string;
   };
+  opensea?: {
+    apiKey: string;
+  };
 }
 
 // Twitter Post Record
