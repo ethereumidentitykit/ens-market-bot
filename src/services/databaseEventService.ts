@@ -51,6 +51,9 @@ export class DatabaseEventService {
     // Always try to connect on startup
     await this.ensureConnection();
     
+    // Check for unposted sales from previous session (startup recovery)
+    await this.performStartupRecovery();
+    
     // Set up periodic health check (every 30 seconds)
     this.healthCheckTimer = setInterval(() => {
       this.performHealthCheck();
@@ -308,6 +311,42 @@ export class DatabaseEventService {
       logger.warn('💔 Database listener health check failed, reconnecting...', error.message);
       this.isListening = false;
       await this.ensureConnection();
+    }
+  }
+
+  /**
+   * Perform startup recovery - check for unposted sales from previous session
+   */
+  private async performStartupRecovery(): Promise<void> {
+    if (this.isShuttingDown) return;
+
+    try {
+      logger.info('🔍 Checking for unposted sales from previous session...');
+
+      // Get the 5 newest unposted sales (most recent first)
+      const unpostedSales = await this.databaseService.getUnpostedSales(5, 24); // 24 hour window
+
+      if (unpostedSales.length === 0) {
+        logger.info('✅ No unposted sales found - clean startup');
+        return;
+      }
+
+      // Simple notification about startup recovery
+      logger.info(`🔄 Startup recovery: Found ${unpostedSales.length} unposted sales, adding to processing queue`);
+
+      // Add unposted sales to queue for immediate processing
+      for (const sale of unpostedSales) {
+        if (sale.id) {
+          this.addToQueue(sale.id);
+          logger.info(`🔄 Recovered unposted sale: ${sale.nftName || sale.tokenId} (${sale.priceEth} ETH) - ID: ${sale.id}`);
+        }
+      }
+
+      logger.info(`✅ Startup recovery complete - ${unpostedSales.length} sales added to processing queue`);
+
+    } catch (error: any) {
+      logger.error('❌ Startup recovery failed:', error.message);
+      // Don't throw - we don't want to prevent service startup
     }
   }
 
