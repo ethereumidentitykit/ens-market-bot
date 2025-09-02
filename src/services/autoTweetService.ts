@@ -260,6 +260,9 @@ export class AutoTweetService {
           saleId
         );
 
+        // CRITICAL: Mark sale as posted in database to prevent duplicate posts
+        await this.databaseService.markAsPosted(saleId, postResult.tweetId);
+
         logger.info(`Successfully auto-posted sale ${saleId} - Tweet ID: ${postResult.tweetId}`);
         
         return {
