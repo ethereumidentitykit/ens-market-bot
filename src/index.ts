@@ -2728,13 +2728,11 @@ async function startApplication(): Promise<void> {
                 
                 if (qnSignature !== expectedSignature) {
                   logger.error('❌ QuickNode webhook signature verification failed!');
-                  logger.warn('⚠️ TEMPORARILY ALLOWING WEBHOOK TO PROCEED FOR DEBUGGING');
-                  // TODO: Re-enable signature verification once format is confirmed
-                  // return res.status(401).json({
-                  //   success: false,
-                  //   error: 'Webhook signature verification failed',
-                  //   message: 'Invalid QuickNode signature'
-                  // });
+                  return res.status(401).json({
+                    success: false,
+                    error: 'Webhook signature verification failed',
+                    message: 'Invalid QuickNode signature'
+                  });
                 }
                 
                 logger.info('✅ QuickNode webhook signature verified successfully');
