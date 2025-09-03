@@ -86,7 +86,7 @@ export class QuickNodeSalesService {
         
         if (!saleData) {
           results.skipped++;
-          logger.debug(`Skipped order ${order.orderHash} - not an ENS sale or below minimum price`);
+          logger.debug(`Skipped order ${order.orderHash} - below minimum price filter`);
           continue;
         }
 
