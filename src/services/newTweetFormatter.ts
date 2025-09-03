@@ -74,7 +74,7 @@ export class NewTweetFormatter {
           const registrationImageData = await this.convertRegistrationToImageData(registration, ownerAccount);
           
           // Generate image buffer using Puppeteer (registration-specific)
-          imageBuffer = await PuppeteerImageService.generateRegistrationImage(registrationImageData, this.databaseService);
+          imageBuffer = await PuppeteerImageService.generateRegistrationImage(registrationImageData, this.databaseService, this.openSeaService);
           
           if (imageBuffer) {
             // Save image for preview
@@ -148,7 +148,7 @@ export class NewTweetFormatter {
           const mockImageData = this.convertRealToImageDataForBid(bidImageData, bid);
           
           // Generate image buffer using Puppeteer (bid-specific)
-          imageBuffer = await PuppeteerImageService.generateBidImage(mockImageData, this.databaseService);
+          imageBuffer = await PuppeteerImageService.generateBidImage(mockImageData, this.databaseService, this.openSeaService);
           
           if (imageBuffer) {
             // Save image for preview
@@ -216,7 +216,7 @@ export class NewTweetFormatter {
       if (this.databaseService) {
         try {
           logger.info(`Generating image for sale: ${sale.transactionHash}`);
-          const realDataService = new RealDataImageService(this.databaseService, this.ethIdentityService);
+          const realDataService = new RealDataImageService(this.databaseService, this.ethIdentityService, this.openSeaService);
           
           // Convert sale to image data
           const saleImageData = await realDataService.convertSaleToImageData(sale);
@@ -225,7 +225,7 @@ export class NewTweetFormatter {
           const mockImageData = this.convertRealToImageData(saleImageData, sale);
           
           // Generate image buffer using Puppeteer
-          imageBuffer = await PuppeteerImageService.generateSaleImage(mockImageData, this.databaseService);
+          imageBuffer = await PuppeteerImageService.generateSaleImage(mockImageData, this.databaseService, this.openSeaService);
           
           // Save image for preview
           const filename = `tweet-image-${sale.id}-${Date.now()}.png`;
@@ -716,7 +716,9 @@ export class NewTweetFormatter {
       sellerAvatar: undefined, // Will be handled by PuppeteerImageService with dao-profile.png
       nftImageUrl: registration.image, // Use ENS NFT image if available
       saleId: registration.id,
-      transactionHash: registration.transactionHash
+      transactionHash: registration.transactionHash,
+      contractAddress: registration.contractAddress,
+      tokenId: registration.tokenId
     };
 
     logger.info('Converted registration to image data:', {
@@ -878,7 +880,9 @@ export class NewTweetFormatter {
       sellerAvatar: currentOwnerAvatar,
       nftImageUrl: bid.nftImage, // Use ENS NFT image if available
       saleId: bid.id,
-      transactionHash: bid.bidId // Use bid ID as transaction reference
+      transactionHash: bid.bidId, // Use bid ID as transaction reference
+      contractAddress: bid.contractAddress,
+      tokenId: bid.tokenId
     };
 
     logger.info('Converted bid to image data:', {
@@ -911,7 +915,9 @@ export class NewTweetFormatter {
       sellerEns: realData.sellerEns,
       sellerAvatar: realData.sellerAvatar,
       transactionHash: sale.transactionHash,
-      timestamp: new Date() // Use current timestamp
+      timestamp: new Date(), // Use current timestamp
+      contractAddress: sale.contractAddress,
+      tokenId: sale.tokenId
     };
   }
 
@@ -931,7 +937,9 @@ export class NewTweetFormatter {
       sellerEns: realData.sellerEns,
       sellerAvatar: realData.sellerAvatar,
       transactionHash: bid.bidId, // Use bid ID as transaction reference
-      timestamp: new Date() // Use current timestamp
+      timestamp: new Date(), // Use current timestamp
+      contractAddress: bid.contractAddress,
+      tokenId: bid.tokenId
     };
   }
 

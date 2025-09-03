@@ -14,4 +14,7 @@ export interface ImageData {
   sellerAvatar?: string;
   transactionHash: string;
   timestamp: Date;
+  // NFT contract info for metadata fallbacks
+  contractAddress?: string;
+  tokenId?: string;
 }
