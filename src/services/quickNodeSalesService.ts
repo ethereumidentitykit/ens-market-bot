@@ -86,7 +86,8 @@ export class QuickNodeSalesService {
         
         if (!saleData) {
           results.skipped++;
-          logger.debug(`Skipped order ${order.orderHash} - below minimum price filter`);
+          const skipReason = this.getSkipReason(order);
+          logger.info(`Skipped order ${order.orderHash} - ${skipReason}`);
           continue;
         }
 
@@ -325,6 +326,50 @@ export class QuickNodeSalesService {
     } catch (error: any) {
       logger.error(`Error enriching sale data for ${saleData.tokenId}:`, error.message);
       return null;
+    }
+  }
+
+  /**
+   * Get detailed reason why an order was skipped
+   * @param order - Seaport orderFulfilled event
+   * @returns Human-readable skip reason
+   */
+  private getSkipReason(order: SeaportOrder): string {
+    try {
+      // Check if it's an ENS token
+      const ensToken = order.offer?.find(item => 
+        item.token.toLowerCase() === this.ENS_REGISTRY.toLowerCase() ||
+        item.token.toLowerCase() === this.ENS_NAMEWRAPPER.toLowerCase()
+      );
+
+      if (!ensToken) {
+        return 'not an ENS token';
+      }
+
+      // Check for ETH/WETH payments
+      const ethPayments = order.consideration?.filter(item => 
+        item.itemType === this.NATIVE_ETH_ITEM_TYPE || // Native ETH
+        item.token.toLowerCase() === this.WETH_ADDRESS.toLowerCase() // WETH
+      ) || [];
+
+      if (ethPayments.length === 0) {
+        return 'no ETH/WETH payments found';
+      }
+
+      // Check minimum price
+      const totalWei = ethPayments.reduce((sum, payment) => {
+        return sum + BigInt(payment.amount);
+      }, BigInt(0));
+
+      const priceEth = Number(totalWei) / 1e18;
+      
+      if (priceEth < this.MIN_PRICE_ETH) {
+        return `price ${priceEth.toFixed(4)} ETH < ${this.MIN_PRICE_ETH} ETH minimum`;
+      }
+
+      return 'unknown reason';
+    } catch (error: any) {
+      return `error parsing order: ${error.message}`;
     }
   }
 }
