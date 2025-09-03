@@ -187,22 +187,22 @@ export class ClubService {
 
     // Normalize search term to lowercase for case-insensitive matching
     const normalizedEnsName = ensName.toLowerCase();
-    logger.info(`[ClubService] Checking clubs for ENS name: ${ensName} (normalized: ${normalizedEnsName})`);
+    logger.debug(`[ClubService] Checking clubs for ENS name: ${ensName} (normalized: ${normalizedEnsName})`);
     const clubs: ClubInfo[] = [];
 
     // Check pattern-based clubs from config (patterns should match original case for flexibility)
     for (const club of this.patternClubs) {
       const regex = this.compiledPatterns.get(club.name);
       if (regex && regex.test(ensName)) {
-        logger.info(`[ClubService] Pattern match found: ${club.name} for ${ensName}`);
+        logger.debug(`[ClubService] Pattern match found: ${club.name} for ${ensName}`);
         clubs.push({ id: club.id, name: club.name, handle: club.handle });
       }
     }
 
     // Check file-based clubs using normalized name
-    logger.info(`[ClubService] Checking ${this.clubDataSets.size} file-based clubs for ${normalizedEnsName}`);
+    logger.debug(`[ClubService] Checking ${this.clubDataSets.size} file-based clubs for ${normalizedEnsName}`);
     for (const [clubKey, nameSet] of this.clubDataSets) {
-      logger.info(`[ClubService] Checking ${clubKey} club (${nameSet.size} names) for ${normalizedEnsName}`);
+      logger.debug(`[ClubService] Checking ${clubKey} club (${nameSet.size} names) for ${normalizedEnsName}`);
       if (nameSet.has(normalizedEnsName)) {
         const clubInfo = this.clubMetadata.get(clubKey);
         if (clubInfo) {
@@ -221,16 +221,16 @@ export class ClubService {
           const logMessage = formattedLogLineNumber 
             ? `File-based match found: ${clubInfo.name}: #${formattedLogLineNumber} for ${ensName}`
             : `File-based match found: ${clubInfo.name} for ${ensName}`;
-          logger.info(`[ClubService] ${logMessage}`);
+          logger.debug(`[ClubService] ${logMessage}`);
           
           clubs.push(clubInfoWithLine);
         }
       } else {
-        logger.info(`[ClubService] No match in ${clubKey} for ${normalizedEnsName}`);
+        logger.debug(`[ClubService] No match in ${clubKey} for ${normalizedEnsName}`);
       }
     }
 
-    logger.info(`[ClubService] Total clubs found for ${ensName}: ${clubs.length}`);
+    logger.debug(`[ClubService] Total clubs found for ${ensName}: ${clubs.length}`);
     return clubs;
   }
 

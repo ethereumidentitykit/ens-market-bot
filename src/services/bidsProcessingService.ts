@@ -291,7 +291,7 @@ export class BidsProcessingService {
         
         // DEBUG: Log filtering decision for troubleshooting
         const bidName = bid.ensName || bid.tokenId?.slice(-6) || 'unnamed';
-        logger.info(`🔍 BID FILTER: ${bidName} - ${priceEth} ETH vs ${ethMinimum} ETH minimum = ${passes ? 'PASS ✅' : 'REJECT ❌'}`);
+        logger.debug(`🔍 BID FILTER: ${bidName} - ${priceEth} ETH vs ${ethMinimum} ETH minimum = ${passes ? 'PASS ✅' : 'REJECT ❌'}`);
         
         return passes;
       }
@@ -359,21 +359,21 @@ export class BidsProcessingService {
       // Apply club-aware logic using ClubService
       const clubs = this.clubService.getClubInfo(ensName);
       
-      logger.info(`🔍 BID FILTER: ${ensName} - clubs detected: [${clubs.map(c => c.name).join(', ') || 'none'}]`);
+      logger.debug(`🔍 BID FILTER: ${ensName} - clubs detected: [${clubs.map(c => c.name).join(', ') || 'none'}]`);
       
       // Check for premium clubs with special thresholds (in priority order)
       for (const club of clubs) {
         if (club.id === '999_club') {
-          logger.info(`🎯 BID FILTER: ${ensName} - 999 Club detected, minimum: ${club999Min} ETH`);
+          logger.debug(`🎯 BID FILTER: ${ensName} - 999 Club detected, minimum: ${club999Min} ETH`);
           return parseFloat(club999Min);
         } else if (club.id === '10k_club') {
-          logger.info(`🎯 BID FILTER: ${ensName} - 10k Club detected, minimum: ${club10kMin} ETH`);
+          logger.debug(`🎯 BID FILTER: ${ensName} - 10k Club detected, minimum: ${club10kMin} ETH`);
           return parseFloat(club10kMin);
         }
       }
       
       // Default minimum for other names
-      logger.info(`🎯 BID FILTER: ${ensName} - default minimum: ${defaultMin} ETH`);
+      logger.debug(`🎯 BID FILTER: ${ensName} - default minimum: ${defaultMin} ETH`);
       return parseFloat(defaultMin);
 
     } catch (error: any) {
