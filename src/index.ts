@@ -2321,23 +2321,74 @@ async function startApplication(): Promise<void> {
       attributes: any[];
     }
 
-    // Fetch ENS metadata from official ENS metadata API
-    async function fetchENSMetadata(contractAddress: string, tokenId: string): Promise<ENSMetadata | null> {
+    // Fetch ENS metadata using OpenSea first, ENS metadata API fallback (same pattern as sales)
+    async function fetchENSMetadata(contractAddress: string, tokenId: string): Promise<{ name?: string; image?: string; description?: string } | null> {
+      let nftName: string | undefined;
+      let nftImage: string | undefined;
+      let nftDescription: string | undefined;
+      let openSeaSuccess = false;
+
+      // 1. Try OpenSea first for metadata
+      logger.info(`🔍 Enriching registration ${tokenId} - trying OpenSea first...`);
       try {
-        const url = `https://metadata.ens.domains/mainnet/${contractAddress}/${tokenId}`;
-        logger.debug(`Fetching ENS metadata from: ${url}`);
+        const openSeaData = await openSeaService.getSimplifiedMetadata(contractAddress, tokenId);
         
-        const response = await axios.get<ENSMetadata>(url, {
-          timeout: 5000, // 5 second timeout
-        });
-        
-        logger.debug(`Successfully fetched ENS metadata: ${response.data.name}`);
-        return response.data;
-        
+        if (openSeaData) {
+          nftName = openSeaData.name;
+          nftImage = openSeaData.image;
+          nftDescription = openSeaData.description;
+          openSeaSuccess = true;
+          logger.info(`✅ OpenSea metadata success: ${nftName} (${openSeaData.collection})`);
+        } else {
+          logger.warn(`⚠️ OpenSea returned null for registration ${tokenId}`);
+        }
       } catch (error: any) {
-        logger.warn(`Failed to fetch ENS metadata for ${contractAddress}/${tokenId}:`, error.message);
+        logger.warn(`❌ OpenSea metadata failed for registration ${tokenId}: ${error.message}`);
+      }
+
+      // 2. Fallback to ENS Metadata service if OpenSea failed
+      if (!nftName || !nftImage) {
+        logger.warn(`⚠️ Falling back to ENS Metadata API for registration ${tokenId} (OpenSea incomplete)`);
+        try {
+          const ensData = await ensMetadataService.getMetadata(contractAddress, tokenId);
+          
+          if (ensData) {
+            const beforeName = nftName;
+            const beforeImage = nftImage;
+            const beforeDescription = nftDescription;
+            nftName = nftName || ensData.name;
+            nftImage = nftImage || ensData.image;
+            nftDescription = nftDescription || ensData.description;
+            
+            const fieldsFromEns = [];
+            if (!beforeName && nftName) fieldsFromEns.push('name');
+            if (!beforeImage && nftImage) fieldsFromEns.push('image');
+            if (!beforeDescription && nftDescription) fieldsFromEns.push('description');
+            
+            logger.info(`✅ ENS metadata fallback success: ${nftName} (provided: ${fieldsFromEns.join(', ')})`);
+          } else {
+            logger.error(`❌ ENS metadata fallback returned null for registration ${tokenId}`);
+          }
+        } catch (error: any) {
+          logger.error(`❌ ENS metadata fallback failed for registration ${tokenId}: ${error.message}`);
+        }
+      }
+
+      // 3. Return enriched metadata or null if no name found
+      if (!nftName) {
+        logger.error(`❌ No NFT name found for registration ${tokenId} - metadata enrichment failed`);
         return null;
       }
+
+      // 4. Log enrichment summary
+      const enrichmentSource = openSeaSuccess ? 'OpenSea' : 'ENS Metadata (fallback)';
+      logger.info(`📋 Registration enrichment complete for ${nftName}: metadata=${enrichmentSource}, hasImage=${!!nftImage}, hasDescription=${!!nftDescription}`);
+
+      return {
+        name: nftName,
+        image: nftImage,
+        description: nftDescription
+      };
     }
 
     // Contract format detection
