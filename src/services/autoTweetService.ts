@@ -698,7 +698,7 @@ export class AutoTweetService {
       
       if (!ensName && bid.tokenId) {
         try {
-          const ensContract = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
+          const ensContract = bid.contractAddress || '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
           const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
           
           const response = await fetch(metadataUrl);
@@ -772,7 +772,7 @@ export class AutoTweetService {
       
       if (!ensName && bid.tokenId) {
         try {
-          const ensContract = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
+          const ensContract = bid.contractAddress || '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
           const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
           
           const response = await fetch(metadataUrl);

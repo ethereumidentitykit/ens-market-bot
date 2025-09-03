@@ -7,6 +7,7 @@ import { PuppeteerImageService } from './puppeteerImageService';
 import { IDatabaseService } from '../types';
 import { AlchemyService } from './alchemyService';
 import { OpenSeaService } from './openSeaService';
+import { ENSMetadataService } from './ensMetadataService';
 import { ClubService } from './clubService';
 
 export interface GeneratedTweet {
@@ -35,7 +36,8 @@ export class NewTweetFormatter {
   constructor(
     private databaseService?: IDatabaseService,
     private alchemyService?: AlchemyService,
-    private openSeaService?: OpenSeaService
+    private openSeaService?: OpenSeaService,
+    private ensMetadataService?: ENSMetadataService
   ) {
     logger.info('[NewTweetFormatter] Constructor called - ClubService should be initialized');
     // Add a small delay to let ClubService initialize, then check status
@@ -344,30 +346,40 @@ export class NewTweetFormatter {
       logger.warn(`⚠️  Magic Eden did not provide ENS name for bid ${bid.bidId} (token: ${bid.tokenId})`);
     }
     
-    // If no ENS name from Magic Eden, try to fetch it ourselves
-    if (!ensName && bid.tokenId) {
+    // If no ENS name from Magic Eden, try to fetch it ourselves using OpenSea + ENS fallback
+    if (!ensName && bid.tokenId && bid.contractAddress) {
       try {
         logger.info(`🔍 Missing ENS name for bid ${bid.bidId}, attempting fallback lookup for token ${bid.tokenId}`);
-        const ensContract = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
-        const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
         
-        const response = await fetch(metadataUrl, { 
-          signal: AbortSignal.timeout(5000) // 5 second timeout
-        });
-        
-        if (response.ok) {
-          const metadata = await response.json();
-          ensName = metadata.name;
-          if (ensName) {
-            logger.info(`✅ Successfully resolved ENS name via fallback: ${ensName}`);
-          } else {
-            logger.warn(`⚠️  ENS metadata service returned no name for token ${bid.tokenId}`);
+        // Try OpenSea first
+        let metadata = null;
+        if (this.openSeaService) {
+          try {
+            metadata = await this.openSeaService.getSimplifiedMetadata(bid.contractAddress, bid.tokenId);
+            if (metadata?.name) {
+              ensName = metadata.name;
+              logger.info(`✅ Fetched ENS name from OpenSea: ${ensName}`);
+            }
+          } catch (error: any) {
+            logger.warn(`⚠️ OpenSea metadata failed for bid ${bid.bidId}: ${error.message}`);
           }
-        } else {
-          logger.warn(`⚠️  ENS metadata service returned HTTP ${response.status} for token ${bid.tokenId}`);
+        }
+        
+        // Fallback to ENS metadata API if OpenSea failed
+        if (!ensName && this.ensMetadataService) {
+          const ensContract = bid.contractAddress || '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
+          logger.debug(`🔗 Falling back to ENS metadata service with contract ${ensContract}`);
+          
+          const ensMetadata = await this.ensMetadataService.getMetadata(ensContract, bid.tokenId);
+          if (ensMetadata?.name) {
+            ensName = ensMetadata.name;
+            logger.info(`✅ Successfully resolved ENS name via ENS metadata fallback: ${ensName}`);
+          } else {
+            logger.warn(`⚠️ ENS metadata service returned no name for token ${bid.tokenId}`);
+          }
         }
       } catch (error: any) {
-        logger.warn(`⚠️  ENS metadata service fallback failed for token ${bid.tokenId}:`, error.message);
+        logger.warn(`⚠️ Metadata fallback failed for token ${bid.tokenId}:`, error.message);
       }
     }
     
@@ -755,30 +767,40 @@ export class NewTweetFormatter {
       logger.warn(`⚠️  Magic Eden did not provide ENS name for image bid ${bid.bidId} (token: ${bid.tokenId})`);
     }
     
-    // If no ENS name from Magic Eden, try to fetch it ourselves (same logic as tweet text)
-    if (!ensName && bid.tokenId) {
+    // If no ENS name from Magic Eden, try to fetch it ourselves using OpenSea + ENS fallback
+    if (!ensName && bid.tokenId && bid.contractAddress) {
       try {
         logger.info(`🔍 Missing ENS name for image generation of bid ${bid.bidId}, attempting fallback lookup for token ${bid.tokenId}`);
-        const ensContract = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
-        const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
         
-        const response = await fetch(metadataUrl, { 
-          signal: AbortSignal.timeout(5000) // 5 second timeout
-        });
-        
-        if (response.ok) {
-          const metadata = await response.json();
-          ensName = metadata.name;
-          if (ensName) {
-            logger.info(`✅ Successfully resolved ENS name via fallback for image: ${ensName}`);
-          } else {
-            logger.warn(`⚠️  ENS metadata service returned no name for image token ${bid.tokenId}`);
+        // Try OpenSea first
+        let metadata = null;
+        if (this.openSeaService) {
+          try {
+            metadata = await this.openSeaService.getSimplifiedMetadata(bid.contractAddress, bid.tokenId);
+            if (metadata?.name) {
+              ensName = metadata.name;
+              logger.info(`✅ Fetched ENS name from OpenSea for image: ${ensName}`);
+            }
+          } catch (error: any) {
+            logger.warn(`⚠️ OpenSea metadata failed for image bid ${bid.bidId}: ${error.message}`);
           }
-        } else {
-          logger.warn(`⚠️  ENS metadata service returned HTTP ${response.status} for image token ${bid.tokenId}`);
+        }
+        
+        // Fallback to ENS metadata API if OpenSea failed
+        if (!ensName && this.ensMetadataService) {
+          const ensContract = bid.contractAddress || '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
+          logger.debug(`🔗 Falling back to ENS metadata service for image with contract ${ensContract}`);
+          
+          const ensMetadata = await this.ensMetadataService.getMetadata(ensContract, bid.tokenId);
+          if (ensMetadata?.name) {
+            ensName = ensMetadata.name;
+            logger.info(`✅ Successfully resolved ENS name via ENS metadata fallback for image: ${ensName}`);
+          } else {
+            logger.warn(`⚠️ ENS metadata service returned no name for image token ${bid.tokenId}`);
+          }
         }
       } catch (error: any) {
-        logger.warn(`⚠️  ENS metadata service fallback failed for image token ${bid.tokenId}:`, error.message);
+        logger.warn(`⚠️ Metadata fallback failed for image token ${bid.tokenId}:`, error.message);
       }
     }
     
@@ -1186,26 +1208,40 @@ export class NewTweetFormatter {
       logger.warn(`⚠️  Magic Eden did not provide ENS name for bid breakdown ${bid.bidId} (token: ${bid.tokenId})`);
     }
     
-    // If no ENS name from Magic Eden, try to fetch it ourselves
-    if (!ensName && bid.tokenId) {
+    // If no ENS name from Magic Eden, try to fetch it ourselves using OpenSea + ENS fallback
+    if (!ensName && bid.tokenId && bid.contractAddress) {
       try {
         logger.info(`🔍 Missing ENS name for bid breakdown ${bid.bidId}, attempting fallback lookup for token ${bid.tokenId}`);
-        const ensContract = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
-        const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
         
-        const response = await fetch(metadataUrl, { 
-          signal: AbortSignal.timeout(5000) // 5 second timeout
-        });
+        // Try OpenSea first
+        let metadata = null;
+        if (this.openSeaService) {
+          try {
+            metadata = await this.openSeaService.getSimplifiedMetadata(bid.contractAddress, bid.tokenId);
+            if (metadata?.name) {
+              ensName = metadata.name;
+              logger.info(`✅ Fetched ENS name from OpenSea for breakdown: ${ensName}`);
+            }
+          } catch (error: any) {
+            logger.warn(`⚠️ OpenSea metadata failed for breakdown bid ${bid.bidId}: ${error.message}`);
+          }
+        }
         
-        if (response.ok) {
-          const metadata = await response.json();
-          ensName = metadata.name;
-          if (ensName) {
-            logger.info(`✅ Successfully resolved ENS name via fallback for breakdown: ${ensName}`);
+        // Fallback to ENS metadata API if OpenSea failed
+        if (!ensName && this.ensMetadataService) {
+          const ensContract = bid.contractAddress || '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
+          logger.debug(`🔗 Falling back to ENS metadata service for breakdown with contract ${ensContract}`);
+          
+          const ensMetadata = await this.ensMetadataService.getMetadata(ensContract, bid.tokenId);
+          if (ensMetadata?.name) {
+            ensName = ensMetadata.name;
+            logger.info(`✅ Successfully resolved ENS name via ENS metadata fallback for breakdown: ${ensName}`);
+          } else {
+            logger.warn(`⚠️ ENS metadata service returned no name for breakdown token ${bid.tokenId}`);
           }
         }
       } catch (error: any) {
-        logger.warn(`⚠️  ENS metadata service fallback failed for breakdown token ${bid.tokenId}:`, error.message);
+        logger.warn(`⚠️ Metadata fallback failed for breakdown token ${bid.tokenId}:`, error.message);
       }
     }
     

@@ -54,6 +54,7 @@ async function startApplication(): Promise<void> {
     const moralisService = new MoralisService();
     const alchemyService = new AlchemyService();
     const openSeaService = new OpenSeaService();
+    const ensMetadataService = new ENSMetadataService();
     
     // Initialize PostgreSQL database service
     const databaseService: IDatabaseService = new DatabaseService();
@@ -62,12 +63,11 @@ async function startApplication(): Promise<void> {
     const magicEdenService = new MagicEdenService();
     const bidsProcessingService = new BidsProcessingService(magicEdenService, databaseService, alchemyService);
     const twitterService = new TwitterService();
-    const newTweetFormatter = new NewTweetFormatter(databaseService, alchemyService, openSeaService);
+    const newTweetFormatter = new NewTweetFormatter(databaseService, alchemyService, openSeaService, ensMetadataService);
     const rateLimitService = new RateLimitService(databaseService);
     const ethIdentityService = new ENSWorkerService();
     const worldTimeService = new WorldTimeService();
     const siweService = new SiweService(databaseService);
-    const ensMetadataService = new ENSMetadataService();
     const quickNodeSalesService = new QuickNodeSalesService(databaseService, openSeaService, ensMetadataService, alchemyService);
     const autoTweetService = new AutoTweetService(newTweetFormatter, twitterService, rateLimitService, databaseService, worldTimeService);
     const schedulerService = new SchedulerService(salesProcessingService, bidsProcessingService, autoTweetService, databaseService);
@@ -2625,9 +2625,15 @@ async function startApplication(): Promise<void> {
               });
 
               // Fetch ENS metadata (image, description, etc.)
-              // Note: Use ENS Base Registrar contract address for metadata API, not the Controller contract
-              const ensBaseRegistrarAddress = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
-              const ensMetadata = await fetchENSMetadata(ensBaseRegistrarAddress, tokenId);
+              // Use the actual contract address from the event data for metadata lookup
+              const metadataContractAddress = eventData.contractAddress;
+              
+              // Convert hex tokenId to decimal for OpenSea API compatibility
+              const tokenIdDecimal = BigInt(tokenId).toString();
+              logger.debug(`Converting tokenId: ${tokenId} (hex) -> ${tokenIdDecimal} (decimal)`);
+              logger.debug(`Using contract address for metadata: ${metadataContractAddress}`);
+              
+              const ensMetadata = await fetchENSMetadata(metadataContractAddress, tokenIdDecimal);
               if (ensMetadata) {
                 logger.info('🖼️ ENS metadata fetched:', {
                   name: ensMetadata.name,
@@ -2655,8 +2661,8 @@ async function startApplication(): Promise<void> {
                 logger.warn('Failed to fetch ETH price for USD conversion:', error.message);
               }
               
-              // Check if this registration is already processed
-              const isProcessed = await databaseService.isRegistrationProcessed(tokenId);
+              // Check if this registration is already processed (use decimal format for consistency)
+              const isProcessed = await databaseService.isRegistrationProcessed(tokenIdDecimal);
               if (isProcessed) {
                 logger.info(`⚠️ ENS registration ${extractedData.ensName} already processed, skipping...`);
                 return;
@@ -2666,7 +2672,7 @@ async function startApplication(): Promise<void> {
               const registrationData: Omit<ENSRegistration, 'id'> = {
                 transactionHash: eventData.transactionHash,
                 contractAddress: eventData.contractAddress,
-                tokenId,
+                tokenId: tokenIdDecimal,
                 ensName: extractedData.ensName,
                 fullName: ensMetadata?.name || `${extractedData.ensName}.eth`,
                 ownerAddress,
