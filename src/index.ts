@@ -2661,7 +2661,7 @@ async function startApplication(): Promise<void> {
               const isProcessed = await databaseService.isRegistrationProcessed(tokenIdDecimal);
               if (isProcessed) {
                 logger.info(`⚠️ ENS registration ${extractedData.ensName} already processed, skipping...`);
-                return;
+                continue;
               }
 
               // Prepare registration data
