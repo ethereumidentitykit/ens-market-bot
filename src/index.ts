@@ -2321,75 +2321,6 @@ async function startApplication(): Promise<void> {
       attributes: any[];
     }
 
-    // Fetch ENS metadata using OpenSea first, ENS metadata API fallback (same pattern as sales)
-    async function fetchENSMetadata(contractAddress: string, tokenId: string): Promise<{ name?: string; image?: string; description?: string } | null> {
-      let nftName: string | undefined;
-      let nftImage: string | undefined;
-      let nftDescription: string | undefined;
-      let openSeaSuccess = false;
-
-      // 1. Try OpenSea first for metadata
-      logger.info(`🔍 Enriching registration ${tokenId} - trying OpenSea first...`);
-      try {
-        const openSeaData = await openSeaService.getSimplifiedMetadata(contractAddress, tokenId);
-        
-        if (openSeaData) {
-          nftName = openSeaData.name;
-          nftImage = openSeaData.image;
-          nftDescription = openSeaData.description;
-          openSeaSuccess = true;
-          logger.info(`✅ OpenSea metadata success: ${nftName} (${openSeaData.collection})`);
-        } else {
-          logger.warn(`⚠️ OpenSea returned null for registration ${tokenId}`);
-        }
-      } catch (error: any) {
-        logger.warn(`❌ OpenSea metadata failed for registration ${tokenId}: ${error.message}`);
-      }
-
-      // 2. Fallback to ENS Metadata service if OpenSea failed
-      if (!nftName || !nftImage) {
-        logger.warn(`⚠️ Falling back to ENS Metadata API for registration ${tokenId} (OpenSea incomplete)`);
-        try {
-          const ensData = await ensMetadataService.getMetadata(contractAddress, tokenId);
-          
-          if (ensData) {
-            const beforeName = nftName;
-            const beforeImage = nftImage;
-            const beforeDescription = nftDescription;
-            nftName = nftName || ensData.name;
-            nftImage = nftImage || ensData.image;
-            nftDescription = nftDescription || ensData.description;
-            
-            const fieldsFromEns = [];
-            if (!beforeName && nftName) fieldsFromEns.push('name');
-            if (!beforeImage && nftImage) fieldsFromEns.push('image');
-            if (!beforeDescription && nftDescription) fieldsFromEns.push('description');
-            
-            logger.info(`✅ ENS metadata fallback success: ${nftName} (provided: ${fieldsFromEns.join(', ')})`);
-          } else {
-            logger.error(`❌ ENS metadata fallback returned null for registration ${tokenId}`);
-          }
-        } catch (error: any) {
-          logger.error(`❌ ENS metadata fallback failed for registration ${tokenId}: ${error.message}`);
-        }
-      }
-
-      // 3. Return enriched metadata or null if no name found
-      if (!nftName) {
-        logger.error(`❌ No NFT name found for registration ${tokenId} - metadata enrichment failed`);
-        return null;
-      }
-
-      // 4. Log enrichment summary
-      const enrichmentSource = openSeaSuccess ? 'OpenSea' : 'ENS Metadata (fallback)';
-      logger.info(`📋 Registration enrichment complete for ${nftName}: metadata=${enrichmentSource}, hasImage=${!!nftImage}, hasDescription=${!!nftDescription}`);
-
-      return {
-        name: nftName,
-        image: nftImage,
-        description: nftDescription
-      };
-    }
 
     // Contract format detection
     interface ContractFormat {
@@ -2625,22 +2556,87 @@ async function startApplication(): Promise<void> {
               });
 
               // Fetch ENS metadata (image, description, etc.)
-              // Use the actual contract address from the event data for metadata lookup
-              const metadataContractAddress = eventData.contractAddress;
-              
-              // Convert hex tokenId to decimal for OpenSea API compatibility
+              // Convert hex tokenId to decimal for API compatibility
               const tokenIdDecimal = BigInt(tokenId).toString();
               logger.debug(`Converting tokenId: ${tokenId} (hex) -> ${tokenIdDecimal} (decimal)`);
-              logger.debug(`Using contract address for metadata: ${metadataContractAddress}`);
               
-              const ensMetadata = await fetchENSMetadata(metadataContractAddress, tokenIdDecimal);
+              // Use OpenSea service with correct NFT contracts (Base Registrar first, then NameWrapper)
+              let ensMetadata: { name?: string; image?: string; description?: string } | null = null;
+              let openSeaSuccess = false;
+              
+              // 1. Try OpenSea with Base Registrar contract first (has most names)
+              const baseRegistrarContract = '0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147ea85';
+              logger.info(`🔍 Enriching registration ${tokenIdDecimal} - trying OpenSea with Base Registrar first...`);
+              try {
+                const openSeaData = await openSeaService.getSimplifiedMetadata(baseRegistrarContract, tokenIdDecimal);
+                if (openSeaData) {
+                  ensMetadata = {
+                    name: openSeaData.name,
+                    image: openSeaData.image,
+                    description: openSeaData.description
+                  };
+                  openSeaSuccess = true;
+                  logger.info(`✅ OpenSea metadata success (Base Registrar): ${openSeaData.name} (${openSeaData.collection})`);
+                } else {
+                  logger.debug(`⚠️ OpenSea returned null for Base Registrar ${tokenIdDecimal}`);
+                }
+              } catch (error: any) {
+                logger.debug(`❌ OpenSea Base Registrar failed for ${tokenIdDecimal}: ${error.message}`);
+              }
+              
+              // 2. Try OpenSea with NameWrapper contract if Base Registrar failed
+              if (!ensMetadata) {
+                const nameWrapperContract = '0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401';
+                logger.info(`🔍 Trying OpenSea with NameWrapper contract...`);
+                try {
+                  const openSeaData = await openSeaService.getSimplifiedMetadata(nameWrapperContract, tokenIdDecimal);
+                  if (openSeaData) {
+                    ensMetadata = {
+                      name: openSeaData.name,
+                      image: openSeaData.image,
+                      description: openSeaData.description
+                    };
+                    openSeaSuccess = true;
+                    logger.info(`✅ OpenSea metadata success (NameWrapper): ${openSeaData.name} (${openSeaData.collection})`);
+                  } else {
+                    logger.debug(`⚠️ OpenSea returned null for NameWrapper ${tokenIdDecimal}`);
+                  }
+                } catch (error: any) {
+                  logger.debug(`❌ OpenSea NameWrapper failed for ${tokenIdDecimal}: ${error.message}`);
+                }
+              }
+              
+              // 3. Fallback to ENS Metadata service if OpenSea failed completely
+              if (!ensMetadata) {
+                logger.warn(`⚠️ Falling back to ENS Metadata API for registration ${tokenIdDecimal} (OpenSea failed)`);
+                try {
+                  const ensData = await ensMetadataService.getMetadataWithFallback(tokenIdDecimal);
+                  if (ensData) {
+                    ensMetadata = {
+                      name: ensData.name,
+                      image: ensData.image,
+                      description: ensData.description
+                    };
+                    logger.info(`✅ ENS metadata fallback success: ${ensData.name}`);
+                  } else {
+                    logger.error(`❌ ENS metadata fallback returned null for registration ${tokenIdDecimal}`);
+                  }
+                } catch (error: any) {
+                  logger.error(`❌ ENS metadata fallback failed for registration ${tokenIdDecimal}: ${error.message}`);
+                }
+              }
+              
+              // 4. Log enrichment results
               if (ensMetadata) {
+                const enrichmentSource = openSeaSuccess ? 'OpenSea' : 'ENS Metadata (fallback)';
+                logger.info(`📋 Registration enrichment complete for ${ensMetadata.name}: metadata=${enrichmentSource}, hasImage=${!!ensMetadata.image}, hasDescription=${!!ensMetadata.description}`);
                 logger.info('🖼️ ENS metadata fetched:', {
                   name: ensMetadata.name,
                   image: ensMetadata.image,
                   description: ensMetadata.description
                 });
               } else {
+                logger.error(`❌ No NFT name found for registration ${tokenIdDecimal} - metadata enrichment failed`);
                 logger.warn('⚠️ Failed to fetch ENS metadata for', extractedData.ensName);
               }
               
@@ -2665,7 +2661,7 @@ async function startApplication(): Promise<void> {
               const isProcessed = await databaseService.isRegistrationProcessed(tokenIdDecimal);
               if (isProcessed) {
                 logger.info(`⚠️ ENS registration ${extractedData.ensName} already processed, skipping...`);
-                return;
+                continue;
               }
 
               // Prepare registration data
