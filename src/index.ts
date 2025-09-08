@@ -118,8 +118,8 @@ async function startApplication(): Promise<void> {
 
     // Middleware - skip JSON parsing for salesv2 webhook
     app.use((req, res, next) => {
-      if (req.path === '/webhook/salesv2') {
-        return next(); // Skip JSON parsing for salesv2 webhook
+      if (req.path === '/webhook/salesv2' || req.path === '/webhook/quicknode-registrations') {
+        return next(); // Skip JSON parsing for QuickNode webhooks
       }
       return express.json()(req, res, next);
     });
@@ -2910,6 +2910,167 @@ async function startApplication(): Promise<void> {
       });
     });
 
+    // QuickNode Registration Webhook - registrations (manual body capture for no content-type)
+    app.post('/webhook/quicknode-registrations', (req, res) => {
+      // Capture raw body manually since QuickNode doesn't send Content-Type
+      let rawBody = Buffer.alloc(0);
+      
+      req.on('data', (chunk) => {
+        rawBody = Buffer.concat([rawBody, chunk]);
+      });
+      
+      req.on('end', async () => {
+        try {
+          logger.info('🚀 QuickNode Registration webhook received');
+          
+          // Log raw request details for debugging
+          logger.info('Request method:', req.method);
+          logger.info('Request headers:', JSON.stringify(req.headers, null, 2));
+          logger.info('Raw body length:', rawBody.length);
+          logger.info('Content-Type:', req.headers['content-type'] || 'not specified');
+          logger.info('Content-Encoding:', req.headers['content-encoding'] || 'not specified');
+          
+          // Check if body exists
+          if (rawBody.length > 0) {
+            logger.info('Raw body (first 100 chars):', rawBody.toString('utf8').substring(0, 100));
+          }
+        
+          // QuickNode Webhook Security Verification
+          const qnSignature = req.headers['x-qn-signature'] as string;
+          const qnNonce = req.headers['x-qn-nonce'] as string;
+          const qnTimestamp = req.headers['x-qn-timestamp'] as string;
+          const quickNodeSecret = config.quicknode.webhookSecret;
+          
+          if (qnSignature && qnNonce && qnTimestamp && quickNodeSecret) {
+            try {
+              // Create the string to sign: nonce + timestamp + raw_payload (QuickNode format)
+              const bodyString = rawBody.toString('utf8');
+              const stringToSign = qnNonce + qnTimestamp + bodyString;
+              
+              // Create expected signature using HMAC-SHA256
+              const expectedSignature = createHmac('sha256', quickNodeSecret)
+                .update(stringToSign)
+                .digest('hex');
+              
+              logger.info('🔐 QuickNode registration webhook signature verification:', {
+                provided: qnSignature,
+                expected: expectedSignature,
+                matches: qnSignature === expectedSignature
+              });
+              
+              if (qnSignature !== expectedSignature) {
+                logger.error('❌ QuickNode registration webhook signature verification failed!');
+                return res.status(401).json({
+                  success: false,
+                  error: 'Webhook signature verification failed',
+                  message: 'Invalid QuickNode signature'
+                });
+              }
+              
+              logger.info('✅ QuickNode registration webhook signature verified successfully');
+              
+            } catch (sigError: any) {
+              logger.error('❌ QuickNode registration signature verification error:', sigError);
+              return res.status(500).json({
+                success: false,
+                error: 'Signature verification error',
+                message: sigError.message
+              });
+            }
+          } else {
+            logger.warn('⚠️ QuickNode registration webhook signature verification skipped - missing headers or secret');
+          }
+        
+          // Handle the webhook data using manually captured rawBody
+          let webhookData;
+          
+          // Check if body is empty
+          if (rawBody.length === 0) {
+            logger.warn('⚠️ Registration webhook received with empty body');
+            return res.status(200).json({ 
+              success: true, 
+              message: 'Registration webhook received but body is empty',
+              type: 'empty_body'
+            });
+          }
+          
+          // Handle potential gzip compression
+          let processedBody: Buffer = rawBody;
+          try {
+            // Check if content is gzipped
+            if (req.headers['content-encoding'] === 'gzip') {
+              logger.info('🗜️ Decompressing gzipped registration content');
+              const decompressed = gunzipSync(rawBody);
+              processedBody = Buffer.from(decompressed);
+            } else {
+              // Try to detect gzip by magic bytes
+              if (rawBody.length >= 2 && rawBody[0] === 0x1f && rawBody[1] === 0x8b) {
+                logger.info('🗜️ Detected gzip magic bytes in registration data, decompressing...');
+                const decompressed = gunzipSync(rawBody);
+                processedBody = Buffer.from(decompressed);
+              }
+            }
+          } catch (gzipError: any) {
+            logger.warn('⚠️ Failed to decompress registration data (not gzipped?):', gzipError.message);
+            processedBody = rawBody;
+          }
+        
+        // Convert buffer to string and then parse as JSON
+        try {
+          const bodyString = processedBody.toString('utf8');
+          logger.info('📊 Full registration payload:', bodyString);
+          
+          // Try to parse as JSON
+          webhookData = JSON.parse(bodyString);
+          logger.info('✅ Successfully parsed registration body as JSON');
+          logger.info('📋 Parsed webhook data structure:', JSON.stringify({
+            hasLogs: !!webhookData.logs,
+            logsCount: webhookData.logs ? webhookData.logs.length : 0,
+            hasBlock: !!webhookData.block
+          }));
+          
+          // Log detailed structure of logs for development
+          if (webhookData.logs && webhookData.logs.length > 0) {
+            logger.info('🔍 First log sample:', JSON.stringify(webhookData.logs[0], null, 2));
+          }
+          
+        } catch (parseError: any) {
+          logger.error('❌ Failed to parse registration webhook data as JSON:', parseError.message);
+          logger.info('Raw registration data that failed to parse:', processedBody.toString('utf8'));
+          return res.status(400).json({
+            success: false,
+            error: 'JSON parse error',
+            message: parseError.message
+          });
+        }
+
+        // TODO: Process registration data with QuickNodeRegistrationService
+        logger.info('⏭️ Registration data parsed successfully - ready for processing service');
+
+        // Return success response
+        res.status(200).json({ 
+          success: true,
+          message: 'QuickNode registration webhook processed successfully', 
+          type: 'quicknode-registrations',
+          results: {
+            logsReceived: webhookData.logs ? webhookData.logs.length : 0,
+            processed: 0, // TODO: Update when processing is implemented
+            skipped: 0,
+            errors: 0
+          }
+        });
+        
+      } catch (error: any) {
+        logger.error('❌ Error processing QuickNode registration webhook:', error.message);
+        res.status(500).json({ 
+          success: false,
+          error: 'Webhook processing failed',
+          message: error.message
+        });
+      }
+    });
+  });
+
     // API info endpoint
     app.get('/api', (req, res) => {
       res.json({
@@ -2926,7 +3087,8 @@ async function startApplication(): Promise<void> {
         },
         webhooks: {
           ensRegistrations: '/webhook/ens-registrations',
-          salesv2: '/webhook/salesv2'
+          salesv2: '/webhook/salesv2',
+          quicknodeRegistrations: '/webhook/quicknode-registrations'
         }
       });
     });
