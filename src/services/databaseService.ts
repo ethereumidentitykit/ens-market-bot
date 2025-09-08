@@ -447,6 +447,47 @@ export class DatabaseService implements IDatabaseService {
   }
 
   /**
+   * Get a specific registration by ID
+   */
+  async getRegistrationById(id: number): Promise<ENSRegistration | null> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        SELECT 
+          id, transaction_hash as "transactionHash", contract_address as "contractAddress",
+          token_id as "tokenId", ens_name as "ensName", full_name as "fullName",
+          owner_address as "ownerAddress", cost_wei as "costWei", cost_eth as "costEth",
+          cost_usd as "costUsd", block_number as "blockNumber", block_timestamp as "blockTimestamp",
+          processed_at as "processedAt", image, description, tweet_id as "tweetId", 
+          posted, expires_at as "expiresAt", created_at as "createdAt", updated_at as "updatedAt"
+        FROM ens_registrations 
+        WHERE id = $1
+      `, [id]);
+
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      const row = result.rows[0];
+      return {
+        ...row,
+        costEth: row.costEth ? row.costEth.toString() : undefined,
+        costUsd: row.costUsd ? row.costUsd.toString() : undefined,
+        blockTimestamp: row.blockTimestamp.toISOString(),
+        processedAt: row.processedAt.toISOString(),
+        expiresAt: row.expiresAt ? row.expiresAt.toISOString() : undefined,
+        createdAt: row.createdAt ? row.createdAt.toISOString() : undefined,
+        updatedAt: row.updatedAt ? row.updatedAt.toISOString() : undefined
+      };
+
+    } catch (error: any) {
+      logger.error('Failed to get registration by ID:', error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Get sales that haven't been posted to Twitter yet
    */
   async getUnpostedSales(limit: number = 10, maxAgeHours: number = 1): Promise<ProcessedSale[]> {
