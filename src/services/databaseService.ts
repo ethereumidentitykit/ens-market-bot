@@ -36,6 +36,7 @@ export class DatabaseService implements IDatabaseService {
       
       // Auto-setup database triggers for real-time processing
       await this.setupSaleNotificationTriggers();
+      await this.setupRegistrationNotificationTriggers();
       
       logger.info('PostgreSQL database initialized successfully');
     } catch (error: any) {
@@ -1401,6 +1402,55 @@ export class DatabaseService implements IDatabaseService {
 
     } catch (error: any) {
       logger.error('❌ Failed to setup sale notification triggers:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Set up database notification triggers for real-time registration processing
+   */
+  async setupRegistrationNotificationTriggers(): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      // Step 1: Create the trigger function
+      const createFunctionQuery = `
+        CREATE OR REPLACE FUNCTION notify_new_registration() 
+        RETURNS TRIGGER AS $$
+        BEGIN
+          -- Only notify for unposted registrations
+          IF NEW.posted = FALSE THEN
+            PERFORM pg_notify('new_registration', NEW.id::text);
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+      `;
+
+      await this.pool.query(createFunctionQuery);
+      logger.info('✅ Created notify_new_registration() trigger function');
+
+      // Step 2: Create the trigger (if it doesn't exist)
+      const createTriggerQuery = `
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_trigger WHERE tgname = 'new_registration_trigger'
+          ) THEN
+            CREATE TRIGGER new_registration_trigger 
+              AFTER INSERT ON ens_registrations 
+              FOR EACH ROW EXECUTE FUNCTION notify_new_registration();
+          END IF;
+        END $$;
+      `;
+
+      await this.pool.query(createTriggerQuery);
+      logger.info('✅ Created new_registration_trigger on ens_registrations table');
+
+      logger.info('🎯 Registration notification triggers setup complete - ready for real-time processing!');
+
+    } catch (error: any) {
+      logger.error('❌ Failed to setup registration notification triggers:', error.message);
       throw error;
     }
   }
