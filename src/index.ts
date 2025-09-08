@@ -26,6 +26,7 @@ import { AutoTweetService } from './services/autoTweetService';
 import { WorldTimeService } from './services/worldTimeService';
 import { SiweService } from './services/siweService';
 import { QuickNodeSalesService } from './services/quickNodeSalesService';
+import { QuickNodeRegistrationService } from './services/quickNodeRegistrationService';
 import { OpenSeaService } from './services/openSeaService';
 import { ENSMetadataService } from './services/ensMetadataService';
 import { DatabaseEventService } from './services/databaseEventService';
@@ -69,6 +70,7 @@ async function startApplication(): Promise<void> {
     const worldTimeService = new WorldTimeService();
     const siweService = new SiweService(databaseService);
     const quickNodeSalesService = new QuickNodeSalesService(databaseService, openSeaService, ensMetadataService, alchemyService);
+    const quickNodeRegistrationService = new QuickNodeRegistrationService(databaseService, ensMetadataService, alchemyService, openSeaService);
     const autoTweetService = new AutoTweetService(newTweetFormatter, twitterService, rateLimitService, databaseService, worldTimeService);
     const schedulerService = new SchedulerService(salesProcessingService, bidsProcessingService, autoTweetService, databaseService);
     
@@ -3044,8 +3046,20 @@ async function startApplication(): Promise<void> {
           });
         }
 
-        // TODO: Process registration data with QuickNodeRegistrationService
+        // Process registration events through QuickNodeRegistrationService
         logger.info('⏭️ Registration data parsed successfully - ready for processing service');
+        
+        try {
+          await quickNodeRegistrationService.processRegistrations(webhookData);
+          logger.info('✅ QuickNode registration processing complete');
+        } catch (processingError: any) {
+          logger.error('❌ QuickNode registration processing failed:', processingError.message);
+          return res.status(500).json({
+            success: false,
+            error: 'Registration processing failed',
+            details: processingError.message
+          });
+        }
 
         // Return success response
         res.status(200).json({ 
