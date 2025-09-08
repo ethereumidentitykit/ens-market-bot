@@ -413,47 +413,64 @@ export class DatabaseEventService {
   }
 
   /**
-   * Perform startup recovery - check for unposted sales from previous session
+   * Perform startup recovery - check for unposted sales and registrations from previous session
    */
   private async performStartupRecovery(): Promise<void> {
     if (this.isShuttingDown) return;
 
     try {
-      logger.info('🔍 Checking for unposted sales from previous session...');
+      logger.info('🔍 Checking for unposted sales and registrations from previous session...');
 
       // Get auto-post settings to use the same time filters
       const autoPostSettings = await this.autoTweetService.getSettings();
       
-      logger.info(`🔍 Using auto-posting time window: ${autoPostSettings.sales.maxAgeHours} hours (enabled: ${autoPostSettings.enabled}/${autoPostSettings.sales.enabled})`);
+      logger.info(`🔍 Using auto-posting time window: Sales ${autoPostSettings.sales.maxAgeHours}h, Registrations ${autoPostSettings.registrations.maxAgeHours}h (Global enabled: ${autoPostSettings.enabled})`);
       
-      // Get the 5 newest unposted sales using auto-posting time window
+      // === SALES RECOVERY ===
       const unpostedSales = await this.databaseService.getUnpostedSales(5, autoPostSettings.sales.maxAgeHours);
+      const allUnpostedSales = await this.databaseService.getUnpostedSales(5, 999); // Debug check
+      
+      logger.info(`🔍 Sales recovery: Found ${allUnpostedSales.length} unposted sales total (any age), ${unpostedSales.length} within ${autoPostSettings.sales.maxAgeHours}h window`);
 
-      // Debug: Also check without time filter to see if there are ANY unposted sales
-      const allUnpostedSales = await this.databaseService.getUnpostedSales(5, 999); // Very large time window
-      logger.info(`🔍 Debug: Found ${allUnpostedSales.length} unposted sales total (any age), ${unpostedSales.length} within ${autoPostSettings.sales.maxAgeHours}h window`);
-
-      if (unpostedSales.length === 0) {
-        if (allUnpostedSales.length > 0) {
-          logger.info(`⏰ Found ${allUnpostedSales.length} unposted sales but they're older than ${autoPostSettings.sales.maxAgeHours}h - outside auto-posting window`);
-        } else {
-          logger.info('✅ No unposted sales found - clean startup');
+      if (unpostedSales.length > 0) {
+        logger.info(`🔄 Sales startup recovery: Found ${unpostedSales.length} unposted sales, adding to processing queue`);
+        
+        for (const sale of unpostedSales) {
+          if (sale.id) {
+            this.addSaleToQueue(sale.id);
+            logger.info(`🔄 Recovered unposted sale: ${sale.nftName || sale.tokenId} (${sale.priceEth} ETH) - ID: ${sale.id}`);
+          }
         }
-        return;
+      } else if (allUnpostedSales.length > 0) {
+        logger.info(`⏰ Found ${allUnpostedSales.length} unposted sales but they're older than ${autoPostSettings.sales.maxAgeHours}h - outside auto-posting window`);
       }
 
-      // Simple notification about startup recovery
-      logger.info(`🔄 Startup recovery: Found ${unpostedSales.length} unposted sales, adding to processing queue`);
+      // === REGISTRATIONS RECOVERY ===
+      const unpostedRegistrations = await this.databaseService.getUnpostedRegistrations(5, autoPostSettings.registrations.maxAgeHours);
+      const allUnpostedRegistrations = await this.databaseService.getUnpostedRegistrations(5, 999); // Debug check
+      
+      logger.info(`🔍 Registrations recovery: Found ${allUnpostedRegistrations.length} unposted registrations total (any age), ${unpostedRegistrations.length} within ${autoPostSettings.registrations.maxAgeHours}h window`);
 
-      // Add unposted sales to queue for immediate processing
-      for (const sale of unpostedSales) {
-        if (sale.id) {
-          this.addSaleToQueue(sale.id);
-          logger.info(`🔄 Recovered unposted sale: ${sale.nftName || sale.tokenId} (${sale.priceEth} ETH) - ID: ${sale.id}`);
+      if (unpostedRegistrations.length > 0) {
+        logger.info(`🔄 Registrations startup recovery: Found ${unpostedRegistrations.length} unposted registrations, adding to processing queue`);
+        
+        for (const registration of unpostedRegistrations) {
+          if (registration.id) {
+            this.addRegistrationToQueue(registration.id);
+            logger.info(`🔄 Recovered unposted registration: ${registration.fullName} (${registration.costEth || registration.costWei} ETH) - ID: ${registration.id}`);
+          }
         }
+      } else if (allUnpostedRegistrations.length > 0) {
+        logger.info(`⏰ Found ${allUnpostedRegistrations.length} unposted registrations but they're older than ${autoPostSettings.registrations.maxAgeHours}h - outside auto-posting window`);
       }
 
-      logger.info(`✅ Startup recovery complete - ${unpostedSales.length} sales added to processing queue`);
+      // === SUMMARY ===
+      const totalRecovered = unpostedSales.length + unpostedRegistrations.length;
+      if (totalRecovered === 0) {
+        logger.info('✅ No unposted items found within time windows - clean startup');
+      } else {
+        logger.info(`✅ Startup recovery complete - ${unpostedSales.length} sales and ${unpostedRegistrations.length} registrations added to processing queues`);
+      }
 
     } catch (error: any) {
       logger.error('❌ Startup recovery failed:', error.message);
