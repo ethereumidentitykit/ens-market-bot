@@ -2659,12 +2659,7 @@ async function startApplication(): Promise<void> {
                 logger.warn('Failed to fetch ETH price for USD conversion:', error.message);
               }
               
-              // Check if this registration is already processed (use decimal format for consistency)
-              const isProcessed = await databaseService.isRegistrationProcessed(tokenIdDecimal);
-              if (isProcessed) {
-                logger.info(`⚠️ ENS registration ${extractedData.ensName} already processed, skipping...`);
-                continue;
-              }
+              // Duplicate checking and source tracking handled by insertRegistrationWithSourceTracking
 
               // Prepare registration data
               const registrationData: Omit<ENSRegistration, 'id'> = {
@@ -2686,9 +2681,9 @@ async function startApplication(): Promise<void> {
                 expiresAt: undefined, // TODO: Calculate expiration if needed
               };
 
-              // Store registration in database
-              const registrationId = await databaseService.insertRegistration(registrationData);
-              logger.info(`💾 ENS registration stored in database with ID: ${registrationId}`);
+              // Store registration in database with source tracking and duplicate detection
+              const registrationId = await databaseService.insertRegistrationWithSourceTracking(registrationData, 'moralis');
+              // Success logging is handled by insertRegistrationWithSourceTracking
 
               // TODO: Format and send tweet
               

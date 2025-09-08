@@ -996,6 +996,100 @@ export class DatabaseService implements IDatabaseService {
     }
   }
 
+  /**
+   * Insert registration with source tracking and detailed duplicate logging
+   */
+  async insertRegistrationWithSourceTracking(
+    registration: Omit<ENSRegistration, 'id'>, 
+    source: 'quicknode' | 'moralis'
+  ): Promise<number> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      // Check if already exists and get details for duplicate logging
+      const existingResult = await this.pool.query(`
+        SELECT 
+          id, ens_name, processed_at, transaction_hash, 
+          EXTRACT(EPOCH FROM (NOW() - processed_at)) as seconds_ago
+        FROM ens_registrations 
+        WHERE token_id = $1
+      `, [registration.tokenId]);
+
+      if (existingResult.rows.length > 0) {
+        const existing = existingResult.rows[0];
+        const secondsAgo = Math.round(existing.seconds_ago);
+        
+        // Determine original source based on transaction patterns or timing
+        const originalSource = this.inferRegistrationSource(existing.transaction_hash, secondsAgo);
+        
+        logger.warn(`🔄 DUPLICATE REGISTRATION ATTEMPT: ${source.toUpperCase()} tried to add ${existing.ens_name}.eth, but it was already processed ${this.formatTimeAgo(secondsAgo)} ago by ${originalSource.toUpperCase()} (Original ID: ${existing.id})`);
+        
+        // Return the existing ID instead of throwing error
+        return existing.id;
+      }
+
+      // No duplicate found, proceed with insert
+      const result = await this.pool.query(`
+        INSERT INTO ens_registrations (
+          transaction_hash, contract_address, token_id, ens_name, full_name,
+          owner_address, cost_wei, cost_eth, cost_usd, block_number, 
+          block_timestamp, processed_at, image, description, expires_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        RETURNING id
+      `, [
+        registration.transactionHash,
+        registration.contractAddress,
+        registration.tokenId,
+        registration.ensName,
+        registration.fullName,
+        registration.ownerAddress,
+        registration.costWei,
+        registration.costEth || null,
+        registration.costUsd || null,
+        registration.blockNumber,
+        registration.blockTimestamp,
+        registration.processedAt,
+        registration.image || null,
+        registration.description || null,
+        registration.expiresAt || null
+      ]);
+
+      const id = result.rows[0].id;
+      logger.info(`💾 ${source.toUpperCase()} successfully stored registration: ${registration.ensName}.eth (ID: ${id})`);
+      return id;
+    } catch (error: any) {
+      logger.error(`Failed to insert ENS registration from ${source}:`, error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Infer the original source of a registration based on patterns
+   */
+  private inferRegistrationSource(transactionHash: string, secondsAgo: number): string {
+    // If it's very recent (< 10 seconds), likely QuickNode was first
+    if (secondsAgo < 10) {
+      return 'quicknode';
+    }
+    // For older registrations, we can't be certain, so use generic term
+    return 'webhook';
+  }
+
+  /**
+   * Format seconds into human-readable time
+   */
+  private formatTimeAgo(seconds: number): string {
+    if (seconds < 60) {
+      return `${seconds} second${seconds !== 1 ? 's' : ''}`;
+    } else if (seconds < 3600) {
+      const minutes = Math.floor(seconds / 60);
+      return `${minutes} minute${minutes !== 1 ? 's' : ''}`;
+    } else {
+      const hours = Math.floor(seconds / 3600);
+      return `${hours} hour${hours !== 1 ? 's' : ''}`;
+    }
+  }
+
   async isRegistrationProcessed(tokenId: string): Promise<boolean> {
     if (!this.pool) throw new Error('Database not initialized');
 

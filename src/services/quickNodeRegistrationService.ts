@@ -77,13 +77,6 @@ export class QuickNodeRegistrationService {
       const tokenIdDecimal = BigInt(tokenId).toString();
       
       logger.debug(`Token ID conversion: ${tokenId} (hex) -> ${tokenIdDecimal} (decimal)`);
-      
-      // Check if already processed
-      const isProcessed = await this.databaseService.isRegistrationProcessed(tokenIdDecimal);
-      if (isProcessed) {
-        logger.info(`⚠️ Registration ${event.name}.eth already processed, skipping...`);
-        return;
-      }
 
       // Use the consistent totalCostWei field (all contracts have this)
       const costWei = event.totalCostWei;
@@ -143,9 +136,9 @@ export class QuickNodeRegistrationService {
         hasDescription: !!registrationData.description
       });
 
-      // Store in database
-      const registrationId = await this.databaseService.insertRegistration(registrationData);
-      logger.info(`💾 Registration ${event.name}.eth stored in database with ID: ${registrationId}`);
+      // Store in database with source tracking and duplicate detection
+      const registrationId = await this.databaseService.insertRegistrationWithSourceTracking(registrationData, 'quicknode');
+      // Success logging is handled by insertRegistrationWithSourceTracking
       
     } catch (error: any) {
       logger.error(`❌ Error processing nameRegistered event for ${event.name}:`, error.message);
