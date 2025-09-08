@@ -213,6 +213,7 @@ export interface IDatabaseService {
   insertRegistration(registration: Omit<ENSRegistration, 'id'>): Promise<number>;
   isRegistrationProcessed(tokenId: string): Promise<boolean>;
   getRecentRegistrations(limit?: number): Promise<ENSRegistration[]>;
+  getRegistrationById(id: number): Promise<ENSRegistration | null>;
   getUnpostedRegistrations(limit?: number, maxAgeHours?: number): Promise<ENSRegistration[]>;
   markRegistrationAsPosted(id: number, tweetId: string): Promise<void>;
   
