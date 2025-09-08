@@ -45,7 +45,8 @@ export const config: Config = {
     domain: process.env.SIWE_DOMAIN || 'localhost'
   },
   quicknode: {
-    webhookSecret: process.env.QUICKNODE_SECRET || ''
+    salesWebhookSecret: process.env.QUICKNODE_SECRET_SALES || '',
+    registrationsWebhookSecret: process.env.QUICKNODE_SECRET_REGISTRATIONS || ''
   },
   opensea: process.env.OPENSEA_API_KEY ? {
     apiKey: process.env.OPENSEA_API_KEY,
@@ -69,10 +70,16 @@ export function validateConfig(): void {
     console.log(`🔐 SIWE admin whitelist configured with ${addresses.length} address(es)`);
   }
   
-  // Validate QuickNode webhook secret
-  if (!process.env.QUICKNODE_SECRET) {
-    console.warn('⚠️  No QUICKNODE_SECRET set - webhook signature verification will be disabled');
+  // Validate QuickNode webhook secrets
+  if (!process.env.QUICKNODE_SECRET_SALES) {
+    console.warn('⚠️  No QUICKNODE_SECRET_SALES set - sales webhook signature verification will be disabled');
   } else {
-    console.log('🔐 QuickNode webhook secret configured for signature verification');
+    console.log('🔐 QuickNode sales webhook secret configured for signature verification');
+  }
+  
+  if (!process.env.QUICKNODE_SECRET_REGISTRATIONS) {
+    console.warn('⚠️  No QUICKNODE_SECRET_REGISTRATIONS set - registrations webhook signature verification will be disabled');
+  } else {
+    console.log('🔐 QuickNode registrations webhook secret configured for signature verification');
   }
 }

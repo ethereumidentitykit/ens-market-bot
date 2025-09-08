@@ -150,7 +150,8 @@ export interface Config {
     domain: string;
   };
   quicknode: {
-    webhookSecret: string;
+    salesWebhookSecret: string;
+    registrationsWebhookSecret: string;
   };
   opensea?: {
     apiKey: string;
@@ -210,8 +211,10 @@ export interface IDatabaseService {
   cleanupOldImages(): Promise<void>;
   // ENS registration methods
   insertRegistration(registration: Omit<ENSRegistration, 'id'>): Promise<number>;
+  insertRegistrationWithSourceTracking(registration: Omit<ENSRegistration, 'id'>, source: 'quicknode' | 'moralis'): Promise<number>;
   isRegistrationProcessed(tokenId: string): Promise<boolean>;
   getRecentRegistrations(limit?: number): Promise<ENSRegistration[]>;
+  getRegistrationById(id: number): Promise<ENSRegistration | null>;
   getUnpostedRegistrations(limit?: number, maxAgeHours?: number): Promise<ENSRegistration[]>;
   markRegistrationAsPosted(id: number, tweetId: string): Promise<void>;
   

@@ -16,9 +16,11 @@ export class DatabaseEventService {
   private autoTweetService: AutoTweetService;
   private databaseService: IDatabaseService;
 
-  // Queue for handling multiple notifications
-  private notificationQueue: number[] = [];
-  private isProcessingQueue = false;
+  // Separate queues for handling sales and registrations
+  private saleNotificationQueue: number[] = [];
+  private registrationNotificationQueue: number[] = [];
+  private isProcessingSales = false;
+  private isProcessingRegistrations = false;
 
   constructor(
     autoTweetService: AutoTweetService,
@@ -119,14 +121,15 @@ export class DatabaseEventService {
       this.client.on('error', this.handleConnectionError.bind(this));
       this.client.on('end', this.handleConnectionEnd.bind(this));
 
-      // Connect and start listening
+      // Connect and start listening for both sales and registrations
       await this.client.connect();
       await this.client.query('LISTEN new_sale');
+      await this.client.query('LISTEN new_registration');
       
       this.isListening = true;
       this.reconnectAttempts = 0; // Reset on successful connection
       
-      logger.info('✅ Database listener connected and listening for new_sale notifications');
+      logger.info('✅ Database listener connected and listening for new_sale and new_registration notifications');
 
     } catch (error: any) {
       this.isListening = false;
@@ -136,7 +139,7 @@ export class DatabaseEventService {
   }
 
   /**
-   * Handle incoming sale notifications
+   * Handle incoming sale and registration notifications
    */
   private handleNotification(msg: any): void {
     try {
@@ -148,10 +151,19 @@ export class DatabaseEventService {
           return;
         }
 
-        logger.info(`🚨 NEW SALE NOTIFICATION: ID ${saleId} - adding to queue`);
+        logger.info(`🚨 NEW SALE NOTIFICATION: ID ${saleId} - adding to sales queue`);
+        this.addSaleToQueue(saleId);
         
-        // Add to queue for processing
-        this.addToQueue(saleId);
+      } else if (msg.channel === 'new_registration' && msg.payload) {
+        const registrationId = parseInt(msg.payload);
+        
+        if (isNaN(registrationId)) {
+          logger.warn(`Invalid registration ID in notification: ${msg.payload}`);
+          return;
+        }
+
+        logger.info(`🚨 NEW REGISTRATION NOTIFICATION: ID ${registrationId} - adding to registrations queue`);
+        this.addRegistrationToQueue(registrationId);
       }
     } catch (error: any) {
       logger.error('Error handling notification:', error.message);
@@ -161,32 +173,48 @@ export class DatabaseEventService {
   /**
    * Add sale ID to processing queue
    */
-  private addToQueue(saleId: number): void {
+  private addSaleToQueue(saleId: number): void {
     // Avoid duplicates in queue
-    if (!this.notificationQueue.includes(saleId)) {
-      this.notificationQueue.push(saleId);
-      logger.info(`📦 Added sale ${saleId} to queue (queue length: ${this.notificationQueue.length})`);
+    if (!this.saleNotificationQueue.includes(saleId)) {
+      this.saleNotificationQueue.push(saleId);
+      logger.info(`📦 Added sale ${saleId} to sales queue (queue length: ${this.saleNotificationQueue.length})`);
     }
 
     // Start processing if not already running
-    if (!this.isProcessingQueue) {
-      this.processQueue();
+    if (!this.isProcessingSales) {
+      this.processSalesQueue();
     }
   }
 
   /**
-   * Process the notification queue with proper rate limiting
+   * Add registration ID to processing queue
    */
-  private async processQueue(): Promise<void> {
-    if (this.isProcessingQueue || this.notificationQueue.length === 0) {
+  private addRegistrationToQueue(registrationId: number): void {
+    // Avoid duplicates in queue
+    if (!this.registrationNotificationQueue.includes(registrationId)) {
+      this.registrationNotificationQueue.push(registrationId);
+      logger.info(`📦 Added registration ${registrationId} to registrations queue (queue length: ${this.registrationNotificationQueue.length})`);
+    }
+
+    // Start processing if not already running
+    if (!this.isProcessingRegistrations) {
+      this.processRegistrationsQueue();
+    }
+  }
+
+  /**
+   * Process the sales notification queue with proper rate limiting
+   */
+  private async processSalesQueue(): Promise<void> {
+    if (this.isProcessingSales || this.saleNotificationQueue.length === 0) {
       return;
     }
 
-    this.isProcessingQueue = true;
-    logger.info(`🔄 Starting queue processing (${this.notificationQueue.length} sales)`);
+    this.isProcessingSales = true;
+    logger.info(`🔄 Starting sales queue processing (${this.saleNotificationQueue.length} sales)`);
 
-    while (this.notificationQueue.length > 0 && !this.isShuttingDown) {
-      const saleId = this.notificationQueue.shift()!;
+    while (this.saleNotificationQueue.length > 0 && !this.isShuttingDown) {
+      const saleId = this.saleNotificationQueue.shift()!;
       
       try {
         await this.processSingleSale(saleId);
@@ -195,8 +223,33 @@ export class DatabaseEventService {
       }
     }
 
-    this.isProcessingQueue = false;
-    logger.info('✅ Queue processing complete');
+    this.isProcessingSales = false;
+    logger.info('✅ Sales queue processing complete');
+  }
+
+  /**
+   * Process the registrations notification queue with proper rate limiting
+   */
+  private async processRegistrationsQueue(): Promise<void> {
+    if (this.isProcessingRegistrations || this.registrationNotificationQueue.length === 0) {
+      return;
+    }
+
+    this.isProcessingRegistrations = true;
+    logger.info(`🔄 Starting registrations queue processing (${this.registrationNotificationQueue.length} registrations)`);
+
+    while (this.registrationNotificationQueue.length > 0 && !this.isShuttingDown) {
+      const registrationId = this.registrationNotificationQueue.shift()!;
+      
+      try {
+        await this.processSingleRegistration(registrationId);
+      } catch (error: any) {
+        logger.error(`Failed to process registration ${registrationId}:`, error.message);
+      }
+    }
+
+    this.isProcessingRegistrations = false;
+    logger.info('✅ Registrations queue processing complete');
   }
 
   /**
@@ -241,6 +294,51 @@ export class DatabaseEventService {
 
     } catch (error: any) {
       logger.error(`Error processing sale ${saleId}:`, error.message);
+    }
+  }
+
+  /**
+   * Process a single registration notification
+   */
+  private async processSingleRegistration(registrationId: number): Promise<void> {
+    try {
+      // Get the registration from database
+      const registration = await this.databaseService.getRegistrationById(registrationId);
+      
+      if (!registration) {
+        logger.warn(`Registration ${registrationId} not found in database`);
+        return;
+      }
+
+      if (registration.posted) {
+        logger.info(`Registration ${registrationId} already posted, skipping`);
+        return;
+      }
+
+      logger.info(`🚀 INSTANT PROCESSING: ${registration.fullName} (${registration.costEth || registration.costWei} ETH) - ID: ${registrationId}`);
+
+      // Get auto-post settings
+      const settings = await this.autoTweetService.getSettings();
+      
+      if (!settings.enabled || !settings.registrations.enabled) {
+        logger.info(`Auto-posting disabled, skipping registration ${registrationId}`);
+        return;
+      }
+
+      // Process through existing AutoTweetService registration method
+      const results = await this.autoTweetService.processNewRegistrations([registration], settings);
+      
+      const result = results[0];
+      if (result?.success) {
+        logger.info(`✅ Successfully posted registration tweet for ${registrationId} - Tweet ID: ${result.tweetId}`);
+      } else if (result?.skipped) {
+        logger.info(`⏭️ Skipped registration ${registrationId}: ${result.reason}`);
+      } else {
+        logger.warn(`❌ Failed to post registration ${registrationId}: ${result?.error || 'Unknown error'}`);
+      }
+
+    } catch (error: any) {
+      logger.error(`Error processing registration ${registrationId}:`, error.message);
     }
   }
 
@@ -315,47 +413,64 @@ export class DatabaseEventService {
   }
 
   /**
-   * Perform startup recovery - check for unposted sales from previous session
+   * Perform startup recovery - check for unposted sales and registrations from previous session
    */
   private async performStartupRecovery(): Promise<void> {
     if (this.isShuttingDown) return;
 
     try {
-      logger.info('🔍 Checking for unposted sales from previous session...');
+      logger.info('🔍 Checking for unposted sales and registrations from previous session...');
 
       // Get auto-post settings to use the same time filters
       const autoPostSettings = await this.autoTweetService.getSettings();
       
-      logger.info(`🔍 Using auto-posting time window: ${autoPostSettings.sales.maxAgeHours} hours (enabled: ${autoPostSettings.enabled}/${autoPostSettings.sales.enabled})`);
+      logger.info(`🔍 Using auto-posting time window: Sales ${autoPostSettings.sales.maxAgeHours}h, Registrations ${autoPostSettings.registrations.maxAgeHours}h (Global enabled: ${autoPostSettings.enabled})`);
       
-      // Get the 5 newest unposted sales using auto-posting time window
+      // === SALES RECOVERY ===
       const unpostedSales = await this.databaseService.getUnpostedSales(5, autoPostSettings.sales.maxAgeHours);
+      const allUnpostedSales = await this.databaseService.getUnpostedSales(5, 999); // Debug check
+      
+      logger.info(`🔍 Sales recovery: Found ${allUnpostedSales.length} unposted sales total (any age), ${unpostedSales.length} within ${autoPostSettings.sales.maxAgeHours}h window`);
 
-      // Debug: Also check without time filter to see if there are ANY unposted sales
-      const allUnpostedSales = await this.databaseService.getUnpostedSales(5, 999); // Very large time window
-      logger.info(`🔍 Debug: Found ${allUnpostedSales.length} unposted sales total (any age), ${unpostedSales.length} within ${autoPostSettings.sales.maxAgeHours}h window`);
-
-      if (unpostedSales.length === 0) {
-        if (allUnpostedSales.length > 0) {
-          logger.info(`⏰ Found ${allUnpostedSales.length} unposted sales but they're older than ${autoPostSettings.sales.maxAgeHours}h - outside auto-posting window`);
-        } else {
-          logger.info('✅ No unposted sales found - clean startup');
+      if (unpostedSales.length > 0) {
+        logger.info(`🔄 Sales startup recovery: Found ${unpostedSales.length} unposted sales, adding to processing queue`);
+        
+        for (const sale of unpostedSales) {
+          if (sale.id) {
+            this.addSaleToQueue(sale.id);
+            logger.info(`🔄 Recovered unposted sale: ${sale.nftName || sale.tokenId} (${sale.priceEth} ETH) - ID: ${sale.id}`);
+          }
         }
-        return;
+      } else if (allUnpostedSales.length > 0) {
+        logger.info(`⏰ Found ${allUnpostedSales.length} unposted sales but they're older than ${autoPostSettings.sales.maxAgeHours}h - outside auto-posting window`);
       }
 
-      // Simple notification about startup recovery
-      logger.info(`🔄 Startup recovery: Found ${unpostedSales.length} unposted sales, adding to processing queue`);
+      // === REGISTRATIONS RECOVERY ===
+      const unpostedRegistrations = await this.databaseService.getUnpostedRegistrations(5, autoPostSettings.registrations.maxAgeHours);
+      const allUnpostedRegistrations = await this.databaseService.getUnpostedRegistrations(5, 999); // Debug check
+      
+      logger.info(`🔍 Registrations recovery: Found ${allUnpostedRegistrations.length} unposted registrations total (any age), ${unpostedRegistrations.length} within ${autoPostSettings.registrations.maxAgeHours}h window`);
 
-      // Add unposted sales to queue for immediate processing
-      for (const sale of unpostedSales) {
-        if (sale.id) {
-          this.addToQueue(sale.id);
-          logger.info(`🔄 Recovered unposted sale: ${sale.nftName || sale.tokenId} (${sale.priceEth} ETH) - ID: ${sale.id}`);
+      if (unpostedRegistrations.length > 0) {
+        logger.info(`🔄 Registrations startup recovery: Found ${unpostedRegistrations.length} unposted registrations, adding to processing queue`);
+        
+        for (const registration of unpostedRegistrations) {
+          if (registration.id) {
+            this.addRegistrationToQueue(registration.id);
+            logger.info(`🔄 Recovered unposted registration: ${registration.fullName} (${registration.costEth || registration.costWei} ETH) - ID: ${registration.id}`);
+          }
         }
+      } else if (allUnpostedRegistrations.length > 0) {
+        logger.info(`⏰ Found ${allUnpostedRegistrations.length} unposted registrations but they're older than ${autoPostSettings.registrations.maxAgeHours}h - outside auto-posting window`);
       }
 
-      logger.info(`✅ Startup recovery complete - ${unpostedSales.length} sales added to processing queue`);
+      // === SUMMARY ===
+      const totalRecovered = unpostedSales.length + unpostedRegistrations.length;
+      if (totalRecovered === 0) {
+        logger.info('✅ No unposted items found within time windows - clean startup');
+      } else {
+        logger.info(`✅ Startup recovery complete - ${unpostedSales.length} sales and ${unpostedRegistrations.length} registrations added to processing queues`);
+      }
 
     } catch (error: any) {
       logger.error('❌ Startup recovery failed:', error.message);
@@ -368,14 +483,18 @@ export class DatabaseEventService {
    */
   getStatus(): {
     isListening: boolean;
-    queueLength: number;
-    isProcessing: boolean;
+    salesQueueLength: number;
+    registrationsQueueLength: number;
+    isProcessingSales: boolean;
+    isProcessingRegistrations: boolean;
     reconnectAttempts: number;
   } {
     return {
       isListening: this.isListening,
-      queueLength: this.notificationQueue.length,
-      isProcessing: this.isProcessingQueue,
+      salesQueueLength: this.saleNotificationQueue.length,
+      registrationsQueueLength: this.registrationNotificationQueue.length,
+      isProcessingSales: this.isProcessingSales,
+      isProcessingRegistrations: this.isProcessingRegistrations,
       reconnectAttempts: this.reconnectAttempts,
     };
   }
