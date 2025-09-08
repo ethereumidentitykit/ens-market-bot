@@ -2744,7 +2744,7 @@ async function startApplication(): Promise<void> {
           const qnSignature = req.headers['x-qn-signature'] as string;
           const qnNonce = req.headers['x-qn-nonce'] as string;
           const qnTimestamp = req.headers['x-qn-timestamp'] as string;
-          const quickNodeSecret = config.quicknode.webhookSecret;
+          const quickNodeSecret = config.quicknode.salesWebhookSecret;
           
           if (qnSignature && qnNonce && qnTimestamp) {
             if (!quickNodeSecret) {
@@ -2939,7 +2939,7 @@ async function startApplication(): Promise<void> {
           const qnSignature = req.headers['x-qn-signature'] as string;
           const qnNonce = req.headers['x-qn-nonce'] as string;
           const qnTimestamp = req.headers['x-qn-timestamp'] as string;
-          const quickNodeSecret = config.quicknode.webhookSecret;
+          const quickNodeSecret = config.quicknode.registrationsWebhookSecret;
           
           if (qnSignature && qnNonce && qnTimestamp && quickNodeSecret) {
             try {

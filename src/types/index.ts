@@ -150,7 +150,8 @@ export interface Config {
     domain: string;
   };
   quicknode: {
-    webhookSecret: string;
+    salesWebhookSecret: string;
+    registrationsWebhookSecret: string;
   };
   opensea?: {
     apiKey: string;
