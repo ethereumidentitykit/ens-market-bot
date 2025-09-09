@@ -41,6 +41,53 @@ export interface OpenSeaResponse {
   nft: OpenSeaNFT;
 }
 
+export interface OpenSeaEventNFT {
+  identifier: string;
+  collection: string;
+  contract: string;
+  token_standard: string;
+  name: string;
+  description: string;
+  image_url: string;
+  display_image_url: string;
+  display_animation_url: string | null;
+  metadata_url: string;
+  opensea_url: string;
+  updated_at: string;
+  is_disabled: boolean;
+  is_nsfw: boolean;
+}
+
+export interface OpenSeaEvent {
+  event_type: string;
+  event_timestamp: number;
+  transaction: string;
+  chain: string;
+  payment: {
+    quantity: string;
+    token_address: string;
+    decimals: number;
+    symbol: string;
+  } | null;
+  closing_date: number | null;
+  seller: string | null;
+  buyer: string | null;
+  from_address: string | null;
+  to_address: string | null;
+  quantity: number;
+  nft: OpenSeaEventNFT;
+}
+
+export interface OpenSeaEventsResponse {
+  asset_events: OpenSeaEvent[];
+  next: string | null;
+}
+
+export interface ResolvedAddresses {
+  buyer: string;
+  seller: string;
+}
+
 /**
  * OpenSea API Service
  * Handles NFT metadata fetching from OpenSea API v2
@@ -189,6 +236,96 @@ export class OpenSeaService {
       collection: nft.collection,
       opensea_url: nft.opensea_url
     };
+  }
+
+  /**
+   * Get real buyer and seller addresses from OpenSea Events API
+   * Resolves proxy contract issues by tracing ENS token flow through proxy contracts
+   * @param contractAddress - ENS contract address
+   * @param tokenId - Token ID (decimal format)
+   * @param txHash - Transaction hash from QuickNode webhook to match transfer events
+   * @param knownProxies - Array of known proxy contract addresses to trace through
+   * @returns Real buyer/seller addresses or null if not found
+   */
+  async getEventAddresses(contractAddress: string, tokenId: string, txHash: string, knownProxies: string[]): Promise<ResolvedAddresses | null> {
+    if (!config.opensea?.apiKey) {
+      logger.warn('OpenSea API key not configured - cannot resolve proxy addresses');
+      return null;
+    }
+
+    try {
+      const url = `${this.baseUrl}/events/chain/ethereum/contract/${contractAddress}/nfts/${tokenId}?limit=5`;
+      
+      logger.debug(`🔍 Fetching OpenSea events for ${contractAddress}/${tokenId}`);
+      
+      const response: AxiosResponse<OpenSeaEventsResponse> = await axios.get(url, {
+        headers: {
+          'X-API-KEY': config.opensea.apiKey,
+        },
+        timeout: this.timeout
+      });
+
+      const events = response.data.asset_events;
+      
+      if (!events || events.length === 0) {
+        logger.debug(`No events found for ${contractAddress}/${tokenId}`);
+        return null;
+      }
+
+      // Find transfer events with same transaction hash (much cleaner!)
+      const transferEvents = events.filter(e => 
+        e.event_type === 'transfer' && 
+        e.transaction === txHash
+      );
+
+      if (transferEvents.length === 0) {
+        logger.debug(`No transfer events found with transaction hash ${txHash}`);
+        return null;
+      }
+
+      logger.debug(`Found ${transferEvents.length} transfer events for tx ${txHash}`);
+
+      // Normalize proxy addresses for comparison
+      const normalizedProxies = knownProxies.map(p => p.toLowerCase());
+
+      let buyer: string | null = null;
+      let seller: string | null = null;
+
+      // Trace ENS token flow through proxy contracts
+      // Step 1: Find transfer where proxy receives ENS (seller → proxy)
+      const sellerToProxy = transferEvents.find(t => 
+        t.to_address && normalizedProxies.includes(t.to_address.toLowerCase())
+      );
+      
+      if (sellerToProxy?.from_address) {
+        seller = sellerToProxy.from_address.toLowerCase();
+        logger.debug(`Found seller → proxy transfer: ${seller} → ${sellerToProxy.to_address}`);
+      }
+
+      // Step 2: Find transfer where proxy sends ENS (proxy → buyer)
+      const proxyToBuyer = transferEvents.find(t => 
+        t.from_address && normalizedProxies.includes(t.from_address.toLowerCase())
+      );
+      
+      if (proxyToBuyer?.to_address) {
+        buyer = proxyToBuyer.to_address.toLowerCase();
+        logger.debug(`Found proxy → buyer transfer: ${proxyToBuyer.from_address} → ${buyer}`);
+      }
+
+      logger.debug(`Flow tracing result - Seller: ${seller}, Buyer: ${buyer}`);
+
+      if (buyer && seller) {
+        logger.info(`✅ Resolved addresses via OpenSea Events API - Buyer: ${buyer}, Seller: ${seller}`);
+        return { buyer, seller };
+      } else {
+        logger.debug(`Incomplete address resolution - Buyer: ${buyer}, Seller: ${seller}`);
+        return null;
+      }
+
+    } catch (error: any) {
+      logger.warn(`Failed to resolve addresses via OpenSea Events API for ${contractAddress}/${tokenId}: ${error.message}`);
+      return null;
+    }
   }
 
   /**
