@@ -41,6 +41,53 @@ export interface OpenSeaResponse {
   nft: OpenSeaNFT;
 }
 
+export interface OpenSeaEventNFT {
+  identifier: string;
+  collection: string;
+  contract: string;
+  token_standard: string;
+  name: string;
+  description: string;
+  image_url: string;
+  display_image_url: string;
+  display_animation_url: string | null;
+  metadata_url: string;
+  opensea_url: string;
+  updated_at: string;
+  is_disabled: boolean;
+  is_nsfw: boolean;
+}
+
+export interface OpenSeaEvent {
+  event_type: string;
+  event_timestamp: number;
+  transaction: string;
+  chain: string;
+  payment: {
+    quantity: string;
+    token_address: string;
+    decimals: number;
+    symbol: string;
+  } | null;
+  closing_date: number | null;
+  seller: string | null;
+  buyer: string | null;
+  from_address: string | null;
+  to_address: string | null;
+  quantity: number;
+  nft: OpenSeaEventNFT;
+}
+
+export interface OpenSeaEventsResponse {
+  asset_events: OpenSeaEvent[];
+  next: string | null;
+}
+
+export interface ResolvedAddresses {
+  buyer: string;
+  seller: string;
+}
+
 /**
  * OpenSea API Service
  * Handles NFT metadata fetching from OpenSea API v2
@@ -189,6 +236,94 @@ export class OpenSeaService {
       collection: nft.collection,
       opensea_url: nft.opensea_url
     };
+  }
+
+  /**
+   * Get real buyer and seller addresses from OpenSea Events API
+   * Resolves proxy contract issues by finding transfer events at the same timestamp as the sale
+   * @param contractAddress - ENS contract address
+   * @param tokenId - Token ID (decimal format)
+   * @param txHash - Transaction hash from QuickNode webhook to match exact sale
+   * @returns Real buyer/seller addresses or null if not found
+   */
+  async getEventAddresses(contractAddress: string, tokenId: string, txHash: string): Promise<ResolvedAddresses | null> {
+    if (!config.opensea?.apiKey) {
+      logger.warn('OpenSea API key not configured - cannot resolve proxy addresses');
+      return null;
+    }
+
+    try {
+      const url = `${this.baseUrl}/events/chain/ethereum/contract/${contractAddress}/nfts/${tokenId}?limit=5`;
+      
+      logger.debug(`🔍 Fetching OpenSea events for ${contractAddress}/${tokenId}`);
+      
+      const response: AxiosResponse<OpenSeaEventsResponse> = await axios.get(url, {
+        headers: {
+          'X-API-KEY': config.opensea.apiKey,
+        },
+        timeout: this.timeout
+      });
+
+      const events = response.data.asset_events;
+      
+      if (!events || events.length === 0) {
+        logger.debug(`No events found for ${contractAddress}/${tokenId}`);
+        return null;
+      }
+
+      // Find sale event by matching transaction hash from QuickNode webhook
+      const saleEvent = events.find(e => e.event_type === 'sale' && e.transaction === txHash);
+      
+      if (!saleEvent) {
+        logger.debug(`No sale event found with transaction hash ${txHash}`);
+        return null;
+      }
+
+      logger.debug(`Found sale event at timestamp ${saleEvent.event_timestamp} for tx ${txHash}`);
+
+      // Find transfer events with exact same timestamp as the sale
+      const transferEvents = events.filter(e => 
+        e.event_type === 'transfer' && 
+        e.event_timestamp === saleEvent.event_timestamp
+      );
+
+      if (transferEvents.length === 0) {
+        logger.debug(`No transfer events found at timestamp ${saleEvent.event_timestamp}`);
+        return null;
+      }
+
+      logger.debug(`Found ${transferEvents.length} transfer events at timestamp ${saleEvent.event_timestamp}`);
+
+      // OpenSea API returns events in chronological order (most recent first)
+      // For ENS token transfers: seller → proxy → buyer
+      // First in array = most recent = final transfer (proxy → buyer)  
+      // Last in array = oldest = initial transfer (seller → proxy)
+
+      let buyer: string | null = null;
+      let seller: string | null = null;
+
+      // Get buyer from final transfer (first in array - most recent)
+      const finalTransfer = transferEvents[0];
+      buyer = finalTransfer.to_address?.toLowerCase() || null;
+
+      // Get seller from initial transfer (last in array - oldest) 
+      const initialTransfer = transferEvents[transferEvents.length - 1];
+      seller = initialTransfer.from_address?.toLowerCase() || null;
+
+      logger.debug(`Transfer events - Final: from=${finalTransfer.from_address} to=${finalTransfer.to_address}, Initial: from=${initialTransfer.from_address} to=${initialTransfer.to_address}`);
+
+      if (buyer && seller) {
+        logger.info(`✅ Resolved addresses via OpenSea Events API - Buyer: ${buyer}, Seller: ${seller}`);
+        return { buyer, seller };
+      } else {
+        logger.debug(`Incomplete address resolution - Buyer: ${buyer}, Seller: ${seller}`);
+        return null;
+      }
+
+    } catch (error: any) {
+      logger.warn(`Failed to resolve addresses via OpenSea Events API for ${contractAddress}/${tokenId}: ${error.message}`);
+      return null;
+    }
   }
 
   /**

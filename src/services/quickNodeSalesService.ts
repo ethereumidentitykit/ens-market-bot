@@ -44,6 +44,13 @@ export class QuickNodeSalesService {
   private readonly WETH_ADDRESS = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
   private readonly NATIVE_ETH_ITEM_TYPE = 0;
   private readonly MIN_PRICE_ETH = 0.01; // Minimum price filter
+  
+  // Known marketplace intermediaries that indicate proxy contracts
+  private readonly PROBLEMATIC_INTERMEDIARIES = [
+    '0x0000a26b00c1F0DF003000390027140000fAa719', // OpenSea WETH wrapper (124x in logs)
+    '0xE6EE2b1eaAc6520bE709e77780Abb50E7fFfcCCd', // Proxy contract (196x in logs)
+    '0x00ca04c45da318d5b7e7b14d5381ca59f09c73f0', // Additional proxy contract
+  ];
 
   constructor(
     private databaseService: IDatabaseService,
@@ -82,7 +89,7 @@ export class QuickNodeSalesService {
         results.processed++;
         
         // Extract ENS sale data from Seaport order
-        const saleData = this.extractSaleData(order);
+        const saleData = await this.extractSaleData(order);
         
         if (!saleData) {
           results.skipped++;
@@ -129,7 +136,7 @@ export class QuickNodeSalesService {
    * @param order - Seaport orderFulfilled event
    * @returns Basic sale data or null if not a valid ENS sale
    */
-  private extractSaleData(order: SeaportOrder): {
+  private async extractSaleData(order: SeaportOrder): Promise<{
     transactionHash: string;
     contractAddress: string;
     tokenId: string;
@@ -138,7 +145,7 @@ export class QuickNodeSalesService {
     priceEth: string;
     blockNumber: number;
     blockTimestamp: string;
-  } | null {
+  } | null> {
     try {
       // Find ENS token in either offer OR consideration 
       // (Seaport orders can represent either buyer or seller perspective)
@@ -206,10 +213,37 @@ export class QuickNodeSalesService {
         BigInt(payment.amount) > BigInt(max.amount) ? payment : max
       );
       
-      const sellerAddress = ('recipient' in mainPayment) 
+      let sellerAddress = ('recipient' in mainPayment) 
         ? (mainPayment as any).recipient.toLowerCase()
         : order.offerer.toLowerCase(); // Fallback to offerer if no recipient
-      const buyerAddress = order.recipient.toLowerCase();
+      let buyerAddress = order.recipient.toLowerCase();
+
+      // Check for proxy contracts and resolve real addresses via OpenSea Events API
+      const hasProxyContract = this.PROBLEMATIC_INTERMEDIARIES.includes(buyerAddress) || 
+                              this.PROBLEMATIC_INTERMEDIARIES.includes(sellerAddress);
+
+      if (hasProxyContract) {
+        logger.debug(`🔍 Proxy contract detected (buyer: ${buyerAddress}, seller: ${sellerAddress}) - resolving via OpenSea Events API`);
+        
+        try {
+          // Use transaction hash to match exact sale event
+          const resolvedAddresses = await this.openSeaService.getEventAddresses(
+            ensToken.token, 
+            ensToken.identifier, 
+            order.txHash
+          );
+
+          if (resolvedAddresses) {
+            logger.info(`✅ Proxy addresses resolved - Original: buyer=${buyerAddress}, seller=${sellerAddress} → Real: buyer=${resolvedAddresses.buyer}, seller=${resolvedAddresses.seller}`);
+            buyerAddress = resolvedAddresses.buyer;
+            sellerAddress = resolvedAddresses.seller;
+          } else {
+            logger.warn(`⚠️ Failed to resolve proxy addresses via OpenSea API - keeping original addresses`);
+          }
+        } catch (error: any) {
+          logger.error(`❌ Error resolving proxy addresses: ${error.message} - keeping original addresses`);
+        }
+      }
 
       // Validation: buyer and seller should be different
       if (buyerAddress === sellerAddress) {
