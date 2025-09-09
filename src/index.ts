@@ -26,6 +26,7 @@ import { AutoTweetService } from './services/autoTweetService';
 import { WorldTimeService } from './services/worldTimeService';
 import { SiweService } from './services/siweService';
 import { QuickNodeSalesService } from './services/quickNodeSalesService';
+import { QuickNodeRegistrationService } from './services/quickNodeRegistrationService';
 import { OpenSeaService } from './services/openSeaService';
 import { ENSMetadataService } from './services/ensMetadataService';
 import { DatabaseEventService } from './services/databaseEventService';
@@ -53,6 +54,8 @@ async function startApplication(): Promise<void> {
     // Initialize services
     const moralisService = new MoralisService();
     const alchemyService = new AlchemyService();
+    const openSeaService = new OpenSeaService();
+    const ensMetadataService = new ENSMetadataService();
     
     // Initialize PostgreSQL database service
     const databaseService: IDatabaseService = new DatabaseService();
@@ -61,14 +64,13 @@ async function startApplication(): Promise<void> {
     const magicEdenService = new MagicEdenService();
     const bidsProcessingService = new BidsProcessingService(magicEdenService, databaseService, alchemyService);
     const twitterService = new TwitterService();
-    const newTweetFormatter = new NewTweetFormatter(databaseService, alchemyService);
+    const newTweetFormatter = new NewTweetFormatter(databaseService, alchemyService, openSeaService, ensMetadataService);
     const rateLimitService = new RateLimitService(databaseService);
     const ethIdentityService = new ENSWorkerService();
     const worldTimeService = new WorldTimeService();
     const siweService = new SiweService(databaseService);
-    const openSeaService = new OpenSeaService();
-    const ensMetadataService = new ENSMetadataService();
     const quickNodeSalesService = new QuickNodeSalesService(databaseService, openSeaService, ensMetadataService, alchemyService);
+    const quickNodeRegistrationService = new QuickNodeRegistrationService(databaseService, ensMetadataService, alchemyService, openSeaService);
     const autoTweetService = new AutoTweetService(newTweetFormatter, twitterService, rateLimitService, databaseService, worldTimeService);
     const schedulerService = new SchedulerService(salesProcessingService, bidsProcessingService, autoTweetService, databaseService);
     
@@ -76,7 +78,7 @@ async function startApplication(): Promise<void> {
     const databaseEventService = new DatabaseEventService(
       autoTweetService,
       databaseService,
-      process.env.DATABASE_URL!
+      process.env.POSTGRES_URL || process.env.DATABASE_URL!
     );
 
     // Initialize database
@@ -118,8 +120,8 @@ async function startApplication(): Promise<void> {
 
     // Middleware - skip JSON parsing for salesv2 webhook
     app.use((req, res, next) => {
-      if (req.path === '/webhook/salesv2') {
-        return next(); // Skip JSON parsing for salesv2 webhook
+      if (req.path === '/webhook/salesv2' || req.path === '/webhook/quicknode-registrations') {
+        return next(); // Skip JSON parsing for QuickNode webhooks
       }
       return express.json()(req, res, next);
     });
@@ -2321,24 +2323,6 @@ async function startApplication(): Promise<void> {
       attributes: any[];
     }
 
-    // Fetch ENS metadata from official ENS metadata API
-    async function fetchENSMetadata(contractAddress: string, tokenId: string): Promise<ENSMetadata | null> {
-      try {
-        const url = `https://metadata.ens.domains/mainnet/${contractAddress}/${tokenId}`;
-        logger.debug(`Fetching ENS metadata from: ${url}`);
-        
-        const response = await axios.get<ENSMetadata>(url, {
-          timeout: 5000, // 5 second timeout
-        });
-        
-        logger.debug(`Successfully fetched ENS metadata: ${response.data.name}`);
-        return response.data;
-        
-      } catch (error: any) {
-        logger.warn(`Failed to fetch ENS metadata for ${contractAddress}/${tokenId}:`, error.message);
-        return null;
-      }
-    }
 
     // Contract format detection
     interface ContractFormat {
@@ -2574,16 +2558,87 @@ async function startApplication(): Promise<void> {
               });
 
               // Fetch ENS metadata (image, description, etc.)
-              // Note: Use ENS Base Registrar contract address for metadata API, not the Controller contract
-              const ensBaseRegistrarAddress = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
-              const ensMetadata = await fetchENSMetadata(ensBaseRegistrarAddress, tokenId);
+              // Convert hex tokenId to decimal for API compatibility
+              const tokenIdDecimal = BigInt(tokenId).toString();
+              logger.debug(`Converting tokenId: ${tokenId} (hex) -> ${tokenIdDecimal} (decimal)`);
+              
+              // Use OpenSea service with correct NFT contracts (Base Registrar first, then NameWrapper)
+              let ensMetadata: { name?: string; image?: string; description?: string } | null = null;
+              let openSeaSuccess = false;
+              
+              // 1. Try OpenSea with Base Registrar contract first (has most names)
+              const baseRegistrarContract = '0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147ea85';
+              logger.info(`🔍 Enriching registration ${tokenIdDecimal} - trying OpenSea with Base Registrar first...`);
+              try {
+                const openSeaData = await openSeaService.getSimplifiedMetadata(baseRegistrarContract, tokenIdDecimal);
+                if (openSeaData) {
+                  ensMetadata = {
+                    name: openSeaData.name,
+                    image: openSeaData.image,
+                    description: openSeaData.description
+                  };
+                  openSeaSuccess = true;
+                  logger.info(`✅ OpenSea metadata success (Base Registrar): ${openSeaData.name} (${openSeaData.collection})`);
+                } else {
+                  logger.debug(`⚠️ OpenSea returned null for Base Registrar ${tokenIdDecimal}`);
+                }
+              } catch (error: any) {
+                logger.debug(`❌ OpenSea Base Registrar failed for ${tokenIdDecimal}: ${error.message}`);
+              }
+              
+              // 2. Try OpenSea with NameWrapper contract if Base Registrar failed
+              if (!ensMetadata) {
+                const nameWrapperContract = '0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401';
+                logger.info(`🔍 Trying OpenSea with NameWrapper contract...`);
+                try {
+                  const openSeaData = await openSeaService.getSimplifiedMetadata(nameWrapperContract, tokenIdDecimal);
+                  if (openSeaData) {
+                    ensMetadata = {
+                      name: openSeaData.name,
+                      image: openSeaData.image,
+                      description: openSeaData.description
+                    };
+                    openSeaSuccess = true;
+                    logger.info(`✅ OpenSea metadata success (NameWrapper): ${openSeaData.name} (${openSeaData.collection})`);
+                  } else {
+                    logger.debug(`⚠️ OpenSea returned null for NameWrapper ${tokenIdDecimal}`);
+                  }
+                } catch (error: any) {
+                  logger.debug(`❌ OpenSea NameWrapper failed for ${tokenIdDecimal}: ${error.message}`);
+                }
+              }
+              
+              // 3. Fallback to ENS Metadata service if OpenSea failed completely
+              if (!ensMetadata) {
+                logger.warn(`⚠️ Falling back to ENS Metadata API for registration ${tokenIdDecimal} (OpenSea failed)`);
+                try {
+                  const ensData = await ensMetadataService.getMetadataWithFallback(tokenIdDecimal);
+                  if (ensData) {
+                    ensMetadata = {
+                      name: ensData.name,
+                      image: ensData.image,
+                      description: ensData.description
+                    };
+                    logger.info(`✅ ENS metadata fallback success: ${ensData.name}`);
+                  } else {
+                    logger.error(`❌ ENS metadata fallback returned null for registration ${tokenIdDecimal}`);
+                  }
+                } catch (error: any) {
+                  logger.error(`❌ ENS metadata fallback failed for registration ${tokenIdDecimal}: ${error.message}`);
+                }
+              }
+              
+              // 4. Log enrichment results
               if (ensMetadata) {
+                const enrichmentSource = openSeaSuccess ? 'OpenSea' : 'ENS Metadata (fallback)';
+                logger.info(`📋 Registration enrichment complete for ${ensMetadata.name}: metadata=${enrichmentSource}, hasImage=${!!ensMetadata.image}, hasDescription=${!!ensMetadata.description}`);
                 logger.info('🖼️ ENS metadata fetched:', {
                   name: ensMetadata.name,
                   image: ensMetadata.image,
                   description: ensMetadata.description
                 });
               } else {
+                logger.error(`❌ No NFT name found for registration ${tokenIdDecimal} - metadata enrichment failed`);
                 logger.warn('⚠️ Failed to fetch ENS metadata for', extractedData.ensName);
               }
               
@@ -2604,18 +2659,13 @@ async function startApplication(): Promise<void> {
                 logger.warn('Failed to fetch ETH price for USD conversion:', error.message);
               }
               
-              // Check if this registration is already processed
-              const isProcessed = await databaseService.isRegistrationProcessed(tokenId);
-              if (isProcessed) {
-                logger.info(`⚠️ ENS registration ${extractedData.ensName} already processed, skipping...`);
-                return;
-              }
+              // Duplicate checking and source tracking handled by insertRegistrationWithSourceTracking
 
               // Prepare registration data
               const registrationData: Omit<ENSRegistration, 'id'> = {
                 transactionHash: eventData.transactionHash,
                 contractAddress: eventData.contractAddress,
-                tokenId,
+                tokenId: tokenIdDecimal,
                 ensName: extractedData.ensName,
                 fullName: ensMetadata?.name || `${extractedData.ensName}.eth`,
                 ownerAddress,
@@ -2631,9 +2681,9 @@ async function startApplication(): Promise<void> {
                 expiresAt: undefined, // TODO: Calculate expiration if needed
               };
 
-              // Store registration in database
-              const registrationId = await databaseService.insertRegistration(registrationData);
-              logger.info(`💾 ENS registration stored in database with ID: ${registrationId}`);
+              // Store registration in database with source tracking and duplicate detection
+              const registrationId = await databaseService.insertRegistrationWithSourceTracking(registrationData, 'moralis');
+              // Success logging is handled by insertRegistrationWithSourceTracking
 
               // TODO: Format and send tweet
               
@@ -2691,7 +2741,7 @@ async function startApplication(): Promise<void> {
           const qnSignature = req.headers['x-qn-signature'] as string;
           const qnNonce = req.headers['x-qn-nonce'] as string;
           const qnTimestamp = req.headers['x-qn-timestamp'] as string;
-          const quickNodeSecret = config.quicknode.webhookSecret;
+          const quickNodeSecret = config.quicknode.salesWebhookSecret;
           
           if (qnSignature && qnNonce && qnTimestamp) {
             if (!quickNodeSecret) {
@@ -2716,7 +2766,14 @@ async function startApplication(): Promise<void> {
                   nonce: qnNonce,
                   stringToSign: stringToSign.substring(0, 200) + (stringToSign.length > 200 ? '...' : ''),
                   stringLength: stringToSign.length,
-                  matches: qnSignature === expectedSignature
+                  matches: qnSignature === expectedSignature,
+                  // Debug info
+                  secretLength: quickNodeSecret ? quickNodeSecret.length : 0,
+                  secretPreview: quickNodeSecret ? quickNodeSecret.substring(0, 8) + '...' : 'NOT_SET',
+                  bodyLength: rawBody.length,
+                  bodyPreview: rawBody.toString('utf8').substring(0, 100),
+                  nonceLength: qnNonce.length,
+                  timestampLength: qnTimestamp.length
                 });
                 
                 if (qnSignature !== expectedSignature) {
@@ -2850,6 +2907,179 @@ async function startApplication(): Promise<void> {
       });
     });
 
+    // QuickNode Registration Webhook - registrations (manual body capture for no content-type)
+    app.post('/webhook/quicknode-registrations', (req, res) => {
+      // Capture raw body manually since QuickNode doesn't send Content-Type
+      let rawBody = Buffer.alloc(0);
+      
+      req.on('data', (chunk) => {
+        rawBody = Buffer.concat([rawBody, chunk]);
+      });
+      
+      req.on('end', async () => {
+        try {
+          logger.info('🚀 QuickNode Registration webhook received');
+          
+          // Log raw request details for debugging
+          logger.info('Request method:', req.method);
+          logger.info('Request headers:', JSON.stringify(req.headers, null, 2));
+          logger.info('Raw body length:', rawBody.length);
+          logger.info('Content-Type:', req.headers['content-type'] || 'not specified');
+          logger.info('Content-Encoding:', req.headers['content-encoding'] || 'not specified');
+          
+          // Check if body exists
+          if (rawBody.length > 0) {
+            logger.info('Raw body (first 100 chars):', rawBody.toString('utf8').substring(0, 100));
+          }
+        
+          // QuickNode Webhook Security Verification
+          const qnSignature = req.headers['x-qn-signature'] as string;
+          const qnNonce = req.headers['x-qn-nonce'] as string;
+          const qnTimestamp = req.headers['x-qn-timestamp'] as string;
+          const quickNodeSecret = config.quicknode.registrationsWebhookSecret;
+          
+          if (qnSignature && qnNonce && qnTimestamp && quickNodeSecret) {
+            try {
+              // Create the string to sign: nonce + timestamp + raw_payload (QuickNode format)
+              const bodyString = rawBody.toString('utf8');
+              const stringToSign = qnNonce + qnTimestamp + bodyString;
+              
+              // Create expected signature using HMAC-SHA256
+              const expectedSignature = createHmac('sha256', quickNodeSecret)
+                .update(stringToSign)
+                .digest('hex');
+              
+              logger.info('🔐 QuickNode registration webhook signature verification:', {
+                provided: qnSignature,
+                expected: expectedSignature,
+                matches: qnSignature === expectedSignature
+              });
+              
+              if (qnSignature !== expectedSignature) {
+                logger.error('❌ QuickNode registration webhook signature verification failed!');
+                return res.status(401).json({
+                  success: false,
+                  error: 'Webhook signature verification failed',
+                  message: 'Invalid QuickNode signature'
+                });
+              }
+              
+              logger.info('✅ QuickNode registration webhook signature verified successfully');
+              
+            } catch (sigError: any) {
+              logger.error('❌ QuickNode registration signature verification error:', sigError);
+              return res.status(500).json({
+                success: false,
+                error: 'Signature verification error',
+                message: sigError.message
+              });
+            }
+          } else {
+            logger.warn('⚠️ QuickNode registration webhook signature verification skipped - missing headers or secret');
+          }
+        
+          // Handle the webhook data using manually captured rawBody
+          let webhookData;
+          
+          // Check if body is empty
+          if (rawBody.length === 0) {
+            logger.warn('⚠️ Registration webhook received with empty body');
+            return res.status(200).json({ 
+              success: true, 
+              message: 'Registration webhook received but body is empty',
+              type: 'empty_body'
+            });
+          }
+          
+          // Handle potential gzip compression
+          let processedBody: Buffer = rawBody;
+          try {
+            // Check if content is gzipped
+            if (req.headers['content-encoding'] === 'gzip') {
+              logger.info('🗜️ Decompressing gzipped registration content');
+              const decompressed = gunzipSync(rawBody);
+              processedBody = Buffer.from(decompressed);
+            } else {
+              // Try to detect gzip by magic bytes
+              if (rawBody.length >= 2 && rawBody[0] === 0x1f && rawBody[1] === 0x8b) {
+                logger.info('🗜️ Detected gzip magic bytes in registration data, decompressing...');
+                const decompressed = gunzipSync(rawBody);
+                processedBody = Buffer.from(decompressed);
+              }
+            }
+          } catch (gzipError: any) {
+            logger.warn('⚠️ Failed to decompress registration data (not gzipped?):', gzipError.message);
+            processedBody = rawBody;
+          }
+        
+        // Convert buffer to string and then parse as JSON
+        try {
+          const bodyString = processedBody.toString('utf8');
+          logger.info('📊 Full registration payload:', bodyString);
+          
+          // Try to parse as JSON
+          webhookData = JSON.parse(bodyString);
+          logger.info('✅ Successfully parsed registration body as JSON');
+          logger.info('📋 Parsed webhook data structure:', JSON.stringify({
+            hasLogs: !!webhookData.logs,
+            logsCount: webhookData.logs ? webhookData.logs.length : 0,
+            hasBlock: !!webhookData.block
+          }));
+          
+          // Log detailed structure of logs for development
+          if (webhookData.logs && webhookData.logs.length > 0) {
+            logger.info('🔍 First log sample:', JSON.stringify(webhookData.logs[0], null, 2));
+          }
+          
+        } catch (parseError: any) {
+          logger.error('❌ Failed to parse registration webhook data as JSON:', parseError.message);
+          logger.info('Raw registration data that failed to parse:', processedBody.toString('utf8'));
+          return res.status(400).json({
+            success: false,
+            error: 'JSON parse error',
+            message: parseError.message
+          });
+        }
+
+        // Process registration events through QuickNodeRegistrationService
+        logger.info('⏭️ Registration data parsed successfully - ready for processing service');
+        
+        try {
+          await quickNodeRegistrationService.processRegistrations(webhookData);
+          logger.info('✅ QuickNode registration processing complete');
+        } catch (processingError: any) {
+          logger.error('❌ QuickNode registration processing failed:', processingError.message);
+          return res.status(500).json({
+            success: false,
+            error: 'Registration processing failed',
+            details: processingError.message
+          });
+        }
+
+        // Return success response
+        res.status(200).json({ 
+          success: true,
+          message: 'QuickNode registration webhook processed successfully', 
+          type: 'quicknode-registrations',
+          results: {
+            logsReceived: webhookData.logs ? webhookData.logs.length : 0,
+            processed: 0, // TODO: Update when processing is implemented
+            skipped: 0,
+            errors: 0
+          }
+        });
+        
+      } catch (error: any) {
+        logger.error('❌ Error processing QuickNode registration webhook:', error.message);
+        res.status(500).json({ 
+          success: false,
+          error: 'Webhook processing failed',
+          message: error.message
+        });
+      }
+    });
+  });
+
     // API info endpoint
     app.get('/api', (req, res) => {
       res.json({
@@ -2866,7 +3096,8 @@ async function startApplication(): Promise<void> {
         },
         webhooks: {
           ensRegistrations: '/webhook/ens-registrations',
-          salesv2: '/webhook/salesv2'
+          salesv2: '/webhook/salesv2',
+          quicknodeRegistrations: '/webhook/quicknode-registrations'
         }
       });
     });

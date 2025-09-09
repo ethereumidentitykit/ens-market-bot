@@ -3,6 +3,7 @@ import { ProcessedSale } from '../types';
 import { ENSWorkerService, ResolvedProfile } from './ensWorkerService';
 import { ImageData } from '../types/imageTypes';
 import { PuppeteerImageService } from './puppeteerImageService';
+import { OpenSeaService } from './openSeaService';
 import { logger } from '../utils/logger';
 
 /**
@@ -19,6 +20,9 @@ export interface RealImageData {
   nftImageUrl?: string;
   saleId?: number;
   transactionHash?: string;
+  // NFT contract info for metadata fallbacks
+  contractAddress?: string;
+  tokenId?: string;
 }
 
 /**
@@ -27,7 +31,8 @@ export interface RealImageData {
 export class RealDataImageService {
   constructor(
     private databaseService: IDatabaseService,
-    private ethIdentityService: ENSWorkerService
+    private ethIdentityService: ENSWorkerService,
+    private openSeaService?: OpenSeaService
   ) {}
 
   /**
@@ -182,7 +187,9 @@ export class RealDataImageService {
       sellerAvatar: sellerProfile.avatar,
       nftImageUrl: sale.nftImage,
       saleId: sale.id,
-      transactionHash: sale.transactionHash
+      transactionHash: sale.transactionHash,
+      contractAddress: sale.contractAddress,
+      tokenId: sale.tokenId
     };
 
     logger.info('Converted sale to image data:', {
@@ -256,7 +263,7 @@ export class RealDataImageService {
       timestamp: new Date()
     };
 
-    return await PuppeteerImageService.generateSaleImage(mockData);
+    return await PuppeteerImageService.generateSaleImage(mockData, this.databaseService, this.openSeaService);
   }
 
   /**

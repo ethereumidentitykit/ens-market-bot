@@ -6,6 +6,8 @@ import { ImageData } from '../types/imageTypes';
 import { PuppeteerImageService } from './puppeteerImageService';
 import { IDatabaseService } from '../types';
 import { AlchemyService } from './alchemyService';
+import { OpenSeaService } from './openSeaService';
+import { ENSMetadataService } from './ensMetadataService';
 import { ClubService } from './clubService';
 
 export interface GeneratedTweet {
@@ -33,7 +35,9 @@ export class NewTweetFormatter {
 
   constructor(
     private databaseService?: IDatabaseService,
-    private alchemyService?: AlchemyService
+    private alchemyService?: AlchemyService,
+    private openSeaService?: OpenSeaService,
+    private ensMetadataService?: ENSMetadataService
   ) {
     logger.info('[NewTweetFormatter] Constructor called - ClubService should be initialized');
     // Add a small delay to let ClubService initialize, then check status
@@ -70,7 +74,7 @@ export class NewTweetFormatter {
           const registrationImageData = await this.convertRegistrationToImageData(registration, ownerAccount);
           
           // Generate image buffer using Puppeteer (registration-specific)
-          imageBuffer = await PuppeteerImageService.generateRegistrationImage(registrationImageData, this.databaseService);
+          imageBuffer = await PuppeteerImageService.generateRegistrationImage(registrationImageData, this.databaseService, this.openSeaService);
           
           if (imageBuffer) {
             // Save image for preview
@@ -144,7 +148,7 @@ export class NewTweetFormatter {
           const mockImageData = this.convertRealToImageDataForBid(bidImageData, bid);
           
           // Generate image buffer using Puppeteer (bid-specific)
-          imageBuffer = await PuppeteerImageService.generateBidImage(mockImageData, this.databaseService);
+          imageBuffer = await PuppeteerImageService.generateBidImage(mockImageData, this.databaseService, this.openSeaService);
           
           if (imageBuffer) {
             // Save image for preview
@@ -212,7 +216,7 @@ export class NewTweetFormatter {
       if (this.databaseService) {
         try {
           logger.info(`Generating image for sale: ${sale.transactionHash}`);
-          const realDataService = new RealDataImageService(this.databaseService, this.ethIdentityService);
+          const realDataService = new RealDataImageService(this.databaseService, this.ethIdentityService, this.openSeaService);
           
           // Convert sale to image data
           const saleImageData = await realDataService.convertSaleToImageData(sale);
@@ -221,7 +225,7 @@ export class NewTweetFormatter {
           const mockImageData = this.convertRealToImageData(saleImageData, sale);
           
           // Generate image buffer using Puppeteer
-          imageBuffer = await PuppeteerImageService.generateSaleImage(mockImageData, this.databaseService);
+          imageBuffer = await PuppeteerImageService.generateSaleImage(mockImageData, this.databaseService, this.openSeaService);
           
           // Save image for preview
           const filename = `tweet-image-${sale.id}-${Date.now()}.png`;
@@ -342,30 +346,40 @@ export class NewTweetFormatter {
       logger.warn(`⚠️  Magic Eden did not provide ENS name for bid ${bid.bidId} (token: ${bid.tokenId})`);
     }
     
-    // If no ENS name from Magic Eden, try to fetch it ourselves
-    if (!ensName && bid.tokenId) {
+    // If no ENS name from Magic Eden, try to fetch it ourselves using OpenSea + ENS fallback
+    if (!ensName && bid.tokenId && bid.contractAddress) {
       try {
         logger.info(`🔍 Missing ENS name for bid ${bid.bidId}, attempting fallback lookup for token ${bid.tokenId}`);
-        const ensContract = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
-        const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
         
-        const response = await fetch(metadataUrl, { 
-          signal: AbortSignal.timeout(5000) // 5 second timeout
-        });
-        
-        if (response.ok) {
-          const metadata = await response.json();
-          ensName = metadata.name;
-          if (ensName) {
-            logger.info(`✅ Successfully resolved ENS name via fallback: ${ensName}`);
-          } else {
-            logger.warn(`⚠️  ENS metadata service returned no name for token ${bid.tokenId}`);
+        // Try OpenSea first
+        let metadata = null;
+        if (this.openSeaService) {
+          try {
+            metadata = await this.openSeaService.getSimplifiedMetadata(bid.contractAddress, bid.tokenId);
+            if (metadata?.name) {
+              ensName = metadata.name;
+              logger.info(`✅ Fetched ENS name from OpenSea: ${ensName}`);
+            }
+          } catch (error: any) {
+            logger.warn(`⚠️ OpenSea metadata failed for bid ${bid.bidId}: ${error.message}`);
           }
-        } else {
-          logger.warn(`⚠️  ENS metadata service returned HTTP ${response.status} for token ${bid.tokenId}`);
+        }
+        
+        // Fallback to ENS metadata API if OpenSea failed
+        if (!ensName && this.ensMetadataService) {
+          const ensContract = bid.contractAddress || '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
+          logger.debug(`🔗 Falling back to ENS metadata service with contract ${ensContract}`);
+          
+          const ensMetadata = await this.ensMetadataService.getMetadata(ensContract, bid.tokenId);
+          if (ensMetadata?.name) {
+            ensName = ensMetadata.name;
+            logger.info(`✅ Successfully resolved ENS name via ENS metadata fallback: ${ensName}`);
+          } else {
+            logger.warn(`⚠️ ENS metadata service returned no name for token ${bid.tokenId}`);
+          }
         }
       } catch (error: any) {
-        logger.warn(`⚠️  ENS metadata service fallback failed for token ${bid.tokenId}:`, error.message);
+        logger.warn(`⚠️ Metadata fallback failed for token ${bid.tokenId}:`, error.message);
       }
     }
     
@@ -408,18 +422,41 @@ export class NewTweetFormatter {
     const bidderHandle = this.getDisplayHandle(bidderAccount, bid.makerAddress);
     const bidderLine = `Bidder: ${bidderHandle}`;
     
-    // Owner line (fetch the current NFT owner)
+    // Owner line (fetch the current NFT owner using OpenSea first, Alchemy fallback)
     let currentOwnerLine = 'Owner: Unknown';
-    if (this.alchemyService && bid.tokenId && bid.contractAddress) {
-      try {
-        const owners = await this.alchemyService.getOwnersForToken(bid.contractAddress, bid.tokenId);
-        if (owners && owners.length > 0) {
-          const ownerAccount = await this.getAccountData(owners[0]);
-          const ownerHandle = this.getDisplayHandle(ownerAccount, owners[0]);
-          currentOwnerLine = `Owner: ${ownerHandle}`;
+    if (bid.tokenId && bid.contractAddress) {
+      let ownerAddress: string | null = null;
+      
+      // Try OpenSea first
+      if (this.openSeaService) {
+        try {
+          ownerAddress = await this.openSeaService.getTokenOwner(bid.contractAddress, bid.tokenId);
+        } catch (error: any) {
+          logger.warn('[OpenSea API] Failed to fetch Owner for bid tweet:', error.message);
         }
-      } catch (error: any) {
-        logger.warn('[Alchemy API] Failed to fetch Owner for bid tweet:', error.message);
+      }
+      
+      // Fallback to Alchemy
+      if (!ownerAddress && this.alchemyService) {
+        try {
+          const owners = await this.alchemyService.getOwnersForToken(bid.contractAddress, bid.tokenId);
+          if (owners && owners.length > 0) {
+            ownerAddress = owners[0];
+          }
+        } catch (error: any) {
+          logger.warn('[Alchemy API] Failed to fetch Owner for bid tweet:', error.message);
+        }
+      }
+      
+      // Get display handle if owner found
+      if (ownerAddress) {
+        try {
+          const ownerAccount = await this.getAccountData(ownerAddress);
+          const ownerHandle = this.getDisplayHandle(ownerAccount, ownerAddress);
+          currentOwnerLine = `Owner: ${ownerHandle}`;
+        } catch (error: any) {
+          logger.warn('Failed to get owner display handle:', error.message);
+        }
       }
     }
     
@@ -679,7 +716,9 @@ export class NewTweetFormatter {
       sellerAvatar: undefined, // Will be handled by PuppeteerImageService with dao-profile.png
       nftImageUrl: registration.image, // Use ENS NFT image if available
       saleId: registration.id,
-      transactionHash: registration.transactionHash
+      transactionHash: registration.transactionHash,
+      contractAddress: registration.contractAddress,
+      tokenId: registration.tokenId
     };
 
     logger.info('Converted registration to image data:', {
@@ -730,30 +769,40 @@ export class NewTweetFormatter {
       logger.warn(`⚠️  Magic Eden did not provide ENS name for image bid ${bid.bidId} (token: ${bid.tokenId})`);
     }
     
-    // If no ENS name from Magic Eden, try to fetch it ourselves (same logic as tweet text)
-    if (!ensName && bid.tokenId) {
+    // If no ENS name from Magic Eden, try to fetch it ourselves using OpenSea + ENS fallback
+    if (!ensName && bid.tokenId && bid.contractAddress) {
       try {
         logger.info(`🔍 Missing ENS name for image generation of bid ${bid.bidId}, attempting fallback lookup for token ${bid.tokenId}`);
-        const ensContract = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
-        const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
         
-        const response = await fetch(metadataUrl, { 
-          signal: AbortSignal.timeout(5000) // 5 second timeout
-        });
-        
-        if (response.ok) {
-          const metadata = await response.json();
-          ensName = metadata.name;
-          if (ensName) {
-            logger.info(`✅ Successfully resolved ENS name via fallback for image: ${ensName}`);
-          } else {
-            logger.warn(`⚠️  ENS metadata service returned no name for image token ${bid.tokenId}`);
+        // Try OpenSea first
+        let metadata = null;
+        if (this.openSeaService) {
+          try {
+            metadata = await this.openSeaService.getSimplifiedMetadata(bid.contractAddress, bid.tokenId);
+            if (metadata?.name) {
+              ensName = metadata.name;
+              logger.info(`✅ Fetched ENS name from OpenSea for image: ${ensName}`);
+            }
+          } catch (error: any) {
+            logger.warn(`⚠️ OpenSea metadata failed for image bid ${bid.bidId}: ${error.message}`);
           }
-        } else {
-          logger.warn(`⚠️  ENS metadata service returned HTTP ${response.status} for image token ${bid.tokenId}`);
+        }
+        
+        // Fallback to ENS metadata API if OpenSea failed
+        if (!ensName && this.ensMetadataService) {
+          const ensContract = bid.contractAddress || '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
+          logger.debug(`🔗 Falling back to ENS metadata service for image with contract ${ensContract}`);
+          
+          const ensMetadata = await this.ensMetadataService.getMetadata(ensContract, bid.tokenId);
+          if (ensMetadata?.name) {
+            ensName = ensMetadata.name;
+            logger.info(`✅ Successfully resolved ENS name via ENS metadata fallback for image: ${ensName}`);
+          } else {
+            logger.warn(`⚠️ ENS metadata service returned no name for image token ${bid.tokenId}`);
+          }
         }
       } catch (error: any) {
-        logger.warn(`⚠️  ENS metadata service fallback failed for image token ${bid.tokenId}:`, error.message);
+        logger.warn(`⚠️ Metadata fallback failed for image token ${bid.tokenId}:`, error.message);
       }
     }
     
@@ -767,30 +816,57 @@ export class NewTweetFormatter {
     const bidderHandle = this.getImageDisplayHandle(bidderAccount, bid.makerAddress);
     const bidderAvatar = bidderAccount?.avatar || bidderAccount?.records?.avatar;
     
-    // Try to get Owner using Alchemy API
+    // Try to get Owner using OpenSea API first, then Alchemy fallback
     let currentOwnerEns = '';
     let currentOwnerAvatar: string | undefined;
     
-    if (this.alchemyService && bid.tokenId && bid.contractAddress) {
-      try {
-        logger.debug(`Looking up Owner for token ${bid.tokenId}`);
-        const owners = await this.alchemyService.getOwnersForToken(bid.contractAddress, bid.tokenId);
-        
-        if (owners.length > 0) {
-          const ownerAddress = owners[0]; // ENS tokens typically have only one owner
-          logger.debug(`Found Owner: ${ownerAddress}`);
+    if (bid.tokenId && bid.contractAddress) {
+      let ownerAddress: string | null = null;
+      
+      // Try OpenSea first
+      if (this.openSeaService) {
+        try {
+          logger.debug(`Looking up Owner for token ${bid.tokenId} via OpenSea`);
+          ownerAddress = await this.openSeaService.getTokenOwner(bid.contractAddress, bid.tokenId);
           
-          // Get profile info for the owner (ENS only for images)
+          if (ownerAddress) {
+            logger.debug(`Found Owner via OpenSea: ${ownerAddress}`);
+          } else {
+            logger.debug(`No owner found via OpenSea for token ${bid.tokenId}`);
+          }
+        } catch (error: any) {
+          logger.warn(`[OpenSea API] Failed to get Owner for token ${bid.tokenId}:`, error.message);
+        }
+      }
+      
+      // Fallback to Alchemy if OpenSea failed
+      if (!ownerAddress && this.alchemyService) {
+        try {
+          logger.debug(`Falling back to Alchemy for Owner lookup of token ${bid.tokenId}`);
+          const owners = await this.alchemyService.getOwnersForToken(bid.contractAddress, bid.tokenId);
+          
+          if (owners.length > 0) {
+            ownerAddress = owners[0]; // ENS tokens typically have only one owner
+            logger.debug(`Found Owner via Alchemy fallback: ${ownerAddress}`);
+          } else {
+            logger.debug(`No owners found via Alchemy for token ${bid.tokenId}`);
+          }
+        } catch (error: any) {
+          logger.warn(`[Alchemy API] Failed to get Owner for token ${bid.tokenId}:`, error.message);
+        }
+      }
+      
+      // If we found an owner, get their profile info
+      if (ownerAddress) {
+        try {
           const ownerAccount = await this.getAccountData(ownerAddress);
           currentOwnerEns = this.getImageDisplayHandle(ownerAccount, ownerAddress);
           currentOwnerAvatar = ownerAccount?.avatar || ownerAccount?.records?.avatar;
           
           logger.debug(`Owner display: ${currentOwnerEns}, Avatar URL: ${currentOwnerAvatar}`);
-        } else {
-          logger.debug(`No owners found for token ${bid.tokenId}`);
+        } catch (error: any) {
+          logger.warn(`Failed to get profile data for owner ${ownerAddress}:`, error.message);
         }
-      } catch (error: any) {
-        logger.warn(`[Alchemy API] Failed to get Owner for token ${bid.tokenId}:`, error.message);
       }
     }
     
@@ -804,7 +880,9 @@ export class NewTweetFormatter {
       sellerAvatar: currentOwnerAvatar,
       nftImageUrl: bid.nftImage, // Use ENS NFT image if available
       saleId: bid.id,
-      transactionHash: bid.bidId // Use bid ID as transaction reference
+      transactionHash: bid.bidId, // Use bid ID as transaction reference
+      contractAddress: bid.contractAddress,
+      tokenId: bid.tokenId
     };
 
     logger.info('Converted bid to image data:', {
@@ -837,7 +915,9 @@ export class NewTweetFormatter {
       sellerEns: realData.sellerEns,
       sellerAvatar: realData.sellerAvatar,
       transactionHash: sale.transactionHash,
-      timestamp: new Date() // Use current timestamp
+      timestamp: new Date(), // Use current timestamp
+      contractAddress: sale.contractAddress,
+      tokenId: sale.tokenId
     };
   }
 
@@ -857,7 +937,9 @@ export class NewTweetFormatter {
       sellerEns: realData.sellerEns,
       sellerAvatar: realData.sellerAvatar,
       transactionHash: bid.bidId, // Use bid ID as transaction reference
-      timestamp: new Date() // Use current timestamp
+      timestamp: new Date(), // Use current timestamp
+      contractAddress: bid.contractAddress,
+      tokenId: bid.tokenId
     };
   }
 
@@ -1134,26 +1216,40 @@ export class NewTweetFormatter {
       logger.warn(`⚠️  Magic Eden did not provide ENS name for bid breakdown ${bid.bidId} (token: ${bid.tokenId})`);
     }
     
-    // If no ENS name from Magic Eden, try to fetch it ourselves
-    if (!ensName && bid.tokenId) {
+    // If no ENS name from Magic Eden, try to fetch it ourselves using OpenSea + ENS fallback
+    if (!ensName && bid.tokenId && bid.contractAddress) {
       try {
         logger.info(`🔍 Missing ENS name for bid breakdown ${bid.bidId}, attempting fallback lookup for token ${bid.tokenId}`);
-        const ensContract = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
-        const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
         
-        const response = await fetch(metadataUrl, { 
-          signal: AbortSignal.timeout(5000) // 5 second timeout
-        });
+        // Try OpenSea first
+        let metadata = null;
+        if (this.openSeaService) {
+          try {
+            metadata = await this.openSeaService.getSimplifiedMetadata(bid.contractAddress, bid.tokenId);
+            if (metadata?.name) {
+              ensName = metadata.name;
+              logger.info(`✅ Fetched ENS name from OpenSea for breakdown: ${ensName}`);
+            }
+          } catch (error: any) {
+            logger.warn(`⚠️ OpenSea metadata failed for breakdown bid ${bid.bidId}: ${error.message}`);
+          }
+        }
         
-        if (response.ok) {
-          const metadata = await response.json();
-          ensName = metadata.name;
-          if (ensName) {
-            logger.info(`✅ Successfully resolved ENS name via fallback for breakdown: ${ensName}`);
+        // Fallback to ENS metadata API if OpenSea failed
+        if (!ensName && this.ensMetadataService) {
+          const ensContract = bid.contractAddress || '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
+          logger.debug(`🔗 Falling back to ENS metadata service for breakdown with contract ${ensContract}`);
+          
+          const ensMetadata = await this.ensMetadataService.getMetadata(ensContract, bid.tokenId);
+          if (ensMetadata?.name) {
+            ensName = ensMetadata.name;
+            logger.info(`✅ Successfully resolved ENS name via ENS metadata fallback for breakdown: ${ensName}`);
+          } else {
+            logger.warn(`⚠️ ENS metadata service returned no name for breakdown token ${bid.tokenId}`);
           }
         }
       } catch (error: any) {
-        logger.warn(`⚠️  ENS metadata service fallback failed for breakdown token ${bid.tokenId}:`, error.message);
+        logger.warn(`⚠️ Metadata fallback failed for breakdown token ${bid.tokenId}:`, error.message);
       }
     }
     
@@ -1185,17 +1281,40 @@ export class NewTweetFormatter {
     const duration = this.calculateBidDuration(bid.validFrom, bid.validUntil);
     const visionUrl = this.buildVisionioUrl(ensName);
     
-    // Fetch Owner for breakdown (same logic as in tweet text)
+    // Fetch Owner for breakdown (using OpenSea first, Alchemy fallback)
     let currentOwnerHandle = 'Unknown';
-    if (this.alchemyService && bid.tokenId && bid.contractAddress) {
-      try {
-        const owners = await this.alchemyService.getOwnersForToken(bid.contractAddress, bid.tokenId);
-        if (owners && owners.length > 0) {
-          const ownerAccount = await this.getAccountData(owners[0]);
-          currentOwnerHandle = this.getDisplayHandle(ownerAccount, owners[0]);
+    if (bid.tokenId && bid.contractAddress) {
+      let ownerAddress: string | null = null;
+      
+      // Try OpenSea first
+      if (this.openSeaService) {
+        try {
+          ownerAddress = await this.openSeaService.getTokenOwner(bid.contractAddress, bid.tokenId);
+        } catch (error: any) {
+          logger.warn('[OpenSea API] Failed to fetch Owner for breakdown:', error.message);
         }
-      } catch (error: any) {
-        logger.warn('[Alchemy API] Failed to fetch Owner for breakdown:', error.message);
+      }
+      
+      // Fallback to Alchemy
+      if (!ownerAddress && this.alchemyService) {
+        try {
+          const owners = await this.alchemyService.getOwnersForToken(bid.contractAddress, bid.tokenId);
+          if (owners && owners.length > 0) {
+            ownerAddress = owners[0];
+          }
+        } catch (error: any) {
+          logger.warn('[Alchemy API] Failed to fetch Owner for breakdown:', error.message);
+        }
+      }
+      
+      // Get display handle if owner found
+      if (ownerAddress) {
+        try {
+          const ownerAccount = await this.getAccountData(ownerAddress);
+          currentOwnerHandle = this.getDisplayHandle(ownerAccount, ownerAddress);
+        } catch (error: any) {
+          logger.warn('Failed to get owner display handle for breakdown:', error.message);
+        }
       }
     }
     

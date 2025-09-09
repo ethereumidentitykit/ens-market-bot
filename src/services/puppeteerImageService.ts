@@ -5,6 +5,7 @@ import { emojiMappingService } from './emojiMappingService';
 import { RealImageData } from './realDataImageService';
 import { SvgConverter } from '../utils/svgConverter';
 import { UnicodeEmojiService } from './unicodeEmojiService';
+import { OpenSeaService } from './openSeaService';
 import * as fs from 'fs';
 import * as path from 'path';
 import axios from 'axios';
@@ -16,7 +17,7 @@ export class PuppeteerImageService {
   /**
    * Generate ENS registration image using Puppeteer
    */
-  public static async generateRegistrationImage(data: RealImageData, databaseService?: IDatabaseService): Promise<Buffer> {
+  public static async generateRegistrationImage(data: RealImageData, databaseService?: IDatabaseService, openSeaService?: OpenSeaService): Promise<Buffer> {
     // Convert RealImageData to ImageData format for compatibility
     const mockData: ImageData = {
       priceEth: data.priceEth,
@@ -30,24 +31,26 @@ export class PuppeteerImageService {
       sellerEns: data.sellerEns, // "ENS DAO"
       sellerAvatar: this.getDaoProfileBase64(), // Use DAO avatar for registrations
       transactionHash: data.transactionHash || '0x0000',
-      timestamp: new Date()
+      timestamp: new Date(),
+      contractAddress: data.contractAddress,
+      tokenId: data.tokenId
     };
 
-    return await this.generateImageWithBackground(mockData, 'registration', databaseService);
+    return await this.generateImageWithBackground(mockData, 'registration', databaseService, openSeaService);
   }
 
   /**
    * Generate ENS sale image using Puppeteer
    */
-  public static async generateSaleImage(data: ImageData, databaseService?: IDatabaseService): Promise<Buffer> {
-    return await this.generateImageWithBackground(data, 'sale', databaseService);
+  public static async generateSaleImage(data: ImageData, databaseService?: IDatabaseService, openSeaService?: OpenSeaService): Promise<Buffer> {
+    return await this.generateImageWithBackground(data, 'sale', databaseService, openSeaService);
   }
 
   /**
    * Generate ENS bid image using Puppeteer
    */
-  public static async generateBidImage(data: ImageData, databaseService?: IDatabaseService): Promise<Buffer> {
-    return await this.generateImageWithBackground(data, 'bid', databaseService);
+  public static async generateBidImage(data: ImageData, databaseService?: IDatabaseService, openSeaService?: OpenSeaService): Promise<Buffer> {
+    return await this.generateImageWithBackground(data, 'bid', databaseService, openSeaService);
   }
 
   /**
@@ -56,7 +59,8 @@ export class PuppeteerImageService {
   private static async generateImageWithBackground(
     data: ImageData, 
     imageType: 'sale' | 'registration' | 'bid', 
-    databaseService?: IDatabaseService
+    databaseService?: IDatabaseService,
+    openSeaService?: OpenSeaService
   ): Promise<Buffer> {
     // Environment-aware Puppeteer setup
     const isVercel = process.env.VERCEL === '1';
@@ -104,7 +108,7 @@ export class PuppeteerImageService {
       });
 
       // Generate HTML content with emoji replacement and background type
-      const htmlContent = await this.generateHTML(data, imageType, databaseService);
+      const htmlContent = await this.generateHTML(data, imageType, databaseService, openSeaService);
       logger.debug(`Generated HTML content length: ${htmlContent.length} chars`);
       
       // Set the HTML content
@@ -332,7 +336,8 @@ export class PuppeteerImageService {
   private static async generateHTML(
     data: ImageData, 
     imageType: 'sale' | 'registration' | 'bid' = 'sale',
-    databaseService?: IDatabaseService
+    databaseService?: IDatabaseService,
+    openSeaService?: OpenSeaService
   ): Promise<string> {
     
     // Get dynamic template path based on transaction type and price tier
@@ -349,9 +354,11 @@ export class PuppeteerImageService {
     // Use actual images or fallbacks
     const templateImagePath = `data:image/png;base64,${backgroundImageBase64}`;
     
-    // Convert NFT SVG to PNG (all NFT images are SVG format)
+    // Convert NFT SVG to PNG (all NFT images are SVG format) with OpenSea fallback
     let nftImageBase64 = `data:image/png;base64,${ensPlaceholderBase64}`; // Default fallback
     if (data.nftImageUrl) {
+      // Try original URL first
+      let imageProcessed = false;
       try {
         logger.info(`🖼️ Processing NFT image: ${data.nftImageUrl}`);
         
@@ -374,9 +381,45 @@ export class PuppeteerImageService {
         
         nftImageBase64 = `data:image/png;base64,${pngBase64}`;
         logger.info(`✅ Successfully converted NFT to PNG with Apple emojis`);
+        imageProcessed = true;
       } catch (error: any) {
-        logger.warn(`❌ Failed to process NFT SVG image: ${data.nftImageUrl}`, error.message);
-        // Falls back to placeholder
+        logger.warn(`❌ Failed to process original NFT image: ${data.nftImageUrl}`, error.message);
+      }
+      
+      // Try OpenSea fallback if original failed
+      if (!imageProcessed && openSeaService && data.contractAddress && data.tokenId) {
+        try {
+          logger.info(`🔄 Trying OpenSea fallback for NFT image: ${data.ensName} (${data.contractAddress}/${data.tokenId})`);
+          
+          const metadata = await openSeaService.getSimplifiedMetadata(data.contractAddress, data.tokenId);
+          
+          if (metadata?.image) {
+            logger.info(`📥 Found OpenSea image URL: ${metadata.image}`);
+            
+            // Try to process the OpenSea image
+            const openSeaResponse = await axios.get(metadata.image, {
+              timeout: 10000,
+              headers: { 'User-Agent': 'ENS-TwitterBot/1.0' }
+            });
+            
+            const openSeaContent = openSeaResponse.data;
+            const openSeaHtmlContent = await this.convertSvgToHtmlWithEmojis(openSeaContent);
+            const openSeaPngBuffer = await SvgConverter.convertSvgToPng(openSeaHtmlContent);
+            const openSeaPngBase64 = openSeaPngBuffer.toString('base64');
+            
+            nftImageBase64 = `data:image/png;base64,${openSeaPngBase64}`;
+            logger.info(`✅ Successfully used OpenSea fallback image for ${data.ensName}`);
+            imageProcessed = true;
+          } else {
+            logger.warn(`⚠️ OpenSea returned no image for ${data.contractAddress}/${data.tokenId}`);
+          }
+        } catch (fallbackError: any) {
+          logger.warn(`❌ OpenSea fallback also failed: ${fallbackError.message}`);
+        }
+      }
+      
+      if (!imageProcessed) {
+        logger.warn(`❌ All image sources failed for ${data.ensName}, using placeholder`);
       }
     } else {
       logger.info(`ℹ️  No NFT image URL provided, using placeholder`);

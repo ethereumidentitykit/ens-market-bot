@@ -73,6 +73,7 @@ export class SchedulerService {
   /**
    * Start the automated scheduling
    * Sales: every 5 minutes, Registrations: every 1 minute, Bids: every 2 minutes
+   * NOTE: Registration tweet processing is handled in real-time by DatabaseEventService
    */
   async start(): Promise<void> {
     // Stop existing jobs if running
@@ -123,6 +124,7 @@ export class SchedulerService {
     await this.saveSchedulerState(true);
     
     logger.info('Scheduler started - Sales: every 5 minutes, Registrations: every 1 minute, Bids: every 2 minutes');
+    logger.info('Tweet processing: REAL-TIME via DatabaseEventService for both Moralis and QuickNode data');
     logger.info(`Next sales run: ${this.salesSyncJob.nextDate().toString()}`);
     logger.info(`Next registration run: ${this.registrationSyncJob.nextDate().toString()}`);
     logger.info(`Next bid run: ${this.bidsSyncJob.nextDate().toString()}`);
@@ -140,6 +142,7 @@ export class SchedulerService {
       wasRunning = true;
     }
     
+    // Registration sync job is already disabled (handled by DatabaseEventService)
     if (this.registrationSyncJob) {
       this.registrationSyncJob.stop();
       this.registrationSyncJob = null;
@@ -159,7 +162,8 @@ export class SchedulerService {
       await this.saveSchedulerState(false);
       
       logger.info('💾 Scheduler state persisted: DISABLED (survives restarts)');
-      logger.info('Scheduler stopped - sales, registration, and bid processing halted');
+    logger.info('Scheduler stopped - sales, registration, and bid processing halted');
+    logger.info('Registration tweet processing continues via real-time DatabaseEventService');
     } else {
       logger.info('Scheduler was not running');
     }
@@ -174,6 +178,7 @@ export class SchedulerService {
       this.salesSyncJob = null;
     }
     
+    // Registration sync job is already disabled (handled by DatabaseEventService)
     if (this.registrationSyncJob) {
       this.registrationSyncJob.stop();
       this.registrationSyncJob = null;
@@ -188,6 +193,7 @@ export class SchedulerService {
     
     // Don't persist state change - allows scheduler to resume after restart
     logger.info('Scheduler gracefully stopped (state preserved for restart)');
+    logger.info('Registration tweet processing continues via real-time DatabaseEventService');
   }
 
   /**
@@ -201,6 +207,7 @@ export class SchedulerService {
       this.salesSyncJob = null;
     }
     
+    // Registration sync job is already disabled (handled by DatabaseEventService)
     if (this.registrationSyncJob) {
       this.registrationSyncJob.stop();
       this.registrationSyncJob = null;
@@ -214,7 +221,8 @@ export class SchedulerService {
     // Save disabled state to database for persistence across restarts
     await this.saveSchedulerState(false);
     
-    logger.info('Scheduler force stopped - all activity halted');
+    logger.info('Scheduler force stopped - sales, registration, and bid processing halted');
+    logger.info('Registration tweet processing continues via real-time DatabaseEventService');
   }
 
   /**
@@ -310,6 +318,9 @@ export class SchedulerService {
 
   /**
    * Execute the registration sync process (runs every 1 minute)
+   * NOTE: Registration data ingestion handled by Moralis (/webhook/ens-registrations) and QuickNode webhooks
+   * NOTE: Registration tweet processing is now handled by DatabaseEventService via NOTIFY/LISTEN
+   * This method is kept for potential future registration maintenance tasks
    */
   private async runRegistrationSync(): Promise<void> {
     if (!this.isRunning) {
@@ -324,50 +335,22 @@ export class SchedulerService {
 
     this.isProcessingRegistrations = true;
     const startTime = new Date();
-    logger.info('Starting registration sync...');
+    logger.debug('Starting registration sync (maintenance only)...');
 
     try {
-      // Load auto-posting settings first to get age limits
-      const autoPostSettings = await this.autoTweetService.getSettings();
+      // Registration data ingestion: Handled by multiple webhooks:
+      // - Moralis webhook: /webhook/ens-registrations (fallback)
+      // - QuickNode webhook: /webhook/quicknode-registrations (primary)
+      // Both store to database with duplicate protection
       
-      // Auto-post unposted registrations if enabled (with age filtering at database level)
-      const unpostedRegistrations = await this.databaseService.getUnpostedRegistrations(10, autoPostSettings.registrations.maxAgeHours);
-      let registrationAutoPostResults: PostResult[] = [];
+      // Registration tweet processing: Handled by DatabaseEventService via NOTIFY/LISTEN
+      // This provides instant real-time processing when registrations are stored in database
       
-      if (unpostedRegistrations.length > 0) {
-        // Check global AND registrations-specific toggles
-        if (autoPostSettings.enabled && autoPostSettings.registrations.enabled) {
-          logger.info(`🏛️ Auto-posting ${unpostedRegistrations.length} unposted registrations (within ${autoPostSettings.registrations.maxAgeHours}h)...`);
-          registrationAutoPostResults = await this.autoTweetService.processNewRegistrations(unpostedRegistrations, autoPostSettings);
-          
-          const posted = registrationAutoPostResults.filter(r => r.success).length;
-          const skipped = registrationAutoPostResults.filter(r => r.skipped).length;
-          const failed = registrationAutoPostResults.filter(r => !r.success && !r.skipped).length;
-          
-          logger.info(`🏛️ Registration auto-posting results: ${posted} posted, ${skipped} skipped, ${failed} failed`);
-        } else {
-          logger.debug(`🏛️ Skipping registrations auto-posting - Global: ${autoPostSettings.enabled}, Registrations: ${autoPostSettings.registrations.enabled}`);
-        }
-      } else {
-        logger.debug(`🏛️ No unposted registrations found within ${autoPostSettings.registrations.maxAgeHours} hours`);
-      }
-
+      // Future: Add any registration maintenance tasks here (e.g., data cleanup, analytics)
+      
       const duration = Date.now() - startTime.getTime();
-      const registrationsPosted = registrationAutoPostResults.filter(r => r.success).length;
       
-      logger.info(`Registration sync completed in ${duration}ms:`, {
-        unpostedFound: unpostedRegistrations.length,
-        registrationsAutoPosted: registrationsPosted
-      });
-
-      // Log registration processing summary
-      if (unpostedRegistrations.length > 0) {
-        logger.info(`🏛️ Processed ${unpostedRegistrations.length} registrations: ${registrationsPosted} posted, ${unpostedRegistrations.length - registrationsPosted} skipped/failed`);
-      }
-      
-      if (registrationsPosted > 0) {
-        logger.info(`🐦 Posted ${registrationsPosted} registration tweets`);
-      }
+      logger.debug(`Registration sync completed in ${duration}ms - dual webhook ingestion active (Moralis fallback + QuickNode primary)`);
 
     } catch (error: any) {
       logger.error(`Registration sync failed:`, error.message);
@@ -498,7 +481,8 @@ export class SchedulerService {
   }
 
   /**
-   * Manually trigger both sales and registration sync (doesn't affect the schedule)
+   * Manually trigger sales, registration, and bid sync (doesn't affect the schedule)
+   * NOTE: Registration tweet processing handled by real-time DatabaseEventService
    */
   async triggerManualSync(): Promise<{
     success: boolean;
@@ -507,6 +491,7 @@ export class SchedulerService {
   }> {
     try {
       logger.info('Manual sync triggered - running sales, registration, and bid processing');
+      logger.info('Registration tweet processing is handled in real-time by DatabaseEventService');
       
       // Run all sync methods manually
       await this.runSalesSync();
@@ -515,7 +500,7 @@ export class SchedulerService {
       
       return {
         success: true,
-        stats: { message: 'Sales, registration, and bid sync completed' }
+        stats: { message: 'Sales, registration, and bid sync completed (registration tweets handled in real-time)' }
       };
     } catch (error: any) {
       logger.error('Manual sync failed:', error.message);
