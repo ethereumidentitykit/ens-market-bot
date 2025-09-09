@@ -140,21 +140,37 @@ export class QuickNodeSalesService {
     blockTimestamp: string;
   } | null {
     try {
-      // Find ENS token in offer (what's being sold)
-      const ensToken = order.offer?.find(item => 
+      // Find ENS token in either offer OR consideration 
+      // (Seaport orders can represent either buyer or seller perspective)
+      const ensTokenInOffer = order.offer?.find(item => 
         item.token.toLowerCase() === this.ENS_REGISTRY.toLowerCase() ||
         item.token.toLowerCase() === this.ENS_NAMEWRAPPER.toLowerCase()
       );
+      
+      const ensTokenInConsideration = order.consideration?.find(item => 
+        item.token.toLowerCase() === this.ENS_REGISTRY.toLowerCase() ||
+        item.token.toLowerCase() === this.ENS_NAMEWRAPPER.toLowerCase()
+      );
+
+      const ensToken = ensTokenInOffer || ensTokenInConsideration;
 
       if (!ensToken) {
         return null; // Not an ENS sale
       }
 
-      // Find ETH/WETH payments in consideration (what's being paid)
-      const ethPayments = order.consideration?.filter(item => 
+      // Find ETH/WETH payments in either consideration OR offer
+      // (depends on whether we're looking at buyer or seller perspective)
+      const ethPaymentsInConsideration = order.consideration?.filter(item => 
         item.itemType === this.NATIVE_ETH_ITEM_TYPE || // Native ETH
         item.token.toLowerCase() === this.WETH_ADDRESS.toLowerCase() // WETH
       ) || [];
+      
+      const ethPaymentsInOffer = order.offer?.filter(item => 
+        item.itemType === this.NATIVE_ETH_ITEM_TYPE || // Native ETH
+        item.token.toLowerCase() === this.WETH_ADDRESS.toLowerCase() // WETH
+      ) || [];
+
+      const ethPayments = [...ethPaymentsInConsideration, ...ethPaymentsInOffer];
 
       if (ethPayments.length === 0) {
         logger.debug(`No ETH/WETH payments found in order ${order.orderHash}`);
@@ -176,11 +192,23 @@ export class QuickNodeSalesService {
 
       // Find the seller: the recipient of the largest ETH payment (main sale amount)
       // In Seaport, the seller gets the main payment, marketplace gets fees
-      const mainPayment = ethPayments.reduce((max, payment) => 
+      // Only consideration items have recipients, offer items don't
+      const ethPaymentsWithRecipients = ethPaymentsInConsideration.length > 0 
+        ? ethPaymentsInConsideration 
+        : ethPaymentsInOffer;
+      
+      if (ethPaymentsWithRecipients.length === 0) {
+        logger.debug(`No ETH payments with recipients found in order ${order.orderHash}`);
+        return null;
+      }
+      
+      const mainPayment = ethPaymentsWithRecipients.reduce((max, payment) => 
         BigInt(payment.amount) > BigInt(max.amount) ? payment : max
       );
       
-      const sellerAddress = mainPayment.recipient.toLowerCase();
+      const sellerAddress = ('recipient' in mainPayment) 
+        ? (mainPayment as any).recipient.toLowerCase()
+        : order.offerer.toLowerCase(); // Fallback to offerer if no recipient
       const buyerAddress = order.recipient.toLowerCase();
 
       // Validation: buyer and seller should be different
@@ -336,21 +364,35 @@ export class QuickNodeSalesService {
    */
   private getSkipReason(order: SeaportOrder): string {
     try {
-      // Check if it's an ENS token
-      const ensToken = order.offer?.find(item => 
+      // Check if it's an ENS token (in either offer or consideration)
+      const ensTokenInOffer = order.offer?.find(item => 
         item.token.toLowerCase() === this.ENS_REGISTRY.toLowerCase() ||
         item.token.toLowerCase() === this.ENS_NAMEWRAPPER.toLowerCase()
       );
+      
+      const ensTokenInConsideration = order.consideration?.find(item => 
+        item.token.toLowerCase() === this.ENS_REGISTRY.toLowerCase() ||
+        item.token.toLowerCase() === this.ENS_NAMEWRAPPER.toLowerCase()
+      );
+
+      const ensToken = ensTokenInOffer || ensTokenInConsideration;
 
       if (!ensToken) {
         return 'not an ENS token';
       }
 
-      // Check for ETH/WETH payments
-      const ethPayments = order.consideration?.filter(item => 
+      // Check for ETH/WETH payments in either consideration or offer
+      const ethPaymentsInConsideration = order.consideration?.filter(item => 
         item.itemType === this.NATIVE_ETH_ITEM_TYPE || // Native ETH
         item.token.toLowerCase() === this.WETH_ADDRESS.toLowerCase() // WETH
       ) || [];
+      
+      const ethPaymentsInOffer = order.offer?.filter(item => 
+        item.itemType === this.NATIVE_ETH_ITEM_TYPE || // Native ETH
+        item.token.toLowerCase() === this.WETH_ADDRESS.toLowerCase() // WETH
+      ) || [];
+
+      const ethPayments = [...ethPaymentsInConsideration, ...ethPaymentsInOffer];
 
       if (ethPayments.length === 0) {
         return 'no ETH/WETH payments found';
