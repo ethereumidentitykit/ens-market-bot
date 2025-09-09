@@ -226,15 +226,15 @@ export class QuickNodeSalesService {
         logger.debug(`🔍 Proxy contract detected (buyer: ${buyerAddress}, seller: ${sellerAddress}) - resolving via OpenSea Events API`);
         
         try {
-          // Use transaction hash to match exact sale event
+          // Use transaction hash to match exact sale event and pass known proxy addresses
           const resolvedAddresses = await this.openSeaService.getEventAddresses(
             ensToken.token, 
             ensToken.identifier, 
-            order.txHash
+            order.txHash,
+            this.PROBLEMATIC_INTERMEDIARIES
           );
 
           if (resolvedAddresses) {
-            logger.info(`✅ Proxy addresses resolved - Original: buyer=${buyerAddress}, seller=${sellerAddress} → Real: buyer=${resolvedAddresses.buyer}, seller=${resolvedAddresses.seller}`);
             buyerAddress = resolvedAddresses.buyer;
             sellerAddress = resolvedAddresses.seller;
           } else {

@@ -240,13 +240,14 @@ export class OpenSeaService {
 
   /**
    * Get real buyer and seller addresses from OpenSea Events API
-   * Resolves proxy contract issues by finding transfer events at the same timestamp as the sale
+   * Resolves proxy contract issues by tracing ENS token flow through proxy contracts
    * @param contractAddress - ENS contract address
    * @param tokenId - Token ID (decimal format)
-   * @param txHash - Transaction hash from QuickNode webhook to match exact sale
+   * @param txHash - Transaction hash from QuickNode webhook to match transfer events
+   * @param knownProxies - Array of known proxy contract addresses to trace through
    * @returns Real buyer/seller addresses or null if not found
    */
-  async getEventAddresses(contractAddress: string, tokenId: string, txHash: string): Promise<ResolvedAddresses | null> {
+  async getEventAddresses(contractAddress: string, tokenId: string, txHash: string, knownProxies: string[]): Promise<ResolvedAddresses | null> {
     if (!config.opensea?.apiKey) {
       logger.warn('OpenSea API key not configured - cannot resolve proxy addresses');
       return null;
@@ -271,46 +272,47 @@ export class OpenSeaService {
         return null;
       }
 
-      // Find sale event by matching transaction hash from QuickNode webhook
-      const saleEvent = events.find(e => e.event_type === 'sale' && e.transaction === txHash);
-      
-      if (!saleEvent) {
-        logger.debug(`No sale event found with transaction hash ${txHash}`);
-        return null;
-      }
-
-      logger.debug(`Found sale event at timestamp ${saleEvent.event_timestamp} for tx ${txHash}`);
-
-      // Find transfer events with exact same timestamp as the sale
+      // Find transfer events with same transaction hash (much cleaner!)
       const transferEvents = events.filter(e => 
         e.event_type === 'transfer' && 
-        e.event_timestamp === saleEvent.event_timestamp
+        e.transaction === txHash
       );
 
       if (transferEvents.length === 0) {
-        logger.debug(`No transfer events found at timestamp ${saleEvent.event_timestamp}`);
+        logger.debug(`No transfer events found with transaction hash ${txHash}`);
         return null;
       }
 
-      logger.debug(`Found ${transferEvents.length} transfer events at timestamp ${saleEvent.event_timestamp}`);
+      logger.debug(`Found ${transferEvents.length} transfer events for tx ${txHash}`);
 
-      // OpenSea API returns events in chronological order (most recent first)
-      // For ENS token transfers: seller → proxy → buyer
-      // First in array = most recent = final transfer (proxy → buyer)  
-      // Last in array = oldest = initial transfer (seller → proxy)
+      // Normalize proxy addresses for comparison
+      const normalizedProxies = knownProxies.map(p => p.toLowerCase());
 
       let buyer: string | null = null;
       let seller: string | null = null;
 
-      // Get buyer from final transfer (first in array - most recent)
-      const finalTransfer = transferEvents[0];
-      buyer = finalTransfer.to_address?.toLowerCase() || null;
+      // Trace ENS token flow through proxy contracts
+      // Step 1: Find transfer where proxy receives ENS (seller → proxy)
+      const sellerToProxy = transferEvents.find(t => 
+        t.to_address && normalizedProxies.includes(t.to_address.toLowerCase())
+      );
+      
+      if (sellerToProxy?.from_address) {
+        seller = sellerToProxy.from_address.toLowerCase();
+        logger.debug(`Found seller → proxy transfer: ${seller} → ${sellerToProxy.to_address}`);
+      }
 
-      // Get seller from initial transfer (last in array - oldest) 
-      const initialTransfer = transferEvents[transferEvents.length - 1];
-      seller = initialTransfer.from_address?.toLowerCase() || null;
+      // Step 2: Find transfer where proxy sends ENS (proxy → buyer)
+      const proxyToBuyer = transferEvents.find(t => 
+        t.from_address && normalizedProxies.includes(t.from_address.toLowerCase())
+      );
+      
+      if (proxyToBuyer?.to_address) {
+        buyer = proxyToBuyer.to_address.toLowerCase();
+        logger.debug(`Found proxy → buyer transfer: ${proxyToBuyer.from_address} → ${buyer}`);
+      }
 
-      logger.debug(`Transfer events - Final: from=${finalTransfer.from_address} to=${finalTransfer.to_address}, Initial: from=${initialTransfer.from_address} to=${initialTransfer.to_address}`);
+      logger.debug(`Flow tracing result - Seller: ${seller}, Buyer: ${buyer}`);
 
       if (buyer && seller) {
         logger.info(`✅ Resolved addresses via OpenSea Events API - Buyer: ${buyer}, Seller: ${seller}`);
