@@ -259,15 +259,37 @@ export class QuickNodeSalesService {
             buyerAddress = resolvedAddresses.buyer;
             sellerAddress = resolvedAddresses.seller;
           } else {
-            logger.warn(`⚠️ Failed to resolve proxy addresses via OpenSea API - keeping original addresses`);
+            logger.warn(`⚠️ Failed to resolve proxy addresses via OpenSea API after retries - using 'unknown' fallback`);
+            
+            // Replace proxy addresses with "unknown" for clearer user experience
+            if (this.PROBLEMATIC_INTERMEDIARIES.includes(buyerAddress)) {
+              buyerAddress = 'unknown';
+              logger.debug(`🔄 Replaced proxy buyer address with 'unknown'`);
+            }
+            
+            if (this.PROBLEMATIC_INTERMEDIARIES.includes(sellerAddress)) {
+              sellerAddress = 'unknown'; 
+              logger.debug(`🔄 Replaced proxy seller address with 'unknown'`);
+            }
           }
         } catch (error: any) {
-          logger.error(`❌ Error resolving proxy addresses: ${error.message} - keeping original addresses`);
+          logger.error(`❌ Error resolving proxy addresses: ${error.message} - using 'unknown' fallback`);
+          
+          // Replace proxy addresses with "unknown" even on error
+          if (this.PROBLEMATIC_INTERMEDIARIES.includes(buyerAddress)) {
+            buyerAddress = 'unknown';
+            logger.debug(`🔄 Replaced proxy buyer address with 'unknown' (error fallback)`);
+          }
+          
+          if (this.PROBLEMATIC_INTERMEDIARIES.includes(sellerAddress)) {
+            sellerAddress = 'unknown'; 
+            logger.debug(`🔄 Replaced proxy seller address with 'unknown' (error fallback)`);
+          }
         }
       }
 
-      // Validation: buyer and seller should be different
-      if (buyerAddress === sellerAddress) {
+      // Validation: buyer and seller should be different (except when both are "unknown")
+      if (buyerAddress === sellerAddress && buyerAddress !== 'unknown') {
         logger.warn(`⚠️ Buyer and seller are the same address: ${buyerAddress} - this may indicate a self-transfer or parsing error`);
       }
 

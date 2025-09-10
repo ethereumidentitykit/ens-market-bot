@@ -241,6 +241,7 @@ export class OpenSeaService {
   /**
    * Get real buyer and seller addresses from OpenSea Events API
    * Resolves proxy contract issues by tracing ENS token flow through proxy contracts
+   * Includes retry mechanism to handle OpenSea API indexing delays
    * @param contractAddress - ENS contract address
    * @param tokenId - Token ID (decimal format)
    * @param txHash - Transaction hash from QuickNode webhook to match transfer events
@@ -248,6 +249,39 @@ export class OpenSeaService {
    * @returns Real buyer/seller addresses or null if not found
    */
   async getEventAddresses(contractAddress: string, tokenId: string, txHash: string, knownProxies: string[]): Promise<ResolvedAddresses | null> {
+    const maxRetries = 3;
+    const retryDelay = 5000; // 5 seconds
+
+    for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+      const result = await this.fetchEventAddresses(contractAddress, tokenId, txHash, knownProxies);
+      
+      if (result) {
+        if (attempt > 1) {
+          logger.info(`✅ OpenSea Events API succeeded on attempt ${attempt}/${maxRetries + 1}`);
+        }
+        return result;
+      }
+
+      if (attempt <= maxRetries) {
+        logger.debug(`🔄 OpenSea Events API attempt ${attempt}/${maxRetries + 1} failed - retrying in ${retryDelay/1000}s...`);
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+      } else {
+        logger.warn(`❌ OpenSea Events API failed after ${maxRetries + 1} attempts`);
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Single attempt to fetch event addresses from OpenSea Events API
+   * @param contractAddress - ENS contract address
+   * @param tokenId - Token ID (decimal format)  
+   * @param txHash - Transaction hash from QuickNode webhook
+   * @param knownProxies - Array of known proxy contract addresses
+   * @returns Real buyer/seller addresses or null if not found
+   */
+  private async fetchEventAddresses(contractAddress: string, tokenId: string, txHash: string, knownProxies: string[]): Promise<ResolvedAddresses | null> {
     if (!config.opensea?.apiKey) {
       logger.warn('OpenSea API key not configured - cannot resolve proxy addresses');
       return null;
@@ -272,11 +306,14 @@ export class OpenSeaService {
         return null;
       }
 
-      // Find transfer events with same transaction hash (much cleaner!)
+      // Find transfer events with same transaction hash
+      logger.debug(`Looking for tx hash: "${txHash}" in ${events.length} OpenSea events`);
+      
       const transferEvents = events.filter(e => 
         e.event_type === 'transfer' && 
         e.transaction === txHash
       );
+      
 
       if (transferEvents.length === 0) {
         logger.debug(`No transfer events found with transaction hash ${txHash}`);
