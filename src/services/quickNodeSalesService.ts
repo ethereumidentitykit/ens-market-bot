@@ -50,6 +50,7 @@ export class QuickNodeSalesService {
     '0x0000a26b00c1F0DF003000390027140000fAa719', // OpenSea WETH wrapper (124x in logs)
     '0xE6EE2b1eaAc6520bE709e77780Abb50E7fFfcCCd', // Proxy contract (196x in logs)
     '0x00ca04c45da318d5b7e7b14d5381ca59f09c73f0', // Additional proxy contract
+    '0x0000a26b00c1f0df003000390027140000faa719', // Additional proxy contract
   ];
 
   constructor(
@@ -213,10 +214,30 @@ export class QuickNodeSalesService {
         BigInt(payment.amount) > BigInt(max.amount) ? payment : max
       );
       
-      let sellerAddress = ('recipient' in mainPayment) 
-        ? (mainPayment as any).recipient.toLowerCase()
-        : order.offerer.toLowerCase(); // Fallback to offerer if no recipient
-      let buyerAddress = order.recipient.toLowerCase();
+      // Determine buyer/seller based on transaction type (where ENS token appears)
+      let buyerAddress: string;
+      let sellerAddress: string;
+
+      if (ensTokenInOffer && !ensTokenInConsideration) {
+        // Type 1: Direct Listing - ENS in offer (seller lists ENS for sale)
+        buyerAddress = order.recipient.toLowerCase();  // Who gets the ENS
+        sellerAddress = order.offerer.toLowerCase();   // Who listed the ENS
+        logger.debug(`📋 Direct listing detected - Seller: ${sellerAddress}, Buyer: ${buyerAddress}`);
+        
+      } else if (ensTokenInConsideration && !ensTokenInOffer) {
+        // Type 2: Accepted Offer - ENS in consideration (buyer's offer accepted)
+        buyerAddress = ensTokenInConsideration.recipient.toLowerCase(); // Who gets the ENS
+        sellerAddress = order.recipient.toLowerCase(); // Who gets the WETH payment
+        logger.debug(`🤝 Accepted offer detected - Seller: ${sellerAddress}, Buyer: ${buyerAddress}`);
+        
+      } else {
+        // Fallback to original logic for edge cases
+        sellerAddress = ('recipient' in mainPayment) 
+          ? (mainPayment as any).recipient.toLowerCase()
+          : order.offerer.toLowerCase();
+        buyerAddress = order.recipient.toLowerCase();
+        logger.warn(`⚠️ Ambiguous transaction type - using fallback logic`);
+      }
 
       // Check for proxy contracts and resolve real addresses via OpenSea Events API
       const hasProxyContract = this.PROBLEMATIC_INTERMEDIARIES.includes(buyerAddress) || 
