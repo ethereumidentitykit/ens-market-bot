@@ -322,7 +322,7 @@ export class BidsProcessingService {
       const club999Min = await this.databaseService.getSystemState('autopost_bids_min_eth_999') || '20';
       
       // DEBUG: Log the actual database values being used
-      logger.info(`🔍 BID THRESHOLDS: Default=${defaultMin}, 10k=${club10kMin}, 999=${club999Min}`);
+      logger.debug(`🔍 BID THRESHOLDS: Default=${defaultMin}, 10k=${club10kMin}, 999=${club999Min}`);
       
       // Use Magic Eden name if available (80-90% of cases)
       let ensName = bid.ensName || '';
@@ -358,8 +358,6 @@ export class BidsProcessingService {
 
       // Apply club-aware logic using ClubService
       const clubs = this.clubService.getClubInfo(ensName);
-      
-      logger.debug(`🔍 BID FILTER: ${ensName} - clubs detected: [${clubs.map(c => c.name).join(', ') || 'none'}]`);
       
       // Check for premium clubs with special thresholds (in priority order)
       for (const club of clubs) {
