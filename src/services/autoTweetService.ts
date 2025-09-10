@@ -96,8 +96,8 @@ export class AutoTweetService {
         
         // Rate limiting: delay between posts to allow for image generation
         if (result.success) {
-          logger.info('Tweet posted successfully, waiting 20 seconds before next post...');
-          await this.delay(20000); // 20 second delay between successful posts (accounts for 5-8s image generation)
+          logger.info('Tweet posted successfully, waiting 8 seconds before next post...');
+          await this.delay(8000); // 8 second delay between successful posts
         }
       } catch (error: any) {
         logger.error(`Error processing sale ${sale.id}:`, error.message);
@@ -150,8 +150,8 @@ export class AutoTweetService {
         
         // Rate limiting: delay between posts to allow for image generation
         if (result.success) {
-          logger.info('Registration tweet posted successfully, waiting 20 seconds before next post...');
-          await this.delay(20000); // 20 second delay between successful posts
+          logger.info('Registration tweet posted successfully, waiting 8 seconds before next post...');
+          await this.delay(8000); // 8 second delay between successful posts
         }
       } catch (error: any) {
         logger.error(`Error processing registration ${registration.id}:`, error.message);
@@ -544,8 +544,8 @@ export class AutoTweetService {
         
         // Rate limiting: delay between posts to allow for image generation
         if (result.success) {
-          logger.info('Bid tweet posted successfully, waiting 20 seconds before next post...');
-          await this.delay(20000);
+          logger.info('Bid tweet posted successfully, waiting 8 seconds before next post...');
+          await this.delay(8000);
         } else {
           // Still add a shorter delay for failed posts
           await this.delay(2000);

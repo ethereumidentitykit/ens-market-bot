@@ -104,9 +104,9 @@ export class SchedulerService {
       'America/New_York' // Timezone
     );
 
-    // Create cron job for bid processing (every 2 minutes)
+    // Create cron job for bid processing (every 1 minute)
     this.bidsSyncJob = new CronJob(
-      '0 */2 * * * *', // Every 2 minutes at :00 seconds
+      '0 * * * * *', // Every 1 minute at :00 seconds
       () => {
         this.runBidsSync();
       },
@@ -123,7 +123,7 @@ export class SchedulerService {
     // Save enabled state to database for persistence across restarts
     await this.saveSchedulerState(true);
     
-    logger.info('Scheduler started - Sales: every 5 minutes, Registrations: every 1 minute, Bids: every 2 minutes');
+    logger.info('Scheduler started - Sales: every 5 minutes, Registrations: every 1 minute, Bids: every 1 minute');
     logger.info('Tweet processing: REAL-TIME via DatabaseEventService for both Moralis and QuickNode data');
     logger.info(`Next sales run: ${this.salesSyncJob.nextDate().toString()}`);
     logger.info(`Next registration run: ${this.registrationSyncJob.nextDate().toString()}`);
@@ -546,10 +546,10 @@ export class SchedulerService {
       registrationRuns.push(nextRegRun);
     }
     
-    // Get next few bid runs (every 2 minutes)
+    // Get next few bid runs (every 1 minute)
     for (let i = 0; i < count; i++) {
       const nextBidRun = new Date(this.bidsSyncJob.nextDate().toJSDate());
-      nextBidRun.setMinutes(nextBidRun.getMinutes() + (i * 2));
+      nextBidRun.setMinutes(nextBidRun.getMinutes() + i);
       bidRuns.push(nextBidRun);
     }
     

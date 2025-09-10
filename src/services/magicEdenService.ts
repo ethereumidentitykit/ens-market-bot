@@ -59,7 +59,7 @@ export class MagicEdenService {
    */
   async getActiveBids(
     cursor?: string,
-    limit: number = 200
+    limit: number = 100
   ): Promise<{ bids: MagicEdenBid[]; continuation?: string }> {
     try {
       logger.info(`🔍 Fetching ENS bids from Magic Eden API`);
@@ -141,7 +141,7 @@ export class MagicEdenService {
     let cursor: string | undefined;
     let allNewBids: MagicEdenBid[] = [];
     let totalPages = 0;
-    const maxPages = 5; // Reduced limit to prevent scheduler overlap (1000 bids max)
+    const maxPages = 10; // Increased limit for better coverage (1000 bids max)
     
     do {
       totalPages++;
