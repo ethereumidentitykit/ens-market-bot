@@ -9,6 +9,9 @@ import { AlchemyService } from './alchemyService';
 import { OpenSeaService } from './openSeaService';
 import { ENSMetadataService } from './ensMetadataService';
 import { ClubService } from './clubService';
+import { MagicEdenService, HistoricalEvent, ListingPrice } from './magicEdenService';
+import { ENSTokenUtils } from './ensTokenUtils';
+import { TimeUtils } from '../utils/timeUtils';
 
 export interface GeneratedTweet {
   text: string;
@@ -37,7 +40,8 @@ export class NewTweetFormatter {
     private databaseService?: IDatabaseService,
     private alchemyService?: AlchemyService,
     private openSeaService?: OpenSeaService,
-    private ensMetadataService?: ENSMetadataService
+    private ensMetadataService?: ENSMetadataService,
+    private magicEdenService?: MagicEdenService
   ) {
     logger.info('[NewTweetFormatter] Constructor called - ClubService should be initialized');
     // Add a small delay to let ClubService initialize, then check status
@@ -206,7 +210,7 @@ export class NewTweetFormatter {
       ]);
 
       // Generate the tweet text
-      const tweetText = this.formatTweetText(sale, buyerAccount, sellerAccount);
+      const tweetText = await this.formatTweetText(sale, buyerAccount, sellerAccount);
       
       // Generate image if database service is available
       let imageBuffer: Buffer | undefined;
@@ -276,6 +280,115 @@ export class NewTweetFormatter {
   }
 
   /**
+   * Get historical context for sales and registrations
+   */
+  private async getHistoricalContext(
+    contractAddress: string, 
+    tokenId: string, 
+    currentTimestamp: number, 
+    ensName: string
+  ): Promise<string | null> {
+    if (!this.magicEdenService) {
+      logger.debug('[NewTweetFormatter] Magic Eden service not available for historical context');
+      return null;
+    }
+
+    try {
+      logger.info(`🔍 Fetching historical context for ${ensName} (${contractAddress}:${tokenId})`);
+      
+      // Determine primary and fallback contracts/tokenIds
+      let primaryContract = contractAddress;
+      let primaryTokenId = tokenId;
+      let fallbackContract: string | null = null;
+      let fallbackTokenId: string | null = null;
+
+      // Set up fallback lookup if needed
+      const isNameWrapper = contractAddress.toLowerCase() === ENSTokenUtils.NAME_WRAPPER_CONTRACT.toLowerCase();
+      const isEnsRegistry = contractAddress.toLowerCase() === ENSTokenUtils.ENS_REGISTRY_CONTRACT.toLowerCase();
+
+      if (isNameWrapper) {
+        // Fallback to unwrapped token
+        fallbackContract = ENSTokenUtils.ENS_REGISTRY_CONTRACT;
+        fallbackTokenId = ENSTokenUtils.ensNameToLabelhash(ensName);
+      } else if (isEnsRegistry) {
+        // Fallback to wrapped token  
+        fallbackContract = ENSTokenUtils.NAME_WRAPPER_CONTRACT;
+        fallbackTokenId = ENSTokenUtils.ensNameToNamehash(ensName);
+      }
+
+      // Try primary lookup first
+      const primaryResult = await this.magicEdenService.getLastSaleOrRegistration(
+        primaryContract, 
+        primaryTokenId, 
+        Number(currentTimestamp)
+      );
+
+      if (primaryResult) {
+        logger.info(`✅ Found historical data from primary contract: ${primaryResult.priceEth} ETH`);
+        return `Last sale/reg: ${TimeUtils.formatHistoricalEvent(Number(primaryResult.priceEth), primaryResult.timestamp)}`;
+      }
+
+      // Try fallback lookup if configured
+      if (fallbackContract && fallbackTokenId) {
+        logger.info(`🔄 Trying fallback lookup: ${fallbackContract}:${fallbackTokenId}`);
+        const fallbackResult = await this.magicEdenService.getLastSaleOrRegistration(
+          fallbackContract,
+          fallbackTokenId,
+          Number(currentTimestamp)
+        );
+
+        if (fallbackResult) {
+          logger.info(`✅ Found historical data from fallback contract: ${fallbackResult.priceEth} ETH`);
+          return `Last sale/reg: ${TimeUtils.formatHistoricalEvent(Number(fallbackResult.priceEth), fallbackResult.timestamp)}`;
+        }
+      }
+
+      logger.info(`ℹ️ No historical context found for ${ensName}`);
+      return null;
+
+    } catch (error: any) {
+      logger.warn(`⚠️ Failed to fetch historical context for ${ensName}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Get current listing price context for bids
+   */
+  private async getListingContext(
+    contractAddress: string,
+    tokenId: string,
+    bidAmountEth: number
+  ): Promise<string | null> {
+    if (!this.magicEdenService) {
+      logger.debug('[NewTweetFormatter] Magic Eden service not available for listing context');
+      return null;
+    }
+
+    try {
+      logger.info(`🔍 Fetching listing context for ${contractAddress}:${tokenId}`);
+
+      const listingData = await this.magicEdenService.getCurrentListingPrice(
+        contractAddress,
+        tokenId,
+        bidAmountEth
+      );
+
+      if (listingData) {
+        logger.info(`✅ Found active listing: ${listingData.priceEth} ETH`);
+        return `Listed for: ${TimeUtils.formatListingPrice(Number(listingData.priceEth), listingData.priceUsd ? Number(listingData.priceUsd) : undefined)}`;
+      }
+
+      logger.info('ℹ️ No active listing found or bid not within proximity threshold');
+      return null;
+
+    } catch (error: any) {
+      logger.warn('⚠️ Failed to fetch listing context:', error.message);
+      return null;
+    }
+  }
+
+  /**
    * Format the tweet text for ENS registrations
    */
   private async formatRegistrationTweetText(
@@ -309,6 +422,20 @@ export class NewTweetFormatter {
     
     const priceLine = priceUsd ? `For: ${priceUsd} (${priceEth} ETH)` : `For: ${priceEth} ETH`;
     
+    // Historical context line (NEW)
+    let historicalLine = '';
+    if (registration.contractAddress && registration.tokenId && registration.blockTimestamp) {
+      const historical = await this.getHistoricalContext(
+        registration.contractAddress,
+        registration.tokenId,
+        Number(registration.blockTimestamp),
+        ensName
+      );
+      if (historical) {
+        historicalLine = historical;
+      }
+    }
+    
     // Minter line
     const ownerHandle = this.getDisplayHandle(ownerAccount, registration.ownerAddress);
     const ownerLine = `Minter: ${ownerHandle}`;
@@ -321,7 +448,11 @@ export class NewTweetFormatter {
     const visionUrl = this.buildVisionioUrl(ensName);
     
     // Combine all lines
-    let tweet = `${header}\n\n${priceLine}\n\n${ownerLine}`;
+    let tweet = `${header}\n\n${priceLine}`;
+    if (historicalLine) {
+      tweet += `\n\n${historicalLine}`;
+    }
+    tweet += `\n\n${ownerLine}`;
     if (clubLine) {
       tweet += `\n${clubLine}`;
     }
@@ -415,7 +546,21 @@ export class NewTweetFormatter {
       priceUsd = bid.priceUsd ? `$${parseFloat(bid.priceUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
     }
     
-    const priceLine = priceUsd ? `For: ${priceUsd} (${priceDecimal} ${currencyDisplay})` : `For: ${priceDecimal} ${currencyDisplay}`;
+    const priceLine = priceUsd ? `Offer for: ${priceUsd} (${priceDecimal} ${currencyDisplay})` : `Offer for: ${priceDecimal} ${currencyDisplay}`;
+    
+    // Listing context line (NEW)
+    let listingLine = '';
+    if (bid.contractAddress && bid.tokenId && (bid.currencySymbol === 'ETH' || bid.currencySymbol === 'WETH')) {
+      const bidAmountEth = parseFloat(bid.priceDecimal);
+      const listing = await this.getListingContext(
+        bid.contractAddress,
+        bid.tokenId,
+        bidAmountEth
+      );
+      if (listing) {
+        listingLine = listing;
+      }
+    }
     
     // Valid duration line
     const duration = this.calculateBidDuration(bid.validFrom, bid.validUntil);
@@ -471,7 +616,11 @@ export class NewTweetFormatter {
     const visionUrl = this.buildVisionioUrl(ensName);
     
     // Combine all lines
-    let tweet = `${header}\n\n${priceLine}\n\n${validLine}\n${bidderLine}\n${currentOwnerLine}`;
+    let tweet = `${header}\n\n${priceLine}`;
+    if (listingLine) {
+      tweet += `\n\n${listingLine}`;
+    }
+    tweet += `\n\n${validLine}\n${bidderLine}\n${currentOwnerLine}`;
     if (clubLine) {
       tweet += `\n${clubLine}`;
     }
@@ -520,11 +669,11 @@ export class NewTweetFormatter {
   /**
    * Format the tweet text according to the new specification
    */
-  private formatTweetText(
+  private async formatTweetText(
     sale: ProcessedSale, 
     buyerAccount: ENSWorkerAccount | null, 
     sellerAccount: ENSWorkerAccount | null
-  ): string {
+  ): Promise<string> {
     // Header: 💰 SOLD: name.eth
     const rawEnsName = sale.nftName || 'Unknown ENS';
     const ensName = this.cleanEnsName(rawEnsName);
@@ -534,6 +683,20 @@ export class NewTweetFormatter {
     const priceEth = parseFloat(sale.priceEth).toFixed(2);
     const priceUsd = sale.priceUsd ? `$${parseFloat(sale.priceUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
     const priceLine = priceUsd ? `For: ${priceUsd} (${priceEth} ETH)` : `For: ${priceEth} ETH`;
+    
+    // Historical context line (NEW)
+    let historicalLine = '';
+    if (sale.contractAddress && sale.tokenId && sale.blockTimestamp) {
+      const historical = await this.getHistoricalContext(
+        sale.contractAddress,
+        sale.tokenId,
+        Number(sale.blockTimestamp),
+        ensName
+      );
+      if (historical) {
+        historicalLine = historical;
+      }
+    }
     
     // Buyer and Seller lines
     const buyerHandle = this.getDisplayHandle(buyerAccount, sale.buyerAddress);
@@ -553,7 +716,11 @@ export class NewTweetFormatter {
     const visionUrl = this.buildVisionioUrl(ensName);
     
     // Combine all lines
-    let tweet = `${header}\n\n${priceLine}\n\n${buyerLine}\n${sellerLine}`;
+    let tweet = `${header}\n\n${priceLine}`;
+    if (historicalLine) {
+      tweet += `\n\n${historicalLine}`;
+    }
+    tweet += `\n\n${buyerLine}\n${sellerLine}`;
     if (clubLine) {
       tweet += `\n${clubLine}`;
     }
