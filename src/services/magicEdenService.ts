@@ -479,26 +479,24 @@ export class MagicEdenService {
       const tokenIdentifier = `${contractAddress}:${numericTokenId}`;
       logger.debug(`🔍 Fetching activity for token: ${tokenIdentifier}`);
 
-      const params: any = {
-        limit,
-        sortBy: 'eventTimestamp',
-        includeMetadata: true
-      };
-
+      // Magic Eden expects multiple separate 'types=' parameters, not an array
+      let urlParams = new URLSearchParams();
+      urlParams.set('limit', limit.toString());
+      urlParams.set('sortBy', 'eventTimestamp');
+      urlParams.set('includeMetadata', 'true');
+      
       if (continuation) {
-        params.continuation = continuation;
+        urlParams.set('continuation', continuation);
       }
-
-      // Add types filter for much faster API responses
+      
       if (types && types.length > 0) {
-        params.types = types;
+        types.forEach(type => urlParams.append('types', type));
         logger.debug(`🎯 Filtering by types: ${types.join(', ')}`);
       }
 
       const response: AxiosResponse<TokenActivityResponse> = await this.axiosInstance.get(
-        `/tokens/${encodeURIComponent(tokenIdentifier)}/activity/v5`,
+        `/tokens/${encodeURIComponent(tokenIdentifier)}/activity/v5?${urlParams.toString()}`,
         {
-          params,
           headers: {
             'Accept': '*/*',
             'User-Agent': 'ENS-TwitterBot/1.0'
