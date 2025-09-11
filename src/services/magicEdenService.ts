@@ -395,6 +395,36 @@ export class MagicEdenService {
 
 
   /**
+   * Validate that a listing is still valid by checking for ownership changes after listing timestamp
+   */
+  private async validateListingOwnership(
+    contractAddress: string, 
+    tokenId: string, 
+    listingTimestamp: number
+  ): Promise<boolean> {
+    try {
+      // Check for any ownership transfers (sales, transfers) after the listing was created
+      const response = await this.getTokenActivity(contractAddress, tokenId, 50, undefined, ['sale', 'transfer']);
+      
+      for (const activity of response.activities) {
+        // If there's any ownership transfer after the listing timestamp, the listing is invalid
+        if (activity.timestamp > listingTimestamp) {
+          logger.debug(`🔍 Found ownership transfer after listing: ${activity.type} at ${activity.timestamp} > ${listingTimestamp}`);
+          return false;
+        }
+      }
+      
+      // No ownership changes found after listing - it's still valid
+      return true;
+      
+    } catch (error: any) {
+      logger.warn(`⚠️ Error validating listing ownership: ${error.message}`);
+      // If we can't validate, assume it's valid to avoid breaking the flow
+      return true;
+    }
+  }
+
+  /**
    * Convert hex token ID to numeric format for Magic Eden API
    */
   private convertTokenIdToNumeric(tokenId: string): string {
@@ -497,8 +527,8 @@ export class MagicEdenService {
           logger.debug(`🔍 Checking activity: type=${activity.type}, price=${activity.price.amount.decimal} ETH, txHash=${activity.txHash}`);
           
           // Skip if this is the current transaction (not historical)
-          if (currentTxHash && activity.txHash === currentTxHash) {
-            logger.debug(`⏭️ Skipping current transaction: ${activity.txHash}`);
+          if (currentTxHash && activity.txHash.toLowerCase() === currentTxHash.toLowerCase()) {
+            logger.debug(`⏭️ Skipping current transaction: ${activity.txHash} (matches ${currentTxHash})`);
             continue;
           }
           
@@ -572,25 +602,28 @@ export class MagicEdenService {
         for (const activity of response.activities) {
           // API already filtered to 'ask' type, just check price > 0
           if (activity.price.amount.decimal > 0) {
-            // Check if this listing is still active (not cancelled or filled)
-            const isStillActive = !response.activities.some(laterActivity => 
-              laterActivity.timestamp > activity.timestamp &&
-              (laterActivity.type === 'cancel_ask' || laterActivity.type === 'sale')
-            );
-
-            if (isStillActive) {
-              activeAsk = activity;
-              break;
-            }
+            activeAsk = activity;
+            break;
           }
         }
 
         if (activeAsk) {
+          // Validate that the listing is still valid (no ownership changes after it was created)
+          const isValidListing = await this.validateListingOwnership(contractAddress, tokenId, activeAsk.timestamp);
+          
+          if (!isValidListing) {
+            logger.debug(`❌ Listing invalidated by ownership transfer after ${activeAsk.timestamp}`);
+            // Continue looking for older valid listings
+            continuation = response.continuation || undefined;
+            attempts++;
+            continue;
+          }
+          
           const listingPriceEth = activeAsk.price.amount.decimal;
           const proximityRatio = bidAmount / listingPriceEth;
           
           // Always show listing price if available (proximity threshold removed)
-          logger.info(`📊 Found active listing: ${listingPriceEth} ETH (bid is ${(proximityRatio * 100).toFixed(1)}% of listing)`);
+          logger.info(`📊 Found valid active listing: ${listingPriceEth} ETH (bid is ${(proximityRatio * 100).toFixed(1)}% of listing)`);
           
           return {
             priceEth: listingPriceEth.toFixed(2),
