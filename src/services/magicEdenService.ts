@@ -401,7 +401,8 @@ export class MagicEdenService {
     contractAddress: string,
     tokenId: string,
     limit: number = 20,
-    continuation?: string
+    continuation?: string,
+    types?: string[]
   ): Promise<TokenActivityResponse> {
     try {
       const tokenIdentifier = `${contractAddress}:${tokenId}`;
@@ -415,6 +416,12 @@ export class MagicEdenService {
 
       if (continuation) {
         params.continuation = continuation;
+      }
+
+      // Add types filter for much faster API responses
+      if (types && types.length > 0) {
+        params.types = types;
+        logger.debug(`🎯 Filtering by types: ${types.join(', ')}`);
       }
 
       const response: AxiosResponse<TokenActivityResponse> = await this.axiosInstance.get(
@@ -455,13 +462,13 @@ export class MagicEdenService {
       const maxAttempts = 10; // Prevent infinite pagination
 
       while (attempts < maxAttempts) {
-        const response = await this.getTokenActivity(contractAddress, tokenId, 20, continuation);
+        const response = await this.getTokenActivity(contractAddress, tokenId, 20, continuation, ['sale', 'mint']);
         
         if (!response.activities || response.activities.length === 0) {
           break;
         }
 
-        // Look for sale or mint events with price > 0
+        // Look for sale or mint events with price > 0 (already filtered by API)
         for (const activity of response.activities) {
           logger.debug(`🔍 Checking activity: type=${activity.type}, price=${activity.price.amount.decimal} ETH, txHash=${activity.txHash}`);
           
@@ -471,8 +478,8 @@ export class MagicEdenService {
             continue;
           }
           
-          if ((activity.type === 'sale' || activity.type === 'mint') && 
-              activity.price.amount.decimal > 0) {
+          // API already filtered to sale/mint types, just check price > 0
+          if (activity.price.amount.decimal > 0) {
             
             const priceEth = activity.price.amount.decimal;
             
@@ -493,7 +500,7 @@ export class MagicEdenService {
               logger.debug(`🔽 Historical event below threshold: ${priceEth} ETH < ${this.historicalThresholdEth} ETH`);
             }
           } else {
-            logger.debug(`❌ Activity filtered out: type=${activity.type}, price=${activity.price.amount.decimal}`);
+            logger.debug(`❌ Activity filtered out: zero price (${activity.price.amount.decimal} ETH)`);
           }
         }
 
@@ -529,17 +536,18 @@ export class MagicEdenService {
       const maxAttempts = 5; // Less attempts for listing lookup
 
       while (attempts < maxAttempts) {
-        const response = await this.getTokenActivity(contractAddress, tokenId, 20, continuation);
+        const response = await this.getTokenActivity(contractAddress, tokenId, 20, continuation, ['ask']);
         
         if (!response.activities || response.activities.length === 0) {
           break;
         }
 
-        // Look for most recent active ask (listing)
+        // Look for most recent active ask (listing) - already filtered by API
         let activeAsk: TokenActivity | null = null;
         
         for (const activity of response.activities) {
-          if (activity.type === 'ask' && activity.price.amount.decimal > 0) {
+          // API already filtered to 'ask' type, just check price > 0
+          if (activity.price.amount.decimal > 0) {
             // Check if this listing is still active (not cancelled or filled)
             const isStillActive = !response.activities.some(laterActivity => 
               laterActivity.timestamp > activity.timestamp &&
