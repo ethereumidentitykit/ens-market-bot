@@ -1,4 +1,4 @@
-import { createHash } from 'crypto';
+import { labelhash, namehash, normalize } from 'viem/ens';
 import { logger } from '../utils/logger';
 
 /**
@@ -14,31 +14,32 @@ export class ENSTokenUtils {
   /**
    * Convert ENS name to labelhash (for unwrapped tokens)
    * Used with ENS Registry contract
+   * Uses viem's labelhash utility for proper ENS normalization
    */
   static ensNameToLabelhash(ensName: string): string {
     // Extract label (part before .eth)
     const label = ensName.replace(/\.eth$/i, '');
     
-    // Calculate keccak-256 hash
-    const hash = createHash('sha3-256').update(label).digest('hex');
+    // Use viem's normalize and labelhash utilities
+    const normalizedLabel = normalize(label);
+    const hash = labelhash(normalizedLabel);
     
     logger.debug(`🔗 Converted ENS name "${ensName}" to labelhash: ${hash}`);
     return hash;
   }
 
   /**
-   * Convert ENS name to namehash (for wrapped tokens)
+   * Convert ENS name to namehash (for wrapped tokens)  
    * Used with Name Wrapper contract
-   * 
-   * NOTE: This is a simplified implementation
-   * In production, use @ensdomains/eth-ens-namehash for full namehash algorithm
+   * Uses viem's namehash utility for proper ENS hashing
    */
   static ensNameToNamehash(ensName: string): string {
-    // Simplified approach - in production implement full namehash algorithm
-    const fullHash = createHash('sha3-256').update(ensName).digest('hex');
+    // Use viem's normalize and namehash utilities
+    const normalizedName = normalize(ensName);
+    const hash = namehash(normalizedName);
     
-    logger.debug(`🔗 Converted ENS name "${ensName}" to namehash: ${fullHash}`);
-    return fullHash;
+    logger.debug(`🔗 Converted ENS name "${ensName}" to namehash: ${hash}`);
+    return hash;
   }
 
   /**

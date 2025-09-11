@@ -296,22 +296,43 @@ export class NewTweetFormatter {
     try {
       logger.info(`🔍 Fetching historical context for ${ensName} (${contractAddress}:${tokenId})`);
       
+      // Check if incoming contract is one of the valid ENS token contracts
+      const isNameWrapper = contractAddress.toLowerCase() === ENSTokenUtils.NAME_WRAPPER_CONTRACT.toLowerCase();
+      const isEnsRegistry = contractAddress.toLowerCase() === ENSTokenUtils.ENS_REGISTRY_CONTRACT.toLowerCase();
+      
       // Determine primary and fallback contracts/tokenIds
-      let primaryContract = contractAddress;
-      let primaryTokenId = tokenId;
+      let primaryContract: string;
+      let primaryTokenId: string;
       let fallbackContract: string | null = null;
       let fallbackTokenId: string | null = null;
 
-      // Set up fallback lookup if needed (only from Name Wrapper to unwrapped)
-      const isNameWrapper = contractAddress.toLowerCase() === ENSTokenUtils.NAME_WRAPPER_CONTRACT.toLowerCase();
-
-      if (isNameWrapper) {
-        // Fallback to unwrapped token (wrapped names might have previous unwrapped history)
+      if (!isNameWrapper && !isEnsRegistry) {
+        // Contract is not an ENS token contract (e.g., old registrar controller)
+        // Default to Name Wrapper first, then fallback to ENS Registry
+        logger.debug(`⚠️ Non-ENS token contract detected: ${contractAddress}. Defaulting to Name Wrapper → ENS Registry lookup`);
+        
+        primaryContract = ENSTokenUtils.NAME_WRAPPER_CONTRACT;
+        primaryTokenId = ENSTokenUtils.ensNameToNamehash(ensName); // Wrapped tokens use namehash
+        
+        fallbackContract = ENSTokenUtils.ENS_REGISTRY_CONTRACT;
+        fallbackTokenId = ENSTokenUtils.ensNameToLabelhash(ensName); // Unwrapped tokens use labelhash
+        
+      } else if (isNameWrapper) {
+        // Valid Name Wrapper contract - use as-is with ENS Registry fallback
+        primaryContract = contractAddress;
+        primaryTokenId = tokenId;
+        
         fallbackContract = ENSTokenUtils.ENS_REGISTRY_CONTRACT;
         fallbackTokenId = ENSTokenUtils.ensNameToLabelhash(ensName);
         logger.debug(`🔄 Will fallback to unwrapped lookup if no wrapped history found`);
+        
+      } else {
+        // Valid ENS Registry contract - use as-is with no fallback
+        primaryContract = contractAddress;
+        primaryTokenId = tokenId;
+        // Note: No fallback from ENS Registry to Name Wrapper (unwrapped tokens won't have wrapped history)
       }
-      // Note: No fallback from ENS Registry to Name Wrapper (unwrapped tokens won't have wrapped history)
+
 
       // Try primary lookup first
       const primaryResult = await this.magicEdenService.getLastSaleOrRegistration(
