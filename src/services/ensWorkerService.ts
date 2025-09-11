@@ -51,6 +51,8 @@ export interface ResolvedProfile {
 export class ENSWorkerService {
   private readonly baseUrl = 'https://enstate-prod-us-east-1.up.railway.app/u';
   private readonly cache = new Map<string, ResolvedName>();
+  private readonly profileCache = new Map<string, { data: ResolvedProfile; timestamp: number }>();
+  private readonly accountCache = new Map<string, { data: ENSWorkerAccount | null; timestamp: number }>();
   private readonly cacheTimeout = 5 * 60 * 1000; // 5 minutes cache
 
   /**
@@ -124,6 +126,13 @@ export class ENSWorkerService {
   async getProfile(address: string): Promise<ResolvedProfile> {
     const normalizedAddress = address.toLowerCase();
     
+    // Check cache first
+    const cached = this.profileCache.get(normalizedAddress);
+    if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
+      logger.debug(`Using cached profile for ${address} -> ${cached.data.displayName}`);
+      return cached.data;
+    }
+    
     try {
       logger.debug(`Getting profile with ENS Worker for address: ${address}`);
       
@@ -152,10 +161,14 @@ export class ENSWorkerService {
       };
 
       logger.debug(`Got profile ${address} -> ${profile.displayName} (ENS: ${profile.hasEns}, Avatar: ${!!profile.avatar})`);
+      
+      // Cache the successful result
+      this.profileCache.set(normalizedAddress, { data: profile, timestamp: Date.now() });
+      
       return profile;
 
     } catch (error: any) {
-      logger.warn(`Failed to get profile for address ${address} with ENS Worker:`, error.message);
+      logger.info(`Failed to get profile for address ${address} with ENS Worker:`, error.message);
       
       // Return fallback with shortened address
       const fallback: ResolvedProfile = {
@@ -163,6 +176,9 @@ export class ENSWorkerService {
         displayName: this.shortenAddress(address),
         hasEns: false
       };
+      
+      // Cache the fallback result (shorter timeout for failed lookups)
+      this.profileCache.set(normalizedAddress, { data: fallback, timestamp: Date.now() });
       
       return fallback;
     }
@@ -297,6 +313,13 @@ export class ENSWorkerService {
   async getFullAccountData(address: string): Promise<ENSWorkerAccount | null> {
     const normalizedAddress = address.toLowerCase();
     
+    // Check cache first
+    const cached = this.accountCache.get(normalizedAddress);
+    if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
+      logger.debug(`Using cached account data for ${address} -> ${cached.data?.name || 'no ENS'}`);
+      return cached.data;
+    }
+    
     try {
       logger.debug(`Getting full account data with ENS Worker for address: ${address}`);
       
@@ -311,10 +334,17 @@ export class ENSWorkerService {
         }
       );
 
+      // Cache the successful result
+      this.accountCache.set(normalizedAddress, { data: response.data, timestamp: Date.now() });
+      
       return response.data;
 
     } catch (error: any) {
-      logger.warn(`Failed to get full account data for address ${address} with ENS Worker:`, error.message);
+      logger.info(`Failed to get full account data for address ${address} with ENS Worker:`, error.message);
+      
+      // Cache the null result (shorter timeout for failed lookups)
+      this.accountCache.set(normalizedAddress, { data: null, timestamp: Date.now() });
+      
       return null;
     }
   }
