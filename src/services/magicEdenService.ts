@@ -89,7 +89,7 @@ export class MagicEdenService {
   
   // Configurable thresholds
   private readonly historicalThresholdEth: number = 0.1; // Only show historical data if >= 0.1 ETH
-  private readonly bidProximityThreshold: number = 0.5; // Only show listing if bid is within 50%
+  // Note: Bid proximity threshold removed - now always show listing price if available
   
   constructor() {
     this.baseUrl = 'https://api-mainnet.magiceden.dev/v3/rtp/ethereum';
@@ -586,19 +586,14 @@ export class MagicEdenService {
           const listingPriceEth = activeAsk.price.amount.decimal;
           const proximityRatio = bidAmount / listingPriceEth;
           
-          // Check if bid is within proximity threshold
-          if (proximityRatio >= this.bidProximityThreshold) {
-            logger.info(`📊 Found active listing: ${listingPriceEth} ETH (bid proximity: ${(proximityRatio * 100).toFixed(1)}%)`);
-            
-            return {
-              priceEth: listingPriceEth.toFixed(2),
-              priceUsd: activeAsk.price.amount.usd?.toFixed(2),
-              timestamp: activeAsk.timestamp
-            };
-          } else {
-            logger.debug(`📉 Listing found but bid too low: ${(proximityRatio * 100).toFixed(1)}% < ${(this.bidProximityThreshold * 100)}%`);
-          }
-          break;
+          // Always show listing price if available (proximity threshold removed)
+          logger.info(`📊 Found active listing: ${listingPriceEth} ETH (bid is ${(proximityRatio * 100).toFixed(1)}% of listing)`);
+          
+          return {
+            priceEth: listingPriceEth.toFixed(2),
+            priceUsd: activeAsk.price.amount.usd?.toFixed(2),
+            timestamp: activeAsk.timestamp
+          };
         }
 
         continuation = response.continuation || undefined;
