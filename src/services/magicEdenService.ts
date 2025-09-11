@@ -447,7 +447,7 @@ export class MagicEdenService {
   async getLastSaleOrRegistration(
     contractAddress: string,
     tokenId: string,
-    currentTransactionTimestamp: number
+    currentTxHash?: string
   ): Promise<HistoricalEvent | null> {
     try {
       let continuation: string | undefined;
@@ -461,11 +461,18 @@ export class MagicEdenService {
           break;
         }
 
-        // Look for sale or mint events older than current transaction
+        // Look for sale or mint events with price > 0
         for (const activity of response.activities) {
+          logger.debug(`🔍 Checking activity: type=${activity.type}, price=${activity.price.amount.decimal} ETH, txHash=${activity.txHash}`);
+          
+          // Skip if this is the current transaction (not historical)
+          if (currentTxHash && activity.txHash === currentTxHash) {
+            logger.debug(`⏭️ Skipping current transaction: ${activity.txHash}`);
+            continue;
+          }
+          
           if ((activity.type === 'sale' || activity.type === 'mint') && 
-              activity.price.amount.decimal > 0 && 
-              activity.timestamp < currentTransactionTimestamp) {
+              activity.price.amount.decimal > 0) {
             
             const priceEth = activity.price.amount.decimal;
             
@@ -485,6 +492,8 @@ export class MagicEdenService {
             } else {
               logger.debug(`🔽 Historical event below threshold: ${priceEth} ETH < ${this.historicalThresholdEth} ETH`);
             }
+          } else {
+            logger.debug(`❌ Activity filtered out: type=${activity.type}, price=${activity.price.amount.decimal}`);
           }
         }
 
@@ -596,8 +605,7 @@ export class MagicEdenService {
       // Get historical context for sales and registrations
       const historical = await this.getLastSaleOrRegistration(
         contractAddress,
-        tokenId,
-        currentTransactionTimestamp
+        tokenId
       );
       
       if (historical) {

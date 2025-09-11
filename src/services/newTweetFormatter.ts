@@ -285,8 +285,8 @@ export class NewTweetFormatter {
   private async getHistoricalContext(
     contractAddress: string, 
     tokenId: string, 
-    currentTimestamp: number, 
-    ensName: string
+    ensName: string,
+    currentTxHash?: string
   ): Promise<string | null> {
     if (!this.magicEdenService) {
       logger.debug('[NewTweetFormatter] Magic Eden service not available for historical context');
@@ -302,25 +302,22 @@ export class NewTweetFormatter {
       let fallbackContract: string | null = null;
       let fallbackTokenId: string | null = null;
 
-      // Set up fallback lookup if needed
+      // Set up fallback lookup if needed (only from Name Wrapper to unwrapped)
       const isNameWrapper = contractAddress.toLowerCase() === ENSTokenUtils.NAME_WRAPPER_CONTRACT.toLowerCase();
-      const isEnsRegistry = contractAddress.toLowerCase() === ENSTokenUtils.ENS_REGISTRY_CONTRACT.toLowerCase();
 
       if (isNameWrapper) {
-        // Fallback to unwrapped token
+        // Fallback to unwrapped token (wrapped names might have previous unwrapped history)
         fallbackContract = ENSTokenUtils.ENS_REGISTRY_CONTRACT;
         fallbackTokenId = ENSTokenUtils.ensNameToLabelhash(ensName);
-      } else if (isEnsRegistry) {
-        // Fallback to wrapped token  
-        fallbackContract = ENSTokenUtils.NAME_WRAPPER_CONTRACT;
-        fallbackTokenId = ENSTokenUtils.ensNameToNamehash(ensName);
+        logger.debug(`🔄 Will fallback to unwrapped lookup if no wrapped history found`);
       }
+      // Note: No fallback from ENS Registry to Name Wrapper (unwrapped tokens won't have wrapped history)
 
       // Try primary lookup first
       const primaryResult = await this.magicEdenService.getLastSaleOrRegistration(
         primaryContract, 
-        primaryTokenId, 
-        Number(currentTimestamp)
+        primaryTokenId,
+        currentTxHash
       );
 
       if (primaryResult) {
@@ -334,7 +331,7 @@ export class NewTweetFormatter {
         const fallbackResult = await this.magicEdenService.getLastSaleOrRegistration(
           fallbackContract,
           fallbackTokenId,
-          Number(currentTimestamp)
+          currentTxHash
         );
 
         if (fallbackResult) {
@@ -424,16 +421,18 @@ export class NewTweetFormatter {
     
     // Historical context line (NEW)
     let historicalLine = '';
-    if (registration.contractAddress && registration.tokenId && registration.blockTimestamp) {
+    if (registration.contractAddress && registration.tokenId) {
       const historical = await this.getHistoricalContext(
         registration.contractAddress,
         registration.tokenId,
-        Number(registration.blockTimestamp),
-        ensName
+        ensName,
+        registration.transactionHash
       );
       if (historical) {
         historicalLine = historical;
       }
+    } else {
+      logger.warn(`⚠️ Missing required data for historical context: contractAddress=${registration.contractAddress}, tokenId=${registration.tokenId}`);
     }
     
     // Minter line
@@ -686,16 +685,18 @@ export class NewTweetFormatter {
     
     // Historical context line (NEW)
     let historicalLine = '';
-    if (sale.contractAddress && sale.tokenId && sale.blockTimestamp) {
+    if (sale.contractAddress && sale.tokenId) {
       const historical = await this.getHistoricalContext(
         sale.contractAddress,
         sale.tokenId,
-        Number(sale.blockTimestamp),
-        ensName
+        ensName,
+        sale.transactionHash
       );
       if (historical) {
         historicalLine = historical;
       }
+    } else {
+      logger.warn(`⚠️ Missing required data for historical context: contractAddress=${sale.contractAddress}, tokenId=${sale.tokenId}`);
     }
     
     // Buyer and Seller lines
