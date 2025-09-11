@@ -398,8 +398,10 @@ export class MagicEdenService {
    * Convert hex token ID to numeric format for Magic Eden API
    */
   private convertTokenIdToNumeric(tokenId: string): string {
-    // Check if token ID is in hex format (with or without 0x prefix)
-    const isHex = tokenId.startsWith('0x') || /^[a-fA-F0-9]{40,}$/.test(tokenId);
+    // Check if token ID is in hex format (with 0x prefix or contains hex letters a-f)
+    const hasHexPrefix = tokenId.startsWith('0x');
+    const hasHexLetters = /[a-fA-F]/.test(tokenId);
+    const isHex = hasHexPrefix || hasHexLetters;
     
     if (isHex) {
       // Ensure 0x prefix for BigInt conversion
@@ -409,7 +411,8 @@ export class MagicEdenService {
       return numericId;
     }
     
-    // Already numeric or not hex
+    // Already numeric - no conversion needed
+    logger.debug(`✅ Token ID ${tokenId} is already numeric, no conversion needed`);
     return tokenId;
   }
 
