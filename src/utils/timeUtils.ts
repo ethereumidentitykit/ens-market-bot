@@ -33,15 +33,28 @@ export class TimeUtils {
 
   /**
    * Format historical event for tweet display
-   * Example: "0.25 ETH, 21 days ago"
+   * Example: "0.25 ETH, 19 Mar 2024"
    */
   static formatHistoricalEvent(priceEth: number, timestamp: number): string {
-    const days = TimeUtils.calculateDaysSince(timestamp);
-    const timePeriod = TimeUtils.formatTimePeriod(days);
+    const dateString = TimeUtils.formatDateForTweet(timestamp);
     const formattedPrice = priceEth.toFixed(2);
     
-    logger.debug(`🕒 Formatted historical event: ${formattedPrice} ETH, ${timePeriod}`);
-    return `${formattedPrice} ETH, ${timePeriod}`;
+    logger.debug(`🕒 Formatted historical event: ${formattedPrice} ETH, ${dateString}`);
+    return `${formattedPrice} ETH, ${dateString}`;
+  }
+
+  /**
+   * Format timestamp as "19 Mar 2024" for tweet display
+   */
+  static formatDateForTweet(timestamp: number): string {
+    const date = new Date(timestamp * 1000); // Convert Unix timestamp to milliseconds
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    
+    const day = date.getDate();
+    const month = months[date.getMonth()];
+    const year = date.getFullYear();
+    
+    return `${day} ${month} ${year}`;
   }
 
   /**

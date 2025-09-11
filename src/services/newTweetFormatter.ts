@@ -322,7 +322,7 @@ export class NewTweetFormatter {
 
       if (primaryResult) {
         logger.info(`✅ Found historical data from primary contract: ${primaryResult.priceEth} ETH`);
-        return `Last sale/reg: ${TimeUtils.formatHistoricalEvent(Number(primaryResult.priceEth), primaryResult.timestamp)}`;
+        return `Last Sale: ${TimeUtils.formatHistoricalEvent(Number(primaryResult.priceEth), primaryResult.timestamp)}`;
       }
 
       // Try fallback lookup if configured
@@ -336,7 +336,7 @@ export class NewTweetFormatter {
 
         if (fallbackResult) {
           logger.info(`✅ Found historical data from fallback contract: ${fallbackResult.priceEth} ETH`);
-          return `Last sale/reg: ${TimeUtils.formatHistoricalEvent(Number(fallbackResult.priceEth), fallbackResult.timestamp)}`;
+          return `Last Sale: ${TimeUtils.formatHistoricalEvent(Number(fallbackResult.priceEth), fallbackResult.timestamp)}`;
         }
       }
 
@@ -373,7 +373,7 @@ export class NewTweetFormatter {
 
       if (listingData) {
         logger.info(`✅ Found active listing: ${listingData.priceEth} ETH`);
-        return `Listed for: ${TimeUtils.formatListingPrice(Number(listingData.priceEth), listingData.priceUsd ? Number(listingData.priceUsd) : undefined)}`;
+        return `List Price: ${Number(listingData.priceEth).toFixed(2)} ETH`;
       }
 
       logger.info('ℹ️ No active listing found or bid not within proximity threshold');
@@ -447,11 +447,10 @@ export class NewTweetFormatter {
     const visionUrl = this.buildVisionioUrl(ensName);
     
     // Combine all lines
-    let tweet = `${header}\n\n${priceLine}`;
+    let tweet = `${header}\n\n${priceLine}\n${ownerLine}`;
     if (historicalLine) {
       tweet += `\n\n${historicalLine}`;
     }
-    tweet += `\n\n${ownerLine}`;
     if (clubLine) {
       tweet += `\n${clubLine}`;
     }
@@ -545,7 +544,7 @@ export class NewTweetFormatter {
       priceUsd = bid.priceUsd ? `$${parseFloat(bid.priceUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
     }
     
-    const priceLine = priceUsd ? `Offer for: ${priceUsd} (${priceDecimal} ${currencyDisplay})` : `Offer for: ${priceDecimal} ${currencyDisplay}`;
+    const priceLine = priceUsd ? `For: ${priceUsd} (${priceDecimal} ${currencyDisplay})` : `For: ${priceDecimal} ${currencyDisplay}`;
     
     // Listing context line (NEW)
     let listingLine = '';
@@ -560,10 +559,20 @@ export class NewTweetFormatter {
         listingLine = listing;
       }
     }
-    
-    // Valid duration line
-    const duration = this.calculateBidDuration(bid.validFrom, bid.validUntil);
-    const validLine = `Valid: ${duration}`;
+
+    // Historical context line (NEW for bids)
+    let historicalLine = '';
+    if (bid.contractAddress && bid.tokenId) {
+      const historical = await this.getHistoricalContext(
+        bid.contractAddress,
+        bid.tokenId,
+        ensName
+        // Note: Bids don't have a transactionHash to exclude since they're offers, not completed transactions
+      );
+      if (historical) {
+        historicalLine = historical;
+      }
+    }
     
     // Bidder line
     const bidderHandle = this.getDisplayHandle(bidderAccount, bid.makerAddress);
@@ -615,11 +624,13 @@ export class NewTweetFormatter {
     const visionUrl = this.buildVisionioUrl(ensName);
     
     // Combine all lines
-    let tweet = `${header}\n\n${priceLine}`;
+    let tweet = `${header}\n\n${priceLine}\n${bidderLine}\n\n${currentOwnerLine}`;
     if (listingLine) {
-      tweet += `\n\n${listingLine}`;
+      tweet += `\n${listingLine}`;
     }
-    tweet += `\n\n${validLine}\n${bidderLine}\n${currentOwnerLine}`;
+    if (historicalLine) {
+      tweet += `\n${historicalLine}`;
+    }
     if (clubLine) {
       tweet += `\n${clubLine}`;
     }
@@ -717,11 +728,10 @@ export class NewTweetFormatter {
     const visionUrl = this.buildVisionioUrl(ensName);
     
     // Combine all lines
-    let tweet = `${header}\n\n${priceLine}`;
+    let tweet = `${header}\n\n${priceLine}\n${buyerLine}\n\n${sellerLine}`;
     if (historicalLine) {
-      tweet += `\n\n${historicalLine}`;
+      tweet += `\n${historicalLine}`;
     }
-    tweet += `\n\n${buyerLine}\n${sellerLine}`;
     if (clubLine) {
       tweet += `\n${clubLine}`;
     }
