@@ -283,7 +283,8 @@ export class NewTweetFormatter {
     ownerAccount: ENSWorkerAccount | null
   ): Promise<string> {
     // Header: 🏛️ REGISTERED: name.eth
-    const ensName = registration.fullName || registration.ensName || 'Unknown ENS';
+    const rawEnsName = registration.fullName || registration.ensName || 'Unknown ENS';
+    const ensName = this.cleanEnsName(rawEnsName);
     const header = `🏛️ REGISTERED: ${ensName}`;
     
     // Price line: For: $X (Y ETH) (recalculate USD with fresh ETH rate)
@@ -525,7 +526,8 @@ export class NewTweetFormatter {
     sellerAccount: ENSWorkerAccount | null
   ): string {
     // Header: 💰 SOLD: name.eth
-    const ensName = sale.nftName || 'Unknown ENS';
+    const rawEnsName = sale.nftName || 'Unknown ENS';
+    const ensName = this.cleanEnsName(rawEnsName);
     const header = `💰 SOLD: ${ensName}`;
     
     // Price line: For: $X (Y ETH) - 2 decimal places for USD in tweets
@@ -576,6 +578,21 @@ export class NewTweetFormatter {
    */
   private getClubName(ensName: string): string | null {
     return this.clubService.getClubName(ensName);
+  }
+
+  /**
+   * Clean ENS name by removing any data after .eth
+   * Database/API sources may have normalization warnings after the .eth suffix
+   */
+  private cleanEnsName(ensName: string): string {
+    if (!ensName) return ensName;
+    
+    const ethIndex = ensName.toLowerCase().indexOf('.eth');
+    if (ethIndex !== -1) {
+      return ensName.substring(0, ethIndex + 4); // Include ".eth"
+    }
+    
+    return ensName; // Return as-is if no .eth found
   }
 
   /**
@@ -710,7 +727,8 @@ export class NewTweetFormatter {
     }
     
     // Get ENS name for display
-    const ensName = registration.fullName || registration.ensName || 'Unknown ENS';
+    const rawEnsName = registration.fullName || registration.ensName || 'Unknown ENS';
+    const ensName = this.cleanEnsName(rawEnsName);
     
     // Get owner display info (ENS only for images)
     const ownerHandle = this.getImageDisplayHandle(ownerAccount, registration.ownerAddress);
@@ -1138,7 +1156,8 @@ export class NewTweetFormatter {
       this.getAccountData(sale.sellerAddress)
     ]);
 
-    const ensName = sale.nftName || 'Unknown ENS';
+    const rawEnsName = sale.nftName || 'Unknown ENS';
+    const ensName = this.cleanEnsName(rawEnsName);
     const priceEth = parseFloat(sale.priceEth).toFixed(2);
     const priceUsd = sale.priceUsd ? `$${parseFloat(sale.priceUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
     const buyerHandle = this.getDisplayHandle(buyerAccount, sale.buyerAddress);
@@ -1188,7 +1207,8 @@ export class NewTweetFormatter {
     // Get account data for breakdown
     const ownerAccount = await this.getAccountData(registration.ownerAddress);
 
-    const ensName = registration.fullName || registration.ensName || 'Unknown ENS';
+    const rawEnsName = registration.fullName || registration.ensName || 'Unknown ENS';
+    const ensName = this.cleanEnsName(rawEnsName);
     const priceEth = parseFloat(registration.costEth || '0').toFixed(2);
     const priceUsd = registration.costUsd ? `($${parseFloat(registration.costUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})` : '';
     const ownerHandle = this.getDisplayHandle(ownerAccount, registration.ownerAddress);

@@ -121,6 +121,21 @@ export class OpenSeaService {
   }
 
   /**
+   * Clean ENS name by removing any data after .eth
+   * OpenSea appends normalization warnings after the .eth suffix
+   */
+  private cleanEnsName(ensName: string): string {
+    if (!ensName) return ensName;
+    
+    const ethIndex = ensName.toLowerCase().indexOf('.eth');
+    if (ethIndex !== -1) {
+      return ensName.substring(0, ethIndex + 4); // Include ".eth"
+    }
+    
+    return ensName; // Return as-is if no .eth found
+  }
+
+  /**
    * Get NFT metadata from OpenSea API
    * @param contractAddress - NFT contract address
    * @param tokenId - Token ID (decimal format)
@@ -230,7 +245,7 @@ export class OpenSeaService {
     }
     
     return {
-      name: nft.name,
+      name: this.cleanEnsName(nft.name),
       description: nft.description,
       image: nft.image_url || nft.display_image_url,
       collection: nft.collection,
