@@ -9,6 +9,7 @@ import { OpenSeaService } from './openSeaService';
 import * as fs from 'fs';
 import * as path from 'path';
 import axios from 'axios';
+import type { Browser, Page } from 'puppeteer-core';
 
 export class PuppeteerImageService {
   private static readonly IMAGE_WIDTH = 1000;
@@ -65,7 +66,7 @@ export class PuppeteerImageService {
     // Environment-aware Puppeteer setup
     const isVercel = process.env.VERCEL === '1';
     
-    let browser;
+    let browser: any; // Using any due to dynamic import type conflicts between puppeteer and puppeteer-core
     
     if (isVercel) {
       // Use Vercel-specific Chromium setup
@@ -98,7 +99,7 @@ export class PuppeteerImageService {
     }
 
     try {
-      const page = await browser.newPage();
+      const page: Page = await browser.newPage();
       
       // Set viewport to match our image dimensions
       await page.setViewport({
@@ -119,9 +120,33 @@ export class PuppeteerImageService {
       });
       logger.debug(`Page content loaded in ${Date.now() - contentStartTime}ms`);
 
-      // Small delay to ensure fonts and rendering are complete
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      logger.debug('Fonts and rendering delay complete, proceeding with image generation');
+      // Wait for fonts to actually load instead of arbitrary delay
+      const fontLoadStart = Date.now();
+      try {
+        // Check if fonts are loaded using document.fonts API with fallback timeout
+        await Promise.race([
+          // Wait for fonts to be ready
+          page.evaluate(() => {
+            return new Promise<void>((resolve) => {
+              if (document.fonts.status === 'loaded') {
+                resolve();
+              } else {
+                document.fonts.addEventListener('loadingdone', () => resolve());
+                document.fonts.ready.then(() => resolve());
+              }
+            });
+          }),
+          // Safety timeout of 2 seconds
+          new Promise(resolve => setTimeout(resolve, 2000))
+        ]);
+        const fontLoadTime = Date.now() - fontLoadStart;
+        logger.debug(`Fonts loaded in ${fontLoadTime}ms (smart detection), proceeding with image generation`);
+      } catch (error) {
+        logger.warn('Font loading detection failed, using 300ms fallback delay');
+        await new Promise(resolve => setTimeout(resolve, 300));
+        const fallbackTime = Date.now() - fontLoadStart;
+        logger.debug(`Font fallback delay complete in ${fallbackTime}ms`);
+      }
 
       // Take screenshot
       const screenshot = await page.screenshot({
