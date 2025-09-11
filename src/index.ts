@@ -64,7 +64,7 @@ async function startApplication(): Promise<void> {
     const magicEdenService = new MagicEdenService();
     const bidsProcessingService = new BidsProcessingService(magicEdenService, databaseService, alchemyService);
     const twitterService = new TwitterService();
-    const newTweetFormatter = new NewTweetFormatter(databaseService, alchemyService, openSeaService, ensMetadataService);
+    const newTweetFormatter = new NewTweetFormatter(databaseService, alchemyService, openSeaService, ensMetadataService, magicEdenService);
     const rateLimitService = new RateLimitService(databaseService);
     const ethIdentityService = new ENSWorkerService();
     const worldTimeService = new WorldTimeService();
