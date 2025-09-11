@@ -581,18 +581,22 @@ export class NewTweetFormatter {
   }
 
   /**
-   * Clean ENS name by removing any data after .eth
-   * Database/API sources may have normalization warnings after the .eth suffix
+   * Clean ENS name by removing any data after .eth and normalizing emoji
+   * Database/API sources may have normalization warnings and non-normalized emoji
+   * Follows ENSIP-15 normalization: strips FE0F variation selectors from emoji
    */
   private cleanEnsName(ensName: string): string {
     if (!ensName) return ensName;
     
+    // Step 1: Remove content after .eth (warning labels)
     const ethIndex = ensName.toLowerCase().indexOf('.eth');
-    if (ethIndex !== -1) {
-      return ensName.substring(0, ethIndex + 4); // Include ".eth"
-    }
+    let cleanName = ethIndex !== -1 ? ensName.substring(0, ethIndex + 4) : ensName;
     
-    return ensName; // Return as-is if no .eth found
+    // Step 2: Apply ENSIP-15 emoji normalization - strip FE0F variation selectors
+    // These are not part of normalized ENS names according to ENS protocol
+    cleanName = cleanName.replace(/\uFE0F/g, '');
+    
+    return cleanName;
   }
 
   /**
@@ -612,7 +616,7 @@ export class NewTweetFormatter {
     }
     
     // URL encode the ENS name to handle emojis and special characters properly
-    // This ensures complex emojis (like 👩‍🎓 with Zero Width Joiners) work in clickable links
+    // cleanName already normalized per ENSIP-15 (FE0F selectors stripped)
     const encodedName = encodeURIComponent(cleanName);
     
     return `https://vision.io/name/${encodedName}.eth`;

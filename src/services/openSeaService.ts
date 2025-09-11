@@ -121,18 +121,22 @@ export class OpenSeaService {
   }
 
   /**
-   * Clean ENS name by removing any data after .eth
-   * OpenSea appends normalization warnings after the .eth suffix
+   * Clean ENS name by removing any data after .eth and normalizing emoji
+   * OpenSea may provide non-normalized names with warnings and FE0F selectors
+   * Follows ENSIP-15 normalization: strips FE0F variation selectors from emoji
    */
   private cleanEnsName(ensName: string): string {
     if (!ensName) return ensName;
     
+    // Step 1: Remove content after .eth (warning labels)
     const ethIndex = ensName.toLowerCase().indexOf('.eth');
-    if (ethIndex !== -1) {
-      return ensName.substring(0, ethIndex + 4); // Include ".eth"
-    }
+    let cleanName = ethIndex !== -1 ? ensName.substring(0, ethIndex + 4) : ensName;
     
-    return ensName; // Return as-is if no .eth found
+    // Step 2: Apply ENSIP-15 emoji normalization - strip FE0F variation selectors
+    // These are not part of normalized ENS names according to ENS protocol
+    cleanName = cleanName.replace(/\uFE0F/g, '');
+    
+    return cleanName;
   }
 
   /**
