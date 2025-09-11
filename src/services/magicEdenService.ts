@@ -5,7 +5,7 @@ import { APIToggleService } from './apiToggleService';
 
 // Token Activity Interfaces
 export interface TokenActivity {
-  type: 'mint' | 'sale' | 'transfer' | 'ask' | 'bid' | 'cancel_ask' | 'cancel_bid';
+  type: 'mint' | 'sale' | 'transfer' | 'ask' | 'bid' | 'ask_cancel' | 'bid_cancel';
   fromAddress: string;
   toAddress: string;
   price: {
@@ -403,24 +403,41 @@ export class MagicEdenService {
     listingTimestamp: number
   ): Promise<boolean> {
     try {
-      // Check for any ownership transfers (sales, transfers) after the listing was created
-      const response = await this.getTokenActivity(contractAddress, tokenId, 50, undefined, ['sale', 'transfer']);
+      // Check for ownership changes (sales/transfers) and cancellations
+      const response = await this.getTokenActivity(contractAddress, tokenId, 50, undefined, ['sale', 'transfer', 'ask_cancel']);
       
+      // Find the most recent ownership change
+      let mostRecentOwnershipChange: number = 0;
       for (const activity of response.activities) {
-        // If there's any ownership transfer after the listing timestamp, the listing is invalid
-        if (activity.timestamp > listingTimestamp) {
-          logger.debug(`🔍 Found ownership transfer after listing: ${activity.type} at ${activity.timestamp} > ${listingTimestamp}`);
+        if (activity.type === 'sale' || activity.type === 'transfer') {
+          if (activity.timestamp > mostRecentOwnershipChange) {
+            mostRecentOwnershipChange = activity.timestamp;
+          }
+        }
+      }
+      
+      // If listing was created before the most recent ownership change, it's invalid
+      if (mostRecentOwnershipChange > 0 && listingTimestamp < mostRecentOwnershipChange) {
+        logger.debug(`🔍 Listing invalidated: created at ${listingTimestamp} but ownership changed at ${mostRecentOwnershipChange}`);
+        return false;
+      }
+      
+      // Check for ask cancellations after the listing (these only affect this specific listing)
+      for (const activity of response.activities) {
+        if (activity.type === 'ask_cancel' && activity.timestamp > listingTimestamp) {
+          logger.debug(`🔍 Listing cancelled at ${activity.timestamp} > ${listingTimestamp}`);
           return false;
         }
       }
       
-      // No ownership changes found after listing - it's still valid
+      // Listing is still valid
+      logger.debug(`✅ Listing still valid - created at ${listingTimestamp}, last ownership change: ${mostRecentOwnershipChange || 'never'}`);
       return true;
       
     } catch (error: any) {
       logger.warn(`⚠️ Error validating listing ownership: ${error.message}`);
-      // If we can't validate, assume it's valid to avoid breaking the flow
-      return true;
+      // If we can't validate, assume it's invalid to be safe
+      return false;
     }
   }
 
@@ -620,10 +637,9 @@ export class MagicEdenService {
           }
           
           const listingPriceEth = activeAsk.price.amount.decimal;
-          const proximityRatio = bidAmount / listingPriceEth;
           
           // Always show listing price if available (proximity threshold removed)
-          logger.info(`📊 Found valid active listing: ${listingPriceEth} ETH (bid is ${(proximityRatio * 100).toFixed(1)}% of listing)`);
+          logger.info(`📊 Found valid active listing: ${listingPriceEth} ETH`);
           
           return {
             priceEth: listingPriceEth.toFixed(2),
