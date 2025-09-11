@@ -3,15 +3,93 @@ import { logger } from '../utils/logger';
 import { MagicEdenBidResponse, MagicEdenBid, BidProcessingStats } from '../types';
 import { APIToggleService } from './apiToggleService';
 
+// Token Activity Interfaces
+export interface TokenActivity {
+  type: 'mint' | 'sale' | 'transfer' | 'ask' | 'bid' | 'cancel_ask' | 'cancel_bid';
+  fromAddress: string;
+  toAddress: string;
+  price: {
+    currency: {
+      contract: string;
+      name: string;
+      symbol: string;
+      decimals: number;
+    };
+    amount: {
+      raw: string;
+      decimal: number;
+      usd: number;
+      native: number;
+    };
+  };
+  amount: number;
+  timestamp: number;
+  createdAt: string;
+  contract: string;
+  token: {
+    tokenId: string;
+    isSpam: boolean;
+    isNsfw: boolean;
+    tokenName: string | null;
+    tokenImage: string | null;
+    rarityScore: number | null;
+    rarityRank: number | null;
+  };
+  collection: {
+    collectionId: string;
+    isSpam: boolean;
+    isNsfw: boolean;
+    collectionName: string;
+    collectionImage: string;
+  };
+  txHash: string;
+  logIndex: number;
+  batchIndex: number;
+  fillSource?: {
+    domain: string;
+    name: string;
+    icon: string;
+  };
+  comment: string | null;
+}
+
+export interface TokenActivityResponse {
+  activities: TokenActivity[];
+  continuation: string | null;
+}
+
+export interface HistoricalEvent {
+  type: 'sale' | 'mint';
+  priceEth: string;
+  priceUsd: string;
+  timestamp: number;
+  daysAgo: number;
+}
+
+export interface ListingPrice {
+  priceEth: string;
+  priceUsd?: string;
+  timestamp: number;
+}
+
+export interface ContextualData {
+  historical?: HistoricalEvent;
+  listing?: ListingPrice;
+}
+
 /**
  * Magic Eden API Service
- * Handles fetching ENS bid data from Magic Eden's API
+ * Handles fetching ENS bid data and token activity from Magic Eden's API
  */
 export class MagicEdenService {
   private readonly baseUrl: string;
   private readonly ensContracts: string[];
   private readonly axiosInstance: AxiosInstance;
   private readonly apiToggleService: APIToggleService;
+  
+  // Configurable thresholds
+  private readonly historicalThresholdEth: number = 0.1; // Only show historical data if >= 0.1 ETH
+  private readonly bidProximityThreshold: number = 0.5; // Only show listing if bid is within 50%
   
   constructor() {
     this.baseUrl = 'https://api-mainnet.magiceden.dev/v3/rtp/ethereum';
@@ -313,6 +391,258 @@ export class MagicEdenService {
     };
 
     return currencyMap[symbol.toUpperCase()] || symbol;
+  }
+
+
+  /**
+   * Get token activity from Magic Eden API with pagination
+   */
+  async getTokenActivity(
+    contractAddress: string,
+    tokenId: string,
+    limit: number = 20,
+    continuation?: string
+  ): Promise<TokenActivityResponse> {
+    try {
+      const tokenIdentifier = `${contractAddress}:${tokenId}`;
+      logger.debug(`🔍 Fetching activity for token: ${tokenIdentifier}`);
+
+      const params: any = {
+        limit,
+        sortBy: 'eventTimestamp',
+        includeMetadata: true
+      };
+
+      if (continuation) {
+        params.continuation = continuation;
+      }
+
+      const response: AxiosResponse<TokenActivityResponse> = await this.axiosInstance.get(
+        `/tokens/${encodeURIComponent(tokenIdentifier)}/activity/v5`,
+        {
+          params,
+          headers: {
+            'Accept': '*/*',
+            'User-Agent': 'ENS-TwitterBot/1.0'
+          },
+          timeout: 10000
+        }
+      );
+
+      logger.debug(`✅ Retrieved ${response.data.activities?.length || 0} activities`);
+      return response.data;
+
+    } catch (error: any) {
+      logger.warn(`⚠️ Failed to fetch activity for ${contractAddress}:${tokenId}:`, error.message);
+      return {
+        activities: [],
+        continuation: null
+      };
+    }
+  }
+
+  /**
+   * Find most recent sale or mint event with pagination
+   */
+  async getLastSaleOrRegistration(
+    contractAddress: string,
+    tokenId: string,
+    currentTransactionTimestamp: number
+  ): Promise<HistoricalEvent | null> {
+    try {
+      let continuation: string | undefined;
+      let attempts = 0;
+      const maxAttempts = 10; // Prevent infinite pagination
+
+      while (attempts < maxAttempts) {
+        const response = await this.getTokenActivity(contractAddress, tokenId, 20, continuation);
+        
+        if (!response.activities || response.activities.length === 0) {
+          break;
+        }
+
+        // Look for sale or mint events older than current transaction
+        for (const activity of response.activities) {
+          if ((activity.type === 'sale' || activity.type === 'mint') && 
+              activity.price.amount.decimal > 0 && 
+              activity.timestamp < currentTransactionTimestamp) {
+            
+            const priceEth = activity.price.amount.decimal;
+            
+            // Apply threshold filter
+            if (priceEth >= this.historicalThresholdEth) {
+              const daysAgo = this.calculateDaysSince(activity.timestamp);
+              
+              logger.info(`📈 Found historical event: ${activity.type} for ${priceEth} ETH, ${daysAgo} days ago`);
+              
+              return {
+                type: activity.type as 'sale' | 'mint',
+                priceEth: priceEth.toFixed(2),
+                priceUsd: activity.price.amount.usd?.toFixed(2) || '',
+                timestamp: activity.timestamp,
+                daysAgo
+              };
+            } else {
+              logger.debug(`🔽 Historical event below threshold: ${priceEth} ETH < ${this.historicalThresholdEth} ETH`);
+            }
+          }
+        }
+
+        continuation = response.continuation || undefined;
+        if (!continuation) break;
+        
+        attempts++;
+        
+        // Rate limiting
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+
+      logger.debug(`📭 No historical data found meeting threshold for ${contractAddress}:${tokenId}`);
+      return null;
+
+    } catch (error: any) {
+      logger.warn(`⚠️ Error getting historical data for ${contractAddress}:${tokenId}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Get current active listing price for comparison with bids
+   */
+  async getCurrentListingPrice(
+    contractAddress: string,
+    tokenId: string,
+    bidAmount: number
+  ): Promise<ListingPrice | null> {
+    try {
+      let continuation: string | undefined;
+      let attempts = 0;
+      const maxAttempts = 5; // Less attempts for listing lookup
+
+      while (attempts < maxAttempts) {
+        const response = await this.getTokenActivity(contractAddress, tokenId, 20, continuation);
+        
+        if (!response.activities || response.activities.length === 0) {
+          break;
+        }
+
+        // Look for most recent active ask (listing)
+        let activeAsk: TokenActivity | null = null;
+        
+        for (const activity of response.activities) {
+          if (activity.type === 'ask' && activity.price.amount.decimal > 0) {
+            // Check if this listing is still active (not cancelled or filled)
+            const isStillActive = !response.activities.some(laterActivity => 
+              laterActivity.timestamp > activity.timestamp &&
+              (laterActivity.type === 'cancel_ask' || laterActivity.type === 'sale')
+            );
+
+            if (isStillActive) {
+              activeAsk = activity;
+              break;
+            }
+          }
+        }
+
+        if (activeAsk) {
+          const listingPriceEth = activeAsk.price.amount.decimal;
+          const proximityRatio = bidAmount / listingPriceEth;
+          
+          // Check if bid is within proximity threshold
+          if (proximityRatio >= this.bidProximityThreshold) {
+            logger.info(`📊 Found active listing: ${listingPriceEth} ETH (bid proximity: ${(proximityRatio * 100).toFixed(1)}%)`);
+            
+            return {
+              priceEth: listingPriceEth.toFixed(2),
+              priceUsd: activeAsk.price.amount.usd?.toFixed(2),
+              timestamp: activeAsk.timestamp
+            };
+          } else {
+            logger.debug(`📉 Listing found but bid too low: ${(proximityRatio * 100).toFixed(1)}% < ${(this.bidProximityThreshold * 100)}%`);
+          }
+          break;
+        }
+
+        continuation = response.continuation || undefined;
+        if (!continuation) break;
+        
+        attempts++;
+        
+        // Rate limiting
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+
+      logger.debug(`📭 No suitable active listing found for ${contractAddress}:${tokenId}`);
+      return null;
+
+    } catch (error: any) {
+      logger.warn(`⚠️ Error getting listing price for ${contractAddress}:${tokenId}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Get contextual data for tweet enhancement
+   */
+  async getContextualData(
+    contractAddress: string,
+    tokenId: string,
+    currentTransactionTimestamp: number,
+    bidAmount?: number
+  ): Promise<ContextualData> {
+    const contextual: ContextualData = {};
+
+    try {
+      // Get historical context for sales and registrations
+      const historical = await this.getLastSaleOrRegistration(
+        contractAddress,
+        tokenId,
+        currentTransactionTimestamp
+      );
+      
+      if (historical) {
+        contextual.historical = historical;
+      }
+
+      // Get current listing price for bids
+      if (bidAmount !== undefined) {
+        const listing = await this.getCurrentListingPrice(contractAddress, tokenId, bidAmount);
+        if (listing) {
+          contextual.listing = listing;
+        }
+      }
+
+      return contextual;
+
+    } catch (error: any) {
+      logger.warn(`⚠️ Error getting contextual data:`, error.message);
+      return {};
+    }
+  }
+
+  /**
+   * Calculate days since timestamp
+   */
+  private calculateDaysSince(timestamp: number): number {
+    const now = Math.floor(Date.now() / 1000);
+    const diffSeconds = now - timestamp;
+    return Math.floor(diffSeconds / (24 * 60 * 60));
+  }
+
+  /**
+   * Format time period for human readability
+   */
+  formatTimePeriod(days: number): string {
+    if (days === 0) return 'today';
+    if (days === 1) return '1 day ago';
+    if (days < 30) return `${days} days ago`;
+    if (days < 60) return '1 month ago';
+    if (days < 365) {
+      const months = Math.floor(days / 30);
+      return `${months} month${months > 1 ? 's' : ''} ago`;
+    }
+    const years = Math.floor(days / 365);
+    return `${years} year${years > 1 ? 's' : ''} ago`;
   }
 
   /**
