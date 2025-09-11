@@ -324,7 +324,9 @@ export class NewTweetFormatter {
     if (clubLine) {
       tweet += `\n${clubLine}`;
     }
-    tweet += `\n\n${visionUrl}`;
+    if (visionUrl) {
+      tweet += `\n\n${visionUrl}`;
+    }
     
     return tweet;
   }
@@ -472,7 +474,9 @@ export class NewTweetFormatter {
     if (clubLine) {
       tweet += `\n${clubLine}`;
     }
-    tweet += `\n\n${visionUrl}`;
+    if (visionUrl) {
+      tweet += `\n\n${visionUrl}`;
+    }
     
     return tweet;
   }
@@ -551,7 +555,9 @@ export class NewTweetFormatter {
     if (clubLine) {
       tweet += `\n${clubLine}`;
     }
-    tweet += `\n\n${visionUrl}`;
+    if (visionUrl) {
+      tweet += `\n\n${visionUrl}`;
+    }
     
     return tweet;
   }
@@ -579,9 +585,13 @@ export class NewTweetFormatter {
     // Remove .eth suffix if present and clean the name
     const cleanName = ensName.replace(/\.eth$/i, '').trim();
     
-    // Handle cases where ensName might be "Unknown ENS" or similar
-    if (!cleanName || cleanName.toLowerCase().includes('unknown') || cleanName.toLowerCase().includes('ens')) {
-      return 'https://vision.io/marketplace';
+    // Handle cases where ensName might be "Unknown ENS" or similar error states
+    // Only match exact problematic values, not substrings (fixes bug with names like "ensexplorer.eth")
+    if (!cleanName || 
+        cleanName.toLowerCase() === 'unknown' || 
+        cleanName.toLowerCase() === 'ens' ||
+        cleanName.toLowerCase() === 'unknown ens') {
+      return ''; // No link for problematic cases
     }
     
     // URL encode the ENS name to handle emojis and special characters properly
@@ -982,7 +992,13 @@ export class NewTweetFormatter {
       errors.push('Registration tweet should include "Minter:" label');
     }
 
-    if (!content.includes('vision.io')) {
+    // Vision.io link is optional - only check if ENS name is valid (not "unknown" etc.)
+    const ensName = content.match(/(\w+)\.eth/)?.[0] || '';
+    const shouldHaveLink = ensName && 
+                          !ensName.toLowerCase().includes('unknown') && 
+                          ensName.toLowerCase() !== 'ens.eth';
+    
+    if (shouldHaveLink && !content.includes('vision.io')) {
       errors.push('Registration tweet should include Vision.io link');
     }
 
@@ -1027,7 +1043,13 @@ export class NewTweetFormatter {
       errors.push('Bid tweet should include "Valid:" label');
     }
 
-    if (!content.includes('vision.io')) {
+    // Vision.io link is optional - only check if ENS name is valid (not "unknown" etc.)
+    const ensName = content.match(/(\w+)\.eth/)?.[0] || '';
+    const shouldHaveLink = ensName && 
+                          !ensName.toLowerCase().includes('unknown') && 
+                          ensName.toLowerCase() !== 'ens.eth';
+    
+    if (shouldHaveLink && !content.includes('vision.io')) {
       errors.push('Bid tweet should include Vision.io link');
     }
 
@@ -1074,7 +1096,13 @@ export class NewTweetFormatter {
       errors.push('Tweet should include "Buyer:" label');
     }
 
-    if (!content.includes('vision.io')) {
+    // Vision.io link is optional - only check if ENS name is valid (not "unknown" etc.)
+    const ensName = content.match(/(\w+)\.eth/)?.[0] || '';
+    const shouldHaveLink = ensName && 
+                          !ensName.toLowerCase().includes('unknown') && 
+                          ensName.toLowerCase() !== 'ens.eth';
+    
+    if (shouldHaveLink && !content.includes('vision.io')) {
       errors.push('Tweet should include Vision.io link');
     }
 
