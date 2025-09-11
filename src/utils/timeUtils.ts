@@ -32,15 +32,17 @@ export class TimeUtils {
   }
 
   /**
-   * Format historical event for tweet display
-   * Example: "0.25 ETH, 19 Mar 2024"
+   * Format historical event for tweet display with dynamic label
+   * Example: "Last Sale: 0.25 ETH, 19 Mar 2024" or "Last Reg: 0.25 ETH, 19 Mar 2024"
    */
-  static formatHistoricalEvent(priceEth: number, timestamp: number): string {
+  static formatHistoricalEvent(priceEth: number, timestamp: number, eventType: 'sale' | 'mint'): string {
     const dateString = TimeUtils.formatDateForTweet(timestamp);
     const formattedPrice = priceEth.toFixed(2);
+    const label = eventType === 'sale' ? 'Last Sale:' : 'Last Reg:';
     
-    logger.debug(`🕒 Formatted historical event: ${formattedPrice} ETH, ${dateString}`);
-    return `${formattedPrice} ETH, ${dateString}`;
+    const result = `${label} ${formattedPrice} ETH, ${dateString}`;
+    logger.debug(`🕒 Formatted historical event (${eventType}): ${result}`);
+    return result;
   }
 
   /**

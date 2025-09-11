@@ -343,7 +343,7 @@ export class NewTweetFormatter {
 
       if (primaryResult) {
         logger.info(`✅ Found historical data from primary contract: ${primaryResult.priceEth} ETH`);
-        return `Last Sale: ${TimeUtils.formatHistoricalEvent(Number(primaryResult.priceEth), primaryResult.timestamp)}`;
+        return TimeUtils.formatHistoricalEvent(Number(primaryResult.priceEth), primaryResult.timestamp, primaryResult.type);
       }
 
       // Try fallback lookup if configured
@@ -357,7 +357,7 @@ export class NewTweetFormatter {
 
         if (fallbackResult) {
           logger.info(`✅ Found historical data from fallback contract: ${fallbackResult.priceEth} ETH`);
-          return `Last Sale: ${TimeUtils.formatHistoricalEvent(Number(fallbackResult.priceEth), fallbackResult.timestamp)}`;
+          return TimeUtils.formatHistoricalEvent(Number(fallbackResult.priceEth), fallbackResult.timestamp, fallbackResult.type);
         }
       }
 
