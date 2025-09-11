@@ -395,6 +395,19 @@ export class MagicEdenService {
 
 
   /**
+   * Convert hex token ID to numeric format for Magic Eden API
+   */
+  private convertTokenIdToNumeric(tokenId: string): string {
+    // Check if token ID is in hex format (starts with 0x)
+    if (tokenId.startsWith('0x')) {
+      const numericId = BigInt(tokenId).toString();
+      logger.debug(`🔄 Converting hex token ID ${tokenId} to numeric: ${numericId}`);
+      return numericId;
+    }
+    return tokenId;
+  }
+
+  /**
    * Get token activity from Magic Eden API with pagination
    */
   async getTokenActivity(
@@ -405,7 +418,9 @@ export class MagicEdenService {
     types?: string[]
   ): Promise<TokenActivityResponse> {
     try {
-      const tokenIdentifier = `${contractAddress}:${tokenId}`;
+      // Convert hex token IDs to numeric format for Magic Eden
+      const numericTokenId = this.convertTokenIdToNumeric(tokenId);
+      const tokenIdentifier = `${contractAddress}:${numericTokenId}`;
       logger.debug(`🔍 Fetching activity for token: ${tokenIdentifier}`);
 
       const params: any = {
