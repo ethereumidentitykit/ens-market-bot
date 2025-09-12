@@ -396,12 +396,13 @@ export class MagicEdenService {
 
   /**
    * Validate that a listing is still valid by checking for ownership changes after listing timestamp
+   * Returns validation result with reason for invalidation
    */
   private async validateListingOwnership(
     contractAddress: string, 
     tokenId: string, 
     listingTimestamp: number
-  ): Promise<boolean> {
+  ): Promise<{ isValid: boolean; invalidationReason?: 'ownership_change' | 'ask_cancel' | 'error' }> {
     try {
       // Check for ownership changes (sales/transfers) and cancellations  
       const response = await this.getTokenActivity(contractAddress, tokenId, 20, undefined, ['sale', 'transfer', 'ask_cancel']);
@@ -419,25 +420,25 @@ export class MagicEdenService {
       // If listing was created before the most recent ownership change, it's invalid
       if (mostRecentOwnershipChange > 0 && listingTimestamp < mostRecentOwnershipChange) {
         logger.debug(`🔍 Listing invalidated: created at ${listingTimestamp} but ownership changed at ${mostRecentOwnershipChange}`);
-        return false;
+        return { isValid: false, invalidationReason: 'ownership_change' };
       }
       
       // Check for ask cancellations after the listing (these only affect this specific listing)
       for (const activity of response.activities) {
         if (activity.type === 'ask_cancel' && activity.timestamp > listingTimestamp) {
           logger.debug(`🔍 Listing cancelled at ${activity.timestamp} > ${listingTimestamp}`);
-          return false;
+          return { isValid: false, invalidationReason: 'ask_cancel' };
         }
       }
       
       // Listing is still valid
       logger.debug(`✅ Listing still valid - created at ${listingTimestamp}, last ownership change: ${mostRecentOwnershipChange || 'never'}`);
-      return true;
+      return { isValid: true };
       
     } catch (error: any) {
       logger.warn(`⚠️ Error validating listing ownership: ${error.message}`);
       // If we can't validate, assume it's invalid to be safe
-      return false;
+      return { isValid: false, invalidationReason: 'error' };
     }
   }
 
@@ -627,14 +628,24 @@ export class MagicEdenService {
 
         if (activeAsk) {
           // Validate that the listing is still valid (no ownership changes after it was created)
-          const isValidListing = await this.validateListingOwnership(contractAddress, tokenId, activeAsk.timestamp);
+          const validation = await this.validateListingOwnership(contractAddress, tokenId, activeAsk.timestamp);
           
-          if (!isValidListing) {
-            logger.debug(`❌ Listing invalidated by ownership transfer after ${activeAsk.timestamp}`);
-            // Continue looking for older valid listings
-            continuation = response.continuation || undefined;
-            attempts++;
-            continue;
+          if (!validation.isValid) {
+            if (validation.invalidationReason === 'ownership_change') {
+              // Ownership changed - ALL listings are invalid, stop searching immediately
+              logger.debug(`❌ Ownership changed after listing ${activeAsk.timestamp} - all listings invalid, stopping search`);
+              break;
+            } else if (validation.invalidationReason === 'error') {
+              // Validation API failed - stop immediately for safety (don't show potentially invalid listings)
+              logger.debug(`❌ Failed to validate listing ${activeAsk.timestamp} - stopping search for safety`);
+              break;
+            } else {
+              // Just this specific listing was cancelled - continue searching for older valid listings
+              logger.debug(`❌ Listing invalidated by ${validation.invalidationReason} after ${activeAsk.timestamp} - continuing search`);
+              continuation = response.continuation || undefined;
+              attempts++;
+              continue;
+            }
           }
           
           const listingPriceEth = activeAsk.price.amount.decimal;
