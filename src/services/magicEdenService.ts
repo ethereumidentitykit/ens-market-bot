@@ -403,8 +403,8 @@ export class MagicEdenService {
     listingTimestamp: number
   ): Promise<boolean> {
     try {
-      // Check for ownership changes (sales/transfers) and cancellations
-      const response = await this.getTokenActivity(contractAddress, tokenId, 50, undefined, ['sale', 'transfer', 'ask_cancel']);
+      // Check for ownership changes (sales/transfers) and cancellations  
+      const response = await this.getTokenActivity(contractAddress, tokenId, 20, undefined, ['sale', 'transfer', 'ask_cancel']);
       
       // Find the most recent ownership change
       let mostRecentOwnershipChange: number = 0;
@@ -494,8 +494,11 @@ export class MagicEdenService {
         logger.debug(`🎯 Filtering by types: ${types.join(', ')}`);
       }
 
+      const fullUrl = `/tokens/${encodeURIComponent(tokenIdentifier)}/activity/v5?${urlParams.toString()}`;
+      logger.debug(`🌐 Full API URL: ${fullUrl}`);
+
       const response: AxiosResponse<TokenActivityResponse> = await this.axiosInstance.get(
-        `/tokens/${encodeURIComponent(tokenIdentifier)}/activity/v5?${urlParams.toString()}`,
+        fullUrl,
         {
           headers: {
             'Accept': '*/*',
