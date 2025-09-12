@@ -556,7 +556,7 @@ export class MagicEdenService {
             
             const priceEth = activity.price.amount.decimal;
             
-            // Apply threshold filter
+            // Hard cutoff: only show if the MOST RECENT event meets threshold
             if (priceEth >= this.historicalThresholdEth) {
               const daysAgo = this.calculateDaysSince(activity.timestamp);
               
@@ -570,7 +570,8 @@ export class MagicEdenService {
                 daysAgo
               };
             } else {
-              logger.debug(`🔽 Historical event below threshold: ${priceEth} ETH < ${this.historicalThresholdEth} ETH`);
+              logger.debug(`🔽 Most recent historical event below threshold: ${priceEth} ETH < ${this.historicalThresholdEth} ETH - not showing any historical data`);
+              return null; // Hard cutoff - don't look for older events
             }
           } else {
             logger.debug(`❌ Activity filtered out: zero price (${activity.price.amount.decimal} ETH)`);
