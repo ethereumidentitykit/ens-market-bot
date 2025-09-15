@@ -584,6 +584,7 @@ export class PuppeteerImageService {
                 color: white;
                 font-size: 85px;
                 font-weight: 600;
+                font-family: 'Inter', 'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif;
             }
 
             /* ETH Price (Left Side - Center Aligned) */
@@ -596,6 +597,7 @@ export class PuppeteerImageService {
                 color: white;
                 font-size: 48px;
                 font-weight: normal;
+                font-family: 'Inter', 'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif;
             }
 
             /* Seller Section (Dynamic Positioning) */
@@ -615,6 +617,7 @@ export class PuppeteerImageService {
                 font-weight: normal;
                 white-space: nowrap;
                 margin-left: 8px;
+                font-family: 'Inter', 'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif;
             }
 
             .seller-avatar {
@@ -641,6 +644,7 @@ export class PuppeteerImageService {
                 font-weight: normal;
                 white-space: nowrap;
                 margin-left: 8px;
+                font-family: 'Inter', 'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif;
             }
 
             .buyer-avatar {
