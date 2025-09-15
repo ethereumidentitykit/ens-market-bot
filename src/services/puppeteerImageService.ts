@@ -507,6 +507,17 @@ export class PuppeteerImageService {
     try {
       buyerEnsWithEmojis = await emojiMappingService.replaceEmojisWithSvg(data.buyerEns || 'buyer');
       logger.info(`✅ Buyer emoji processing: "${data.buyerEns}" -> ${buyerEnsWithEmojis.length} chars`);
+      
+      // Debug Korean characters specifically
+      const originalBuyer = data.buyerEns || 'buyer';
+      const hasKorean = /[\uAC00-\uD7AF]/.test(originalBuyer);
+      if (hasKorean) {
+        logger.info(`🇰🇷 KOREAN DEBUG - Original: "${originalBuyer}"`);
+        logger.info(`🇰🇷 KOREAN DEBUG - After emoji: "${buyerEnsWithEmojis}"`);
+        logger.info(`🇰🇷 KOREAN DEBUG - Unicode: ${[...originalBuyer].map(c => `U+${c.charCodeAt(0).toString(16).toUpperCase()}`).join(' ')}`);
+        logger.info(`🇰🇷 KOREAN DEBUG - After Unicode: ${[...buyerEnsWithEmojis].map(c => `U+${c.charCodeAt(0).toString(16).toUpperCase()}`).join(' ')}`);
+      }
+      
       if (buyerEnsWithEmojis !== (data.buyerEns || 'buyer')) {
         logger.info(`  🔄 Emojis were replaced in buyer name`);
       }
@@ -514,7 +525,7 @@ export class PuppeteerImageService {
       logger.error(`❌ Failed to process buyer emojis for "${data.buyerEns}":`, error);
     }
     
-    return `
+    const html = `
     <!DOCTYPE html>
     <html lang="en">
     <head>
@@ -695,11 +706,25 @@ export class PuppeteerImageService {
             <!-- Buyer Section -->
             <div class="buyer-section">
                 <div class="buyer-name">${buyerEnsWithEmojis}</div>
+                <!-- Debug: Buyer name in HTML: ${buyerEnsWithEmojis} -->
                 <img src="${buyerAvatarPath}" alt="Buyer" class="buyer-avatar" onerror="this.src='data:image/png;base64,${userPlaceholderBase64}'">
             </div>
         </div>
     </body>
     </html>`;
+    
+    // Debug: Log HTML for Korean names
+    const originalBuyer = data.buyerEns || 'buyer';
+    const hasKorean = /[\uAC00-\uD7AF]/.test(originalBuyer);
+    if (hasKorean) {
+      logger.info(`🇰🇷 KOREAN DEBUG - Final HTML snippet:`);
+      const buyerSectionMatch = html.match(/<div class="buyer-section">.*?<\/div>/s);
+      if (buyerSectionMatch) {
+        logger.info(`🇰🇷 HTML: ${buyerSectionMatch[0].substring(0, 200)}...`);
+      }
+    }
+    
+    return html;
   }
 
   /**
