@@ -148,10 +148,35 @@ export class PuppeteerImageService {
         logger.debug(`Font fallback delay complete in ${fallbackTime}ms`);
       }
 
-      // TEMP TEST: Add 1 second delay for Korean font loading
-      logger.debug('Adding 1 second delay for Korean font test...');
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      logger.debug('Korean font delay complete, taking screenshot...');
+      // Smart Korean font loading detection
+      const koreanFontStart = Date.now();
+      try {
+        await Promise.race([
+          // Wait specifically for Noto Sans KR to load
+          page.evaluate(() => {
+            return new Promise<void>((resolve) => {
+              if (document.fonts.check('16px "Noto Sans KR"')) {
+                resolve();
+              } else {
+                const checkFont = () => {
+                  if (document.fonts.check('16px "Noto Sans KR"')) {
+                    resolve();
+                  } else {
+                    setTimeout(checkFont, 50);
+                  }
+                };
+                checkFont();
+              }
+            });
+          }),
+          // 2 second timeout for Korean font
+          new Promise(resolve => setTimeout(resolve, 2000))
+        ]);
+        const koreanFontTime = Date.now() - koreanFontStart;
+        logger.debug(`Korean font loaded in ${koreanFontTime}ms, taking screenshot...`);
+      } catch (error) {
+        logger.debug(`Korean font detection timeout after 2s, proceeding with screenshot...`);
+      }
 
       // Take screenshot
       const screenshot = await page.screenshot({
@@ -513,15 +538,6 @@ export class PuppeteerImageService {
       buyerEnsWithEmojis = await emojiMappingService.replaceEmojisWithSvg(data.buyerEns || 'buyer');
       logger.info(`✅ Buyer emoji processing: "${data.buyerEns}" -> ${buyerEnsWithEmojis.length} chars`);
       
-      // Debug Korean characters specifically
-      const originalBuyer = data.buyerEns || 'buyer';
-      const hasKorean = /[\uAC00-\uD7AF]/.test(originalBuyer);
-      if (hasKorean) {
-        logger.info(`🇰🇷 KOREAN DEBUG - Original: "${originalBuyer}"`);
-        logger.info(`🇰🇷 KOREAN DEBUG - After emoji: "${buyerEnsWithEmojis}"`);
-        logger.info(`🇰🇷 KOREAN DEBUG - Unicode: ${[...originalBuyer].map(c => `U+${c.charCodeAt(0).toString(16).toUpperCase()}`).join(' ')}`);
-        logger.info(`🇰🇷 KOREAN DEBUG - After Unicode: ${[...buyerEnsWithEmojis].map(c => `U+${c.charCodeAt(0).toString(16).toUpperCase()}`).join(' ')}`);
-      }
       
       if (buyerEnsWithEmojis !== (data.buyerEns || 'buyer')) {
         logger.info(`  🔄 Emojis were replaced in buyer name`);
@@ -711,23 +727,12 @@ export class PuppeteerImageService {
             <!-- Buyer Section -->
             <div class="buyer-section">
                 <div class="buyer-name">${buyerEnsWithEmojis}</div>
-                <!-- Debug: Buyer name in HTML: ${buyerEnsWithEmojis} -->
                 <img src="${buyerAvatarPath}" alt="Buyer" class="buyer-avatar" onerror="this.src='data:image/png;base64,${userPlaceholderBase64}'">
             </div>
         </div>
     </body>
     </html>`;
     
-    // Debug: Log HTML for Korean names
-    const originalBuyer = data.buyerEns || 'buyer';
-    const hasKorean = /[\uAC00-\uD7AF]/.test(originalBuyer);
-    if (hasKorean) {
-      logger.info(`🇰🇷 KOREAN DEBUG - Final HTML snippet:`);
-      const buyerSectionMatch = html.match(/<div class="buyer-section">.*?<\/div>/s);
-      if (buyerSectionMatch) {
-        logger.info(`🇰🇷 HTML: ${buyerSectionMatch[0].substring(0, 200)}...`);
-      }
-    }
     
     return html;
   }
