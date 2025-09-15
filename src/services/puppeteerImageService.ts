@@ -523,7 +523,7 @@ export class PuppeteerImageService {
         <title>ENS Transaction Image</title>
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
         <style>
             * {
                 margin: 0;
@@ -534,7 +534,7 @@ export class PuppeteerImageService {
             body {
                 width: ${this.IMAGE_WIDTH}px;
                 height: ${this.IMAGE_HEIGHT}px;
-                font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+                font-family: 'Inter', 'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif;
                 overflow: hidden;
                 position: relative;
                 background: #1E1E1E;
@@ -990,7 +990,7 @@ export class PuppeteerImageService {
       
       htmlTextElements.push(`
         <div style="position: absolute; left: ${x}px; top: ${adjustedY}px; 
-                    font-family: 'Inter', sans-serif;
+                    font-family: 'Inter', 'Noto Sans KR', sans-serif;
                     font-size: ${fontSize}; font-weight: 500; color: ${fill};
                     line-height: 1; 
                     filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.25));">
@@ -1002,9 +1002,9 @@ export class PuppeteerImageService {
     // Build complete HTML with background, logo, and text
     // Load Inter font from Google Fonts with weight 500
     const html = `
-      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@500&display=swap" rel="stylesheet">
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@500&family=Noto+Sans+KR:wght@500&display=swap" rel="stylesheet">
       <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@500&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@500&family=Noto+Sans+KR:wght@500&display=swap');
       </style>
       <div style="width: 270px; height: 270px; position: relative; overflow: hidden; ${backgroundStyle}">
         ${svgPaths}
