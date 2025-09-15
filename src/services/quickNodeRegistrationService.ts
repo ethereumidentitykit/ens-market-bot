@@ -163,7 +163,7 @@ export class QuickNodeRegistrationService {
     const baseRegistrarContract = '0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147ea85';
     try {
       const openSeaData = await this.openSeaService.getSimplifiedMetadata(baseRegistrarContract, tokenIdDecimal);
-      if (openSeaData) {
+      if (openSeaData && (openSeaData.name || openSeaData.image || openSeaData.description)) {
         ensMetadata = {
           name: openSeaData.name,
           image: openSeaData.image,
@@ -172,7 +172,7 @@ export class QuickNodeRegistrationService {
         openSeaSuccess = true;
         logger.info(`✅ OpenSea metadata success (Base Registrar): ${openSeaData.name} (${openSeaData.collection})`);
       } else {
-        logger.debug(`⚠️ OpenSea returned null for Base Registrar ${tokenIdDecimal}`);
+        logger.debug(`⚠️ OpenSea returned null or empty data for Base Registrar ${tokenIdDecimal}`);
       }
     } catch (error: any) {
       logger.debug(`❌ OpenSea Base Registrar failed for ${tokenIdDecimal}: ${error.message}`);
@@ -184,7 +184,7 @@ export class QuickNodeRegistrationService {
       logger.info(`🔍 Trying OpenSea with NameWrapper contract...`);
       try {
         const openSeaData = await this.openSeaService.getSimplifiedMetadata(nameWrapperContract, tokenIdDecimal);
-        if (openSeaData) {
+        if (openSeaData && (openSeaData.name || openSeaData.image || openSeaData.description)) {
           ensMetadata = {
             name: openSeaData.name,
             image: openSeaData.image,
@@ -193,7 +193,7 @@ export class QuickNodeRegistrationService {
           openSeaSuccess = true;
           logger.info(`✅ OpenSea metadata success (NameWrapper): ${openSeaData.name} (${openSeaData.collection})`);
         } else {
-          logger.debug(`⚠️ OpenSea returned null for NameWrapper ${tokenIdDecimal}`);
+          logger.debug(`⚠️ OpenSea returned null or empty data for NameWrapper ${tokenIdDecimal}`);
         }
       } catch (error: any) {
         logger.debug(`❌ OpenSea NameWrapper failed for ${tokenIdDecimal}: ${error.message}`);
