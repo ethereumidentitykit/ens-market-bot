@@ -196,6 +196,29 @@ export class PuppeteerImageService {
         logger.debug(`Korean font detection timeout, proceeding with screenshot...`);
       }
 
+      // Text fitting for main template buyer/seller names
+      await page.evaluate(() => {
+        const fitText = (selector: string, maxSize: number, minSize: number) => {
+          const elements = document.querySelectorAll(selector);
+          elements.forEach((element: any) => {
+            const parent = element.parentElement;
+            if (!parent) return;
+            
+            let size = maxSize;
+            element.style.fontSize = size + 'px';
+            
+            // Keep reducing size while text overflows and we're above minimum
+            while (element.scrollWidth > parent.clientWidth && size > minSize) {
+              size -= 0.5;
+              element.style.fontSize = size + 'px';
+            }
+          });
+        };
+        
+        // Fit buyer and seller names in main template
+        fitText('.buyer-name, .seller-name', 24, 10);
+      });
+
       // Take screenshot
       const screenshot = await page.screenshot({
         type: 'png',
@@ -1041,14 +1064,29 @@ export class PuppeteerImageService {
         'style="display: inline-block; vertical-align: text-bottom; width: 1em; height: 1em; margin: 0 0.05em; transform: translateY(-3px);"'
       );
       
+      // Text fitting for NFT overlay (270px container width)
+      let finalFontSize = parseFloat(fontSize);
+      const maxWidth = 270 - 50; // 270px container minus 20px padding
+      
+      // Simple text width estimation (more accurate than canvas for this use case)
+      // Average character width varies by font size: ~0.6 * fontSize for Inter font
+      const estimatedCharWidth = finalFontSize * 0.6;
+      const estimatedTextWidth = processedText.length * estimatedCharWidth;
+      
+      // Scale down font if text would overflow
+      if (estimatedTextWidth > maxWidth) {
+        const scaleFactor = maxWidth / estimatedTextWidth;
+        finalFontSize = Math.max(Math.floor(finalFontSize * scaleFactor), 12); // Min 12px
+        logger.debug(`📏 NFT text scaled: ${fontSize} → ${finalFontSize}px for "${textContent}"`);
+      }
+      
       // Parse font size to adjust y position (SVG uses baseline, HTML uses top)
-      const fontSizeNum = parseFloat(fontSize);
-      const adjustedY = parseFloat(y) - (fontSizeNum * 0.87); // Approximate baseline offset
+      const adjustedY = parseFloat(y) - (finalFontSize * 0.87); // Approximate baseline offset
       
       htmlTextElements.push(`
         <div style="position: absolute; left: ${x}px; top: ${adjustedY}px; 
                     font-family: 'Inter', 'Noto Sans KR', sans-serif;
-                    font-size: ${fontSize}; font-weight: 500; color: ${fill};
+                    font-size: ${finalFontSize}px; font-weight: 500; color: ${fill};
                     line-height: 1; 
                     filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.25));">
           ${alignedText}
