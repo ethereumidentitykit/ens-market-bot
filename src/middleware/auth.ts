@@ -14,7 +14,7 @@ export function createAuthMiddleware(siweService: SiweService) {
       const address = req.session?.address;
 
       if (!sessionId || !address) {
-        logger.warn(`Unauthorized access attempt to ${req.path} - no session - IP: ${req.ip} - User-Agent: ${req.headers['user-agent'] || 'unknown'}`);
+        logger.info(`Unauthorized access attempt to ${req.path} - no session - IP: ${req.ip} - User-Agent: ${req.headers['user-agent'] || 'unknown'}`);
         return res.status(401).json({ 
           error: 'Authentication required',
           message: 'Please sign in with your wallet to access this resource'
@@ -25,7 +25,7 @@ export function createAuthMiddleware(siweService: SiweService) {
       const isValid = await siweService.validateSession(sessionId);
       
       if (!isValid) {
-        logger.warn(`Invalid session attempted access to ${req.path} - IP: ${req.ip} - User-Agent: ${req.headers['user-agent'] || 'unknown'}`);
+        logger.info(`Invalid session attempted access to ${req.path} - IP: ${req.ip} - User-Agent: ${req.headers['user-agent'] || 'unknown'}`);
         
         // Clear invalid session
         req.session.destroy((err) => {
@@ -42,7 +42,7 @@ export function createAuthMiddleware(siweService: SiweService) {
 
       // Double-check whitelist (defense in depth)
       if (!siweService.isWhitelisted(address)) {
-        logger.warn(`Non-whitelisted address ${address} attempted access to ${req.path} with valid session - IP: ${req.ip} - User-Agent: ${req.headers['user-agent'] || 'unknown'}`);
+        logger.info(`Non-whitelisted address ${address} attempted access to ${req.path} with valid session - IP: ${req.ip} - User-Agent: ${req.headers['user-agent'] || 'unknown'}`);
         
         // This shouldn't happen if authentication worked properly, but check anyway
         req.session.destroy((err) => {
