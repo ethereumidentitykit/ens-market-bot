@@ -148,6 +148,11 @@ export class PuppeteerImageService {
         logger.debug(`Font fallback delay complete in ${fallbackTime}ms`);
       }
 
+      // TEMP TEST: Add 1 second delay for Korean font loading
+      logger.debug('Adding 1 second delay for Korean font test...');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      logger.debug('Korean font delay complete, taking screenshot...');
+
       // Take screenshot
       const screenshot = await page.screenshot({
         type: 'png',
