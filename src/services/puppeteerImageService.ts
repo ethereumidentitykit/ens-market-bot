@@ -152,30 +152,48 @@ export class PuppeteerImageService {
       const koreanFontStart = Date.now();
       try {
         await Promise.race([
-          // Wait specifically for Noto Sans KR to load
+          // Test if Korean characters render properly
           page.evaluate(() => {
             return new Promise<void>((resolve) => {
-              if (document.fonts.check('16px "Noto Sans KR"')) {
+              const testKoreanFont = () => {
+                // Create canvas to test character rendering
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return false;
+                
+                // Test with Korean character
+                ctx.font = '16px "Noto Sans KR", sans-serif';
+                const koreanWidth = ctx.measureText('한').width;
+                
+                // Test with fallback
+                ctx.font = '16px sans-serif';
+                const fallbackWidth = ctx.measureText('한').width;
+                
+                // If widths differ significantly, Korean font is loaded
+                return Math.abs(koreanWidth - fallbackWidth) > 1;
+              };
+              
+              if (testKoreanFont()) {
                 resolve();
               } else {
                 const checkFont = () => {
-                  if (document.fonts.check('16px "Noto Sans KR"')) {
+                  if (testKoreanFont()) {
                     resolve();
                   } else {
                     setTimeout(checkFont, 50);
                   }
                 };
-                checkFont();
+                setTimeout(checkFont, 50);
               }
             });
           }),
-          // 2 second timeout for Korean font
-          new Promise(resolve => setTimeout(resolve, 2000))
+          // 1 second timeout for Korean font
+          new Promise(resolve => setTimeout(resolve, 1000))
         ]);
         const koreanFontTime = Date.now() - koreanFontStart;
-        logger.debug(`Korean font loaded in ${koreanFontTime}ms, taking screenshot...`);
+        logger.debug(`Korean font loaded in ${koreanFontTime}ms (smart detection)`);
       } catch (error) {
-        logger.debug(`Korean font detection timeout after 2s, proceeding with screenshot...`);
+        logger.debug(`Korean font detection timeout, proceeding with screenshot...`);
       }
 
       // Take screenshot
