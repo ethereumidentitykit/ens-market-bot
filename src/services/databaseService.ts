@@ -1321,9 +1321,24 @@ export class DatabaseService implements IDatabaseService {
     }
 
     try {
+      // First ensure status column exists and is migrated
+      await this.pool.query(`
+        ALTER TABLE ens_bids ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'unposted'
+      `);
+      
+      await this.pool.query(`
+        UPDATE ens_bids 
+        SET status = CASE 
+          WHEN posted = TRUE AND (status IS NULL OR status = '') THEN 'posted'
+          WHEN posted = FALSE AND (status IS NULL OR status = '') THEN 'unposted'
+          ELSE COALESCE(status, 'unposted')
+        END
+        WHERE status IS NULL OR status = ''
+      `);
+
       const result = await this.pool.query(`
         SELECT * FROM ens_bids 
-        WHERE posted = FALSE
+        WHERE (status = 'unposted' OR (status IS NULL AND posted = FALSE))
           AND created_at_api > NOW() - INTERVAL '1 hour' * $2
         ORDER BY created_at_api DESC 
         LIMIT $1
@@ -1347,13 +1362,50 @@ export class DatabaseService implements IDatabaseService {
     try {
       await this.pool.query(`
         UPDATE ens_bids 
-        SET posted = TRUE, tweet_id = $1, updated_at = CURRENT_TIMESTAMP 
+        SET posted = TRUE, status = 'posted', tweet_id = $1, updated_at = CURRENT_TIMESTAMP 
         WHERE id = $2
       `, [tweetId, id]);
 
       logger.debug(`Marked ENS bid ${id} as posted with tweet ID: ${tweetId}`);
     } catch (error: any) {
       logger.error('Failed to mark ENS bid as posted:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Mark a bid as failed (validation failed, don't retry)
+   */
+  async markBidAsFailed(id: number, reason: string): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      // First check if status column exists, if not add it
+      await this.pool.query(`
+        ALTER TABLE ens_bids ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'unposted'
+      `);
+      
+      // Migrate existing data if needed (only once)
+      await this.pool.query(`
+        UPDATE ens_bids 
+        SET status = CASE 
+          WHEN posted = TRUE AND status IS NULL THEN 'posted'
+          WHEN posted = FALSE AND status IS NULL THEN 'unposted'
+          ELSE COALESCE(status, 'unposted')
+        END
+        WHERE status IS NULL OR status = ''
+      `);
+
+      // Mark this specific bid as failed
+      await this.pool.query(`
+        UPDATE ens_bids 
+        SET status = 'failed', updated_at = CURRENT_TIMESTAMP 
+        WHERE id = $1
+      `, [id]);
+
+      logger.warn(`🚫 Marked ENS bid ${id} as failed: ${reason}`);
+    } catch (error: any) {
+      logger.error('Failed to mark ENS bid as failed:', error.message);
       throw error;
     }
   }

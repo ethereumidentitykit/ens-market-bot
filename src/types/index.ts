@@ -224,6 +224,7 @@ export interface IDatabaseService {
   getRecentBids(limit?: number): Promise<ENSBid[]>;
   getUnpostedBids(limit?: number, maxAgeHours?: number): Promise<ENSBid[]>;
   markBidAsPosted(id: number, tweetId: string): Promise<void>;
+  markBidAsFailed(id: number, reason: string): Promise<void>;
   
   // Price tier methods
   getPriceTiers(transactionType?: string): Promise<PriceTier[]>;

@@ -622,11 +622,23 @@ export class AutoTweetService {
       const tweetData = await this.newTweetFormatter.generateBidTweet(bid);
 
       if (!tweetData.isValid) {
-        logger.error(`Invalid tweet generated for bid ${bidId}:`, tweetData.text);
+        const validationResult = this.newTweetFormatter.validateBidTweet(tweetData.text);
+        const errors = validationResult.errors.join(', ');
+        
+        // Mark bid as failed to prevent infinite retries
+        await this.databaseService.markBidAsFailed(bidId, `Validation failed: ${errors}`);
+        
+        logger.error(`🚫 VALIDATION FAILED - Bid ${bidId} marked as failed:`, {
+          bidId,
+          ensName: bid.ensName,
+          errors: validationResult.errors,
+          tweetText: tweetData.text
+        });
+        
         return {
           success: false,
           bidId,
-          error: 'Generated tweet failed validation',
+          error: `Validation failed: ${errors}`,
           type: 'bid'
         };
       }
@@ -745,7 +757,7 @@ export class AutoTweetService {
         FROM ens_bids 
         WHERE ens_name = $1 
           AND created_at_api >= NOW() - INTERVAL '12 hours'
-          AND posted = TRUE
+          AND (status = 'posted' OR (status IS NULL AND posted = TRUE))
       `;
       
       const result = await this.databaseService.pgPool?.query(query, [ensName]);

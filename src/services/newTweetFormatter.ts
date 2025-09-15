@@ -1260,9 +1260,6 @@ export class NewTweetFormatter {
       errors.push('Bid tweet should include "Owner:" label');
     }
 
-    if (!content.includes('Valid:')) {
-      errors.push('Bid tweet should include "Valid:" label');
-    }
 
     // Vision.io link is optional - only check if ENS name is valid (not "unknown" etc.)
     const ensName = content.match(/(\w+)\.eth/)?.[0] || '';
