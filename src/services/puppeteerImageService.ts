@@ -1036,6 +1036,10 @@ export class PuppeteerImageService {
     let textMatch;
     let htmlTextElements = [];
     
+    // UNIFIED SCALING: Collect all text elements first, then apply the most restrictive scaling to all
+    let textElements = [];
+    
+    // STEP 1: Collect all text elements and their properties
     while ((textMatch = textRegex.exec(svgContent)) !== null) {
       const fullTextElement = textMatch[0];
       const textContent = textMatch[1];
@@ -1055,50 +1059,60 @@ export class PuppeteerImageService {
       // Trim whitespace from SVG text content (SVG can have indentation/newlines)
       const trimmedTextContent = textContent.trim();
       
-      logger.info(`  📍 Text at (${x}, ${y}): "${trimmedTextContent}" [size: ${fontSize}]`);
+      // Count visual characters BEFORE emoji replacement
+      const visualCharCount = [...trimmedTextContent].length;
       
-      // Count visual characters BEFORE emoji replacement (crucial for accurate width estimation)
-      const visualCharCount = [...trimmedTextContent].length; // Count trimmed text, not SVG markup
+      // Collect element info instead of processing immediately
+      textElements.push({
+        x,
+        y,
+        fontSize: parseFloat(fontSize),
+        fill,
+        trimmedTextContent,
+        visualCharCount
+      });
+    }
+    
+    // STEP 2: Calculate required font size for each line and find the minimum (most restrictive)
+    const maxWidth = 270 - 60; // 270px container minus padding
+    const charWidthRatio = 0.7; // Character width estimation ratio
+    let unifiedFontSize = 30; // Start with original size
+    
+    for (const element of textElements) {
+      let requiredFontSize = element.fontSize;
+      const estimatedTextWidth = element.visualCharCount * (element.fontSize * charWidthRatio);
       
-      // Process emojis using our mapping service (on trimmed content)
-      const processedText = await emojiMappingService.replaceEmojisWithSvg(trimmedTextContent);
-      logger.info(`  ✅ Processed: ${processedText.length > 100 ? processedText.substring(0, 100) + '...' : processedText}`);
+      if (estimatedTextWidth > maxWidth) {
+        // Calculate what font size is needed for this line to fit
+        const bufferedWidth = estimatedTextWidth * 0.8; // 20% buffer
+        const scaleFactor = maxWidth / bufferedWidth;
+        requiredFontSize = Math.max(Math.floor(element.fontSize * scaleFactor), 18); // Min 18px
+      }
+      
+      // Keep track of the smallest required size (most restrictive)
+      unifiedFontSize = Math.min(unifiedFontSize, requiredFontSize);
+    }
+    
+    // STEP 3: Process all text elements with the unified font size
+    for (const element of textElements) {
+      // Process emojis using our mapping service
+      const processedText = await emojiMappingService.replaceEmojisWithSvg(element.trimmedTextContent);
       
       // Create positioned div with correct font properties
-      // Adjust inline SVG emoji styling for proper baseline alignment (moved up 2px)
+      // Adjust inline SVG emoji styling for proper baseline alignment
       const alignedText = processedText.replace(/style="[^"]*"/g, 
         'style="display: inline-block; vertical-align: text-bottom; width: 1em; height: 1em; margin: 0 0.05em; transform: translateY(-3px);"'
       );
       
-      // Text fitting for NFT overlay (270px container width)
-      let finalFontSize = parseFloat(fontSize);
-      const maxWidth = 270 - 60; // 270px container minus padding = 220px
-      
-      // Conservative character width estimation (starts scaling sooner)
-      // Increased from 0.6 to 0.7 to trigger scaling earlier
-      const estimatedCharWidth = finalFontSize * 0.7;
-      
-      // Use visual character count from ORIGINAL text (before SVG emoji replacement)
-      const estimatedTextWidth = visualCharCount * estimatedCharWidth;
-      
-      // Per-line scaling: each line scales independently based on its own length
-      if (estimatedTextWidth > maxWidth) {
-        // Add 20% buffer to make scaling less aggressive
-        const bufferedWidth = estimatedTextWidth * 0.8;
-        const scaleFactor = maxWidth / bufferedWidth;
-        finalFontSize = Math.max(Math.floor(finalFontSize * scaleFactor), 18); // Min 18px
-        logger.debug(`📏 NFT text scaled: ${fontSize} → ${finalFontSize}px for "${trimmedTextContent}"`);
-      }
-      
-      // Parse font size to adjust y position (SVG uses baseline, HTML uses top)
-      const adjustedY = parseFloat(y) - (finalFontSize * 0.87); // Approximate baseline offset
+      // Use unified font size for all lines
+      const adjustedY = parseFloat(element.y) - (unifiedFontSize * 0.87); // Baseline offset
       
       htmlTextElements.push(`
-        <div style="position: absolute; left: ${x}px; top: ${adjustedY}px; 
+        <div style="position: absolute; left: ${element.x}px; top: ${adjustedY}px; 
                     font-family: 'Inter', 'Noto Sans KR', sans-serif;
-                    font-size: ${finalFontSize}px; font-weight: 500; color: ${fill};
+                    font-size: ${unifiedFontSize}px; font-weight: 500; color: ${element.fill};
                     line-height: 1; 
-                    filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.25));">
+                    filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.15));">
           ${alignedText}
         </div>
       `);
