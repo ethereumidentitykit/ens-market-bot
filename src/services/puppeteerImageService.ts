@@ -1052,13 +1052,16 @@ export class PuppeteerImageService {
       const fontSize = attrs['font-size'] || attrs.fontSize || '30px';
       const fill = attrs.fill || 'white';
       
-      logger.info(`  📍 Text at (${x}, ${y}): "${textContent}" [size: ${fontSize}] (${[...textContent].length} visual chars)`);
+      // Trim whitespace from SVG text content (SVG can have indentation/newlines)
+      const trimmedTextContent = textContent.trim();
+      
+      logger.info(`  📍 Text at (${x}, ${y}): "${textContent}" → "${trimmedTextContent}" [size: ${fontSize}] (${[...trimmedTextContent].length} visual chars)`);
       
       // Count visual characters BEFORE emoji replacement (crucial for accurate width estimation)
-      const visualCharCount = [...textContent].length; // Count original text, not SVG markup
+      const visualCharCount = [...trimmedTextContent].length; // Count trimmed text, not SVG markup
       
-      // Process emojis using our mapping service
-      const processedText = await emojiMappingService.replaceEmojisWithSvg(textContent);
+      // Process emojis using our mapping service (on trimmed content)
+      const processedText = await emojiMappingService.replaceEmojisWithSvg(trimmedTextContent);
       logger.info(`  ✅ Processed: ${processedText.length > 100 ? processedText.substring(0, 100) + '...' : processedText}`);
       
       // Create positioned div with correct font properties
@@ -1084,9 +1087,9 @@ export class PuppeteerImageService {
         const bufferedWidth = estimatedTextWidth * 0.8;
         const scaleFactor = maxWidth / bufferedWidth;
         finalFontSize = Math.max(Math.floor(finalFontSize * scaleFactor), 18); // Min 18px
-        logger.info(`📏 NFT line scaled: ${fontSize} → ${finalFontSize}px for "${textContent}" (${visualCharCount} visual chars → ${estimatedTextWidth}px estimated → ${bufferedWidth}px buffered vs ${maxWidth}px max)`);
+        logger.info(`📏 NFT line scaled: ${fontSize} → ${finalFontSize}px for "${trimmedTextContent}" (${visualCharCount} visual chars → ${estimatedTextWidth}px estimated → ${bufferedWidth}px buffered vs ${maxWidth}px max)`);
       } else {
-        logger.info(`📏 NFT line unchanged: "${textContent}" (${visualCharCount} chars → ${estimatedTextWidth}px fits in ${maxWidth}px)`);
+        logger.info(`📏 NFT line unchanged: "${trimmedTextContent}" (${visualCharCount} chars → ${estimatedTextWidth}px fits in ${maxWidth}px)`);
       }
       
       // Parse font size to adjust y position (SVG uses baseline, HTML uses top)
