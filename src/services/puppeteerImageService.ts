@@ -1055,7 +1055,7 @@ export class PuppeteerImageService {
       // Trim whitespace from SVG text content (SVG can have indentation/newlines)
       const trimmedTextContent = textContent.trim();
       
-      logger.info(`  📍 Text at (${x}, ${y}): "${textContent}" → "${trimmedTextContent}" [size: ${fontSize}] (${[...trimmedTextContent].length} visual chars)`);
+      logger.info(`  📍 Text at (${x}, ${y}): "${trimmedTextContent}" [size: ${fontSize}]`);
       
       // Count visual characters BEFORE emoji replacement (crucial for accurate width estimation)
       const visualCharCount = [...trimmedTextContent].length; // Count trimmed text, not SVG markup
@@ -1087,9 +1087,7 @@ export class PuppeteerImageService {
         const bufferedWidth = estimatedTextWidth * 0.8;
         const scaleFactor = maxWidth / bufferedWidth;
         finalFontSize = Math.max(Math.floor(finalFontSize * scaleFactor), 18); // Min 18px
-        logger.info(`📏 NFT line scaled: ${fontSize} → ${finalFontSize}px for "${trimmedTextContent}" (${visualCharCount} visual chars → ${estimatedTextWidth}px estimated → ${bufferedWidth}px buffered vs ${maxWidth}px max)`);
-      } else {
-        logger.info(`📏 NFT line unchanged: "${trimmedTextContent}" (${visualCharCount} chars → ${estimatedTextWidth}px fits in ${maxWidth}px)`);
+        logger.debug(`📏 NFT text scaled: ${fontSize} → ${finalFontSize}px for "${trimmedTextContent}"`);
       }
       
       // Parse font size to adjust y position (SVG uses baseline, HTML uses top)
