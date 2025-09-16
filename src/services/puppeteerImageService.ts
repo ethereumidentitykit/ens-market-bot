@@ -1052,7 +1052,7 @@ export class PuppeteerImageService {
       const fontSize = attrs['font-size'] || attrs.fontSize || '30px';
       const fill = attrs.fill || 'white';
       
-      logger.info(`  📍 Text at (${x}, ${y}): "${textContent}" [size: ${fontSize}]`);
+      logger.info(`  📍 Text at (${x}, ${y}): "${textContent}" [size: ${fontSize}] (${[...textContent].length} visual chars)`);
       
       // Count visual characters BEFORE emoji replacement (crucial for accurate width estimation)
       const visualCharCount = [...textContent].length; // Count original text, not SVG markup
@@ -1078,13 +1078,15 @@ export class PuppeteerImageService {
       // Use visual character count from ORIGINAL text (before SVG emoji replacement)
       const estimatedTextWidth = visualCharCount * estimatedCharWidth;
       
-      // Gentler scaling: starts sooner but scales less aggressively
+      // Per-line scaling: each line scales independently based on its own length
       if (estimatedTextWidth > maxWidth) {
         // Add 20% buffer to make scaling less aggressive
         const bufferedWidth = estimatedTextWidth * 0.8;
         const scaleFactor = maxWidth / bufferedWidth;
-        finalFontSize = Math.max(Math.floor(finalFontSize * scaleFactor), 18); // Min 16px
-        logger.debug(`📏 NFT text scaled: ${fontSize} → ${finalFontSize}px for "${textContent}" (${visualCharCount} visual chars, was ${processedText.length} after emoji processing)`);
+        finalFontSize = Math.max(Math.floor(finalFontSize * scaleFactor), 18); // Min 18px
+        logger.info(`📏 NFT line scaled: ${fontSize} → ${finalFontSize}px for "${textContent}" (${visualCharCount} visual chars → ${estimatedTextWidth}px estimated → ${bufferedWidth}px buffered vs ${maxWidth}px max)`);
+      } else {
+        logger.info(`📏 NFT line unchanged: "${textContent}" (${visualCharCount} chars → ${estimatedTextWidth}px fits in ${maxWidth}px)`);
       }
       
       // Parse font size to adjust y position (SVG uses baseline, HTML uses top)
