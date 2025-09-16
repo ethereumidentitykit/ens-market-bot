@@ -216,7 +216,7 @@ export class PuppeteerImageService {
         };
         
         // Fit buyer and seller names in main template
-        fitText('.buyer-name, .seller-name', 24, 10);
+        fitText('.buyer-name, .seller-name', 24, 16);
       });
 
       // Take screenshot
@@ -1066,18 +1066,20 @@ export class PuppeteerImageService {
       
       // Text fitting for NFT overlay (270px container width)
       let finalFontSize = parseFloat(fontSize);
-      const maxWidth = 270 - 50; // 270px container minus 20px padding
+      const maxWidth = 270 - 60; // 270px container minus padding = 220px
       
-      // Simple text width estimation (more accurate than canvas for this use case)
-      // Average character width varies by font size: ~0.6 * fontSize for Inter font
-      const estimatedCharWidth = finalFontSize * 0.6;
+      // Conservative character width estimation (starts scaling sooner)
+      // Increased from 0.6 to 0.7 to trigger scaling earlier
+      const estimatedCharWidth = finalFontSize * 0.7;
       const estimatedTextWidth = processedText.length * estimatedCharWidth;
       
-      // Scale down font if text would overflow
+      // Gentler scaling: starts sooner but scales less aggressively
       if (estimatedTextWidth > maxWidth) {
-        const scaleFactor = maxWidth / estimatedTextWidth;
-        finalFontSize = Math.max(Math.floor(finalFontSize * scaleFactor), 12); // Min 12px
-        logger.debug(`📏 NFT text scaled: ${fontSize} → ${finalFontSize}px for "${textContent}"`);
+        // Add 20% buffer to make scaling less aggressive
+        const bufferedWidth = estimatedTextWidth * 0.8;
+        const scaleFactor = maxWidth / bufferedWidth;
+        finalFontSize = Math.max(Math.floor(finalFontSize * scaleFactor), 16); // Min 16px
+        logger.debug(`📏 NFT text scaled: ${fontSize} → ${finalFontSize}px for "${textContent}" (${processedText.length} chars)`);
       }
       
       // Parse font size to adjust y position (SVG uses baseline, HTML uses top)
