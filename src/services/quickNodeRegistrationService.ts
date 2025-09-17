@@ -4,6 +4,7 @@ import { IDatabaseService, ENSRegistration } from '../types';
 import { OpenSeaService } from './openSeaService';
 import { ENSMetadataService } from './ensMetadataService';
 import { AlchemyService } from './alchemyService';
+import { ENSTokenUtils } from './ensTokenUtils';
 
 // QuickNode webhook interfaces based on actual payload analysis
 export interface QuickNodeRegistrationData {
@@ -154,15 +155,28 @@ export class QuickNodeRegistrationService {
     tokenIdDecimal: string
   ): Promise<{ name?: string; image?: string; description?: string }> {
     
-    logger.info(`🔍 Enriching registration ${tokenIdDecimal} - trying OpenSea with Base Registrar first...`);
+    // Generate contract-specific token IDs using ENSTokenUtils
+    const fullEnsName = `${ensName}.eth`;
+    const baseRegistrarContract = '0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147ea85';
+    const nameWrapperContract = '0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401';
+    
+    // Base Registrar uses labelhash (tokenIdDecimal is already correct)
+    const baseRegistrarTokenId = tokenIdDecimal;
+    // NameWrapper uses namehash (generated from full ENS name)
+    const nameWrapperTokenId = BigInt(ENSTokenUtils.getTokenIdForContract(nameWrapperContract, fullEnsName)).toString();
+    
+    logger.debug(`Token ID generation for "${fullEnsName}":`);
+    logger.debug(`  Base Registrar (labelhash): ${baseRegistrarTokenId}`);
+    logger.debug(`  NameWrapper (namehash): ${nameWrapperTokenId}`);
+    
+    logger.info(`🔍 Enriching registration - trying OpenSea with Base Registrar (${baseRegistrarTokenId})...`);
     
     let ensMetadata: { name?: string; image?: string; description?: string } | null = null;
     let openSeaSuccess = false;
     
     // 1. Try OpenSea with Base Registrar contract first (has most names)
-    const baseRegistrarContract = '0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147ea85';
     try {
-      const openSeaData = await this.openSeaService.getSimplifiedMetadata(baseRegistrarContract, tokenIdDecimal);
+      const openSeaData = await this.openSeaService.getSimplifiedMetadata(baseRegistrarContract, baseRegistrarTokenId);
       if (openSeaData && (openSeaData.name || openSeaData.image || openSeaData.description)) {
         ensMetadata = {
           name: openSeaData.name,
@@ -172,18 +186,17 @@ export class QuickNodeRegistrationService {
         openSeaSuccess = true;
         logger.info(`✅ OpenSea metadata success (Base Registrar): ${openSeaData.name} (${openSeaData.collection})`);
       } else {
-        logger.debug(`⚠️ OpenSea returned null or empty data for Base Registrar ${tokenIdDecimal}`);
+        logger.debug(`⚠️ OpenSea returned null or empty data for Base Registrar ${baseRegistrarTokenId}`);
       }
     } catch (error: any) {
-      logger.debug(`❌ OpenSea Base Registrar failed for ${tokenIdDecimal}: ${error.message}`);
+      logger.debug(`❌ OpenSea Base Registrar failed for ${baseRegistrarTokenId}: ${error.message}`);
     }
 
     // 2. Try OpenSea with NameWrapper contract if Base Registrar failed
     if (!ensMetadata) {
-      const nameWrapperContract = '0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401';
-      logger.info(`🔍 Trying OpenSea with NameWrapper contract...`);
+      logger.info(`🔍 Trying OpenSea with NameWrapper contract (${nameWrapperTokenId})...`);
       try {
-        const openSeaData = await this.openSeaService.getSimplifiedMetadata(nameWrapperContract, tokenIdDecimal);
+        const openSeaData = await this.openSeaService.getSimplifiedMetadata(nameWrapperContract, nameWrapperTokenId);
         if (openSeaData && (openSeaData.name || openSeaData.image || openSeaData.description)) {
           ensMetadata = {
             name: openSeaData.name,
@@ -193,18 +206,18 @@ export class QuickNodeRegistrationService {
           openSeaSuccess = true;
           logger.info(`✅ OpenSea metadata success (NameWrapper): ${openSeaData.name} (${openSeaData.collection})`);
         } else {
-          logger.debug(`⚠️ OpenSea returned null or empty data for NameWrapper ${tokenIdDecimal}`);
+          logger.debug(`⚠️ OpenSea returned null or empty data for NameWrapper ${nameWrapperTokenId}`);
         }
       } catch (error: any) {
-        logger.debug(`❌ OpenSea NameWrapper failed for ${tokenIdDecimal}: ${error.message}`);
+        logger.debug(`❌ OpenSea NameWrapper failed for ${nameWrapperTokenId}: ${error.message}`);
       }
     }
 
     // 3. Fallback to ENS Metadata service if OpenSea failed completely
     if (!ensMetadata) {
-      logger.warn(`⚠️ Falling back to ENS Metadata API for registration ${tokenIdDecimal} (OpenSea failed)`);
+      logger.warn(`⚠️ Falling back to ENS Metadata API for registration ${baseRegistrarTokenId} (OpenSea failed)`);
       try {
-        const ensData = await this.ensMetadataService.getMetadataWithFallback(tokenIdDecimal);
+        const ensData = await this.ensMetadataService.getMetadataWithFallback(baseRegistrarTokenId);
         if (ensData) {
           ensMetadata = {
             name: ensData.name,
@@ -213,10 +226,10 @@ export class QuickNodeRegistrationService {
           };
           logger.info(`✅ ENS metadata fallback success: ${ensData.name}`);
         } else {
-          logger.error(`❌ ENS metadata fallback returned null for registration ${tokenIdDecimal}`);
+          logger.error(`❌ ENS metadata fallback returned null for registration ${baseRegistrarTokenId}`);
         }
       } catch (error: any) {
-        logger.error(`❌ ENS metadata fallback failed for registration ${tokenIdDecimal}: ${error.message}`);
+        logger.error(`❌ ENS metadata fallback failed for registration ${baseRegistrarTokenId}: ${error.message}`);
       }
     }
 
@@ -231,7 +244,7 @@ export class QuickNodeRegistrationService {
       });
       return ensMetadata;
     } else {
-      logger.error(`❌ No NFT name found for registration ${tokenIdDecimal} - metadata enrichment failed`);
+      logger.error(`❌ No NFT name found for registration ${baseRegistrarTokenId} - metadata enrichment failed`);
       logger.warn('⚠️ Failed to fetch ENS metadata for', ensName);
       return {};
     }
