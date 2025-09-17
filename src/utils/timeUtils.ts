@@ -1,4 +1,5 @@
 import { logger } from './logger';
+import { CurrencyUtils } from './currencyUtils';
 
 /**
  * Time utilities for contextual tweet enhancements
@@ -33,14 +34,22 @@ export class TimeUtils {
 
   /**
    * Format historical event for tweet display with dynamic label
-   * Example: "Last Sale: 0.25 ETH, 19 Mar 2024" or "Last Reg: 0.25 ETH, 19 Mar 2024"
+   * Example: "Last Sale: 0.25 ETH, 19 Mar 2024" or "Last Sale: 1000 USDC, 22 Nov 2022"
    */
-  static formatHistoricalEvent(priceEth: number, timestamp: number, eventType: 'sale' | 'mint'): string {
+  static formatHistoricalEvent(
+    priceEth: number, 
+    timestamp: number, 
+    eventType: 'sale' | 'mint',
+    currencySymbol?: string
+  ): string {
     const dateString = TimeUtils.formatDateForTweet(timestamp);
     const formattedPrice = priceEth.toFixed(2);
     const label = eventType === 'sale' ? 'Last Sale:' : 'Last Reg:';
     
-    const result = `${label} ${formattedPrice} ETH, ${dateString}`;
+    // Use provided currency symbol or default to ETH for backwards compatibility
+    const currency = currencySymbol ? CurrencyUtils.getDisplayName(currencySymbol) : 'ETH';
+    
+    const result = `${label} ${formattedPrice} ${currency}, ${dateString}`;
     logger.debug(`🕒 Formatted historical event (${eventType}): ${result}`);
     return result;
   }
@@ -61,19 +70,21 @@ export class TimeUtils {
 
   /**
    * Format listing price for bid tweets
-   * Example: "$1,234.56 (0.75 ETH)"
+   * Example: "$1,234.56 (0.75 ETH)" or "$999.70 (1000 USDC)"
    */
-  static formatListingPrice(priceEth: number, priceUsd?: number): string {
-    const formattedEth = priceEth.toFixed(2);
+  static formatListingPrice(priceEth: number, priceUsd?: number, currencySymbol?: string): string {
+    // Use provided currency symbol or default to ETH for backwards compatibility
+    const currency = currencySymbol ? CurrencyUtils.getDisplayName(currencySymbol) : 'ETH';
+    const formattedPrice = priceEth.toFixed(2);
     
     if (priceUsd && priceUsd > 0) {
       const formattedUsd = `$${priceUsd.toLocaleString('en-US', { 
         minimumFractionDigits: 2, 
         maximumFractionDigits: 2 
       })}`;
-      return `${formattedUsd} (${formattedEth} ETH)`;
+      return `${formattedUsd} (${formattedPrice} ${currency})`;
     }
     
-    return `${formattedEth} ETH`;
+    return `${formattedPrice} ${currency}`;
   }
 }

@@ -2,6 +2,7 @@ import axios, { AxiosResponse, AxiosInstance } from 'axios';
 import { logger } from '../utils/logger';
 import { MagicEdenBidResponse, MagicEdenBid, BidProcessingStats } from '../types';
 import { APIToggleService } from './apiToggleService';
+import { CurrencyUtils } from '../utils/currencyUtils';
 
 // Token Activity Interfaces
 export interface TokenActivity {
@@ -60,16 +61,24 @@ export interface TokenActivityResponse {
 
 export interface HistoricalEvent {
   type: 'sale' | 'mint';
-  priceEth: string;
+  priceEth: string; // For backwards compatibility - now represents price in native currency
   priceUsd: string;
   timestamp: number;
   daysAgo: number;
+  // New currency fields
+  currencySymbol: string; // USDC, ETH, USDT, etc.
+  currencyContract?: string; // Contract address (empty for native ETH)
+  priceDecimal: number; // Raw decimal amount
 }
 
 export interface ListingPrice {
-  priceEth: string;
+  priceEth: string; // For backwards compatibility - now represents price in native currency
   priceUsd?: string;
   timestamp: number;
+  // New currency fields
+  currencySymbol: string; // USDC, ETH, USDT, etc.
+  currencyContract?: string; // Contract address (empty for native ETH)
+  priceDecimal: number; // Raw decimal amount
 }
 
 export interface ContextualData {
@@ -543,7 +552,8 @@ export class MagicEdenService {
 
         // Look for sale or mint events with price > 0 (already filtered by API)
         for (const activity of response.activities) {
-          logger.debug(`🔍 Checking activity: type=${activity.type}, price=${activity.price.amount.decimal} ETH, txHash=${activity.txHash}`);
+          const activityCurrencySymbol = CurrencyUtils.getCurrencySymbol(activity.price.currency.contract, activity.price.currency.symbol);
+          logger.debug(`🔍 Checking activity: type=${activity.type}, price=${activity.price.amount.decimal} ${activityCurrencySymbol}, txHash=${activity.txHash}`);
           
           // Skip if this is the current transaction (not historical)
           if (currentTxHash && activity.txHash.toLowerCase() === currentTxHash.toLowerCase()) {
@@ -554,27 +564,38 @@ export class MagicEdenService {
           // API already filtered to sale/mint types, just check price > 0
           if (activity.price.amount.decimal > 0) {
             
-            const priceEth = activity.price.amount.decimal;
+            const priceDecimal = activity.price.amount.decimal;
+            const currencyContract = activity.price.currency.contract;
+            const currencySymbol = CurrencyUtils.getCurrencySymbol(currencyContract, activity.price.currency.symbol);
+            
+            // For threshold comparison, use ETH equivalent for non-ETH currencies
+            const thresholdPrice = CurrencyUtils.isETHEquivalent(currencyContract) 
+              ? priceDecimal 
+              : activity.price.amount.native; // Use native ETH equivalent for threshold
             
             // Hard cutoff: only show if the MOST RECENT event meets threshold
-            if (priceEth >= this.historicalThresholdEth) {
+            if (thresholdPrice >= this.historicalThresholdEth) {
               const daysAgo = this.calculateDaysSince(activity.timestamp);
               
-              logger.info(`📈 Found historical event: ${activity.type} for ${priceEth} ETH, ${daysAgo} days ago`);
+              logger.info(`📈 Found historical event: ${activity.type} for ${priceDecimal} ${currencySymbol}, ${daysAgo} days ago`);
               
               return {
                 type: activity.type as 'sale' | 'mint',
-                priceEth: priceEth.toFixed(2),
+                priceEth: priceDecimal.toFixed(2), // Now represents price in native currency
                 priceUsd: activity.price.amount.usd?.toFixed(2) || '',
                 timestamp: activity.timestamp,
-                daysAgo
+                daysAgo,
+                currencySymbol,
+                currencyContract: currencyContract || '',
+                priceDecimal
               };
             } else {
-              logger.debug(`🔽 Most recent historical event below threshold: ${priceEth} ETH < ${this.historicalThresholdEth} ETH - not showing any historical data`);
+              logger.debug(`🔽 Most recent historical event below threshold: ${thresholdPrice} ETH-equivalent < ${this.historicalThresholdEth} ETH - not showing any historical data`);
               return null; // Hard cutoff - don't look for older events
             }
           } else {
-            logger.debug(`❌ Activity filtered out: zero price (${activity.price.amount.decimal} ETH)`);
+            const activityCurrencySymbol = CurrencyUtils.getCurrencySymbol(activity.price.currency.contract, activity.price.currency.symbol);
+            logger.debug(`❌ Activity filtered out: zero price (${activity.price.amount.decimal} ${activityCurrencySymbol})`);
           }
         }
 
@@ -649,15 +670,20 @@ export class MagicEdenService {
             }
           }
           
-          const listingPriceEth = activeAsk.price.amount.decimal;
+          const listingPriceDecimal = activeAsk.price.amount.decimal;
+          const listingCurrencyContract = activeAsk.price.currency.contract;
+          const listingCurrencySymbol = CurrencyUtils.getCurrencySymbol(listingCurrencyContract, activeAsk.price.currency.symbol);
           
           // Always show listing price if available (proximity threshold removed)
-          logger.info(`📊 Found valid active listing: ${listingPriceEth} ETH`);
+          logger.info(`📊 Found valid active listing: ${listingPriceDecimal} ${listingCurrencySymbol}`);
           
           return {
-            priceEth: listingPriceEth.toFixed(2),
+            priceEth: listingPriceDecimal.toFixed(2), // Now represents price in native currency
             priceUsd: activeAsk.price.amount.usd?.toFixed(2),
-            timestamp: activeAsk.timestamp
+            timestamp: activeAsk.timestamp,
+            currencySymbol: listingCurrencySymbol,
+            currencyContract: listingCurrencyContract || '',
+            priceDecimal: listingPriceDecimal
           };
         }
 
