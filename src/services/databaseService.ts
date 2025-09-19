@@ -37,6 +37,7 @@ export class DatabaseService implements IDatabaseService {
       // Auto-setup database triggers for real-time processing
       await this.setupSaleNotificationTriggers();
       await this.setupRegistrationNotificationTriggers();
+      await this.setupBidNotificationTriggers();
       
       logger.info('PostgreSQL database initialized successfully');
     } catch (error: any) {
@@ -1374,6 +1375,41 @@ export class DatabaseService implements IDatabaseService {
   }
 
   /**
+   * Get bid by ID
+   */
+  async getBidById(id: number): Promise<ENSBid | null> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        SELECT 
+          id, bid_id as "bidId", contract_address as "contractAddress",
+          token_id as "tokenId", maker_address as "makerAddress", taker_address as "takerAddress",
+          status, price_raw as "priceRaw", price_decimal as "priceDecimal",
+          price_usd as "priceUsd", currency_contract as "currencyContract", 
+          currency_symbol as "currencySymbol", source_domain as "sourceDomain",
+          source_name as "sourceName", marketplace_fee as "marketplaceFee",
+          valid_from as "validFrom", valid_until as "validUntil", created_at_api as "createdAtApi",
+          processed_at as "processedAt", tweet_id as "tweetId", posted, ens_name as "ensName",
+          nft_image as "nftImage", nft_description as "nftDescription"
+        FROM ens_bids 
+        WHERE id = $1
+      `, [id]);
+
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      const bid = this.mapBidRows([result.rows[0]])[0];
+      return bid;
+
+    } catch (error: any) {
+      logger.error(`Error fetching bid by ID ${id}:`, error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Mark a bid as failed (validation failed, don't retry)
    */
   async markBidAsFailed(id: number, reason: string): Promise<void> {
@@ -1435,32 +1471,32 @@ export class DatabaseService implements IDatabaseService {
   private mapBidRows(rows: any[]): ENSBid[] {
     return rows.map((row: any) => ({
       id: row.id,
-      bidId: row.bid_id,
-      contractAddress: row.contract_address,
-      tokenId: row.token_id,
-      makerAddress: row.maker_address,
-      takerAddress: row.taker_address,
+      bidId: row.bidId || row.bid_id,
+      contractAddress: row.contractAddress || row.contract_address,
+      tokenId: row.tokenId || row.token_id,
+      makerAddress: row.makerAddress || row.maker_address,
+      takerAddress: row.takerAddress || row.taker_address,
       status: row.status,
-      priceRaw: row.price_raw,
-      priceDecimal: row.price_decimal,
-      priceUsd: row.price_usd,
-      currencyContract: row.currency_contract,
-      currencySymbol: row.currency_symbol,
-      sourceDomain: row.source_domain,
-      sourceName: row.source_name,
-      marketplaceFee: row.marketplace_fee,
-      createdAtApi: row.created_at_api,
-      updatedAtApi: row.updated_at_api,
-      validFrom: row.valid_from,
-      validUntil: row.valid_until,
-      processedAt: row.processed_at,
-      ensName: row.ens_name,
-      nftImage: row.nft_image,
-      nftDescription: row.nft_description,
-      tweetId: row.tweet_id,
+      priceRaw: row.priceRaw || row.price_raw,
+      priceDecimal: row.priceDecimal || row.price_decimal,
+      priceUsd: row.priceUsd || row.price_usd,
+      currencyContract: row.currencyContract || row.currency_contract,
+      currencySymbol: row.currencySymbol || row.currency_symbol,
+      sourceDomain: row.sourceDomain || row.source_domain,
+      sourceName: row.sourceName || row.source_name,
+      marketplaceFee: row.marketplaceFee || row.marketplace_fee,
+      createdAtApi: row.createdAtApi || row.created_at_api,
+      updatedAtApi: row.updatedAtApi || row.updated_at_api,
+      validFrom: row.validFrom || row.valid_from,
+      validUntil: row.validUntil || row.valid_until,
+      processedAt: row.processedAt || row.processed_at,
+      ensName: row.ensName || row.ens_name,
+      nftImage: row.nftImage || row.nft_image,
+      nftDescription: row.nftDescription || row.nft_description,
+      tweetId: row.tweetId || row.tweet_id,
       posted: row.posted,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at
+      createdAt: row.createdAt || row.created_at,
+      updatedAt: row.updatedAt || row.updated_at
     }));
   }
 
@@ -1638,6 +1674,56 @@ export class DatabaseService implements IDatabaseService {
 
     } catch (error: any) {
       logger.error('❌ Failed to setup registration notification triggers:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Set up database notification triggers for real-time bid processing
+   * Creates trigger function and trigger for instant processing
+   */
+  async setupBidNotificationTriggers(): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      // Step 1: Create the trigger function
+      const createFunctionQuery = `
+        CREATE OR REPLACE FUNCTION notify_new_bid() 
+        RETURNS TRIGGER AS $$
+        BEGIN
+          -- Only notify for unposted bids
+          IF NEW.status = 'unposted' THEN
+            PERFORM pg_notify('new_bid', NEW.id::text);
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+      `;
+
+      await this.pool.query(createFunctionQuery);
+      logger.info('✅ Created notify_new_bid() trigger function');
+
+      // Step 2: Create the trigger (if it doesn't exist)
+      const createTriggerQuery = `
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_trigger WHERE tgname = 'new_bid_trigger'
+          ) THEN
+            CREATE TRIGGER new_bid_trigger 
+              AFTER INSERT ON ens_bids 
+              FOR EACH ROW EXECUTE FUNCTION notify_new_bid();
+          END IF;
+        END $$;
+      `;
+
+      await this.pool.query(createTriggerQuery);
+      logger.info('✅ Created new_bid_trigger on ens_bids table');
+
+      logger.info('🎯 Bid notification triggers setup complete - ready for real-time processing!');
+
+    } catch (error: any) {
+      logger.error('❌ Failed to setup bid notification triggers:', error.message);
       throw error;
     }
   }

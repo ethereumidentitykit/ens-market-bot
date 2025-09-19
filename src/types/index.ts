@@ -225,6 +225,7 @@ export interface IDatabaseService {
   getUnpostedBids(limit?: number, maxAgeHours?: number): Promise<ENSBid[]>;
   markBidAsPosted(id: number, tweetId: string): Promise<void>;
   markBidAsFailed(id: number, reason: string): Promise<void>;
+  getBidById(id: number): Promise<ENSBid | null>;
   
   // Price tier methods
   getPriceTiers(transactionType?: string): Promise<PriceTier[]>;
@@ -241,6 +242,8 @@ export interface IDatabaseService {
   
   // Real-time notification trigger methods
   setupSaleNotificationTriggers(): Promise<void>;
+  setupRegistrationNotificationTriggers(): Promise<void>;
+  setupBidNotificationTriggers(): Promise<void>;
   checkSaleNotificationTriggers(): Promise<boolean>;
 }
 

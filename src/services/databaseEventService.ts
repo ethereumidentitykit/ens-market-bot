@@ -16,11 +16,13 @@ export class DatabaseEventService {
   private autoTweetService: AutoTweetService;
   private databaseService: IDatabaseService;
 
-  // Separate queues for handling sales and registrations
+  // Separate queues for handling sales, registrations, and bids
   private saleNotificationQueue: number[] = [];
   private registrationNotificationQueue: number[] = [];
+  private bidNotificationQueue: number[] = [];
   private isProcessingSales = false;
   private isProcessingRegistrations = false;
+  private isProcessingBids = false;
 
   constructor(
     autoTweetService: AutoTweetService,
@@ -121,15 +123,16 @@ export class DatabaseEventService {
       this.client.on('error', this.handleConnectionError.bind(this));
       this.client.on('end', this.handleConnectionEnd.bind(this));
 
-      // Connect and start listening for both sales and registrations
+      // Connect and start listening for sales, registrations, and bids
       await this.client.connect();
       await this.client.query('LISTEN new_sale');
       await this.client.query('LISTEN new_registration');
+      await this.client.query('LISTEN new_bid');
       
       this.isListening = true;
       this.reconnectAttempts = 0; // Reset on successful connection
       
-      logger.info('✅ Database listener connected and listening for new_sale and new_registration notifications');
+      logger.info('✅ Database listener connected and listening for new_sale, new_registration, and new_bid notifications');
 
     } catch (error: any) {
       this.isListening = false;
@@ -164,6 +167,17 @@ export class DatabaseEventService {
 
         logger.info(`🚨 NEW REGISTRATION NOTIFICATION: ID ${registrationId} - adding to registrations queue`);
         this.addRegistrationToQueue(registrationId);
+        
+      } else if (msg.channel === 'new_bid' && msg.payload) {
+        const bidId = parseInt(msg.payload);
+        
+        if (isNaN(bidId)) {
+          logger.warn(`Invalid bid ID in notification: ${msg.payload}`);
+          return;
+        }
+
+        logger.info(`🚨 NEW BID NOTIFICATION: ID ${bidId} - adding to bids queue`);
+        this.addBidToQueue(bidId);
       }
     } catch (error: any) {
       logger.error('Error handling notification:', error.message);
@@ -199,6 +213,22 @@ export class DatabaseEventService {
     // Start processing if not already running
     if (!this.isProcessingRegistrations) {
       this.processRegistrationsQueue();
+    }
+  }
+
+  /**
+   * Add bid ID to processing queue
+   */
+  private addBidToQueue(bidId: number): void {
+    // Avoid duplicates in queue
+    if (!this.bidNotificationQueue.includes(bidId)) {
+      this.bidNotificationQueue.push(bidId);
+      logger.info(`📦 Added bid ${bidId} to bids queue (queue length: ${this.bidNotificationQueue.length})`);
+    }
+
+    // Start processing if not already running
+    if (!this.isProcessingBids) {
+      this.processBidsQueue();
     }
   }
 
@@ -250,6 +280,31 @@ export class DatabaseEventService {
 
     this.isProcessingRegistrations = false;
     logger.info('✅ Registrations queue processing complete');
+  }
+
+  /**
+   * Process the bids notification queue with proper rate limiting
+   */
+  private async processBidsQueue(): Promise<void> {
+    if (this.isProcessingBids || this.bidNotificationQueue.length === 0) {
+      return;
+    }
+
+    this.isProcessingBids = true;
+    logger.info(`🔄 Starting bids queue processing (${this.bidNotificationQueue.length} bids)`);
+
+    while (this.bidNotificationQueue.length > 0 && !this.isShuttingDown) {
+      const bidId = this.bidNotificationQueue.shift()!;
+      
+      try {
+        await this.processSingleBid(bidId);
+      } catch (error: any) {
+        logger.error(`Failed to process bid ${bidId}:`, error.message);
+      }
+    }
+
+    this.isProcessingBids = false;
+    logger.info('✅ Bids queue processing complete');
   }
 
   /**
@@ -343,6 +398,51 @@ export class DatabaseEventService {
   }
 
   /**
+   * Process a single bid notification
+   */
+  private async processSingleBid(bidId: number): Promise<void> {
+    try {
+      // Get the bid from database
+      const bid = await this.databaseService.getBidById(bidId);
+      
+      if (!bid) {
+        logger.warn(`Bid ${bidId} not found in database`);
+        return;
+      }
+
+      if (bid.status !== 'unposted') {
+        logger.info(`Bid ${bidId} already processed (status: ${bid.status}), skipping`);
+        return;
+      }
+
+      logger.info(`🚀 INSTANT PROCESSING: ${bid.priceDecimal} ETH bid for ${bid.ensName} - ID: ${bidId}`);
+
+      // Get auto-post settings
+      const settings = await this.autoTweetService.getSettings();
+      
+      if (!settings.enabled || !settings.bids.enabled) {
+        logger.info(`Auto-posting disabled, skipping bid ${bidId}`);
+        return;
+      }
+
+      // Process through existing AutoTweetService bid method
+      const results = await this.autoTweetService.processNewBids([bid], settings);
+      
+      const result = results[0];
+      if (result?.success) {
+        logger.info(`✅ Successfully posted bid tweet for ${bidId} - Tweet ID: ${result.tweetId}`);
+      } else if (result?.skipped) {
+        logger.info(`⏭️ Skipped bid ${bidId}: ${result.reason}`);
+      } else {
+        logger.warn(`❌ Failed to post bid ${bidId}: ${result?.error || 'Unknown error'}`);
+      }
+
+    } catch (error: any) {
+      logger.error(`Error processing bid ${bidId}:`, error.message);
+    }
+  }
+
+  /**
    * Handle database connection errors
    */
   private handleConnectionError(error: Error): void {
@@ -424,7 +524,7 @@ export class DatabaseEventService {
       // Get auto-post settings to use the same time filters
       const autoPostSettings = await this.autoTweetService.getSettings();
       
-      logger.info(`🔍 Using auto-posting time window: Sales ${autoPostSettings.sales.maxAgeHours}h, Registrations ${autoPostSettings.registrations.maxAgeHours}h (Global enabled: ${autoPostSettings.enabled})`);
+      logger.info(`🔍 Using auto-posting time window: Sales ${autoPostSettings.sales.maxAgeHours}h, Registrations ${autoPostSettings.registrations.maxAgeHours}h, Bids ${autoPostSettings.bids.maxAgeHours}h (Global enabled: ${autoPostSettings.enabled})`);
       
       // === SALES RECOVERY ===
       const unpostedSales = await this.databaseService.getUnpostedSales(5, autoPostSettings.sales.maxAgeHours);
@@ -464,12 +564,31 @@ export class DatabaseEventService {
         logger.info(`⏰ Found ${allUnpostedRegistrations.length} unposted registrations but they're older than ${autoPostSettings.registrations.maxAgeHours}h - outside auto-posting window`);
       }
 
+      // === BIDS RECOVERY ===
+      const unpostedBids = await this.databaseService.getUnpostedBids(5, autoPostSettings.bids.maxAgeHours);
+      const allUnpostedBids = await this.databaseService.getUnpostedBids(5, 999); // Debug check
+      
+      logger.info(`🔍 Bids recovery: Found ${allUnpostedBids.length} unposted bids total (any age), ${unpostedBids.length} within ${autoPostSettings.bids.maxAgeHours}h window`);
+
+      if (unpostedBids.length > 0) {
+        logger.info(`🔄 Bids startup recovery: Found ${unpostedBids.length} unposted bids, adding to processing queue`);
+        
+        for (const bid of unpostedBids) {
+          if (bid.id) {
+            this.addBidToQueue(bid.id);
+            logger.info(`🔄 Recovered unposted bid: ${bid.priceDecimal} ETH for ${bid.ensName} - ID: ${bid.id}`);
+          }
+        }
+      } else if (allUnpostedBids.length > 0) {
+        logger.info(`⏰ Found ${allUnpostedBids.length} unposted bids but they're older than ${autoPostSettings.bids.maxAgeHours}h - outside auto-posting window`);
+      }
+
       // === SUMMARY ===
-      const totalRecovered = unpostedSales.length + unpostedRegistrations.length;
+      const totalRecovered = unpostedSales.length + unpostedRegistrations.length + unpostedBids.length;
       if (totalRecovered === 0) {
         logger.info('✅ No unposted items found within time windows - clean startup');
       } else {
-        logger.info(`✅ Startup recovery complete - ${unpostedSales.length} sales and ${unpostedRegistrations.length} registrations added to processing queues`);
+        logger.info(`✅ Startup recovery complete - ${unpostedSales.length} sales, ${unpostedRegistrations.length} registrations, and ${unpostedBids.length} bids added to processing queues`);
       }
 
     } catch (error: any) {
