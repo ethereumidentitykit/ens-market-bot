@@ -2823,7 +2823,7 @@ all/Kiss Person Woman Medium Skin Tone.svg,Kiss Person Woman Medium Skin Tone,�
 all/Man Light Skin Tone Bald.svg,Man Light Skin Tone Bald,👨🏻‍🦲,1F468-1F3FB-200D-1F9B2,mapped,hair-attr
 all/Writing Hand Dark Skin Tone.svg,Writing Hand Dark Skin Tone,✍🏿,270D-1F3FF,mapped,lookup+tone
 all/Lemon.svg,Lemon,🍋,1F34B,mapped,lookup
-all/Lime.svg,Lime,🍋🟢,1F34B-LIME,mapped,custom
+all/Lime.svg,Lime,🍋‍🟩,1F34B-200D-1F7E9,mapped,zwj-sequence
 all/Articulated Lorry.svg,Articulated Lorry,🚛,1F69B,mapped,lookup
 all/Cucumber.svg,Cucumber,🥒,1F952,mapped,lookup
 all/Man Rowing Boat Medium Skin Tone.svg,Man Rowing Boat Medium Skin Tone,🚣🏽‍♂️,1F6A3-1F3FD-200D-2642-FE0F,mapped,activity-person
