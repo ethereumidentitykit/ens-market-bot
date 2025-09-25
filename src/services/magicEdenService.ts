@@ -346,7 +346,7 @@ export class MagicEdenService {
       tokenId: this.extractTokenId(magicEdenBid.tokenSetId),
       makerAddress: magicEdenBid.maker,
       takerAddress: magicEdenBid.taker,
-      status: magicEdenBid.status,
+      status: 'unposted', // Always use 'unposted' for internal status - Magic Eden status validated separately
       priceRaw: magicEdenBid.price.amount.raw,
       priceDecimal: magicEdenBid.price.amount.decimal.toString(),
       priceUsd: magicEdenBid.price.amount.usd?.toString() || '',

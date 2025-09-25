@@ -128,7 +128,7 @@ export class BidsProcessingService {
       const transformedBid = this.magicEdenService.transformBid(magicEdenBid);
 
       // Apply filtering logic
-      if (!(await this.shouldProcessBid(transformedBid))) {
+      if (!(await this.shouldProcessBid(transformedBid, magicEdenBid))) {
         logger.debug(`🚫 Bid ${magicEdenBid.id} filtered out (${transformedBid.priceDecimal} ${transformedBid.currencySymbol})`);
         stats.filtered++;
         return;
@@ -261,10 +261,11 @@ export class BidsProcessingService {
    * Filtering logic for ENS bids
    * Applies club-aware minimum thresholds and age limits
    */
-  private async shouldProcessBid(bid: any): Promise<boolean> {
+  private async shouldProcessBid(bid: any, magicEdenBid: any): Promise<boolean> {
     try {
-      // Only process active bids
-      if (bid.status !== 'active') {
+      // Only process active bids from Magic Eden API
+      if (magicEdenBid.status !== 'active') {
+        logger.debug(`🚫 Skipping non-active bid: ${magicEdenBid.id} (status: ${magicEdenBid.status})`);
         return false;
       }
 
