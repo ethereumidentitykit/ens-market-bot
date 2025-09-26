@@ -72,8 +72,8 @@ export class SchedulerService {
 
   /**
    * Start the automated scheduling
-   * Sales: every 5 minutes, Registrations: every 1 minute, Bids: every 2 minutes
-   * NOTE: Registration tweet processing is handled in real-time by DatabaseEventService
+   * Sales: every 5 minutes, Registrations: every 1 minute
+   * NOTE: Registration and bid tweet processing is handled in real-time by DatabaseEventService
    */
   async start(): Promise<void> {
     // Stop existing jobs if running
@@ -104,30 +104,22 @@ export class SchedulerService {
       'America/New_York' // Timezone
     );
 
-    // Create cron job for bid processing (every 1 minute)
-    this.bidsSyncJob = new CronJob(
-      '0 * * * * *', // Every 1 minute at :00 seconds
-      () => {
-        this.runBidsSync();
-      },
-      null,
-      false, // Don't start automatically
-      'America/New_York' // Timezone
-    );
+    // NOTE: Bid processing is now handled entirely in real-time via DatabaseEventService
+    // No scheduled polling needed for bids anymore
 
     this.salesSyncJob.start();
     this.registrationSyncJob.start();
-    this.bidsSyncJob.start();
+    // this.bidsSyncJob.start(); // DISABLED - Real-time processing via database notifications
     this.isRunning = true;
     
     // Save enabled state to database for persistence across restarts
     await this.saveSchedulerState(true);
     
-    logger.info('Scheduler started - Sales: every 5 minutes, Registrations: every 1 minute, Bids: every 1 minute');
-    logger.info('Tweet processing: REAL-TIME via DatabaseEventService for both Moralis and QuickNode data');
+    logger.info('Scheduler started - Sales: every 5 minutes, Registrations: every 1 minute');
+    logger.info('Tweet processing: REAL-TIME via DatabaseEventService for Registrations, Bids, and Moralis/QuickNode data');
     logger.info(`Next sales run: ${this.salesSyncJob.nextDate().toString()}`);
     logger.info(`Next registration run: ${this.registrationSyncJob.nextDate().toString()}`);
-    logger.info(`Next bid run: ${this.bidsSyncJob.nextDate().toString()}`);
+    logger.info('Bid processing: REAL-TIME via database notifications (no scheduled polling)');
   }
 
   /**
@@ -142,13 +134,13 @@ export class SchedulerService {
       wasRunning = true;
     }
     
-    // Registration sync job is already disabled (handled by DatabaseEventService)
     if (this.registrationSyncJob) {
       this.registrationSyncJob.stop();
       this.registrationSyncJob = null;
       wasRunning = true;
     }
     
+    // Bid sync job is now disabled by default (handled by DatabaseEventService)
     if (this.bidsSyncJob) {
       this.bidsSyncJob.stop();
       this.bidsSyncJob = null;
@@ -162,8 +154,8 @@ export class SchedulerService {
       await this.saveSchedulerState(false);
       
       logger.info('💾 Scheduler state persisted: DISABLED (survives restarts)');
-    logger.info('Scheduler stopped - sales, registration, and bid processing halted');
-    logger.info('Registration tweet processing continues via real-time DatabaseEventService');
+      logger.info('Scheduler stopped - sales and registration processing halted');
+      logger.info('Registration and bid tweet processing continues via real-time DatabaseEventService');
     } else {
       logger.info('Scheduler was not running');
     }
@@ -178,12 +170,12 @@ export class SchedulerService {
       this.salesSyncJob = null;
     }
     
-    // Registration sync job is already disabled (handled by DatabaseEventService)
     if (this.registrationSyncJob) {
       this.registrationSyncJob.stop();
       this.registrationSyncJob = null;
     }
     
+    // Bid sync job is now disabled by default (handled by DatabaseEventService)
     if (this.bidsSyncJob) {
       this.bidsSyncJob.stop();
       this.bidsSyncJob = null;
@@ -193,7 +185,7 @@ export class SchedulerService {
     
     // Don't persist state change - allows scheduler to resume after restart
     logger.info('Scheduler gracefully stopped (state preserved for restart)');
-    logger.info('Registration tweet processing continues via real-time DatabaseEventService');
+    logger.info('Registration and bid tweet processing continues via real-time DatabaseEventService');
   }
 
   /**
@@ -360,7 +352,9 @@ export class SchedulerService {
   }
 
   /**
-   * Execute the bid sync process (runs every 2 minutes)
+   * Execute the bid sync process 
+   * NOTE: This method is retained for manual testing/debugging only.
+   * Bid processing is now handled entirely in real-time via DatabaseEventService.
    */
   private async runBidsSync(): Promise<void> {
     if (!this.isRunning) {
@@ -458,11 +452,11 @@ export class SchedulerService {
   } {
     const nextSalesRunTime = this.salesSyncJob ? this.salesSyncJob.nextDate().toJSDate() : null;
     const nextRegistrationRunTime = this.registrationSyncJob ? this.registrationSyncJob.nextDate().toJSDate() : null;
-    const nextBidsRunTime = this.bidsSyncJob ? this.bidsSyncJob.nextDate().toJSDate() : null;
+    const nextBidsRunTime = null; // Bid scheduling disabled - handled in real-time via DatabaseEventService
     
     // For backward compatibility, show the nearest upcoming run
     let nextRunTime = null;
-    const allNextTimes = [nextSalesRunTime, nextRegistrationRunTime, nextBidsRunTime].filter(t => t !== null);
+    const allNextTimes = [nextSalesRunTime, nextRegistrationRunTime].filter(t => t !== null);
     if (allNextTimes.length > 0) {
       nextRunTime = new Date(Math.min(...allNextTimes.map(t => t!.getTime())));
     }
@@ -481,8 +475,8 @@ export class SchedulerService {
   }
 
   /**
-   * Manually trigger sales, registration, and bid sync (doesn't affect the schedule)
-   * NOTE: Registration tweet processing handled by real-time DatabaseEventService
+   * Manually trigger sales and registration sync (doesn't affect the schedule)
+   * NOTE: Registration and bid tweet processing handled by real-time DatabaseEventService
    */
   async triggerManualSync(): Promise<{
     success: boolean;
@@ -490,17 +484,16 @@ export class SchedulerService {
     error?: string;
   }> {
     try {
-      logger.info('Manual sync triggered - running sales, registration, and bid processing');
-      logger.info('Registration tweet processing is handled in real-time by DatabaseEventService');
+      logger.info('Manual sync triggered - running sales and registration processing');
+      logger.info('Registration and bid tweet processing is handled in real-time by DatabaseEventService');
       
-      // Run all sync methods manually
+      // Run scheduled sync methods manually (bids are real-time only)
       await this.runSalesSync();
       await this.runRegistrationSync();
-      await this.runBidsSync();
       
       return {
         success: true,
-        stats: { message: 'Sales, registration, and bid sync completed (registration tweets handled in real-time)' }
+        stats: { message: 'Sales and registration sync completed (registration and bid tweets handled in real-time)' }
       };
     } catch (error: any) {
       logger.error('Manual sync failed:', error.message);
