@@ -810,9 +810,8 @@
                                         <span x-show="tweetImageUrl" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
                                             <i class="fas fa-image mr-1"></i>Image
                                         </span>
-                                        <span class="text-xs" 
-                                              :class="generatedTweet?.characterCount <= 280 ? 'text-green-600' : 'text-red-600'"
-                                              x-text="`${generatedTweet?.characterCount || 0}/280 chars`">
+                                        <span class="text-xs text-gray-600" 
+                                              x-text="`${generatedTweet?.characterCount || 0} chars`">
                                         </span>
                                         <span x-show="generatedTweet?.isValid" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                                             <i class="fas fa-check mr-1"></i>Valid

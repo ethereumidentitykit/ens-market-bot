@@ -32,7 +32,7 @@ export interface GeneratedTweet {
  * #ENS #ENSDomains #Ethereum"
  */
 export class NewTweetFormatter {
-  private readonly MAX_TWEET_LENGTH = 280;
+  // Note: No longer enforcing character limit - premium account supports longer tweets
   private readonly ethIdentityService = new ENSWorkerService();
   private readonly clubService = new ClubService();
 
@@ -104,7 +104,7 @@ export class NewTweetFormatter {
       const result: GeneratedTweet = {
         text: tweetText,
         characterCount: tweetText.length,
-        isValid: tweetText.length <= this.MAX_TWEET_LENGTH && tweetText.length > 0,
+        isValid: tweetText.length > 0,
         imageBuffer,
         imageUrl,
         imageData
@@ -253,7 +253,7 @@ export class NewTweetFormatter {
       const result: GeneratedTweet = {
         text: tweetText,
         characterCount: tweetText.length,
-        isValid: tweetText.length <= this.MAX_TWEET_LENGTH && tweetText.length > 0,
+        isValid: tweetText.length > 0,
         imageBuffer,
         imageUrl,
         imageData
@@ -1239,9 +1239,7 @@ export class NewTweetFormatter {
       errors.push('Registration tweet content cannot be empty');
     }
 
-    if (content.length > this.MAX_TWEET_LENGTH) {
-      errors.push(`Registration tweet too long: ${content.length} characters (max ${this.MAX_TWEET_LENGTH})`);
-    }
+    // No longer enforcing character limit - premium account supports longer tweets
 
     // Check for required elements in registration format
     if (!content.includes('🏛️ REGISTERED:')) {
@@ -1286,9 +1284,7 @@ export class NewTweetFormatter {
       errors.push('Bid tweet content cannot be empty');
     }
 
-    if (content.length > this.MAX_TWEET_LENGTH) {
-      errors.push(`Bid tweet too long: ${content.length} characters (max ${this.MAX_TWEET_LENGTH})`);
-    }
+    // No longer enforcing character limit - premium account supports longer tweets
 
     // Check for required elements in bid format
     if (!content.includes('✋ OFFER:')) {
@@ -1336,9 +1332,7 @@ export class NewTweetFormatter {
       errors.push('Tweet content cannot be empty');
     }
 
-    if (content.length > this.MAX_TWEET_LENGTH) {
-      errors.push(`Tweet too long: ${content.length} characters (max ${this.MAX_TWEET_LENGTH})`);
-    }
+    // No longer enforcing character limit - premium account supports longer tweets
 
     // Check for required elements in new format
     if (!content.includes('💰 SOLD:')) {
