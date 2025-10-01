@@ -111,13 +111,7 @@ export class TwitterService {
     }
 
     try {
-      // Validate content length
-      if (content.length > 280) {
-        const error = `Tweet content too long: ${content.length} characters (max 280)`;
-        logger.error(error);
-        return { success: false, error };
-      }
-
+      // Validate content is not empty
       if (content.trim().length === 0) {
         const error = 'Tweet content cannot be empty';
         logger.error(error);
