@@ -630,6 +630,89 @@ export class DatabaseService implements IDatabaseService {
   }
 
   /**
+   * AI Configuration Methods
+   * Type-safe wrappers around system_state for AI settings
+   */
+
+  /**
+   * Check if AI replies are globally enabled
+   * @returns true if enabled, false otherwise
+   */
+  async isAIRepliesEnabled(): Promise<boolean> {
+    const value = await this.getSystemState('ai_replies_enabled');
+    return value === 'true'; // Default: false
+  }
+
+  /**
+   * Enable or disable AI replies globally
+   * @param enabled - true to enable, false to disable
+   */
+  async setAIRepliesEnabled(enabled: boolean): Promise<void> {
+    await this.setSystemState('ai_replies_enabled', enabled.toString());
+    logger.info(`AI replies ${enabled ? 'enabled' : 'disabled'}`);
+  }
+
+  /**
+   * Get the OpenAI model to use for AI replies
+   * @returns model name (default: "gpt-5")
+   */
+  async getAIModel(): Promise<string> {
+    const value = await this.getSystemState('ai_openai_model');
+    return value || 'gpt-5';
+  }
+
+  /**
+   * Set the OpenAI model to use for AI replies
+   * @param model - model name (e.g., "gpt-5", "o1")
+   */
+  async setAIModel(model: string): Promise<void> {
+    await this.setSystemState('ai_openai_model', model);
+    logger.info(`AI model set to: ${model}`);
+  }
+
+  /**
+   * Get the temperature for AI generation
+   * @returns temperature value (0.0-1.0, default: 0.7)
+   */
+  async getAITemperature(): Promise<number> {
+    const value = await this.getSystemState('ai_temperature');
+    return value ? parseFloat(value) : 0.7;
+  }
+
+  /**
+   * Set the temperature for AI generation
+   * @param temperature - temperature value (0.0-1.0)
+   */
+  async setAITemperature(temperature: number): Promise<void> {
+    if (temperature < 0 || temperature > 1) {
+      throw new Error('Temperature must be between 0 and 1');
+    }
+    await this.setSystemState('ai_temperature', temperature.toString());
+    logger.info(`AI temperature set to: ${temperature}`);
+  }
+
+  /**
+   * Get the maximum tokens for AI completion
+   * @returns max tokens (default: 300)
+   */
+  async getAIMaxTokens(): Promise<number> {
+    const value = await this.getSystemState('ai_max_tokens');
+    return value ? parseInt(value, 10) : 300;
+  }
+
+  /**
+   * Set the maximum tokens for AI completion
+   * @param maxTokens - maximum completion tokens
+   */
+  async setAIMaxTokens(maxTokens: number): Promise<void> {
+    if (maxTokens < 1) {
+      throw new Error('Max tokens must be greater than 0');
+    }
+    await this.setSystemState('ai_max_tokens', maxTokens.toString());
+    logger.info(`AI max tokens set to: ${maxTokens}`);
+  }
+
+  /**
    * Get database statistics
    */
   async getStats(): Promise<{

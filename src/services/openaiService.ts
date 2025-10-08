@@ -31,6 +31,8 @@ interface ModelConfig {
 export class OpenAIService {
   private client: OpenAI;
   private readonly temperature = 0.7; // Balance creativity and consistency
+  private readonly maxRetries = 2; // Retry up to 2 times (3 total attempts)
+  private readonly baseRetryDelay = 1000; // 1 second base delay
   
   // Model configurations (token limits based on Oct 2025 OpenAI specs)
   private readonly models: { 
@@ -70,6 +72,77 @@ export class OpenAIService {
     logger.info(`   Search model: ${this.models.search.name} (with web search)`);
     logger.info(`   Generation model: ${this.models.base.name} (max ${this.models.base.maxInputTokens.toLocaleString()} tokens)`);
     logger.info(`   Fallback model: ${this.models.thinking.name} (max ${this.models.thinking.maxInputTokens.toLocaleString()} tokens)`);
+  }
+
+  /**
+   * Sleep for a specified duration
+   * @param ms - Milliseconds to sleep
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Determine if an error is retryable
+   * @param error - Error to check
+   * @returns True if should retry, false otherwise
+   */
+  private isRetryableError(error: any): boolean {
+    // Retry on rate limits and server errors
+    if (error?.status === 429) return true; // Rate limit
+    if (error?.status >= 500) return true; // Server errors
+    if (error?.code === 'ECONNRESET') return true; // Connection reset
+    if (error?.code === 'ETIMEDOUT') return true; // Timeout
+    
+    // Don't retry on client errors
+    if (error?.status === 401) return false; // Invalid API key
+    if (error?.status === 400) return false; // Bad request
+    if (error?.status === 403) return false; // Forbidden
+    
+    // Retry on unknown errors
+    return true;
+  }
+
+  /**
+   * Execute a function with retry logic
+   * @param fn - Async function to execute
+   * @param context - Description for logging
+   * @returns Result from function
+   */
+  private async withRetry<T>(
+    fn: () => Promise<T>,
+    context: string
+  ): Promise<T> {
+    let lastError: any;
+    
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      try {
+        return await fn();
+      } catch (error: any) {
+        lastError = error;
+        
+        // Check if we should retry
+        const isRetryable = this.isRetryableError(error);
+        const isLastAttempt = attempt === this.maxRetries;
+        
+        if (!isRetryable || isLastAttempt) {
+          throw error; // Don't retry or no more retries left
+        }
+        
+        // Calculate delay with exponential backoff
+        const isRateLimit = error?.status === 429;
+        const delay = isRateLimit 
+          ? this.baseRetryDelay * Math.pow(2, attempt) * 2 // Longer delay for rate limits
+          : this.baseRetryDelay * Math.pow(2, attempt);
+        
+        logger.warn(`${context} failed (attempt ${attempt + 1}/${this.maxRetries + 1}): ${error.message}`);
+        logger.info(`   Retrying in ${delay}ms...`);
+        
+        await this.sleep(delay);
+      }
+    }
+    
+    throw lastError;
   }
 
   /**
@@ -141,13 +214,6 @@ METHOD (use web.run)
 • Prefer primary/authoritative sources: Wikipedia/Wikidata, reputable dictionaries, news orgs, NameBio/DNJournal/marketplaces, USPTO/EUIPO/WIPO, major analytics sources.
 • Cite 1–3 strongest sources per subsection. Do not over-cite.
 
-SCORING RUBRIC (0–10; justify each briefly)
-• Brandability
-• Global usability
-• SEO/keyword demand
-• Legal/reputation risk (reverse-scored; lower risk → higher score)
-• Liquidity (resale likelihood within 12–24 months)
-Compute Overall Value Score (0–10) as a reasoned weighted average you state explicitly.
 
 OUTPUT
 1) Executive summary (≤120 words)
@@ -156,7 +222,7 @@ OUTPUT
 4) Sales comps table (if any): {name | TLD/namespace | price | date | source}.
 5) Snapshot table: {TLD | status | indicative ask (if any) | source}.
 6) Risk notes (trademark/NSFW/controversy) with citations.
-7) Scoring with one-line rationale per dimension and the weighted formula used.
+
 
 CONSTRAINTS
 • Be concise and evidence-driven.
@@ -165,12 +231,17 @@ CONSTRAINTS
 
 BEGIN with research for: ${label}`;
 
-      // Call GPT-5 with web search
-      const response = await this.client.responses.create({
-        model: this.models.search.name,
-        input: researchPrompt,
-        tools: [{ type: "web_search" }],
-      });
+      // Call GPT-5 with web search (with retry logic)
+      const response = await this.withRetry(
+        async () => {
+          return await this.client.responses.create({
+            model: this.models.search.name,
+            input: researchPrompt,
+            tools: [{ type: "web_search" }],
+          });
+        },
+        `Name research for "${label}"`
+      );
 
       const research = response.output_text?.trim() || '';
       
@@ -247,11 +318,16 @@ BEGIN with research for: ${label}`;
       logger.info(`   Estimated input: ${estimatedTokens.toLocaleString()} tokens`);
       logger.info(`   Selected model: ${selectedModel.name} (${selectedModel.description})`);
 
-      // Call OpenAI Responses API (no web search needed - already done)
-      const response = await this.client.responses.create({
-        model: selectedModel.name,
-        input: fullPrompt,
-      });
+      // Call OpenAI Responses API (with retry logic)
+      const response = await this.withRetry(
+        async () => {
+          return await this.client.responses.create({
+            model: selectedModel.name,
+            input: fullPrompt,
+          });
+        },
+        `Tweet generation for "${context.event.tokenName}"`
+      );
 
       const tweetText = response.output_text?.trim() || '';
       
@@ -278,16 +354,16 @@ BEGIN with research for: ${label}`;
     } catch (error: any) {
       logger.error('❌ OpenAI generation error:', error.message);
       
-      // Handle rate limits
+      // Enhance error messages (retry logic already applied)
       if (error?.status === 429) {
-        throw new Error('OpenAI rate limit exceeded. Please try again later.');
+        throw new Error('OpenAI rate limit exceeded after retries. Please try again later.');
       }
       
       // Handle other API errors
       if (error?.status) {
         throw new Error(`OpenAI API error (${error.status}): ${error.message}`);
       }
-      
+
       throw error;
     }
   }
