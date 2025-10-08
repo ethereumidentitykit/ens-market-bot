@@ -564,12 +564,14 @@ async function startApplication(): Promise<void> {
         // Step 4: Build LLM context using DataProcessingService
         logger.debug('   Building LLM context...');
         const { dataProcessingService } = await import('./services/dataProcessingService');
+        const ensWorkerService = new ENSWorkerService();
         const llmContext = await dataProcessingService.buildLLMContext(
           eventData,
           tokenActivities,
           buyerActivities,
           sellerActivities,
-          magicEdenService  // Pass for on-demand proxy resolution
+          magicEdenService,  // Pass for on-demand proxy resolution
+          ensWorkerService   // Pass for ENS name resolution
         );
 
         logger.info(`✅ AI Reply Preview generated for ${type} ${transactionId}`);
@@ -592,13 +594,7 @@ async function startApplication(): Promise<void> {
               buyerActivities: buyerActivities.length,
               sellerActivities: sellerActivities?.length || 0
             },
-            llmContext: llmContext,
-            // Include sample of raw data for debugging
-            sampleData: {
-              tokenActivities: tokenActivities.slice(0, 5),
-              buyerActivities: buyerActivities.slice(0, 5),
-              sellerActivities: sellerActivities?.slice(0, 5) || []
-            }
+            llmContext: llmContext
           }
         });
 

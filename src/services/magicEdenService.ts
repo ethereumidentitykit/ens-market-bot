@@ -553,13 +553,13 @@ export class MagicEdenService {
     options: {
       limit?: number;  // Items per request (default: 20, Magic Eden max)
       types?: ('sale' | 'mint' | 'transfer' | 'ask' | 'bid' | 'ask_cancel' | 'bid_cancel')[];
-      maxPages?: number;  // Maximum pages to fetch (default: 40)
+      maxPages?: number;  // Maximum pages to fetch (default: 60)
     } = {}
   ): Promise<TokenActivity[]> {
     // Set defaults
     const limit = options.limit || 20;  // Magic Eden max is 20
     const types = options.types || ['sale', 'mint', 'transfer'];  // Include transfers for proxy resolution
-    const maxPages = options.maxPages || 40;  // Fetch more pages for complete history
+    const maxPages = options.maxPages || 60;  // Fetch more pages for complete history (60x20 = 1200 items)
 
     logger.info(`📚 Fetching token activity history for ${contract}:${tokenId}`);
     logger.debug(`   Settings: limit=${limit}, types=[${types.join(',')}], maxPages=${maxPages}`);
@@ -636,7 +636,7 @@ export class MagicEdenService {
     options: {
       limit?: number;  // Items per request (default: 20, Magic Eden max)
       types?: ('sale' | 'mint' | 'transfer' | 'ask' | 'bid' | 'ask_cancel' | 'bid_cancel')[];
-      maxPages?: number;  // Maximum pages to fetch (default: 40)
+      maxPages?: number;  // Maximum pages to fetch (default: 60)
     } = {}
   ): Promise<TokenActivity[]> {
     // Set defaults - NOTE: Excludes 'bid' and 'transfer' types
@@ -644,7 +644,7 @@ export class MagicEdenService {
     // Proxy resolution happens via known proxy list, not transfer tracing
     const limit = options.limit || 20;  // Magic Eden caps at 20 for user activity
     const types = options.types || ['sale', 'mint'];  // NO transfers by default
-    const maxPages = options.maxPages || 40;  // Increased to 40 pages (20x40 = 800 items)
+    const maxPages = options.maxPages || 60;  // Increased to 60 pages (20x60 = 1200 items)
 
     logger.info(`👤 Fetching user activity history for ${address}`);
     logger.debug(`   Settings: limit=${limit}, types=[${types.join(',')}], maxPages=${maxPages}`);

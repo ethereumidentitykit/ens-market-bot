@@ -1,32 +1,35 @@
 import { logger } from '../utils/logger';
 import { TokenActivity } from './magicEdenService';
+import { ENSWorkerService } from './ensWorkerService';
 
 /**
  * Insights extracted from token's trading history
  */
 export interface TokenInsights {
-  firstSale: {
+  firstTx: {
+    type: 'mint' | 'sale';
     price: number;
     priceUsd: number;
     timestamp: number;
     buyer: string;
     seller: string;
   } | null;
-  lastSale: {
+  previousTx: {
+    type: 'mint' | 'sale';
     price: number;
     priceUsd: number;
     timestamp: number;
     buyer: string;
     seller: string;
   } | null;
-  totalVolume: number; // Sum of all sale prices (ETH)
-  totalVolumeUsd: number; // Sum of all sale prices (USD)
-  numberOfSales: number;
+  totalVolume: number; // Sum of all transaction prices: sales + mints (ETH)
+  totalVolumeUsd: number; // Sum of all transaction prices: sales + mints (USD)
+  numberOfSales: number; // Count of sales only (mints not included)
   averageHoldDuration: number; // Average time between sales in hours
-  priceDirection: 'increasing' | 'decreasing' | 'stable' | 'unknown';
   
   // Current seller's flip tracking (if determinable)
   sellerAcquisitionTracked: boolean; // Can we track where seller got it?
+  sellerAcquisitionType: 'mint' | 'sale' | null; // How seller acquired (mint or sale)
   sellerBuyPrice: number | null; // What seller paid in ETH (if tracked)
   sellerBuyPriceUsd: number | null; // What seller paid in USD (if tracked)
   sellerPnl: number | null; // Seller's profit/loss in ETH (if tracked)
@@ -39,6 +42,7 @@ export interface TokenInsights {
  */
 export interface UserStats {
   address: string;
+  ensName: string | null; // Resolved ENS name (e.g., "trader.eth")
   role: 'buyer' | 'seller';
   
   // Buy statistics
@@ -74,7 +78,9 @@ export interface LLMPromptContext {
     currency: string;
     timestamp: number;
     buyerAddress: string;
+    buyerEnsName: string | null; // Resolved ENS name for buyer (e.g., "trader.eth")
     sellerAddress?: string; // Not present for registrations
+    sellerEnsName?: string | null; // Resolved ENS name for seller (if applicable)
     txHash: string; // Transaction hash from DB
   };
   
@@ -84,6 +90,26 @@ export interface LLMPromptContext {
   // User activity context (FROM MAGIC EDEN API)
   buyerStats: UserStats;
   sellerStats: UserStats | null; // Null for registrations
+  
+  // Full user activity histories for pattern detection (condensed)
+  buyerActivityHistory: Array<{
+    type: 'mint' | 'sale';
+    timestamp: number;
+    tokenName?: string;  // Name of token traded (if available)
+    role: 'buyer' | 'seller'; // Was this user buying or selling?
+    price: number;       // ETH
+    priceUsd: number;    // USD
+    txHash: string;
+  }>;
+  sellerActivityHistory: Array<{
+    type: 'mint' | 'sale';
+    timestamp: number;
+    tokenName?: string;  // Name of token traded (if available)
+    role: 'buyer' | 'seller'; // Was this user buying or selling?
+    price: number;       // ETH
+    priceUsd: number;    // USD
+    txHash: string;
+  }> | null; // Null for registrations
   
   // Additional metadata
   metadata: {
@@ -198,14 +224,18 @@ export class DataProcessingService {
       logger.debug(`   Current tx to exclude: ${currentTxHash}`);
     }
     
-    // Separate sales and transfers
+    // Separate sales, mints, and transfers
     const sales = activities.filter(a => 
       a.type === 'sale' && 
       a.price?.amount?.decimal !== undefined
     );
+    const mints = activities.filter(a =>
+      a.type === 'mint' &&
+      a.price?.amount?.decimal !== undefined
+    );
     const transfers = activities.filter(a => a.type === 'transfer');
     
-    logger.debug(`   Found ${sales.length} sales (before filtering), ${transfers.length} transfers`);
+    logger.debug(`   Found ${sales.length} sales, ${mints.length} mints (before filtering), ${transfers.length} transfers`);
     
     // Log all sale txHashes for debugging
     if (sales.length > 0) {
@@ -252,23 +282,42 @@ export class DataProcessingService {
       };
     }).filter(s => s !== null); // Remove current tx if filtered
     
-    logger.debug(`   ${resolvedSales.length} historical sales (after filtering current tx)`);
+    // Process mints (no proxy resolution needed, seller is always 0x0)
+    const resolvedMints = mints.map(mint => {
+      // Skip current transaction if provided
+      if (currentTxHash && mint.txHash.toLowerCase() === currentTxHash.toLowerCase()) {
+        logger.debug(`   Filtering out current tx: ${mint.txHash.slice(0, 10)}...`);
+        return null;
+      }
+      
+      return {
+        ...mint,
+        resolvedBuyer: mint.toAddress.toLowerCase(),
+        resolvedSeller: mint.fromAddress.toLowerCase() // Will be 0x0
+      };
+    }).filter(m => m !== null);
+    
+    logger.debug(`   ${resolvedSales.length} historical sales, ${resolvedMints.length} historical mints (after filtering current tx)`);
+    
+    // Combine sales and mints for firstTx/previousTx
+    const allTransactions = [...resolvedSales, ...resolvedMints];
     
     // Sort by timestamp (oldest first)
+    allTransactions.sort((a, b) => a.timestamp - b.timestamp);
     resolvedSales.sort((a, b) => a.timestamp - b.timestamp);
     
     // Handle edge cases
-    if (resolvedSales.length === 0) {
-      logger.debug('   No historical sales found - returning empty insights');
+    if (allTransactions.length === 0) {
+      logger.debug('   No historical transactions found - returning empty insights');
       return {
-        firstSale: null,
-        lastSale: null,
+        firstTx: null,
+        previousTx: null,
         totalVolume: 0,
         totalVolumeUsd: 0,
         numberOfSales: 0,
         averageHoldDuration: 0,
-        priceDirection: 'unknown',
         sellerAcquisitionTracked: false,
+        sellerAcquisitionType: null,
         sellerBuyPrice: null,
         sellerBuyPriceUsd: null,
         sellerPnl: null,
@@ -277,16 +326,17 @@ export class DataProcessingService {
       };
     }
     
-    // Extract first and last sale
-    const firstSale = resolvedSales[0];
-    const lastSale = resolvedSales[resolvedSales.length - 1];
+    // Extract first and previous transactions (includes mints)
+    const firstTx = allTransactions[0];
+    const previousTx = allTransactions[allTransactions.length - 1];
     
-    // Calculate total volume (ETH and USD)
-    const totalVolume = resolvedSales.reduce((sum, sale) => 
-      sum + (sale.price?.amount?.decimal || 0), 0
+    // Calculate total volume (ETH and USD) - includes both sales AND mints
+    // Mints are real costs paid in a free market (registration fees)
+    const totalVolume = allTransactions.reduce((sum, tx) => 
+      sum + (tx.price?.amount?.decimal || 0), 0
     );
-    const totalVolumeUsd = resolvedSales.reduce((sum, sale) => 
-      sum + (sale.price?.amount?.usd || 0), 0
+    const totalVolumeUsd = allTransactions.reduce((sum, tx) => 
+      sum + (tx.price?.amount?.usd || 0), 0
     );
     
     // Calculate average hold duration (time between sales)
@@ -300,28 +350,9 @@ export class DataProcessingService {
       averageHoldDuration = durations.reduce((sum, d) => sum + d, 0) / durations.length;
     }
     
-    // Determine price direction (comparing first to last sale)
-    let priceDirection: 'increasing' | 'decreasing' | 'stable' | 'unknown' = 'unknown';
-    if (resolvedSales.length > 1) {
-      const firstPrice = firstSale.price.amount.decimal;
-      const lastPrice = lastSale.price.amount.decimal;
-      const priceChange = ((lastPrice - firstPrice) / firstPrice) * 100;
-      
-      if (priceChange > 10) {
-        priceDirection = 'increasing';
-      } else if (priceChange < -10) {
-        priceDirection = 'decreasing';
-      } else {
-        priceDirection = 'stable';
-      }
-      
-      logger.debug(`   Price direction: ${priceDirection} (${priceChange.toFixed(1)}% change)`);
-    } else {
-      priceDirection = 'stable'; // Only 1 sale, consider stable
-    }
-    
     // Track seller's acquisition and PNL (if determinable)
     let sellerAcquisitionTracked = false;
+    let sellerAcquisitionType: 'mint' | 'sale' | null = null;
     let sellerBuyPrice: number | null = null;
     let sellerBuyPriceUsd: number | null = null;
     let sellerPnl: number | null = null;
@@ -329,19 +360,13 @@ export class DataProcessingService {
     let sellerHoldDuration: number | null = null;
     
     // If we have the current seller's address, search through history to find their acquisition
-    if (currentSellerAddress && resolvedSales.length > 0) {
+    if (currentSellerAddress && allTransactions.length > 0) {
       const normalizedSellerAddress = currentSellerAddress.toLowerCase();
       logger.debug(`   🔍 Searching for seller's acquisition: ${normalizedSellerAddress.slice(0, 8)}...`);
       
-      // Get all sales AND mints (seller might have minted it)
-      const allAcquisitions = [
-        ...resolvedSales,
-        ...activities.filter(a => a.type === 'mint' && a.price?.amount?.decimal !== undefined)
-      ];
-      
-      // Sort by timestamp (newest first) and filter out current tx
-      const historicalAcquisitions = allAcquisitions
-        .filter(a => !currentTxHash || a.txHash.toLowerCase() !== currentTxHash.toLowerCase())
+      // Sort by timestamp (newest first) - allTransactions already filtered current tx
+      const historicalAcquisitions = allTransactions
+        .slice() // Copy to avoid mutating original
         .sort((a, b) => b.timestamp - a.timestamp);
       
       // Find where seller acquired this token (most recent acquisition by this address)
@@ -352,6 +377,7 @@ export class DataProcessingService {
       
       if (sellerAcquisition) {
         sellerAcquisitionTracked = true;
+        sellerAcquisitionType = sellerAcquisition.type === 'mint' ? 'mint' : 'sale';
         sellerBuyPrice = sellerAcquisition.price.amount.decimal;
         sellerBuyPriceUsd = sellerAcquisition.price.amount.usd;
         
@@ -363,8 +389,8 @@ export class DataProcessingService {
           sellerHoldDuration = (currentTimestamp - sellerAcquisition.timestamp) / 3600; // hours
         }
         
-        const acquisitionType = sellerAcquisition.type === 'mint' ? 'minted' : 'bought';
-        logger.debug(`   ✅ Seller ${acquisitionType} for ${sellerBuyPrice.toFixed(4)} ETH ($${sellerBuyPriceUsd.toFixed(2)}) at ${new Date(sellerAcquisition.timestamp * 1000).toISOString().slice(0, 10)}`);
+        const acquisitionTypeLabel = sellerAcquisitionType === 'mint' ? 'minted' : 'bought';
+        logger.debug(`   ✅ Seller ${acquisitionTypeLabel} for ${sellerBuyPrice.toFixed(4)} ETH ($${sellerBuyPriceUsd.toFixed(2)}) at ${new Date(sellerAcquisition.timestamp * 1000).toISOString().slice(0, 10)}`);
         if (sellerPnl !== null && sellerPnlUsd !== null && sellerHoldDuration !== null) {
           logger.debug(`      PNL: ${sellerPnl >= 0 ? '+' : ''}${sellerPnl.toFixed(4)} ETH (${sellerPnlUsd >= 0 ? '+' : ''}$${sellerPnlUsd.toFixed(2)}), held ${(sellerHoldDuration / 24).toFixed(1)} days`);
         }
@@ -376,26 +402,28 @@ export class DataProcessingService {
     }
     
     const insights: TokenInsights = {
-      firstSale: {
-        price: firstSale.price.amount.decimal,
-        priceUsd: firstSale.price.amount.usd,
-        timestamp: firstSale.timestamp,
-        buyer: firstSale.resolvedBuyer,
-        seller: firstSale.resolvedSeller
+      firstTx: {
+        type: firstTx.type as 'mint' | 'sale',
+        price: firstTx.price.amount.decimal,
+        priceUsd: firstTx.price.amount.usd,
+        timestamp: firstTx.timestamp,
+        buyer: firstTx.resolvedBuyer,
+        seller: firstTx.resolvedSeller
       },
-      lastSale: {
-        price: lastSale.price.amount.decimal,
-        priceUsd: lastSale.price.amount.usd,
-        timestamp: lastSale.timestamp,
-        buyer: lastSale.resolvedBuyer,
-        seller: lastSale.resolvedSeller
+      previousTx: {
+        type: previousTx.type as 'mint' | 'sale',
+        price: previousTx.price.amount.decimal,
+        priceUsd: previousTx.price.amount.usd,
+        timestamp: previousTx.timestamp,
+        buyer: previousTx.resolvedBuyer,
+        seller: previousTx.resolvedSeller
       },
       totalVolume,
       totalVolumeUsd,
       numberOfSales: resolvedSales.length,
       averageHoldDuration,
-      priceDirection,
       sellerAcquisitionTracked,
+      sellerAcquisitionType,
       sellerBuyPrice,
       sellerBuyPriceUsd,
       sellerPnl,
@@ -403,7 +431,7 @@ export class DataProcessingService {
       sellerHoldDuration
     };
     
-    logger.debug(`   ✅ Token insights: ${resolvedSales.length} sales, ${totalVolume.toFixed(4)} ETH ($${totalVolumeUsd.toFixed(2)}) volume, ${priceDirection} trend`);
+    logger.debug(`   ✅ Token insights: ${allTransactions.length} total txs (${resolvedSales.length} sales, ${resolvedMints.length} mints), ${totalVolume.toFixed(4)} ETH ($${totalVolumeUsd.toFixed(2)}) volume`);
     
     return insights;
   }
@@ -545,6 +573,7 @@ export class DataProcessingService {
     
     const stats: UserStats = {
       address: normalizedAddress,
+      ensName: null, // Will be populated in buildLLMContext after ENS resolution
       role,
       buysCount,
       buysVolume,
@@ -597,13 +626,35 @@ export class DataProcessingService {
     tokenActivities: TokenActivity[],
     buyerActivities: TokenActivity[],
     sellerActivities: TokenActivity[] | null,
-    magicEdenService?: any
+    magicEdenService?: any,
+    ensWorkerService?: ENSWorkerService
   ): Promise<LLMPromptContext> {
     logger.info(`🧠 Building LLM context for ${eventData.type}: ${eventData.tokenName}`);
     logger.debug(`   Event from DB: ${eventData.price} ETH ($${eventData.priceUsd}), txHash: ${eventData.txHash.slice(0, 10)}...`);
     logger.debug(`   Raw data: ${tokenActivities.length} token activities, ${buyerActivities.length} buyer activities, ${sellerActivities?.length || 0} seller activities`);
     
     const startTime = Date.now();
+    
+    // Step 0: Resolve ENS names for buyer and seller
+    let buyerEnsName: string | null = null;
+    let sellerEnsName: string | null = null;
+    
+    if (ensWorkerService) {
+      logger.debug(`   🔍 Resolving ENS names...`);
+      try {
+        const buyerAccount = await ensWorkerService.getFullAccountData(eventData.buyerAddress);
+        buyerEnsName = buyerAccount?.name || null;
+        
+        if (eventData.sellerAddress) {
+          const sellerAccount = await ensWorkerService.getFullAccountData(eventData.sellerAddress);
+          sellerEnsName = sellerAccount?.name || null;
+        }
+        
+        logger.debug(`   ✅ Buyer: ${buyerEnsName || eventData.buyerAddress.slice(0, 8) + '...'}, Seller: ${sellerEnsName || (eventData.sellerAddress?.slice(0, 8) + '...') || 'N/A'}`);
+      } catch (error: any) {
+        logger.warn(`   ⚠️  ENS resolution failed: ${error.message}`);
+      }
+    }
     
     // Step 1: Process token history (exclude current transaction)
     logger.debug(`   📊 Processing token history...`);
@@ -638,6 +689,59 @@ export class DataProcessingService {
       logger.debug(`   ⏭️  No seller data (registration)`);
     }
     
+    // Update stats with resolved ENS names
+    buyerStats.ensName = buyerEnsName;
+    if (sellerStats) {
+      sellerStats.ensName = sellerEnsName;
+    }
+    
+    // Step 3.5: Build condensed user activity histories for pattern detection
+    logger.debug(`   📜 Building condensed user activity histories...`);
+    
+    // Buyer's full trading history
+    const buyerActivityHistory = buyerActivities
+      .filter(a => (a.type === 'mint' || a.type === 'sale') && a.price?.amount?.decimal !== undefined)
+      .map(a => {
+        const normalizedBuyerAddress = eventData.buyerAddress.toLowerCase();
+        const role = a.toAddress.toLowerCase() === normalizedBuyerAddress ? 'buyer' : 'seller';
+        return {
+          type: a.type as 'mint' | 'sale',
+          timestamp: a.timestamp,
+          tokenName: a.token?.tokenName ?? undefined,
+          role: role as 'buyer' | 'seller',
+          price: a.price.amount.decimal,
+          priceUsd: a.price.amount.usd,
+          txHash: a.txHash
+        };
+      })
+      .sort((a, b) => a.timestamp - b.timestamp); // Chronological order
+    
+    // Seller's full trading history (if applicable)
+    let sellerActivityHistory: typeof buyerActivityHistory | null = null;
+    if (sellerActivities && eventData.sellerAddress) {
+      sellerActivityHistory = sellerActivities
+        .filter(a => (a.type === 'mint' || a.type === 'sale') && a.price?.amount?.decimal !== undefined)
+        .map(a => {
+          const normalizedSellerAddress = eventData.sellerAddress!.toLowerCase();
+          const role = a.toAddress.toLowerCase() === normalizedSellerAddress ? 'buyer' : 'seller';
+          return {
+            type: a.type as 'mint' | 'sale',
+            timestamp: a.timestamp,
+            tokenName: a.token?.tokenName ?? undefined,
+            role: role as 'buyer' | 'seller',
+            price: a.price.amount.decimal,
+            priceUsd: a.price.amount.usd,
+            txHash: a.txHash
+          };
+        })
+        .sort((a, b) => a.timestamp - b.timestamp); // Chronological order
+    }
+    
+    logger.debug(`   ✅ Buyer activity history: ${buyerActivityHistory.length} entries`);
+    if (sellerActivityHistory) {
+      logger.debug(`   ✅ Seller activity history: ${sellerActivityHistory.length} entries`);
+    }
+    
     // Step 4: Assemble complete context
     const context: LLMPromptContext = {
       event: {
@@ -648,12 +752,16 @@ export class DataProcessingService {
         currency: eventData.currency,
         timestamp: eventData.timestamp,
         buyerAddress: eventData.buyerAddress,
+        buyerEnsName,
         sellerAddress: eventData.sellerAddress,
+        sellerEnsName,
         txHash: eventData.txHash
       },
       tokenInsights,
       buyerStats,
       sellerStats,
+      buyerActivityHistory,
+      sellerActivityHistory,
       metadata: {
         dataFetchedAt: Date.now(),
         tokenActivityCount: tokenActivities.length,
@@ -664,7 +772,7 @@ export class DataProcessingService {
     
     const processingTime = Date.now() - startTime;
     logger.info(`✅ LLM context built in ${processingTime}ms`);
-    logger.debug(`   Token: ${tokenInsights.numberOfSales} sales, ${tokenInsights.priceDirection} trend`);
+    logger.debug(`   Token: ${tokenInsights.numberOfSales} historical sales, ${tokenInsights.totalVolume.toFixed(4)} ETH volume`);
     logger.debug(`   Buyer: ${buyerStats.buysCount} buys (${buyerStats.buysVolume.toFixed(4)} ETH), ${buyerStats.sellsCount} sells (${buyerStats.sellsVolume.toFixed(4)} ETH)`);
     if (sellerStats) {
       logger.debug(`   Seller: ${sellerStats.buysCount} buys (${sellerStats.buysVolume.toFixed(4)} ETH), ${sellerStats.sellsCount} sells (${sellerStats.sellsVolume.toFixed(4)} ETH)`);
