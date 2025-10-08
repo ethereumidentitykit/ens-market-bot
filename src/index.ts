@@ -12,10 +12,10 @@ import { MONITORED_CONTRACTS } from './config/contracts';
 import { MoralisService } from './services/moralisService';
 import { AlchemyService } from './services/alchemyService';
 import { DatabaseService } from './services/databaseService';
-import { IDatabaseService, ENSRegistration } from './types';
+import { IDatabaseService, ENSRegistration, ProcessedSale } from './types';
 import { SalesProcessingService } from './services/salesProcessingService';
 import { BidsProcessingService } from './services/bidsProcessingService';
-import { MagicEdenService } from './services/magicEdenService';
+import { MagicEdenService, TokenActivity } from './services/magicEdenService';
 import { SchedulerService } from './services/schedulerService';
 import { TwitterService } from './services/twitterService';
 import { NewTweetFormatter } from './services/newTweetFormatter';
@@ -467,6 +467,142 @@ async function startApplication(): Promise<void> {
           }
         });
       } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    // AI Reply Preview Endpoint
+    app.get('/api/ai-reply-preview', requireAuth, async (req, res) => {
+      try {
+        const { type, id } = req.query;
+
+        // Validate inputs
+        if (!type || !id) {
+          return res.status(400).json({
+            success: false,
+            error: 'Missing required parameters: type and id'
+          });
+        }
+
+        if (type !== 'sale' && type !== 'registration') {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid type. Must be "sale" or "registration"'
+          });
+        }
+
+        const transactionId = parseInt(id as string, 10);
+        if (isNaN(transactionId)) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid id. Must be a number'
+          });
+        }
+
+        logger.info(`🔍 AI Reply Preview requested: ${type} ${transactionId}`);
+
+        // Step 1: Fetch transaction from database
+        logger.debug('   Fetching transaction from database...');
+        const transaction = type === 'sale'
+          ? await databaseService.getSaleById(transactionId)
+          : await databaseService.getRegistrationById(transactionId);
+
+        if (!transaction) {
+          return res.status(404).json({
+            success: false,
+            error: `${type} with id ${transactionId} not found`
+          });
+        }
+
+        // Step 2: Type-safe access to transaction properties
+        const isSale = type === 'sale';
+        const sale = isSale ? transaction as ProcessedSale : null;
+        const registration = !isSale ? transaction as ENSRegistration : null;
+
+        const tokenName = isSale ? (sale!.nftName || 'Unknown') : registration!.fullName;
+        logger.debug(`   Found transaction: ${tokenName}`);
+
+        // Step 3: Prepare event data for context building
+        const eventData = {
+          type: type as 'sale' | 'registration',
+          tokenName,
+          price: parseFloat(isSale ? sale!.priceEth : (registration!.costEth || '0')),
+          priceUsd: parseFloat(isSale ? (sale!.priceUsd || '0') : (registration!.costUsd || '0')),
+          currency: 'ETH',
+          timestamp: new Date(transaction.blockTimestamp).getTime() / 1000,
+          buyerAddress: isSale ? sale!.buyerAddress : registration!.ownerAddress,
+          sellerAddress: isSale ? sale!.sellerAddress : undefined,
+          txHash: transaction.transactionHash
+        };
+
+        // Step 3: Fetch Magic Eden data
+        logger.debug('   Fetching token activity from Magic Eden...');
+        const tokenActivities = await magicEdenService.getTokenActivityHistory(
+          transaction.contractAddress,
+          transaction.tokenId,
+          { types: ['sale', 'mint', 'transfer'], maxPages: 5 }
+        );
+
+        logger.debug('   Fetching buyer activity from Magic Eden...');
+        const buyerActivities = await magicEdenService.getUserActivityHistory(
+          eventData.buyerAddress,
+          { types: ['sale', 'mint', 'transfer'], maxPages: 5 }
+        );
+
+        let sellerActivities: TokenActivity[] | null = null;
+        if (eventData.sellerAddress) {
+          logger.debug('   Fetching seller activity from Magic Eden...');
+          sellerActivities = await magicEdenService.getUserActivityHistory(
+            eventData.sellerAddress,
+            { types: ['sale', 'mint', 'transfer'], maxPages: 5 }
+          );
+        }
+
+        // Step 4: Build LLM context using DataProcessingService
+        logger.debug('   Building LLM context...');
+        const { dataProcessingService } = await import('./services/dataProcessingService');
+        const llmContext = await dataProcessingService.buildLLMContext(
+          eventData,
+          tokenActivities,
+          buyerActivities,
+          sellerActivities
+        );
+
+        logger.info(`✅ AI Reply Preview generated for ${type} ${transactionId}`);
+
+        // Step 5: Return preview JSON
+        res.json({
+          success: true,
+          preview: {
+            transaction: {
+              id: transaction.id,
+              type: type,
+              tokenName: eventData.tokenName,
+              price: eventData.price,
+              priceUsd: eventData.priceUsd,
+              txHash: eventData.txHash,
+              blockTimestamp: transaction.blockTimestamp
+            },
+            dataFetched: {
+              tokenActivities: tokenActivities.length,
+              buyerActivities: buyerActivities.length,
+              sellerActivities: sellerActivities?.length || 0
+            },
+            llmContext: llmContext,
+            // Include sample of raw data for debugging
+            sampleData: {
+              tokenActivities: tokenActivities.slice(0, 5),
+              buyerActivities: buyerActivities.slice(0, 5),
+              sellerActivities: sellerActivities?.slice(0, 5) || []
+            }
+          }
+        });
+
+      } catch (error: any) {
+        logger.error('❌ AI Reply Preview error:', error.message);
         res.status(500).json({
           success: false,
           error: error.message

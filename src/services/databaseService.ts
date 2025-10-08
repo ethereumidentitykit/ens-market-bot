@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
-import { ProcessedSale, IDatabaseService, TwitterPost, ENSRegistration, ENSBid, PriceTier, SiweSession } from '../types';
+import { ProcessedSale, IDatabaseService, TwitterPost, ENSRegistration, ENSBid, PriceTier, SiweSession, AIReply } from '../types';
 
 /**
  * PostgreSQL database service 
@@ -295,6 +295,43 @@ export class DatabaseService implements IDatabaseService {
       // Create index for session lookup
       await this.pool.query(`
         CREATE INDEX IF NOT EXISTS idx_admin_sessions_session_id ON admin_sessions(session_id);
+      `);
+
+      // Create ai_replies table for AI-generated contextual replies
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS ai_replies (
+          id SERIAL PRIMARY KEY,
+          sale_id INTEGER REFERENCES processed_sales(id),
+          registration_id INTEGER REFERENCES ens_registrations(id),
+          original_tweet_id VARCHAR(255) NOT NULL,
+          reply_tweet_id VARCHAR(255),
+          transaction_type VARCHAR(20) NOT NULL CHECK (transaction_type IN ('sale', 'registration')),
+          transaction_hash VARCHAR(66) NOT NULL,
+          model_used VARCHAR(50) NOT NULL,
+          prompt_tokens INTEGER NOT NULL,
+          completion_tokens INTEGER NOT NULL,
+          total_tokens INTEGER NOT NULL,
+          cost_usd DECIMAL(10,6) NOT NULL,
+          reply_text TEXT NOT NULL,
+          status VARCHAR(20) NOT NULL CHECK (status IN ('pending', 'posted', 'failed', 'skipped')) DEFAULT 'pending',
+          error_message TEXT,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          posted_at TIMESTAMP,
+          CONSTRAINT check_transaction_ref CHECK (
+            (sale_id IS NOT NULL AND registration_id IS NULL) OR
+            (sale_id IS NULL AND registration_id IS NOT NULL)
+          )
+        )
+      `);
+
+      // Create indexes for ai_replies
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_ai_replies_sale_id ON ai_replies(sale_id);
+        CREATE INDEX IF NOT EXISTS idx_ai_replies_registration_id ON ai_replies(registration_id);
+        CREATE INDEX IF NOT EXISTS idx_ai_replies_original_tweet ON ai_replies(original_tweet_id);
+        CREATE INDEX IF NOT EXISTS idx_ai_replies_reply_tweet ON ai_replies(reply_tweet_id);
+        CREATE INDEX IF NOT EXISTS idx_ai_replies_status ON ai_replies(status);
+        CREATE INDEX IF NOT EXISTS idx_ai_replies_created_at ON ai_replies(created_at);
       `);
 
       logger.info('PostgreSQL tables created successfully');
@@ -1498,6 +1535,171 @@ export class DatabaseService implements IDatabaseService {
       createdAt: row.createdAt || row.created_at,
       updatedAt: row.updatedAt || row.updated_at
     }));
+  }
+
+  /**
+   * Insert a new AI reply record
+   */
+  async insertAIReply(reply: Omit<AIReply, 'id' | 'createdAt' | 'postedAt'>): Promise<number> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        INSERT INTO ai_replies (
+          sale_id, registration_id, original_tweet_id, reply_tweet_id,
+          transaction_type, transaction_hash, model_used,
+          prompt_tokens, completion_tokens, total_tokens, cost_usd,
+          reply_text, status, error_message
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        RETURNING id
+      `, [
+        reply.saleId || null,
+        reply.registrationId || null,
+        reply.originalTweetId,
+        reply.replyTweetId || null,
+        reply.transactionType,
+        reply.transactionHash,
+        reply.modelUsed,
+        reply.promptTokens,
+        reply.completionTokens,
+        reply.totalTokens,
+        reply.costUsd,
+        reply.replyText,
+        reply.status,
+        reply.errorMessage || null
+      ]);
+
+      logger.info(`AI reply inserted with ID: ${result.rows[0].id}`);
+      return result.rows[0].id;
+    } catch (error: any) {
+      logger.error('Failed to insert AI reply:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get AI reply by sale ID
+   */
+  async getAIReplyBySaleId(saleId: number): Promise<AIReply | null> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        SELECT 
+          id, sale_id as "saleId", registration_id as "registrationId",
+          original_tweet_id as "originalTweetId", reply_tweet_id as "replyTweetId",
+          transaction_type as "transactionType", transaction_hash as "transactionHash",
+          model_used as "modelUsed", prompt_tokens as "promptTokens",
+          completion_tokens as "completionTokens", total_tokens as "totalTokens",
+          cost_usd as "costUsd", reply_text as "replyText", status,
+          error_message as "errorMessage", created_at as "createdAt",
+          posted_at as "postedAt"
+        FROM ai_replies
+        WHERE sale_id = $1
+      `, [saleId]);
+
+      return result.rows.length > 0 ? result.rows[0] : null;
+    } catch (error: any) {
+      logger.error('Failed to get AI reply by sale ID:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get AI reply by registration ID
+   */
+  async getAIReplyByRegistrationId(registrationId: number): Promise<AIReply | null> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        SELECT 
+          id, sale_id as "saleId", registration_id as "registrationId",
+          original_tweet_id as "originalTweetId", reply_tweet_id as "replyTweetId",
+          transaction_type as "transactionType", transaction_hash as "transactionHash",
+          model_used as "modelUsed", prompt_tokens as "promptTokens",
+          completion_tokens as "completionTokens", total_tokens as "totalTokens",
+          cost_usd as "costUsd", reply_text as "replyText", status,
+          error_message as "errorMessage", created_at as "createdAt",
+          posted_at as "postedAt"
+        FROM ai_replies
+        WHERE registration_id = $1
+      `, [registrationId]);
+
+      return result.rows.length > 0 ? result.rows[0] : null;
+    } catch (error: any) {
+      logger.error('Failed to get AI reply by registration ID:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get recent AI replies
+   */
+  async getRecentAIReplies(limit: number = 50): Promise<AIReply[]> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        SELECT 
+          id, sale_id as "saleId", registration_id as "registrationId",
+          original_tweet_id as "originalTweetId", reply_tweet_id as "replyTweetId",
+          transaction_type as "transactionType", transaction_hash as "transactionHash",
+          model_used as "modelUsed", prompt_tokens as "promptTokens",
+          completion_tokens as "completionTokens", total_tokens as "totalTokens",
+          cost_usd as "costUsd", reply_text as "replyText", status,
+          error_message as "errorMessage", created_at as "createdAt",
+          posted_at as "postedAt"
+        FROM ai_replies
+        ORDER BY created_at DESC
+        LIMIT $1
+      `, [limit]);
+
+      return result.rows;
+    } catch (error: any) {
+      logger.error('Failed to get recent AI replies:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Update AI reply tweet ID (after posting)
+   */
+  async updateAIReplyTweetId(id: number, replyTweetId: string): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      await this.pool.query(`
+        UPDATE ai_replies
+        SET reply_tweet_id = $1, status = 'posted', posted_at = NOW()
+        WHERE id = $2
+      `, [replyTweetId, id]);
+
+      logger.info(`AI reply ${id} marked as posted with tweet ID: ${replyTweetId}`);
+    } catch (error: any) {
+      logger.error('Failed to update AI reply tweet ID:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Update AI reply status
+   */
+  async updateAIReplyStatus(id: number, status: AIReply['status'], errorMessage?: string): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      await this.pool.query(`
+        UPDATE ai_replies
+        SET status = $1, error_message = $2
+        WHERE id = $3
+      `, [status, errorMessage || null, id]);
+
+      logger.info(`AI reply ${id} status updated to: ${status}`);
+    } catch (error: any) {
+      logger.error('Failed to update AI reply status:', error.message);
+      throw error;
+    }
   }
 
   /**
