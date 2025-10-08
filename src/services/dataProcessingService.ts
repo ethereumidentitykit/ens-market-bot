@@ -103,8 +103,79 @@ export interface LLMPromptContext {
  * Transforms raw Magic Eden activity data into structured insights for LLM consumption
  */
 export class DataProcessingService {
+  // Known marketplace proxy contracts (matches QuickNodeSalesService and MagicEdenService)
+  private readonly KNOWN_PROXY_CONTRACTS = [
+    '0x0000a26b00c1f0df003000390027140000faa719', // OpenSea WETH wrapper
+    '0xe6ee2b1eaac6520be709e77780abb50e7fffcccd', // Seaport proxy
+    '0x00ca04c45da318d5b7e7b14d5381ca59f09c73f0', // Additional proxy
+  ];
+
   constructor() {
     logger.info('🔬 DataProcessingService initialized');
+  }
+
+  /**
+   * Check if an address is a known proxy contract
+   */
+  private isKnownProxy(address: string): boolean {
+    const normalized = address.toLowerCase();
+    return this.KNOWN_PROXY_CONTRACTS.includes(normalized);
+  }
+
+  /**
+   * Resolve proxy addresses for a specific transaction by fetching token transfers
+   * Only called when a proxy is detected in user activity
+   * 
+   * @param activity - Sale/mint activity with proxy address
+   * @param magicEdenService - MagicEdenService instance for fetching token data
+   * @returns Resolved buyer and seller addresses
+   */
+  private async resolveProxyForActivity(
+    activity: TokenActivity,
+    magicEdenService: any
+  ): Promise<{
+    resolvedBuyer: string;
+    resolvedSeller: string;
+  }> {
+    try {
+      // Fetch just this token's activity (including transfers) - limit to recent activity
+      const tokenActivities = await magicEdenService.getTokenActivityHistory(
+        activity.contract,
+        activity.token.tokenId,
+        { types: ['sale', 'mint', 'transfer'], maxPages: 2 }  // Only fetch recent pages
+      );
+      
+      // Find transfers matching this transaction
+      const transfers = tokenActivities.filter((a: TokenActivity) => 
+        a.type === 'transfer' && 
+        a.txHash.toLowerCase() === activity.txHash.toLowerCase()
+      );
+      
+      if (transfers.length > 0) {
+        // Use transfer chain to resolve
+        const finalTransfer = transfers[transfers.length - 1];
+        const firstTransfer = transfers[0];
+        
+        return {
+          resolvedBuyer: finalTransfer.toAddress?.toLowerCase() || activity.toAddress.toLowerCase(),
+          resolvedSeller: firstTransfer.fromAddress?.toLowerCase() || activity.fromAddress.toLowerCase()
+        };
+      }
+      
+      // No transfers found, return original addresses
+      return {
+        resolvedBuyer: activity.toAddress.toLowerCase(),
+        resolvedSeller: activity.fromAddress.toLowerCase()
+      };
+      
+    } catch (error: any) {
+      logger.warn(`Failed to resolve proxy for tx ${activity.txHash.slice(0, 10)}...: ${error.message}`);
+      // On error, return original addresses
+      return {
+        resolvedBuyer: activity.toAddress.toLowerCase(),
+        resolvedSeller: activity.fromAddress.toLowerCase()
+      };
+    }
   }
 
   /**
@@ -307,65 +378,68 @@ export class DataProcessingService {
   /**
    * Calculate trading statistics for a user
    * Tracks buy/sell volumes, PNL, and activity patterns
-   * Resolves proxy contracts using transfer events
+   * Resolves proxy contracts on-demand by fetching token transfers
    * 
-   * @param activities - User activity history from Magic Eden (sales, mints, transfers)
+   * @param activities - User activity history from Magic Eden (sales, mints only)
    * @param userAddress - The address of the user we're analyzing (already resolved from DB)
    * @param role - Whether this user is the buyer or seller in current event
+   * @param magicEdenService - MagicEdenService instance for on-demand token data fetching
    * @returns User trading statistics
    */
   async processUserActivity(
     activities: TokenActivity[],
     userAddress: string,
-    role: 'buyer' | 'seller'
+    role: 'buyer' | 'seller',
+    magicEdenService?: any
   ): Promise<UserStats> {
     logger.debug(`👤 Processing user activity: ${activities.length} activities for ${userAddress.slice(0, 8)}... (${role})`);
     
     // Normalize address for comparison (DB already resolved proxies)
     const normalizedAddress = userAddress.toLowerCase();
     
-    // Separate sales/mints and transfers
+    // Filter for sales/mints with valid prices
     const salesAndMints = activities.filter(a => 
       (a.type === 'sale' || a.type === 'mint') &&
       a.price?.amount?.decimal !== undefined
     );
-    const transfers = activities.filter(a => a.type === 'transfer');
     
-    logger.debug(`   Found ${salesAndMints.length} sales/mints, ${transfers.length} transfers`);
+    logger.debug(`   Found ${salesAndMints.length} sales/mints`);
     
-    // Resolve real buyer/seller for each sale using transfer events (same logic as processTokenHistory)
-    const resolvedActivities = salesAndMints.map(activity => {
-      // Find transfers with same txHash
-      const activityTransfers = transfers.filter(t => 
-        t.txHash.toLowerCase() === activity.txHash.toLowerCase()
-      );
-      
-      let realBuyer = activity.toAddress.toLowerCase();
-      let realSeller = activity.fromAddress.toLowerCase();
-      
-      // If there are transfers in same tx, use them to resolve real addresses
-      if (activityTransfers.length > 0) {
-        // Find the final recipient (last toAddress in transfer chain)
-        const finalTransfer = activityTransfers[activityTransfers.length - 1];
-        if (finalTransfer.toAddress) {
-          realBuyer = finalTransfer.toAddress.toLowerCase();
-        }
+    // Check which activities have known proxy addresses
+    const activitiesWithProxies = salesAndMints.filter(a => 
+      this.isKnownProxy(a.fromAddress) || this.isKnownProxy(a.toAddress)
+    );
+    
+    if (activitiesWithProxies.length > 0) {
+      logger.debug(`   ⚠️  Detected ${activitiesWithProxies.length} activities with proxies - will resolve on-demand`);
+    }
+    
+    // Process each activity - resolve proxies on-demand if magicEdenService is provided
+    const resolvedActivities = await Promise.all(
+      salesAndMints.map(async (activity) => {
+        // Check if this activity has a proxy
+        const hasProxy = this.isKnownProxy(activity.fromAddress) || this.isKnownProxy(activity.toAddress);
         
-        // Find the original sender (first fromAddress in transfer chain)
-        const firstTransfer = activityTransfers[0];
-        if (firstTransfer.fromAddress && firstTransfer.fromAddress !== '0x0000000000000000000000000000000000000000') {
-          realSeller = firstTransfer.fromAddress.toLowerCase();
+        if (hasProxy && magicEdenService) {
+          // Lazy-fetch token transfers for this specific transaction
+          const resolved = await this.resolveProxyForActivity(activity, magicEdenService);
+          return {
+            ...activity,
+            ...resolved
+          };
+        } else {
+          // No proxy or no service provided, use addresses directly
+          return {
+            ...activity,
+            resolvedBuyer: activity.toAddress.toLowerCase(),
+            resolvedSeller: activity.fromAddress.toLowerCase()
+          };
         }
-      }
-      
-      return {
-        ...activity,
-        resolvedBuyer: realBuyer,
-        resolvedSeller: realSeller
-      };
-    });
+      })
+    );
     
-    logger.debug(`   Resolved ${resolvedActivities.length} activities through proxy contracts`);
+    const proxiesResolved = magicEdenService ? activitiesWithProxies.length : 0;
+    logger.debug(`   Processed ${resolvedActivities.length} activities (${proxiesResolved} proxies resolved)`);
     
     // Separate buys vs sells using RESOLVED addresses
     const buys = resolvedActivities.filter(a => 
@@ -496,7 +570,8 @@ export class DataProcessingService {
     },
     tokenActivities: TokenActivity[],
     buyerActivities: TokenActivity[],
-    sellerActivities: TokenActivity[] | null
+    sellerActivities: TokenActivity[] | null,
+    magicEdenService?: any
   ): Promise<LLMPromptContext> {
     logger.info(`🧠 Building LLM context for ${eventData.type}: ${eventData.tokenName}`);
     logger.debug(`   Event from DB: ${eventData.price} ETH ($${eventData.priceUsd}), txHash: ${eventData.txHash.slice(0, 10)}...`);
@@ -513,7 +588,8 @@ export class DataProcessingService {
     const buyerStats = await this.processUserActivity(
       buyerActivities,
       eventData.buyerAddress,
-      'buyer'
+      'buyer',
+      magicEdenService
     );
     
     // Step 3: Process seller activity (if this is a sale)
@@ -523,7 +599,8 @@ export class DataProcessingService {
       sellerStats = await this.processUserActivity(
         sellerActivities,
         eventData.sellerAddress,
-        'seller'
+        'seller',
+        magicEdenService
       );
     } else {
       logger.debug(`   ⏭️  No seller data (registration)`);

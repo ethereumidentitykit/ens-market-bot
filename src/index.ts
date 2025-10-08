@@ -538,26 +538,26 @@ async function startApplication(): Promise<void> {
           txHash: transaction.transactionHash
         };
 
-        // Step 3: Fetch Magic Eden data
+        // Step 3: Fetch Magic Eden data (use defaults: 20 pages, 30s timeout)
         logger.debug('   Fetching token activity from Magic Eden...');
         const tokenActivities = await magicEdenService.getTokenActivityHistory(
           transaction.contractAddress,
-          transaction.tokenId,
-          { types: ['sale', 'mint', 'transfer'], maxPages: 5 }
+          transaction.tokenId
+          // No options = use service defaults (maxPages: 20, timeout: 30s)
         );
 
         logger.debug('   Fetching buyer activity from Magic Eden...');
         const buyerActivities = await magicEdenService.getUserActivityHistory(
-          eventData.buyerAddress,
-          { types: ['sale', 'mint', 'transfer'], maxPages: 5 }
+          eventData.buyerAddress
+          // No options = use service defaults (maxPages: 20, timeout: 30s)
         );
 
         let sellerActivities: TokenActivity[] | null = null;
         if (eventData.sellerAddress) {
           logger.debug('   Fetching seller activity from Magic Eden...');
           sellerActivities = await magicEdenService.getUserActivityHistory(
-            eventData.sellerAddress,
-            { types: ['sale', 'mint', 'transfer'], maxPages: 5 }
+            eventData.sellerAddress
+            // No options = use service defaults (maxPages: 20, timeout: 30s)
           );
         }
 
@@ -568,7 +568,8 @@ async function startApplication(): Promise<void> {
           eventData,
           tokenActivities,
           buyerActivities,
-          sellerActivities
+          sellerActivities,
+          magicEdenService  // Pass for on-demand proxy resolution
         );
 
         logger.info(`✅ AI Reply Preview generated for ${type} ${transactionId}`);

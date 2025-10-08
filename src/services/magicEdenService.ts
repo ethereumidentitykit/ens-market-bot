@@ -95,6 +95,14 @@ export class MagicEdenService {
   private readonly ensContracts: string[];
   private readonly axiosInstance: AxiosInstance;
   private readonly apiToggleService: APIToggleService;
+
+  // Known marketplace proxy contracts (from existing QuickNode sales processing)
+  // These intermediary addresses obscure the real buyer/seller
+  private readonly KNOWN_PROXY_CONTRACTS = [
+    '0x0000a26b00c1f0df003000390027140000faa719', // OpenSea WETH wrapper
+    '0xe6ee2b1eaac6520be709e77780abb50e7fffcccd', // Seaport proxy
+    '0x00ca04c45da318d5b7e7b14d5381ca59f09c73f0', // Additional proxy
+  ];
   
   // Configurable thresholds
   private readonly historicalThresholdEth: number = 0.1; // Only show historical data if >= 0.1 ETH
@@ -514,7 +522,7 @@ export class MagicEdenService {
             'Accept': '*/*',
             'User-Agent': 'ENS-TwitterBot/1.0'
           },
-          timeout: 10000
+          timeout: 30000  // 30 seconds for complete activity history
         }
       );
 
@@ -551,7 +559,7 @@ export class MagicEdenService {
     // Set defaults
     const limit = options.limit || 20;  // Magic Eden max is 20
     const types = options.types || ['sale', 'mint', 'transfer'];  // Include transfers for proxy resolution
-    const maxPages = options.maxPages || 10;
+    const maxPages = options.maxPages || 20;  // Fetch more pages for complete history
 
     logger.info(`📚 Fetching token activity history for ${contract}:${tokenId}`);
     logger.debug(`   Settings: limit=${limit}, types=[${types.join(',')}], maxPages=${maxPages}`);
@@ -611,11 +619,12 @@ export class MagicEdenService {
    * Get complete user activity history with automatic pagination
    * Fetches user's ENS activities across BOTH ENS contracts
    * 
-   * NOTE: Defaults to 'sale', 'mint', and 'transfer'. Excludes 'bid' types due to excessive
-   * bot activity that creates noise in the data. Bids can generate hundreds of activities
-   * per user, making it difficult to extract meaningful trading patterns.
+   * NOTE: Defaults to 'sale' and 'mint' ONLY. Excludes:
+   * - 'bid': Excessive bot activity creates noise (hundreds per user)
+   * - 'transfer': Creates massive result sets (10x+ more data than sales/mints)
    * 
-   * Transfers are included to resolve proxy contract addresses.
+   * Proxy contract resolution: Activities with known proxy addresses are filtered
+   * out during processing rather than resolved via transfers (performance optimization).
    * 
    * @param address - User wallet address
    * @param options - Optional pagination settings
@@ -624,15 +633,17 @@ export class MagicEdenService {
   async getUserActivityHistory(
     address: string,
     options: {
-      limit?: number;  // Items per request (default: 20, Magic Eden max)
+      limit?: number;  // Items per request (default: 100, max: 1000 with includeMetadata=false)
       types?: ('sale' | 'mint' | 'transfer' | 'ask' | 'bid' | 'ask_cancel' | 'bid_cancel')[];
       maxPages?: number;  // Maximum pages to fetch (default: 10)
     } = {}
   ): Promise<TokenActivity[]> {
-    // Set defaults - NOTE: Excludes 'bid' types to avoid bot noise
-    const limit = options.limit || 20;  // Magic Eden max is 20
-    const types = options.types || ['sale', 'mint', 'transfer'];  // Include transfers for proxy resolution
-    const maxPages = options.maxPages || 10;
+    // Set defaults - NOTE: Excludes 'bid' and 'transfer' types
+    // Transfers excluded because they create massive result sets (10x more data)
+    // Proxy resolution happens via known proxy list, not transfer tracing
+    const limit = options.limit || 20;  // Magic Eden caps at 20 for user activity
+    const types = options.types || ['sale', 'mint'];  // NO transfers by default
+    const maxPages = options.maxPages || 20;  // Back to 20 pages (20x20 = 400 items)
 
     logger.info(`👤 Fetching user activity history for ${address}`);
     logger.debug(`   Settings: limit=${limit}, types=[${types.join(',')}], maxPages=${maxPages}`);
@@ -651,7 +662,7 @@ export class MagicEdenService {
           users: address,
           limit: limit,
           sortBy: 'eventTimestamp',
-          includeMetadata: true
+          includeMetadata: false  // Allows limit up to 1000, reduces payload size
         };
 
         // Add both ENS contracts
@@ -660,12 +671,28 @@ export class MagicEdenService {
         // Add types filter
         if (types && types.length > 0) {
           params.types = types;
+          logger.debug(`   🎯 Filtering by types: ${types.join(', ')}`);
         }
 
         // Add continuation cursor if available
         if (continuation) {
           params.continuation = continuation;
         }
+
+        // Build URL string for debug logging
+        const urlParams = new URLSearchParams();
+        urlParams.append('users', address);
+        this.ensContracts.forEach(c => urlParams.append('collection', c));
+        urlParams.append('limit', limit.toString());
+        urlParams.append('sortBy', 'eventTimestamp');
+        urlParams.append('includeMetadata', 'false');
+        if (types && types.length > 0) {
+          types.forEach(type => urlParams.append('types', type));
+        }
+        if (continuation) {
+          urlParams.append('continuation', continuation);
+        }
+        logger.debug(`   🌐 Full API URL: /users/activity/v6?${urlParams.toString()}`);
 
         // Fetch single page
         const response: AxiosResponse<TokenActivityResponse> = await this.axiosInstance.get(
@@ -676,7 +703,7 @@ export class MagicEdenService {
               'Accept': '*/*',
               'User-Agent': 'ENS-TwitterBot/1.0'
             },
-            timeout: 10000
+            timeout: 30000  // 30 seconds for complete activity history
           }
         );
 
