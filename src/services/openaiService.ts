@@ -125,7 +125,7 @@ SCOPE
 • If possible, approximate search interest and competitive density using reputable sources.
 
 4) Market comparables & availability snapshot
-• Recent public sales comps of exact/close variants (e.g., ${label}.com/.io/.ai; ${label}.eth; plural/singular; hyphenated). Prioritize NameBio, DNJournal, marketplace sold pages, ENS marketplaces.
+• Recent public sales comps of exact/close variants (e.g., ${label}.com/.io/.ai; ${label}.eth; plural/singular; hyphenated). Prioritize NameBio, DNJournal, marketplace sold pages.
 • Current availability/ask indications for major TLDs (.com/.net/.org/.io/.ai) and notable ccTLDs. If listed, capture indicative ask (not an appraisal).
 • Check if the above TLDs are registered / non-registered for ${label}
 • Social handle checks (read-only): note whether @${label} appears obviously taken on major platforms.
@@ -136,7 +136,7 @@ SCOPE
 • Notable disputes, scandals, or sensitivities tied to the label or famous marks.
 
 METHOD (use web.run)
-• Run multiple search_query calls varying: "${label}", "${label} meaning", "${label} acronym", "${label} slang", "${label} brand", "${label} trademark", "${label} site:.gov|.edu", "${label} wiki", "${label}.com sale", "${label} ENS sale".
+• Run multiple search_query calls varying: "${label}", "${label} meaning", "${label} acronym", "${label} slang", "${label} brand", "${label} trademark", "${label} site:.gov|.edu", "${label} wiki", "${label}.com sale".
 • When multilingual is relevant, query top languages where the string plausibly has meaning.
 • Prefer primary/authoritative sources: Wikipedia/Wikidata, reputable dictionaries, news orgs, NameBio/DNJournal/marketplaces, USPTO/EUIPO/WIPO, major analytics sources.
 • Cite 1–3 strongest sources per subsection. Do not over-cite.
@@ -297,9 +297,9 @@ BEGIN with research for: ${label}`;
    * Defines the AI's role, tone, and constraints
    */
   private buildSystemPrompt(): string {
-    return `You are an expert ENS (Ethereum Name Service) market analyst who provides insightful, conversational commentary on ENS name sales and registrations.
+    return `You are an expert domain name market analyst who provides insightful, conversational commentary domain name sales and registrations.
 
-Your role is to write SHORT, engaging Twitter replies that add context and insight to ENS transactions.
+Your role is to write SHORT, engaging response that add context and insight do domain transactions or potential transactions.
 
 GUIDELINES:
 - Write in a natural, conversational tone (NOT robotic or structured)
