@@ -7,25 +7,30 @@ import { TokenActivity } from './magicEdenService';
 export interface TokenInsights {
   firstSale: {
     price: number;
+    priceUsd: number;
     timestamp: number;
     buyer: string;
     seller: string;
   } | null;
   lastSale: {
     price: number;
+    priceUsd: number;
     timestamp: number;
     buyer: string;
     seller: string;
   } | null;
-  totalVolume: number; // Sum of all sale prices
+  totalVolume: number; // Sum of all sale prices (ETH)
+  totalVolumeUsd: number; // Sum of all sale prices (USD)
   numberOfSales: number;
   averageHoldDuration: number; // Average time between sales in hours
   priceDirection: 'increasing' | 'decreasing' | 'stable' | 'unknown';
   
   // Current seller's flip tracking (if determinable)
   sellerAcquisitionTracked: boolean; // Can we track where seller got it?
-  sellerBuyPrice: number | null; // What seller paid (if tracked)
-  sellerPnl: number | null; // Seller's profit/loss (if tracked)
+  sellerBuyPrice: number | null; // What seller paid in ETH (if tracked)
+  sellerBuyPriceUsd: number | null; // What seller paid in USD (if tracked)
+  sellerPnl: number | null; // Seller's profit/loss in ETH (if tracked)
+  sellerPnlUsd: number | null; // Seller's profit/loss in USD (if tracked)
   sellerHoldDuration: number | null; // How long seller held in hours (if tracked)
 }
 
@@ -38,14 +43,17 @@ export interface UserStats {
   
   // Buy statistics
   buysCount: number;
-  buysVolume: number;
+  buysVolume: number; // Total ETH spent
+  buysVolumeUsd: number; // Total USD spent
   
   // Sell statistics
   sellsCount: number;
-  sellsVolume: number;
+  sellsVolume: number; // Total ETH received
+  sellsVolumeUsd: number; // Total USD received
   
   // PNL calculation
-  realizedPnl: number; // sellsVolume - buysVolume
+  realizedPnl: number; // sellsVolume - buysVolume (ETH)
+  realizedPnlUsd: number; // sellsVolumeUsd - buysVolumeUsd (USD)
   
   // Activity timing
   firstActivityTimestamp: number | null;
@@ -65,6 +73,7 @@ export interface LLMPromptContext {
     type: 'sale' | 'registration';
     tokenName: string;
     price: number;
+    priceUsd: number;
     currency: string;
     timestamp: number;
     buyerAddress: string;
@@ -174,12 +183,15 @@ export class DataProcessingService {
         firstSale: null,
         lastSale: null,
         totalVolume: 0,
+        totalVolumeUsd: 0,
         numberOfSales: 0,
         averageHoldDuration: 0,
         priceDirection: 'unknown',
         sellerAcquisitionTracked: false,
         sellerBuyPrice: null,
+        sellerBuyPriceUsd: null,
         sellerPnl: null,
+        sellerPnlUsd: null,
         sellerHoldDuration: null
       };
     }
@@ -188,9 +200,12 @@ export class DataProcessingService {
     const firstSale = resolvedSales[0];
     const lastSale = resolvedSales[resolvedSales.length - 1];
     
-    // Calculate total volume
+    // Calculate total volume (ETH and USD)
     const totalVolume = resolvedSales.reduce((sum, sale) => 
       sum + (sale.price?.amount?.decimal || 0), 0
+    );
+    const totalVolumeUsd = resolvedSales.reduce((sum, sale) => 
+      sum + (sale.price?.amount?.usd || 0), 0
     );
     
     // Calculate average hold duration (time between sales)
@@ -227,7 +242,9 @@ export class DataProcessingService {
     // Track seller's acquisition and PNL (if determinable)
     let sellerAcquisitionTracked = false;
     let sellerBuyPrice: number | null = null;
+    let sellerBuyPriceUsd: number | null = null;
     let sellerPnl: number | null = null;
+    let sellerPnlUsd: number | null = null;
     let sellerHoldDuration: number | null = null;
     
     // Check if last sale's seller was the previous sale's buyer
@@ -240,10 +257,13 @@ export class DataProcessingService {
         // Seller acquired it in the previous sale!
         sellerAcquisitionTracked = true;
         sellerBuyPrice = previousSale.price.amount.decimal;
+        sellerBuyPriceUsd = previousSale.price.amount.usd;
         sellerPnl = lastSale.price.amount.decimal - sellerBuyPrice;
+        sellerPnlUsd = lastSale.price.amount.usd - sellerBuyPriceUsd;
         sellerHoldDuration = (lastSale.timestamp - previousSale.timestamp) / 3600; // hours
         
-        logger.debug(`   ✅ Seller PNL tracked: bought for ${sellerBuyPrice.toFixed(4)} ETH, held ${sellerHoldDuration.toFixed(1)}h, PNL: ${sellerPnl >= 0 ? '+' : ''}${sellerPnl.toFixed(4)} ETH`);
+        logger.debug(`   ✅ Seller PNL tracked: bought for ${sellerBuyPrice.toFixed(4)} ETH ($${sellerBuyPriceUsd.toFixed(2)}), held ${sellerHoldDuration.toFixed(1)}h`);
+        logger.debug(`      PNL: ${sellerPnl >= 0 ? '+' : ''}${sellerPnl.toFixed(4)} ETH (${sellerPnlUsd >= 0 ? '+' : ''}$${sellerPnlUsd.toFixed(2)})`);
       } else {
         logger.debug(`   ❌ Seller PNL not trackable: seller ${currentSeller.slice(0, 8)}... ≠ previous buyer ${previousBuyer.slice(0, 8)}...`);
       }
@@ -252,27 +272,32 @@ export class DataProcessingService {
     const insights: TokenInsights = {
       firstSale: {
         price: firstSale.price.amount.decimal,
+        priceUsd: firstSale.price.amount.usd,
         timestamp: firstSale.timestamp,
         buyer: firstSale.resolvedBuyer,
         seller: firstSale.resolvedSeller
       },
       lastSale: {
         price: lastSale.price.amount.decimal,
+        priceUsd: lastSale.price.amount.usd,
         timestamp: lastSale.timestamp,
         buyer: lastSale.resolvedBuyer,
         seller: lastSale.resolvedSeller
       },
       totalVolume,
+      totalVolumeUsd,
       numberOfSales: resolvedSales.length,
       averageHoldDuration,
       priceDirection,
       sellerAcquisitionTracked,
       sellerBuyPrice,
+      sellerBuyPriceUsd,
       sellerPnl,
+      sellerPnlUsd,
       sellerHoldDuration
     };
     
-    logger.debug(`   ✅ Token insights: ${resolvedSales.length} sales, ${totalVolume.toFixed(4)} ETH volume, ${priceDirection} trend`);
+    logger.debug(`   ✅ Token insights: ${resolvedSales.length} sales, ${totalVolume.toFixed(4)} ETH ($${totalVolumeUsd.toFixed(2)}) volume, ${priceDirection} trend`);
     
     return insights;
   }
