@@ -608,6 +608,106 @@ export class MagicEdenService {
   }
 
   /**
+   * Get complete user activity history with automatic pagination
+   * Fetches user's ENS activities across BOTH ENS contracts
+   * 
+   * @param address - User wallet address
+   * @param options - Optional pagination settings
+   * @returns Array of user activities (aggregated from all pages)
+   */
+  async getUserActivityHistory(
+    address: string,
+    options: {
+      limit?: number;  // Items per request (default: 20, Magic Eden max)
+      types?: ('sale' | 'mint' | 'transfer' | 'ask' | 'bid' | 'ask_cancel' | 'bid_cancel')[];
+      maxPages?: number;  // Maximum pages to fetch (default: 10)
+    } = {}
+  ): Promise<TokenActivity[]> {
+    // Set defaults
+    const limit = options.limit || 20;  // Magic Eden max is 20
+    const types = options.types || ['sale', 'mint'];
+    const maxPages = options.maxPages || 10;
+
+    logger.info(`👤 Fetching user activity history for ${address}`);
+    logger.debug(`   Settings: limit=${limit}, types=[${types.join(',')}], maxPages=${maxPages}`);
+
+    const allActivities: TokenActivity[] = [];
+    let continuation: string | undefined;
+    let pageCount = 0;
+
+    try {
+      // Loop through pages until we hit maxPages or run out of data
+      while (pageCount < maxPages) {
+        pageCount++;
+        
+        // Build query params - must include BOTH ENS contracts
+        const params: any = {
+          users: address,
+          limit: limit,
+          sortBy: 'eventTimestamp',
+          includeMetadata: true
+        };
+
+        // Add both ENS contracts
+        params.collection = this.ensContracts;
+
+        // Add types filter
+        if (types && types.length > 0) {
+          params.types = types;
+        }
+
+        // Add continuation cursor if available
+        if (continuation) {
+          params.continuation = continuation;
+        }
+
+        // Fetch single page
+        const response: AxiosResponse<TokenActivityResponse> = await this.axiosInstance.get(
+          '/users/activity/v6',
+          {
+            params,
+            headers: {
+              'Accept': '*/*',
+              'User-Agent': 'ENS-TwitterBot/1.0'
+            },
+            timeout: 10000
+          }
+        );
+
+        // Break if no activities returned
+        if (!response.data.activities || response.data.activities.length === 0) {
+          logger.debug(`   Page ${pageCount}: No more activities, stopping pagination`);
+          break;
+        }
+
+        // Add activities to aggregated array
+        allActivities.push(...response.data.activities);
+        logger.debug(`   Page ${pageCount}: Fetched ${response.data.activities.length} activities (total: ${allActivities.length})`);
+
+        // Check for continuation cursor
+        continuation = response.data.continuation || undefined;
+        if (!continuation) {
+          logger.debug(`   Page ${pageCount}: No continuation cursor, reached end of data`);
+          break;
+        }
+
+        // Rate limiting between requests (200ms delay)
+        if (continuation) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+      }
+
+      logger.info(`✅ User activity history complete: ${allActivities.length} activities across ${pageCount} pages`);
+      return allActivities;
+
+    } catch (error: any) {
+      logger.error(`❌ Error fetching user activity history: ${error.message}`);
+      // Return whatever we collected before the error
+      return allActivities;
+    }
+  }
+
+  /**
    * Find most recent sale or mint event with pagination
    */
   async getLastSaleOrRegistration(
