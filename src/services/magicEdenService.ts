@@ -611,6 +611,10 @@ export class MagicEdenService {
    * Get complete user activity history with automatic pagination
    * Fetches user's ENS activities across BOTH ENS contracts
    * 
+   * NOTE: Defaults to 'sale' and 'mint' only. Excludes 'bid' types due to excessive
+   * bot activity that creates noise in the data. Bids can generate hundreds of activities
+   * per user, making it difficult to extract meaningful trading patterns.
+   * 
    * @param address - User wallet address
    * @param options - Optional pagination settings
    * @returns Array of user activities (aggregated from all pages)
@@ -623,9 +627,9 @@ export class MagicEdenService {
       maxPages?: number;  // Maximum pages to fetch (default: 10)
     } = {}
   ): Promise<TokenActivity[]> {
-    // Set defaults
+    // Set defaults - NOTE: Excludes 'bid' types to avoid bot noise
     const limit = options.limit || 20;  // Magic Eden max is 20
-    const types = options.types || ['sale', 'mint'];
+    const types = options.types || ['sale', 'mint'];  // Only real transactions, not bid spam
     const maxPages = options.maxPages || 10;
 
     logger.info(`👤 Fetching user activity history for ${address}`);
