@@ -32,15 +32,18 @@ export class OpenAIService {
   private readonly temperature = 0.7; // Balance creativity and consistency
   
   // Model configurations (token limits based on Oct 2025 OpenAI specs)
+  // NOTE: Web search tool has a 128k token limit regardless of model
+  private readonly WEB_SEARCH_TOKEN_LIMIT = 128000;
+  
   private readonly models: { base: ModelConfig; thinking: ModelConfig } = {
     base: {
       name: 'gpt-5',
-      maxInputTokens: 128000, // GPT-5 context window
+      maxInputTokens: 128000, // GPT-5 context window (matches web search limit)
       description: 'Fast, general-purpose model with web search'
     },
     thinking: {
       name: 'o1', // Thinking model with larger context window
-      maxInputTokens: 200000, // O1 extended context window
+      maxInputTokens: 200000, // O1 extended context window (but web search capped at 128k)
       description: 'Advanced reasoning model for complex/long inputs'
     }
   };
@@ -76,21 +79,36 @@ export class OpenAIService {
 
   /**
    * Select the appropriate model based on input token count
-   * Automatically switches to thinking model if base model limit exceeded
+   * NOTE: Web search tool has a 128k token limit regardless of model
+   * 
+   * Typical token usage for our prompts:
+   * - System prompt: ~430 tokens
+   * - User prompt (base): ~286 tokens  
+   * - Activity history (10 entries per user): ~860 tokens
+   * - Total typical: ~1,500 tokens (well under 128k limit)
+   * 
+   * The 128k limit would only be hit if we tried to include thousands of
+   * activity entries, which is not expected in normal operation.
    * 
    * @param estimatedTokens - Estimated input token count
    * @returns Selected model configuration
    */
   private selectModel(estimatedTokens: number): ModelConfig {
+    // Check web search token limit first (applies to all models)
+    if (estimatedTokens > this.WEB_SEARCH_TOKEN_LIMIT) {
+      logger.error(`❌ Input (${estimatedTokens.toLocaleString()} tokens) exceeds web search limit (${this.WEB_SEARCH_TOKEN_LIMIT.toLocaleString()} tokens)`);
+      logger.error(`   Web search is required for name research but is capped at 128k tokens`);
+      throw new Error(`Input too large for web search: ${estimatedTokens.toLocaleString()} tokens (max with web search: ${this.WEB_SEARCH_TOKEN_LIMIT.toLocaleString()})`);
+    }
+    
+    // Select model based on input size (within web search limit)
     if (estimatedTokens <= this.models.base.maxInputTokens) {
       return this.models.base;
-    } else if (estimatedTokens <= this.models.thinking.maxInputTokens) {
-      logger.warn(`⚠️  Input (${estimatedTokens.toLocaleString()} tokens) exceeds base model limit`);
-      logger.info(`   Switching to ${this.models.thinking.name} for extended context`);
-      return this.models.thinking;
     } else {
-      logger.error(`❌ Input (${estimatedTokens.toLocaleString()} tokens) exceeds all model limits!`);
-      throw new Error(`Input too large: ${estimatedTokens.toLocaleString()} tokens (max: ${this.models.thinking.maxInputTokens.toLocaleString()})`);
+      // This shouldn't happen since web search limit = base model limit, but keeping for safety
+      logger.warn(`⚠️  Input (${estimatedTokens.toLocaleString()} tokens) exceeds base model limit`);
+      logger.info(`   Switching to ${this.models.thinking.name} (but still limited by web search to 128k)`);
+      return this.models.thinking;
     }
   }
 
