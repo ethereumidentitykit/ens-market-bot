@@ -181,19 +181,20 @@ FOCUS AREAS:
    - Is it a common word, brand name, person name, or acronym?
    - Any cultural or industry significance?
 
-2. Market Interest
-   - Is this name registered on major TLDs (.com, .io, .ai)?
-   - Any notable sales of similar names? (check NameBio, DNJournal)
-   - General search interest or trend relevance
+2. Name Popularity & Usage
+   - If it's a person name, check forebears.io for usage statistics (how common is it globally?)
+   - Search interest or trend relevance
+   - Geographic distribution if it's a name
 
-3. Issues (if any)
-   - Trademark conflicts
-   - Negative meanings or controversies
+3. Market Interest
+   - Is this name registered on major TLDs (.com, .io, .ai)?
+   - Any notable sales of similar names? (check NameBio, DNJournal if available)
+   - General market demand for this type of name
 
 OUTPUT (keep brief, 200 words max):
 - Key meaning/context in 1-2 sentences
+- Usage statistics if it's a common name (forebears data)
 - Market relevance (if notable)
-- Any red flags
 
 IMPORTANT: Be honest. If there's nothing particularly interesting or significant about this name, just say so. Don't inflate its importance or make up significance that isn't there. A common generic word is fine to describe as such.
 
@@ -362,7 +363,10 @@ FORMATTING:
 - Write in short paragraphs
 
 WHAT TO FOCUS ON:
-1. **Name meaning**: Only explain if it's unusual or unclear. Skip obvious ones like "students" or "coffee." Explain obscure names, non-English words, or technical terms.
+1. **Name meaning & popularity**: 
+   - Only explain if it's unusual or unclear. Skip obvious ones like "students" or "coffee."
+   - If it's a common name, mention usage statistics (e.g., "Common surname, ~50k bearers globally")
+   - Explain obscure names, non-English words, or technical terms
 
 2. **Trading patterns**: Only mention if notable:
    - Someone buying lots of similar names (what kind?)
@@ -380,17 +384,18 @@ CRITICAL RULES:
 - Don't explain obvious name meanings
 - Don't list stats just because you have them
 - Don't repeat the price or name from the main tweet
+- Skip legal/trademark topics unless it's a major red flag
 - NEVER offer personal services or suggest you can help ("I can look up..." "let me know if...")
 - NEVER ask questions to the reader
 - You are an automated analysis bot, not a person offering services
 
 GOOD EXAMPLE:
-"The buyer has been focused on education terms, picking up 6 names in this category over 2 months. No flips, just holding. The seller waited over 3 years and made 4x. These utility names are seeing more interest as communities look for brandable domains."
+"Edward is one of the most common English names globally (forebears shows ~600k bearers). The buyer has been focused on traditional first names, picking up 6 premium ones over 2 months. No flips, just holding. The seller waited over 3 years and made 4x. Classic identity names are seeing renewed interest."
 
 BAD EXAMPLES:
 "This descriptive education label shows strong SEO potential. The acquirer powergrails.eth demonstrates consolidator behavior with 6 acquisitions."
 
-"This is a fresh registration, not a resale. If you plan to use this, first confirm who controls the wallet."`;
+"Common given name, nothing exotic. Note there are live trademark filings using the same word, so commercial uses could carry legal risk in some industries."`;
   }
 
   /**
