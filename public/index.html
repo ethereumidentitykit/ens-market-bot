@@ -2275,10 +2275,12 @@
                                             <td class="px-6 py-4 whitespace-nowrap">
                                                 <div class="flex items-center">
                                                     <img 
-                                                        :src="bid.nftImage || '/assets/nameplaceholder.png'" 
+                                                        :src="bid.nftImage" 
                                                         :alt="bid.tokenId" 
                                                         class="w-8 h-8 rounded-full mr-3 border border-gray-600"
-                                                        onerror="this.src='/assets/nameplaceholder.png'"
+                                                        style="display: none;"
+                                                        x-show="bid.nftImage"
+                                                        onerror="this.style.display='none'"
                                                     >
                                                     <div>
                                                         <div class="text-sm font-medium text-white" x-text="bid.ensName || `Token: ${bid.tokenId?.slice(-6) || 'Unknown'}...`"></div>

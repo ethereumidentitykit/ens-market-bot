@@ -525,6 +525,7 @@ function dashboard() {
             await this.loadContracts();
             await this.loadTweetHistory();
             await this.loadAIRepliesStatus();
+            await this.refreshPostedTransactions();
             await this.databaseView.loadPage(1);
             await this.registrationsView.loadPage(1);
             await this.bidsView.loadPage(1);
@@ -1168,6 +1169,10 @@ function dashboard() {
             // Initialize Sales Slider
             const salesSlider = document.getElementById('sales-slider');
             if (salesSlider && typeof noUiSlider !== 'undefined') {
+                // Destroy existing slider if it exists
+                if (salesSlider.noUiSlider) {
+                    salesSlider.noUiSlider.destroy();
+                }
                 noUiSlider.create(salesSlider, {
                     start: [
                         this.priceTiers.sales.tier1,
@@ -1199,6 +1204,10 @@ function dashboard() {
             // Initialize Registrations Slider
             const registrationsSlider = document.getElementById('registrations-slider');
             if (registrationsSlider && typeof noUiSlider !== 'undefined') {
+                // Destroy existing slider if it exists
+                if (registrationsSlider.noUiSlider) {
+                    registrationsSlider.noUiSlider.destroy();
+                }
                 noUiSlider.create(registrationsSlider, {
                     start: [
                         this.priceTiers.registrations.tier1,
@@ -2027,17 +2036,27 @@ Issued At: ${issuedAt}`;
                 this.loading = true;
 
                 // Load posted sales (those with tweet_id)
-                const salesResponse = await this.fetch('/api/unposted-sales?limit=100');
+                const salesResponse = await this.fetch('/api/database/sales?limit=500&page=1');
                 if (salesResponse.ok) {
                     const salesData = await salesResponse.json();
-                    this.postedSales = salesData.data.filter(sale => sale.tweetId);
+                    const sales = salesData.data?.sales || [];
+                    console.log('📊 Total sales fetched:', sales.length);
+                    console.log('📊 Sample sale object:', sales[0]);
+                    console.log('📊 Sales with tweetId:', sales.filter(s => s.tweetId).length);
+                    this.postedSales = sales.filter(sale => sale.tweetId);
+                    console.log('✅ Posted sales:', this.postedSales.length);
                 }
 
                 // Load posted registrations (those with tweet_id)
-                const regsResponse = await this.fetch('/api/unposted-registrations?limit=100');
+                const regsResponse = await this.fetch('/api/database/registrations?limit=500&page=1');
                 if (regsResponse.ok) {
                     const regsData = await regsResponse.json();
-                    this.postedRegistrations = regsData.data.filter(reg => reg.tweetId);
+                    const registrations = regsData.data?.registrations || [];
+                    console.log('📊 Total registrations fetched:', registrations.length);
+                    console.log('📊 Sample registration object:', registrations[0]);
+                    console.log('📊 Registrations with tweetId:', registrations.filter(r => r.tweetId).length);
+                    this.postedRegistrations = registrations.filter(reg => reg.tweetId);
+                    console.log('✅ Posted registrations:', this.postedRegistrations.length);
                 }
             } catch (error) {
                 console.error('Failed to refresh posted transactions:', error);

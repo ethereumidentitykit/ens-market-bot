@@ -711,6 +711,13 @@ async function startApplication(): Promise<void> {
           txHash: transaction.transactionHash
         };
 
+        logger.debug(`   📋 Addresses from DB: Buyer=${eventData.buyerAddress.slice(0, 10)}..., Seller=${eventData.sellerAddress ? eventData.sellerAddress.slice(0, 10) + '...' : 'N/A'}`);
+        
+        // Warn if buyer and seller are the same (unusual but possible)
+        if (eventData.sellerAddress && eventData.buyerAddress.toLowerCase() === eventData.sellerAddress.toLowerCase()) {
+          logger.warn(`   ⚠️ WARNING: Buyer and seller are the same address! This may be incorrect.`);
+        }
+
         logger.debug('   Fetching Magic Eden data...');
         const tokenActivities = await magicEdenService.getTokenActivityHistory(
           transaction.contractAddress,
