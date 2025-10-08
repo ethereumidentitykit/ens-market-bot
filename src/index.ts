@@ -1144,6 +1144,57 @@ async function startApplication(): Promise<void> {
       });
     });
 
+    // AI Replies endpoints
+    app.post('/api/admin/toggle-ai-replies', requireAuth, async (req, res) => {
+      try {
+        const { enabled } = req.body;
+        if (typeof enabled !== 'boolean') {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid enabled value'
+          });
+        }
+
+        await databaseService.setAIRepliesEnabled(enabled);
+        
+        logger.info(`AI Replies ${enabled ? 'enabled' : 'disabled'}`);
+        res.json({
+          success: true,
+          enabled: enabled
+        });
+      } catch (error: any) {
+        logger.error('Failed to toggle AI replies:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.get('/api/admin/ai-replies-status', requireAuth, async (req, res) => {
+      try {
+        const enabled = await databaseService.isAIRepliesEnabled();
+        const openaiConfigured = !!process.env.OPENAI_API_KEY;
+        
+        // Get count of generated replies
+        const recentReplies = await databaseService.getRecentAIReplies(1000);
+        const generatedCount = recentReplies.length;
+
+        res.json({
+          success: true,
+          enabled: enabled,
+          openaiConfigured: openaiConfigured,
+          generatedCount: generatedCount
+        });
+      } catch (error: any) {
+        logger.error('Failed to get AI replies status:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     // Database trigger setup for real-time processing
     app.post('/api/admin/setup-triggers', requireAuth, async (req, res) => {
       try {

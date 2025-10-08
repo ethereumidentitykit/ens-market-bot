@@ -1982,18 +1982,13 @@ Issued At: ${issuedAt}`;
 
         async loadAIRepliesStatus() {
             try {
-                // Check if AI replies are enabled (using system state)
-                const statusResponse = await this.fetch('/api/admin/toggle-status');
+                const statusResponse = await this.fetch('/api/admin/ai-replies-status');
                 if (statusResponse.ok) {
                     const data = await statusResponse.json();
-                    // For now, default to false - will need to add endpoint to check AI status
-                    this.aiRepliesEnabled = false;
-                    this.openaiConfigured = !!process.env.OPENAI_API_KEY; // Check if API key exists
+                    this.aiRepliesEnabled = data.enabled || false;
+                    this.openaiConfigured = data.openaiConfigured || false;
+                    this.aiRepliesGenerated = data.generatedCount || 0;
                 }
-
-                // Load count of generated replies
-                // This would need a new endpoint - for now set to 0
-                this.aiRepliesGenerated = 0;
             } catch (error) {
                 console.error('Failed to load AI replies status:', error);
             }
@@ -2004,8 +1999,6 @@ Issued At: ${issuedAt}`;
                 this.loading = true;
                 const newState = !this.aiRepliesEnabled;
 
-                // Call backend to toggle AI replies
-                // This endpoint doesn't exist yet - placeholder
                 const response = await this.fetch('/api/admin/toggle-ai-replies', {
                     method: 'POST',
                     body: JSON.stringify({ enabled: newState })
