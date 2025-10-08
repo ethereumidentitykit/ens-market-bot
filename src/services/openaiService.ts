@@ -227,7 +227,6 @@ OUTPUT
 CONSTRAINTS
 • Be concise and evidence-driven.
 • If evidence is weak or conflicting, state uncertainty explicitly and why.
-• Every non-obvious claim must have a citation immediately after the sentence it supports.
 
 BEGIN with research for: ${label}`;
 
