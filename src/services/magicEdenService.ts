@@ -474,7 +474,7 @@ export class MagicEdenService {
   }
 
   /**
-   * Get token activity from Magic Eden API with pagination
+   * Get token activity from Magic Eden API with pagination (single page)
    */
   async getTokenActivity(
     contractAddress: string,
@@ -527,6 +527,83 @@ export class MagicEdenService {
         activities: [],
         continuation: null
       };
+    }
+  }
+
+  /**
+   * Get complete token activity history with automatic pagination
+   * Aggregates multiple pages of token activity into a single array
+   * 
+   * @param contract - ENS contract address
+   * @param tokenId - Token ID
+   * @param options - Optional pagination settings
+   * @returns Array of token activities (aggregated from all pages)
+   */
+  async getTokenActivityHistory(
+    contract: string,
+    tokenId: string,
+    options: {
+      limit?: number;  // Items per request (default: 20, Magic Eden max)
+      types?: ('sale' | 'mint' | 'transfer' | 'ask' | 'bid' | 'ask_cancel' | 'bid_cancel')[];
+      maxPages?: number;  // Maximum pages to fetch (default: 10)
+    } = {}
+  ): Promise<TokenActivity[]> {
+    // Set defaults
+    const limit = options.limit || 20;  // Magic Eden max is 20
+    const types = options.types || ['sale', 'mint'];
+    const maxPages = options.maxPages || 10;
+
+    logger.info(`📚 Fetching token activity history for ${contract}:${tokenId}`);
+    logger.debug(`   Settings: limit=${limit}, types=[${types.join(',')}], maxPages=${maxPages}`);
+
+    const allActivities: TokenActivity[] = [];
+    let continuation: string | undefined;
+    let pageCount = 0;
+
+    try {
+      // Loop through pages until we hit maxPages or run out of data
+      while (pageCount < maxPages) {
+        pageCount++;
+        
+        // Fetch single page using existing method
+        const response = await this.getTokenActivity(
+          contract,
+          tokenId,
+          limit,
+          continuation,
+          types as string[]
+        );
+
+        // Break if no activities returned
+        if (!response.activities || response.activities.length === 0) {
+          logger.debug(`   Page ${pageCount}: No more activities, stopping pagination`);
+          break;
+        }
+
+        // Add activities to aggregated array
+        allActivities.push(...response.activities);
+        logger.debug(`   Page ${pageCount}: Fetched ${response.activities.length} activities (total: ${allActivities.length})`);
+
+        // Check for continuation cursor
+        continuation = response.continuation || undefined;
+        if (!continuation) {
+          logger.debug(`   Page ${pageCount}: No continuation cursor, reached end of data`);
+          break;
+        }
+
+        // Rate limiting between requests (200ms delay)
+        if (continuation) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+      }
+
+      logger.info(`✅ Token activity history complete: ${allActivities.length} activities across ${pageCount} pages`);
+      return allActivities;
+
+    } catch (error: any) {
+      logger.error(`❌ Error fetching token activity history: ${error.message}`);
+      // Return whatever we collected before the error
+      return allActivities;
     }
   }
 
