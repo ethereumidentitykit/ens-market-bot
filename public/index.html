@@ -1083,22 +1083,42 @@
                             </div>
                         </div>
 
-                        <!-- Transaction ID Input (for posted transactions only) -->
-                        <div class="mb-4">
-                            <label class="block text-sm font-medium text-gray-700 mb-2">
-                                Select Transaction (Posted to Twitter only)
-                            </label>
+                        <!-- Sale Selection -->
+                        <div x-show="aiReplyType === 'sale'" class="mb-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Select Sale (Posted to Twitter only)</label>
                             <div class="flex items-center space-x-3">
                                 <select 
                                     x-model="aiReplyTransactionId"
                                     @change="clearAIReply()"
                                     class="flex-1 block px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                                 >
-                                    <option value="">Select a transaction...</option>
-                                    <template x-show="aiReplyType === 'sale'" x-for="sale in postedSales" :key="sale.id">
+                                    <option value="">Select a sale...</option>
+                                    <template x-for="sale in postedSales" :key="sale.id">
                                         <option :value="sale.id" x-text="`${sale.nftName || 'Unknown'} - ${parseFloat(sale.priceEth).toFixed(2)} ETH`"></option>
                                     </template>
-                                    <template x-show="aiReplyType === 'registration'" x-for="registration in postedRegistrations" :key="registration.id">
+                                </select>
+                                <button 
+                                    @click="refreshPostedTransactions()" 
+                                    :disabled="loading"
+                                    class="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50"
+                                >
+                                    <i class="fas fa-sync-alt mr-1" :class="{'loading': loading}"></i>
+                                    Refresh
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Registration Selection -->
+                        <div x-show="aiReplyType === 'registration'" class="mb-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Select Registration (Posted to Twitter only)</label>
+                            <div class="flex items-center space-x-3">
+                                <select 
+                                    x-model="aiReplyTransactionId"
+                                    @change="clearAIReply()"
+                                    class="flex-1 block px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                                >
+                                    <option value="">Select a registration...</option>
+                                    <template x-for="registration in postedRegistrations" :key="registration.id">
                                         <option :value="registration.id" x-text="`${registration.fullName || registration.ensName || 'Unknown'} - ${parseFloat(registration.costEth || '0').toFixed(2)} ETH`"></option>
                                     </template>
                                 </select>
@@ -1111,7 +1131,6 @@
                                     Refresh
                                 </button>
                             </div>
-                            <p class="mt-1 text-xs text-gray-500">Only transactions that have been posted to Twitter can generate replies</p>
                         </div>
 
                         <!-- Generate AI Reply Button -->
