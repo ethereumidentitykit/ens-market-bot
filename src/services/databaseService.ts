@@ -693,11 +693,11 @@ export class DatabaseService implements IDatabaseService {
 
   /**
    * Get the maximum tokens for AI completion
-   * @returns max tokens (default: 600 for ~1000 char responses)
+   * @returns max tokens (default: 500 for ~800 char responses)
    */
   async getAIMaxTokens(): Promise<number> {
     const value = await this.getSystemState('ai_max_tokens');
-    return value ? parseInt(value, 10) : 600; // Default 600 tokens for ~1000 char responses
+    return value ? parseInt(value, 10) : 500; // Default 500 tokens for ~800 char responses
   }
 
   /**
