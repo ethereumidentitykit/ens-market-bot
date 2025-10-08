@@ -500,9 +500,68 @@ export class DataProcessingService {
   ): Promise<LLMPromptContext> {
     logger.info(`🧠 Building LLM context for ${eventData.type}: ${eventData.tokenName}`);
     logger.debug(`   Event from DB: ${eventData.price} ETH ($${eventData.priceUsd}), txHash: ${eventData.txHash.slice(0, 10)}...`);
+    logger.debug(`   Raw data: ${tokenActivities.length} token activities, ${buyerActivities.length} buyer activities, ${sellerActivities?.length || 0} seller activities`);
     
-    // TODO: Implementation in Task 1.7
-    throw new Error('Not implemented yet');
+    const startTime = Date.now();
+    
+    // Step 1: Process token history (exclude current transaction)
+    logger.debug(`   📊 Processing token history...`);
+    const tokenInsights = await this.processTokenHistory(tokenActivities, eventData.txHash);
+    
+    // Step 2: Process buyer activity
+    logger.debug(`   👤 Processing buyer activity...`);
+    const buyerStats = await this.processUserActivity(
+      buyerActivities,
+      eventData.buyerAddress,
+      'buyer'
+    );
+    
+    // Step 3: Process seller activity (if this is a sale)
+    let sellerStats: UserStats | null = null;
+    if (eventData.sellerAddress && sellerActivities) {
+      logger.debug(`   👤 Processing seller activity...`);
+      sellerStats = await this.processUserActivity(
+        sellerActivities,
+        eventData.sellerAddress,
+        'seller'
+      );
+    } else {
+      logger.debug(`   ⏭️  No seller data (registration)`);
+    }
+    
+    // Step 4: Assemble complete context
+    const context: LLMPromptContext = {
+      event: {
+        type: eventData.type,
+        tokenName: eventData.tokenName,
+        price: eventData.price,
+        priceUsd: eventData.priceUsd,
+        currency: eventData.currency,
+        timestamp: eventData.timestamp,
+        buyerAddress: eventData.buyerAddress,
+        sellerAddress: eventData.sellerAddress,
+        txHash: eventData.txHash
+      },
+      tokenInsights,
+      buyerStats,
+      sellerStats,
+      metadata: {
+        dataFetchedAt: Date.now(),
+        tokenActivityCount: tokenActivities.length,
+        buyerActivityCount: buyerActivities.length,
+        sellerActivityCount: sellerActivities?.length || 0
+      }
+    };
+    
+    const processingTime = Date.now() - startTime;
+    logger.info(`✅ LLM context built in ${processingTime}ms`);
+    logger.debug(`   Token: ${tokenInsights.numberOfSales} sales, ${tokenInsights.priceDirection} trend`);
+    logger.debug(`   Buyer: ${buyerStats.buysCount} buys, ${buyerStats.sellsCount} sells, PNL: ${buyerStats.realizedPnl >= 0 ? '+' : ''}${buyerStats.realizedPnl.toFixed(4)} ETH`);
+    if (sellerStats) {
+      logger.debug(`   Seller: ${sellerStats.buysCount} buys, ${sellerStats.sellsCount} sells, PNL: ${sellerStats.realizedPnl >= 0 ? '+' : ''}${sellerStats.realizedPnl.toFixed(4)} ETH`);
+    }
+    
+    return context;
   }
 }
 
