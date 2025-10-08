@@ -127,6 +127,7 @@ SCOPE
 4) Market comparables & availability snapshot
 • Recent public sales comps of exact/close variants (e.g., ${label}.com/.io/.ai; ${label}.eth; plural/singular; hyphenated). Prioritize NameBio, DNJournal, marketplace sold pages, ENS marketplaces.
 • Current availability/ask indications for major TLDs (.com/.net/.org/.io/.ai) and notable ccTLDs. If listed, capture indicative ask (not an appraisal).
+• Check if the above TLDs are registered / non-registered for ${label}
 • Social handle checks (read-only): note whether @${label} appears obviously taken on major platforms.
 
 5) Legal/reputation risk
