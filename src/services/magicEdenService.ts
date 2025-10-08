@@ -501,7 +501,7 @@ export class MagicEdenService {
       let urlParams = new URLSearchParams();
       urlParams.set('limit', limit.toString());
       urlParams.set('sortBy', 'eventTimestamp');
-      urlParams.set('includeMetadata', 'true');
+      urlParams.set('includeMetadata', 'false');
       
       if (continuation) {
         urlParams.set('continuation', continuation);
@@ -553,13 +553,13 @@ export class MagicEdenService {
     options: {
       limit?: number;  // Items per request (default: 20, Magic Eden max)
       types?: ('sale' | 'mint' | 'transfer' | 'ask' | 'bid' | 'ask_cancel' | 'bid_cancel')[];
-      maxPages?: number;  // Maximum pages to fetch (default: 10)
+      maxPages?: number;  // Maximum pages to fetch (default: 40)
     } = {}
   ): Promise<TokenActivity[]> {
     // Set defaults
     const limit = options.limit || 20;  // Magic Eden max is 20
     const types = options.types || ['sale', 'mint', 'transfer'];  // Include transfers for proxy resolution
-    const maxPages = options.maxPages || 20;  // Fetch more pages for complete history
+    const maxPages = options.maxPages || 40;  // Fetch more pages for complete history
 
     logger.info(`📚 Fetching token activity history for ${contract}:${tokenId}`);
     logger.debug(`   Settings: limit=${limit}, types=[${types.join(',')}], maxPages=${maxPages}`);
@@ -599,9 +599,10 @@ export class MagicEdenService {
           break;
         }
 
-        // Rate limiting between requests (200ms delay)
+        // Rate limiting between requests (1000-1100ms randomized delay to avoid rate limits)
         if (continuation) {
-          await new Promise(resolve => setTimeout(resolve, 200));
+          const delay = 1000 + Math.random() * 100; // Random delay between 1000ms and 1100ms
+          await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
 
@@ -635,7 +636,7 @@ export class MagicEdenService {
     options: {
       limit?: number;  // Items per request (default: 20, Magic Eden max)
       types?: ('sale' | 'mint' | 'transfer' | 'ask' | 'bid' | 'ask_cancel' | 'bid_cancel')[];
-      maxPages?: number;  // Maximum pages to fetch (default: 20)
+      maxPages?: number;  // Maximum pages to fetch (default: 40)
     } = {}
   ): Promise<TokenActivity[]> {
     // Set defaults - NOTE: Excludes 'bid' and 'transfer' types
@@ -643,7 +644,7 @@ export class MagicEdenService {
     // Proxy resolution happens via known proxy list, not transfer tracing
     const limit = options.limit || 20;  // Magic Eden caps at 20 for user activity
     const types = options.types || ['sale', 'mint'];  // NO transfers by default
-    const maxPages = options.maxPages || 20;  // Back to 20 pages (20x20 = 400 items)
+    const maxPages = options.maxPages || 40;  // Increased to 40 pages (20x40 = 800 items)
 
     logger.info(`👤 Fetching user activity history for ${address}`);
     logger.debug(`   Settings: limit=${limit}, types=[${types.join(',')}], maxPages=${maxPages}`);
@@ -724,9 +725,10 @@ export class MagicEdenService {
           break;
         }
 
-        // Rate limiting between requests (200ms delay)
+        // Rate limiting between requests (1000-1100ms randomized delay to avoid rate limits)
         if (continuation) {
-          await new Promise(resolve => setTimeout(resolve, 200));
+          const delay = 1000 + Math.random() * 100; // Random delay between 1000ms and 1100ms
+          await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
 

@@ -51,10 +51,6 @@ export interface UserStats {
   sellsVolume: number; // Total ETH received
   sellsVolumeUsd: number; // Total USD received
   
-  // PNL calculation
-  realizedPnl: number; // sellsVolume - buysVolume (ETH)
-  realizedPnlUsd: number; // sellsVolumeUsd - buysVolumeUsd (USD)
-  
   // Activity timing
   firstActivityTimestamp: number | null;
   lastActivityTimestamp: number | null;
@@ -191,7 +187,7 @@ export class DataProcessingService {
     activities: TokenActivity[],
     currentTxHash?: string
   ): Promise<TokenInsights> {
-    logger.debug(`🔍 Processing token history: ${activities.length} activities`);
+    logger.debug(`🔍 Processing token history: ${activities.length} total activities`);
     if (currentTxHash) {
       logger.debug(`   Current tx to exclude: ${currentTxHash}`);
     }
@@ -203,12 +199,18 @@ export class DataProcessingService {
     );
     const transfers = activities.filter(a => a.type === 'transfer');
     
-    logger.debug(`   Found ${sales.length} sales, ${transfers.length} transfers`);
+    logger.debug(`   Found ${sales.length} sales (before filtering), ${transfers.length} transfers`);
+    
+    // Log all sale txHashes for debugging
+    if (sales.length > 0) {
+      logger.debug(`   Sale txHashes: ${sales.slice(0, 3).map(s => s.txHash.slice(0, 10) + '...').join(', ')}${sales.length > 3 ? ` (+${sales.length - 3} more)` : ''}`);
+    }
     
     // Resolve real buyer/seller for each sale using transfer events
     const resolvedSales = sales.map(sale => {
       // Skip current transaction if provided
       if (currentTxHash && sale.txHash.toLowerCase() === currentTxHash.toLowerCase()) {
+        logger.debug(`   Filtering out current tx: ${sale.txHash.slice(0, 10)}...`);
         return null;
       }
       
@@ -470,10 +472,6 @@ export class DataProcessingService {
       sum + activity.price.amount.usd, 0
     );
     
-    // Calculate PNL (simple: total sells - total buys)
-    const realizedPnl = sellsVolume - buysVolume;
-    const realizedPnlUsd = sellsVolumeUsd - buysVolumeUsd;
-    
     // Track activity timing
     const allActivities = [...buys, ...sells];
     let firstActivityTimestamp: number | null = null;
@@ -523,16 +521,13 @@ export class DataProcessingService {
       sellsCount,
       sellsVolume,
       sellsVolumeUsd,
-      realizedPnl,
-      realizedPnlUsd,
       firstActivityTimestamp,
       lastActivityTimestamp,
       transactionsPerMonth,
       topMarketplaces
     };
     
-    logger.debug(`   ✅ User stats: ${buysCount} buys (${buysVolume.toFixed(4)} ETH), ${sellsCount} sells (${sellsVolume.toFixed(4)} ETH)`);
-    logger.debug(`      PNL: ${realizedPnl >= 0 ? '+' : ''}${realizedPnl.toFixed(4)} ETH (${realizedPnlUsd >= 0 ? '+' : ''}$${realizedPnlUsd.toFixed(2)})`);
+    logger.debug(`   ✅ User stats: ${buysCount} buys (${buysVolume.toFixed(4)} ETH / $${buysVolumeUsd.toFixed(2)}), ${sellsCount} sells (${sellsVolume.toFixed(4)} ETH / $${sellsVolumeUsd.toFixed(2)})`);
     logger.debug(`      Activity: ${transactionsPerMonth.toFixed(2)} txns/month, Top marketplaces: ${topMarketplaces.join(', ')}`);
     
     return stats;
@@ -633,9 +628,9 @@ export class DataProcessingService {
     const processingTime = Date.now() - startTime;
     logger.info(`✅ LLM context built in ${processingTime}ms`);
     logger.debug(`   Token: ${tokenInsights.numberOfSales} sales, ${tokenInsights.priceDirection} trend`);
-    logger.debug(`   Buyer: ${buyerStats.buysCount} buys, ${buyerStats.sellsCount} sells, PNL: ${buyerStats.realizedPnl >= 0 ? '+' : ''}${buyerStats.realizedPnl.toFixed(4)} ETH`);
+    logger.debug(`   Buyer: ${buyerStats.buysCount} buys (${buyerStats.buysVolume.toFixed(4)} ETH), ${buyerStats.sellsCount} sells (${buyerStats.sellsVolume.toFixed(4)} ETH)`);
     if (sellerStats) {
-      logger.debug(`   Seller: ${sellerStats.buysCount} buys, ${sellerStats.sellsCount} sells, PNL: ${sellerStats.realizedPnl >= 0 ? '+' : ''}${sellerStats.realizedPnl.toFixed(4)} ETH`);
+      logger.debug(`   Seller: ${sellerStats.buysCount} buys (${sellerStats.buysVolume.toFixed(4)} ETH), ${sellerStats.sellsCount} sells (${sellerStats.sellsVolume.toFixed(4)} ETH)`);
     }
     
     return context;
