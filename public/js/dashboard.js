@@ -122,6 +122,20 @@ function dashboard() {
         tweetGenerating: false,
         tweetSending: false,
 
+        // AI Replies state
+        aiRepliesEnabled: false,
+        openaiConfigured: false,
+        aiRepliesGenerated: 0,
+        aiReplyType: 'sale', // 'sale' or 'registration'
+        aiReplyTransactionId: '',
+        postedSales: [],
+        postedRegistrations: [],
+        generatedAIReply: null,
+        aiReplyGenerating: false,
+        aiReplySending: false,
+        aiReplyMessage: '',
+        aiReplyMessageType: 'info',
+
         // Database management state
         databaseResetting: false,
         salesClearing: false,
@@ -510,6 +524,7 @@ function dashboard() {
             await this.loadUnpostedBids();
             await this.loadContracts();
             await this.loadTweetHistory();
+            await this.loadAIRepliesStatus();
             await this.databaseView.loadPage(1);
             await this.registrationsView.loadPage(1);
             await this.bidsView.loadPage(1);
@@ -1961,6 +1976,186 @@ Issued At: ${issuedAt}`;
             } catch (error) {
                 console.error('Logout failed:', error);
             }
+        },
+
+        // ===== AI Replies Functions =====
+
+        async loadAIRepliesStatus() {
+            try {
+                // Check if AI replies are enabled (using system state)
+                const statusResponse = await this.fetch('/api/admin/toggle-status');
+                if (statusResponse.ok) {
+                    const data = await statusResponse.json();
+                    // For now, default to false - will need to add endpoint to check AI status
+                    this.aiRepliesEnabled = false;
+                    this.openaiConfigured = !!process.env.OPENAI_API_KEY; // Check if API key exists
+                }
+
+                // Load count of generated replies
+                // This would need a new endpoint - for now set to 0
+                this.aiRepliesGenerated = 0;
+            } catch (error) {
+                console.error('Failed to load AI replies status:', error);
+            }
+        },
+
+        async toggleAIReplies() {
+            try {
+                this.loading = true;
+                const newState = !this.aiRepliesEnabled;
+
+                // Call backend to toggle AI replies
+                // This endpoint doesn't exist yet - placeholder
+                const response = await this.fetch('/api/admin/toggle-ai-replies', {
+                    method: 'POST',
+                    body: JSON.stringify({ enabled: newState })
+                });
+
+                if (response.ok) {
+                    this.aiRepliesEnabled = newState;
+                    this.showAIReplyMessage(
+                        `AI Replies ${newState ? 'enabled' : 'disabled'} successfully`,
+                        'success'
+                    );
+                } else {
+                    const data = await response.json();
+                    this.showAIReplyMessage(data.error || 'Failed to toggle AI replies', 'error');
+                }
+            } catch (error) {
+                console.error('Toggle AI replies failed:', error);
+                this.showAIReplyMessage(error.message, 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async refreshPostedTransactions() {
+            try {
+                this.loading = true;
+
+                // Load posted sales (those with tweet_id)
+                const salesResponse = await this.fetch('/api/unposted-sales?limit=100');
+                if (salesResponse.ok) {
+                    const salesData = await salesResponse.json();
+                    this.postedSales = salesData.data.filter(sale => sale.tweetId);
+                }
+
+                // Load posted registrations (those with tweet_id)
+                const regsResponse = await this.fetch('/api/unposted-registrations?limit=100');
+                if (regsResponse.ok) {
+                    const regsData = await regsResponse.json();
+                    this.postedRegistrations = regsData.data.filter(reg => reg.tweetId);
+                }
+            } catch (error) {
+                console.error('Failed to refresh posted transactions:', error);
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        clearAIReply() {
+            this.generatedAIReply = null;
+            this.aiReplyMessage = '';
+        },
+
+        async generateAIReply() {
+            if (!this.aiReplyTransactionId) {
+                this.showAIReplyMessage('Please select a transaction', 'error');
+                return;
+            }
+
+            if (!this.aiRepliesEnabled) {
+                this.showAIReplyMessage('AI Replies are disabled. Please enable them first.', 'error');
+                return;
+            }
+
+            try {
+                this.aiReplyGenerating = true;
+                this.clearAIReply();
+
+                const response = await this.fetch('/api/ai-reply-generate', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        type: this.aiReplyType,
+                        id: parseInt(this.aiReplyTransactionId)
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    this.generatedAIReply = data.reply;
+                    this.showAIReplyMessage(
+                        data.message || 'AI reply generated successfully',
+                        'success'
+                    );
+                } else {
+                    const data = await response.json();
+                    this.showAIReplyMessage(
+                        data.error || 'Failed to generate AI reply',
+                        'error'
+                    );
+                }
+            } catch (error) {
+                console.error('Generate AI reply failed:', error);
+                this.showAIReplyMessage(error.message, 'error');
+            } finally {
+                this.aiReplyGenerating = false;
+            }
+        },
+
+        async sendAIReplyPost() {
+            if (!this.generatedAIReply) {
+                this.showAIReplyMessage('No AI reply to send', 'error');
+                return;
+            }
+
+            try {
+                this.aiReplySending = true;
+
+                // Post reply to Twitter
+                // This endpoint doesn't exist yet - placeholder
+                const response = await this.fetch('/api/ai-reply-post', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        replyId: this.generatedAIReply.id
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    this.showAIReplyMessage(
+                        'AI reply posted successfully!',
+                        'success'
+                    );
+                    
+                    // Clear the generated reply after posting
+                    setTimeout(() => {
+                        this.clearAIReply();
+                        this.aiReplyTransactionId = '';
+                    }, 2000);
+                } else {
+                    const data = await response.json();
+                    this.showAIReplyMessage(
+                        data.error || 'Failed to post AI reply',
+                        'error'
+                    );
+                }
+            } catch (error) {
+                console.error('Send AI reply failed:', error);
+                this.showAIReplyMessage(error.message, 'error');
+            } finally {
+                this.aiReplySending = false;
+            }
+        },
+
+        showAIReplyMessage(message, type = 'info') {
+            this.aiReplyMessage = message;
+            this.aiReplyMessageType = type;
+            
+            // Auto-hide message after 5 seconds
+            setTimeout(() => {
+                this.aiReplyMessage = '';
+            }, 5000);
         }
     };
 }

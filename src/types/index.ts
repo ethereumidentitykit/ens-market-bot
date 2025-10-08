@@ -211,6 +211,15 @@ export interface IDatabaseService {
   markAsPosted(id: number, tweetId: string): Promise<void>;
   getSystemState(key: string): Promise<string | null>;
   setSystemState(key: string, value: string): Promise<void>;
+  // AI Configuration methods
+  isAIRepliesEnabled(): Promise<boolean>;
+  setAIRepliesEnabled(enabled: boolean): Promise<void>;
+  getAIModel(): Promise<string>;
+  setAIModel(model: string): Promise<void>;
+  getAITemperature(): Promise<number>;
+  setAITemperature(temperature: number): Promise<void>;
+  getAIMaxTokens(): Promise<number>;
+  setAIMaxTokens(maxTokens: number): Promise<void>;
   getStats(): Promise<{
     totalSales: number;
     postedSales: number;

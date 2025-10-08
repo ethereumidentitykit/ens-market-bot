@@ -615,7 +615,7 @@
                 <div class="bg-white shadow rounded-lg p-6">
                     <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4 flex items-center">
                         <i class="fab fa-twitter text-blue-400 mr-2"></i>
-                        Twitter Integration
+                        Twitter Sales Data Posting
                     </h3>
                     
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
@@ -998,6 +998,200 @@
                                     <p class="text-sm" 
                                        :class="twitterMessageType === 'success' ? 'text-green-800' : 'text-red-800'"
                                        x-text="twitterMessage">
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Twitter AI Replies -->
+            <div class="mb-8">
+                <div class="bg-white shadow rounded-lg p-6">
+                    <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4 flex items-center">
+                        <i class="fas fa-robot text-purple-400 mr-2"></i>
+                        Twitter AI Replies
+                    </h3>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                        <!-- AI Status -->
+                        <div class="flex items-center">
+                            <span class="text-sm font-medium text-gray-500 mr-2">AI Status:</span>
+                            <span x-show="aiRepliesEnabled" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                <i class="fas fa-check mr-1"></i>
+                                Enabled
+                            </span>
+                            <span x-show="!aiRepliesEnabled" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                <i class="fas fa-times mr-1"></i>
+                                Disabled
+                            </span>
+                        </div>
+                        
+                        <!-- OpenAI API Status -->
+                        <div class="flex items-center">
+                            <span class="text-sm font-medium text-gray-500 mr-2">OpenAI API:</span>
+                            <span x-show="openaiConfigured" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                <i class="fas fa-check-circle mr-1"></i>
+                                Connected
+                            </span>
+                            <span x-show="!openaiConfigured" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                <i class="fas fa-exclamation-triangle mr-1"></i>
+                                Not Configured
+                            </span>
+                        </div>
+
+                        <!-- Generated Count -->
+                        <div class="flex items-center">
+                            <span class="text-sm font-medium text-gray-500 mr-2">Generated Replies:</span>
+                            <span class="text-sm font-bold text-purple-600" x-text="aiRepliesGenerated || 0"></span>
+                        </div>
+                    </div>
+
+                    <!-- Toggle AI Replies -->
+                    <div class="mb-4">
+                        <button 
+                            @click="toggleAIReplies()" 
+                            :disabled="loading"
+                            class="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50"
+                        >
+                            <i class="fas" :class="aiRepliesEnabled ? 'fa-toggle-on text-green-600' : 'fa-toggle-off text-gray-400'" style="font-size: 1.25rem; margin-right: 0.5rem;"></i>
+                            <span x-text="aiRepliesEnabled ? 'Disable AI Replies' : 'Enable AI Replies'"></span>
+                        </button>
+                        <p class="mt-1 text-xs text-gray-500">Enable/disable automatic AI reply generation for new posts</p>
+                    </div>
+
+                    <!-- AI Reply Generation Section -->
+                    <div class="mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                        <h4 class="text-sm font-medium text-gray-900 mb-4 flex items-center">
+                            <i class="fas fa-magic text-purple-500 mr-2"></i>
+                            Generate AI Reply
+                        </h4>
+                        
+                        <!-- Transaction Type Selection -->
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Transaction Type</label>
+                            <div class="flex items-center space-x-4">
+                                <label class="inline-flex items-center">
+                                    <input type="radio" x-model="aiReplyType" value="sale" class="form-radio h-4 w-4 text-purple-600" @change="clearAIReply(); aiReplyTransactionId = '';">
+                                    <span class="ml-2 text-sm text-gray-700">💰 Sales</span>
+                                </label>
+                                <label class="inline-flex items-center">
+                                    <input type="radio" x-model="aiReplyType" value="registration" class="form-radio h-4 w-4 text-purple-600" @change="clearAIReply(); aiReplyTransactionId = '';">
+                                    <span class="ml-2 text-sm text-gray-700">🏛️ Registrations</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Transaction ID Input (for posted transactions only) -->
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                Select Transaction (Posted to Twitter only)
+                            </label>
+                            <div class="flex items-center space-x-3">
+                                <select 
+                                    x-model="aiReplyTransactionId"
+                                    @change="clearAIReply()"
+                                    class="flex-1 block px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                                >
+                                    <option value="">Select a transaction...</option>
+                                    <template x-show="aiReplyType === 'sale'" x-for="sale in postedSales" :key="sale.id">
+                                        <option :value="sale.id" x-text="`${sale.nftName || 'Unknown'} - ${parseFloat(sale.priceEth).toFixed(2)} ETH`"></option>
+                                    </template>
+                                    <template x-show="aiReplyType === 'registration'" x-for="registration in postedRegistrations" :key="registration.id">
+                                        <option :value="registration.id" x-text="`${registration.fullName || registration.ensName || 'Unknown'} - ${parseFloat(registration.costEth || '0').toFixed(2)} ETH`"></option>
+                                    </template>
+                                </select>
+                                <button 
+                                    @click="refreshPostedTransactions()" 
+                                    :disabled="loading"
+                                    class="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50"
+                                >
+                                    <i class="fas fa-sync-alt mr-1" :class="{'loading': loading}"></i>
+                                    Refresh
+                                </button>
+                            </div>
+                            <p class="mt-1 text-xs text-gray-500">Only transactions that have been posted to Twitter can generate replies</p>
+                        </div>
+
+                        <!-- Generate AI Reply Button -->
+                        <div class="mb-4">
+                            <button 
+                                @click="generateAIReply()" 
+                                :disabled="!aiReplyTransactionId || aiReplyGenerating || !aiRepliesEnabled"
+                                class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                <i class="fas fa-robot mr-2" :class="{'loading': aiReplyGenerating}"></i>
+                                <span x-show="!aiReplyGenerating">Generate AI Reply</span>
+                                <span x-show="aiReplyGenerating">Generating...</span>
+                            </button>
+                            <p class="mt-1 text-xs text-gray-500">Generate contextual AI reply using GPT-5 with web search</p>
+                        </div>
+
+                        <!-- AI Reply Preview -->
+                        <div x-show="generatedAIReply" x-transition class="space-y-4">
+                            <!-- Reply Text Preview -->
+                            <div class="bg-white border border-purple-300 rounded-lg p-4">
+                                <div class="flex items-center justify-between mb-2">
+                                    <h5 class="text-sm font-medium text-gray-900">Generated Reply</h5>
+                                    <div class="flex items-center space-x-2">
+                                        <span class="text-xs text-gray-500" x-text="`${generatedAIReply?.text?.length || 0}/280 chars`"></span>
+                                        <span x-show="generatedAIReply?.text?.length <= 280" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                                            <i class="fas fa-check mr-1"></i>
+                                            Valid
+                                        </span>
+                                    </div>
+                                </div>
+                                <div class="bg-purple-50 rounded p-3 font-mono text-sm whitespace-pre-wrap" x-text="generatedAIReply?.text"></div>
+                            </div>
+
+                            <!-- Reply Metadata -->
+                            <div class="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                                <h5 class="text-sm font-medium text-gray-900 mb-2">Metadata</h5>
+                                <div class="grid grid-cols-2 gap-2 text-xs">
+                                    <div><span class="font-medium text-purple-800">Model:</span> <span x-text="generatedAIReply?.modelUsed"></span></div>
+                                    <div><span class="font-medium text-purple-800">Status:</span> <span x-text="generatedAIReply?.status"></span></div>
+                                    <div><span class="font-medium text-purple-800">Prompt Tokens:</span> <span x-text="generatedAIReply?.tokens?.prompt"></span></div>
+                                    <div><span class="font-medium text-purple-800">Completion Tokens:</span> <span x-text="generatedAIReply?.tokens?.completion"></span></div>
+                                    <div><span class="font-medium text-purple-800">Total Tokens:</span> <span x-text="generatedAIReply?.tokens?.total"></span></div>
+                                    <div><span class="font-medium text-purple-800">Name Research:</span> <span x-text="generatedAIReply?.nameResearch || 'N/A'"></span></div>
+                                </div>
+                            </div>
+
+                            <!-- Post Reply Button -->
+                            <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <h5 class="text-sm font-medium text-yellow-900">Ready to Post Reply</h5>
+                                        <p class="text-xs text-yellow-700 mt-1">This will post as a threaded reply to the original tweet</p>
+                                    </div>
+                                    <button 
+                                        @click="sendAIReplyPost()" 
+                                        :disabled="!generatedAIReply || aiReplySending || twitterRateLimit?.status?.limitReached"
+                                        class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        <i class="fab fa-twitter mr-2" :class="{'loading': aiReplySending}"></i>
+                                        <span x-show="!aiReplySending">Send Reply</span>
+                                        <span x-show="aiReplySending">Sending...</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Status Message -->
+                    <div x-show="aiReplyMessage" x-transition class="mt-4">
+                        <div class="rounded-md p-4" 
+                             :class="aiReplyMessageType === 'success' ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'">
+                            <div class="flex">
+                                <div class="flex-shrink-0">
+                                    <i x-show="aiReplyMessageType === 'success'" class="fas fa-check-circle text-green-400"></i>
+                                    <i x-show="aiReplyMessageType === 'error'" class="fas fa-exclamation-circle text-red-400"></i>
+                                </div>
+                                <div class="ml-3">
+                                    <p class="text-sm" 
+                                       :class="aiReplyMessageType === 'success' ? 'text-green-800' : 'text-red-800'"
+                                       x-text="aiReplyMessage">
                                     </p>
                                 </div>
                             </div>

@@ -31,6 +31,7 @@ import { OpenSeaService } from './services/openSeaService';
 import { ENSMetadataService } from './services/ensMetadataService';
 import { ENSTokenUtils } from './services/ensTokenUtils';
 import { DatabaseEventService } from './services/databaseEventService';
+import { OpenAIService } from './services/openaiService';
 import pgSession from 'connect-pg-simple';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -600,6 +601,193 @@ async function startApplication(): Promise<void> {
 
       } catch (error: any) {
         logger.error('❌ AI Reply Preview error:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    // AI Reply Generation Endpoint
+    app.post('/api/ai-reply-generate', requireAuth, async (req, res) => {
+      try {
+        const { type, id } = req.body;
+
+        // Validate inputs
+        if (!type || !id) {
+          return res.status(400).json({
+            success: false,
+            error: 'Missing required parameters: type and id'
+          });
+        }
+
+        if (type !== 'sale' && type !== 'registration') {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid type. Must be "sale" or "registration"'
+          });
+        }
+
+        const transactionId = parseInt(id as string, 10);
+        if (isNaN(transactionId)) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid id. Must be a number'
+          });
+        }
+
+        logger.info(`🤖 AI Reply Generation requested: ${type} ${transactionId}`);
+
+        // Step 1: Check if AI replies are enabled
+        const aiEnabled = await databaseService.isAIRepliesEnabled();
+        if (!aiEnabled) {
+          return res.status(403).json({
+            success: false,
+            error: 'AI replies are currently disabled. Enable them in admin settings.'
+          });
+        }
+
+        // Step 2: Check if reply already exists
+        const existingReply = type === 'sale'
+          ? await databaseService.getAIReplyBySaleId(transactionId)
+          : await databaseService.getAIReplyByRegistrationId(transactionId);
+
+        if (existingReply) {
+          logger.info(`   Reply already exists (ID: ${existingReply.id})`);
+          return res.json({
+            success: true,
+            message: 'Reply already exists',
+            reply: {
+              id: existingReply.id,
+              text: existingReply.replyText,
+              tokens: {
+                prompt: existingReply.promptTokens,
+                completion: existingReply.completionTokens,
+                total: existingReply.totalTokens
+              },
+              modelUsed: existingReply.modelUsed,
+              status: existingReply.status,
+              createdAt: existingReply.createdAt
+            }
+          });
+        }
+
+        // Step 3: Fetch transaction from database
+        logger.debug('   Fetching transaction from database...');
+        const transaction = type === 'sale'
+          ? await databaseService.getSaleById(transactionId)
+          : await databaseService.getRegistrationById(transactionId);
+
+        if (!transaction) {
+          return res.status(404).json({
+            success: false,
+            error: `${type} with id ${transactionId} not found`
+          });
+        }
+
+        // Check if transaction has a tweet_id (required for replies)
+        if (!transaction.tweetId) {
+          return res.status(400).json({
+            success: false,
+            error: `${type} has not been posted to Twitter yet. Cannot generate reply without original tweet.`
+          });
+        }
+
+        // Step 4: Prepare event data and fetch Magic Eden data (reuse preview logic)
+        const isSale = type === 'sale';
+        const sale = isSale ? transaction as ProcessedSale : null;
+        const registration = !isSale ? transaction as ENSRegistration : null;
+        const tokenName = isSale ? (sale!.nftName || 'Unknown') : registration!.fullName;
+
+        const eventData = {
+          type: type as 'sale' | 'registration',
+          tokenName,
+          price: parseFloat(isSale ? sale!.priceEth : (registration!.costEth || '0')),
+          priceUsd: parseFloat(isSale ? (sale!.priceUsd || '0') : (registration!.costUsd || '0')),
+          currency: 'ETH',
+          timestamp: new Date(transaction.blockTimestamp).getTime() / 1000,
+          buyerAddress: isSale ? sale!.buyerAddress : registration!.ownerAddress,
+          sellerAddress: isSale ? sale!.sellerAddress : undefined,
+          txHash: transaction.transactionHash
+        };
+
+        logger.debug('   Fetching Magic Eden data...');
+        const tokenActivities = await magicEdenService.getTokenActivityHistory(
+          transaction.contractAddress,
+          transaction.tokenId
+        );
+
+        const buyerActivities = await magicEdenService.getUserActivityHistory(
+          eventData.buyerAddress
+        );
+
+        let sellerActivities: TokenActivity[] | null = null;
+        if (eventData.sellerAddress) {
+          sellerActivities = await magicEdenService.getUserActivityHistory(
+            eventData.sellerAddress
+          );
+        }
+
+        // Step 5: Build LLM context
+        logger.debug('   Building LLM context...');
+        const { dataProcessingService } = await import('./services/dataProcessingService');
+        const ensWorkerService = new ENSWorkerService();
+        const llmContext = await dataProcessingService.buildLLMContext(
+          eventData,
+          tokenActivities,
+          buyerActivities,
+          sellerActivities,
+          magicEdenService,
+          ensWorkerService
+        );
+
+        // Step 6: Generate reply using OpenAI
+        logger.debug('   Generating AI reply...');
+        const openaiService = new OpenAIService();
+        const generatedReply = await openaiService.generateReply(llmContext);
+
+        // Step 7: Store in database
+        logger.debug('   Storing AI reply in database...');
+        const replyId = await databaseService.insertAIReply({
+          saleId: isSale ? transactionId : undefined,
+          registrationId: !isSale ? transactionId : undefined,
+          originalTweetId: transaction.tweetId,
+          replyTweetId: undefined, // Not posted yet
+          transactionType: type,
+          transactionHash: transaction.transactionHash,
+          modelUsed: generatedReply.modelUsed,
+          promptTokens: generatedReply.promptTokens,
+          completionTokens: generatedReply.completionTokens,
+          totalTokens: generatedReply.totalTokens,
+          costUsd: 0, // Not tracked per requirements
+          replyText: generatedReply.tweetText,
+          status: 'pending', // Generated but not posted
+          errorMessage: undefined
+        });
+
+        logger.info(`✅ AI reply generated and stored (ID: ${replyId})`);
+
+        // Step 8: Return response
+        res.json({
+          success: true,
+          message: 'AI reply generated successfully',
+          reply: {
+            id: replyId,
+            text: generatedReply.tweetText,
+            tokens: {
+              prompt: generatedReply.promptTokens,
+              completion: generatedReply.completionTokens,
+              total: generatedReply.totalTokens
+            },
+            modelUsed: generatedReply.modelUsed,
+            status: 'pending',
+            nameResearch: generatedReply.nameResearch ? 'Available' : 'Not available'
+          }
+        });
+
+      } catch (error: any) {
+        logger.error('❌ AI Reply Generation error:', error.message);
+        logger.error(error.stack);
         res.status(500).json({
           success: false,
           error: error.message
