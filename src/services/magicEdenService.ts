@@ -633,9 +633,9 @@ export class MagicEdenService {
   async getUserActivityHistory(
     address: string,
     options: {
-      limit?: number;  // Items per request (default: 100, max: 1000 with includeMetadata=false)
+      limit?: number;  // Items per request (default: 20, Magic Eden max)
       types?: ('sale' | 'mint' | 'transfer' | 'ask' | 'bid' | 'ask_cancel' | 'bid_cancel')[];
-      maxPages?: number;  // Maximum pages to fetch (default: 10)
+      maxPages?: number;  // Maximum pages to fetch (default: 20)
     } = {}
   ): Promise<TokenActivity[]> {
     // Set defaults - NOTE: Excludes 'bid' and 'transfer' types
@@ -662,7 +662,7 @@ export class MagicEdenService {
           users: address,
           limit: limit,
           sortBy: 'eventTimestamp',
-          includeMetadata: false  // Allows limit up to 1000, reduces payload size
+          includeMetadata: false  // Reduces payload size, improves reliability
         };
 
         // Add both ENS contracts
