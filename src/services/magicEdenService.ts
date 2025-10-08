@@ -712,6 +712,55 @@ export class MagicEdenService {
   }
 
   /**
+   * Fetch activities for multiple users in parallel
+   * Useful for fetching buyer + seller activities simultaneously
+   * 
+   * @param addresses - Array of wallet addresses to fetch
+   * @param options - Optional pagination settings (applied to all fetches)
+   * @returns Map of address -> activities (normalized to lowercase keys)
+   */
+  async getMultipleUserActivities(
+    addresses: string[],
+    options?: {
+      limit?: number;
+      types?: ('sale' | 'mint' | 'transfer' | 'ask' | 'bid' | 'ask_cancel' | 'bid_cancel')[];
+      maxPages?: number;
+    }
+  ): Promise<Map<string, TokenActivity[]>> {
+    logger.info(`👥 Fetching activities for ${addresses.length} users in parallel`);
+
+    // Normalize addresses to lowercase for consistent map keys
+    const normalizedAddresses = addresses.map(addr => addr.toLowerCase());
+
+    // Create promises for parallel fetching
+    const fetchPromises = normalizedAddresses.map(address =>
+      this.getUserActivityHistory(address, options)
+    );
+
+    // Use Promise.allSettled to handle failures gracefully
+    const results = await Promise.allSettled(fetchPromises);
+
+    // Build map from results
+    const activitiesMap = new Map<string, TokenActivity[]>();
+
+    results.forEach((result, index) => {
+      const address = normalizedAddresses[index];
+      
+      if (result.status === 'fulfilled') {
+        activitiesMap.set(address, result.value);
+        logger.debug(`   ✅ ${address}: ${result.value.length} activities`);
+      } else {
+        // On failure, store empty array and log warning
+        activitiesMap.set(address, []);
+        logger.warn(`   ❌ ${address}: Failed to fetch - ${result.reason}`);
+      }
+    });
+
+    logger.info(`✅ Parallel fetch complete: ${activitiesMap.size} users processed`);
+    return activitiesMap;
+  }
+
+  /**
    * Find most recent sale or mint event with pagination
    */
   async getLastSaleOrRegistration(
