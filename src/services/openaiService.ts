@@ -11,6 +11,7 @@ export interface GeneratedReply {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  nameResearch?: string; // Research results about the name
 }
 
 /**
@@ -32,18 +33,24 @@ export class OpenAIService {
   private readonly temperature = 0.7; // Balance creativity and consistency
   
   // Model configurations (token limits based on Oct 2025 OpenAI specs)
-  // NOTE: Web search tool has a 128k token limit regardless of model
-  private readonly WEB_SEARCH_TOKEN_LIMIT = 128000;
-  
-  private readonly models: { base: ModelConfig; thinking: ModelConfig } = {
+  private readonly models: { 
+    search: ModelConfig;
+    base: ModelConfig; 
+    thinking: ModelConfig;
+  } = {
+    search: {
+      name: 'gpt-5',
+      maxInputTokens: 128000, // Web search tool has 128k limit
+      description: 'GPT-5 with web search for name research'
+    },
     base: {
       name: 'gpt-5',
-      maxInputTokens: 128000, // GPT-5 context window (matches web search limit)
-      description: 'Fast, general-purpose model with web search'
+      maxInputTokens: 128000, // GPT-5 context window
+      description: 'Fast, general-purpose model for tweet generation'
     },
     thinking: {
       name: 'o1', // Thinking model with larger context window
-      maxInputTokens: 200000, // O1 extended context window (but web search capped at 128k)
+      maxInputTokens: 200000, // O1 extended context window
       description: 'Advanced reasoning model for complex/long inputs'
     }
   };
@@ -60,7 +67,8 @@ export class OpenAIService {
     });
 
     logger.info('🤖 OpenAIService initialized');
-    logger.info(`   Base model: ${this.models.base.name} (max ${this.models.base.maxInputTokens.toLocaleString()} tokens)`);
+    logger.info(`   Search model: ${this.models.search.name} (with web search)`);
+    logger.info(`   Generation model: ${this.models.base.name} (max ${this.models.base.maxInputTokens.toLocaleString()} tokens)`);
     logger.info(`   Fallback model: ${this.models.thinking.name} (max ${this.models.thinking.maxInputTokens.toLocaleString()} tokens)`);
   }
 
@@ -78,43 +86,137 @@ export class OpenAIService {
   }
 
   /**
+   * Research an ENS name using GPT-5 with web search
+   * Uses a detailed domain research prompt to gather comprehensive information
+   * 
+   * @param tokenName - Full ENS name (e.g., "example.eth")
+   * @returns Research summary about the name
+   */
+  private async researchName(tokenName: string): Promise<string> {
+    try {
+      // Extract label (remove .eth suffix)
+      const label = tokenName.replace(/\.eth$/i, '');
+      
+      logger.info(`🔍 Researching name: ${label}...`);
+      
+      // Build comprehensive research prompt
+      const researchPrompt = `ROLE
+Act as a senior domain/name researcher and brand strategist. Your task is to evaluate the single-label name "${label}" (no TLD assumed) for meaning, significance, and potential value across web2 domains and web3 naming systems.
+
+TOOLS
+You MUST use web.run for every factual claim that isn't obvious. Prioritize authoritative sources. Include concise inline citations after the statements they support.
+
+SCOPE
+1) Semantics & usage
+• Identify common meanings, translations, and connotations of ${label} across major languages and regions relevant to global use.
+• Disambiguate entities sharing this label (companies, products, people, places). Note notoriety or newsworthiness.
+• Check slang/NSFW/negative meanings.
+• Assess acronym expansions if ${label} is 3–5 letters; rank by prevalence.
+
+2) Brandability & linguistics
+• Length, character class (letters/digits/hyphen), pronounceability (IPA approximation), syllable count, phonotactics, memorability, radio test.
+• Confusables/homographs (IDN lookalikes), common misspellings, homophones.
+• Globality: does it travel well across Latin/non-Latin markets?
+
+3) Demand signals & SEO
+• Keyword intent (navigational/informational/transactional).
+• Trend direction and seasonality (high level if exact indices unavailable).
+• SERP landscape snapshot: dominant categories/brands.
+• If possible, approximate search interest and competitive density using reputable sources.
+
+4) Market comparables & availability snapshot
+• Recent public sales comps of exact/close variants (e.g., ${label}.com/.io/.ai; ${label}.eth; plural/singular; hyphenated). Prioritize NameBio, DNJournal, marketplace sold pages, ENS marketplaces.
+• Current availability/ask indications for major TLDs (.com/.net/.org/.io/.ai) and notable ccTLDs. If listed, capture indicative ask (not an appraisal).
+• Social handle checks (read-only): note whether @${label} appears obviously taken on major platforms.
+
+5) Legal/reputation risk
+• Trademark screening: exact-match and close variants in USPTO, EUIPO, WIPO Global Brand DB. Note Nice classes and status (LIVE/DEAD).
+• Notable disputes, scandals, or sensitivities tied to the label or famous marks.
+
+METHOD (use web.run)
+• Run multiple search_query calls varying: "${label}", "${label} meaning", "${label} acronym", "${label} slang", "${label} brand", "${label} trademark", "${label} site:.gov|.edu", "${label} wiki", "${label}.com sale", "${label} ENS sale".
+• When multilingual is relevant, query top languages where the string plausibly has meaning.
+• Prefer primary/authoritative sources: Wikipedia/Wikidata, reputable dictionaries, news orgs, NameBio/DNJournal/marketplaces, USPTO/EUIPO/WIPO, major analytics sources.
+• Cite 1–3 strongest sources per subsection. Do not over-cite.
+
+SCORING RUBRIC (0–10; justify each briefly)
+• Brandability
+• Global usability
+• SEO/keyword demand
+• Legal/reputation risk (reverse-scored; lower risk → higher score)
+• Liquidity (resale likelihood within 12–24 months)
+Compute Overall Value Score (0–10) as a reasoned weighted average you state explicitly.
+
+OUTPUT
+1) Executive summary (≤120 words)
+2) Pros (bullets, 3–6 items).
+3) Cons (bullets, 3–6 items).
+4) Sales comps table (if any): {name | TLD/namespace | price | date | source}.
+5) Snapshot table: {TLD | status | indicative ask (if any) | source}.
+6) Risk notes (trademark/NSFW/controversy) with citations.
+7) Scoring with one-line rationale per dimension and the weighted formula used.
+
+CONSTRAINTS
+• Be concise and evidence-driven.
+• If evidence is weak or conflicting, state uncertainty explicitly and why.
+• Every non-obvious claim must have a citation immediately after the sentence it supports.
+
+BEGIN with research for: ${label}`;
+
+      // Call GPT-5 with web search
+      const response = await this.client.responses.create({
+        model: this.models.search.name,
+        input: researchPrompt,
+        tools: [{ type: "web_search" }],
+      });
+
+      const research = response.output_text?.trim() || '';
+      
+      logger.info(`✅ Name research complete: ${research.length} characters`);
+      logger.debug(`   Research preview: ${research.slice(0, 200)}...`);
+      
+      return research;
+
+    } catch (error: any) {
+      logger.error('❌ Name research error:', error.message);
+      // Return empty string rather than failing - tweet can still be generated without research
+      logger.warn('   Continuing without name research...');
+      return '';
+    }
+  }
+
+  /**
    * Select the appropriate model based on input token count
-   * NOTE: Web search tool has a 128k token limit regardless of model
+   * Automatically switches to thinking model for very large inputs
    * 
    * Typical token usage for our prompts:
    * - System prompt: ~430 tokens
    * - User prompt (base): ~286 tokens  
+   * - Name research: ~500-2000 tokens
    * - Activity history (10 entries per user): ~860 tokens
-   * - Total typical: ~1,500 tokens (well under 128k limit)
-   * 
-   * The 128k limit would only be hit if we tried to include thousands of
-   * activity entries, which is not expected in normal operation.
+   * - Total typical: ~2,000-4,000 tokens (well under limits)
    * 
    * @param estimatedTokens - Estimated input token count
    * @returns Selected model configuration
    */
   private selectModel(estimatedTokens: number): ModelConfig {
-    // Check web search token limit first (applies to all models)
-    if (estimatedTokens > this.WEB_SEARCH_TOKEN_LIMIT) {
-      logger.error(`❌ Input (${estimatedTokens.toLocaleString()} tokens) exceeds web search limit (${this.WEB_SEARCH_TOKEN_LIMIT.toLocaleString()} tokens)`);
-      logger.error(`   Web search is required for name research but is capped at 128k tokens`);
-      throw new Error(`Input too large for web search: ${estimatedTokens.toLocaleString()} tokens (max with web search: ${this.WEB_SEARCH_TOKEN_LIMIT.toLocaleString()})`);
-    }
-    
-    // Select model based on input size (within web search limit)
     if (estimatedTokens <= this.models.base.maxInputTokens) {
       return this.models.base;
-    } else {
-      // This shouldn't happen since web search limit = base model limit, but keeping for safety
+    } else if (estimatedTokens <= this.models.thinking.maxInputTokens) {
       logger.warn(`⚠️  Input (${estimatedTokens.toLocaleString()} tokens) exceeds base model limit`);
-      logger.info(`   Switching to ${this.models.thinking.name} (but still limited by web search to 128k)`);
+      logger.info(`   Switching to ${this.models.thinking.name} for extended context`);
       return this.models.thinking;
+    } else {
+      logger.error(`❌ Input (${estimatedTokens.toLocaleString()} tokens) exceeds all model limits!`);
+      throw new Error(`Input too large: ${estimatedTokens.toLocaleString()} tokens (max: ${this.models.thinking.maxInputTokens.toLocaleString()})`);
     }
   }
 
   /**
    * Generate a contextual reply tweet based on sale/registration data
-   * Automatically selects appropriate model based on input size
+   * TWO-STEP PROCESS:
+   * 1. Research the name using GPT-5 with web search
+   * 2. Generate tweet using GPT-5 with research + transaction context
    * 
    * @param context - Complete LLM prompt context with event, token, and user data
    * @returns Generated tweet text and metadata
@@ -123,12 +225,17 @@ export class OpenAIService {
     try {
       logger.info(`🎨 Generating AI reply for ${context.event.tokenName}...`);
       
+      // Step 1: Research the name (separate API call with web search)
+      const nameResearch = await this.researchName(context.event.tokenName);
+      
+      // Step 2: Build prompts with research results
       const systemPrompt = this.buildSystemPrompt();
-      const userPrompt = this.buildUserPrompt(context);
+      const userPrompt = this.buildUserPrompt(context, nameResearch);
       const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
 
       logger.debug('System prompt length:', systemPrompt.length);
       logger.debug('User prompt length:', userPrompt.length);
+      logger.debug('Name research length:', nameResearch.length);
       logger.debug('Total prompt length:', fullPrompt.length);
 
       // Estimate tokens and select appropriate model
@@ -138,11 +245,10 @@ export class OpenAIService {
       logger.info(`   Estimated input: ${estimatedTokens.toLocaleString()} tokens`);
       logger.info(`   Selected model: ${selectedModel.name} (${selectedModel.description})`);
 
-      // Call OpenAI Responses API with web search enabled
+      // Call OpenAI Responses API (no web search needed - already done)
       const response = await this.client.responses.create({
         model: selectedModel.name,
         input: fullPrompt,
-        tools: [{ type: "web_search" }], // Enable web search for name research
       });
 
       const tweetText = response.output_text?.trim() || '';
@@ -159,6 +265,7 @@ export class OpenAIService {
         promptTokens: usage?.input_tokens || 0,
         completionTokens: usage?.output_tokens || 0,
         totalTokens: (usage?.input_tokens || 0) + (usage?.output_tokens || 0),
+        nameResearch: nameResearch || undefined,
       };
 
       logger.info(`✅ Generated ${tweetText.length} char reply using ${result.totalTokens} tokens`);
@@ -220,9 +327,10 @@ WHAT TO AVOID:
    * Format the LLM prompt context into a structured prompt
    * 
    * @param context - Complete context with event, token insights, and user stats
+   * @param nameResearch - Research results about the name (from separate web search)
    * @returns Formatted prompt string
    */
-  private buildUserPrompt(context: LLMPromptContext): string {
+  private buildUserPrompt(context: LLMPromptContext, nameResearch?: string): string {
     const { event, tokenInsights, buyerStats, sellerStats, buyerActivityHistory, sellerActivityHistory } = context;
 
     // Format event details
@@ -234,6 +342,11 @@ WHAT TO AVOID:
     
     if (event.type === 'sale' && event.sellerAddress) {
       prompt += `- Seller: ${event.sellerEnsName || event.sellerAddress.slice(0, 10) + '...'}\n`;
+    }
+
+    // Include name research if available
+    if (nameResearch) {
+      prompt += `\nNAME RESEARCH:\n${nameResearch}\n`;
     }
 
     // Format token insights
@@ -292,7 +405,7 @@ WHAT TO AVOID:
       }
     }
 
-    prompt += `\nBased on this data, write a short, insightful Twitter reply (max 280 chars). Use web search to research the name "${event.tokenName}" if helpful. Focus on what's interesting or noteworthy about this transaction.`;
+    prompt += `\nBased on all this data (including the name research above), write a short, insightful Twitter reply (max 280 chars). Focus on what's interesting or noteworthy about this transaction.`;
 
     return prompt;
   }
