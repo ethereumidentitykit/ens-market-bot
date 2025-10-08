@@ -66,9 +66,10 @@ export interface UserStats {
 
 /**
  * Complete context package for LLM prompts
+ * Combines data from DATABASE (event details) and Magic Eden API (historical context)
  */
 export interface LLMPromptContext {
-  // Current event details
+  // Current event details (FROM DATABASE - master source of truth)
   event: {
     type: 'sale' | 'registration';
     tokenName: string;
@@ -78,12 +79,13 @@ export interface LLMPromptContext {
     timestamp: number;
     buyerAddress: string;
     sellerAddress?: string; // Not present for registrations
+    txHash: string; // Transaction hash from DB
   };
   
-  // Token historical context
+  // Token historical context (FROM MAGIC EDEN API)
   tokenInsights: TokenInsights;
   
-  // User activity context
+  // User activity context (FROM MAGIC EDEN API)
   buyerStats: UserStats;
   sellerStats: UserStats | null; // Null for registrations
   
@@ -305,29 +307,179 @@ export class DataProcessingService {
   /**
    * Calculate trading statistics for a user
    * Tracks buy/sell volumes, PNL, and activity patterns
+   * Resolves proxy contracts using transfer events
    * 
-   * @param activities - User activity history from Magic Eden
+   * @param activities - User activity history from Magic Eden (sales, mints, transfers)
+   * @param userAddress - The address of the user we're analyzing (already resolved from DB)
    * @param role - Whether this user is the buyer or seller in current event
    * @returns User trading statistics
    */
   async processUserActivity(
     activities: TokenActivity[],
+    userAddress: string,
     role: 'buyer' | 'seller'
   ): Promise<UserStats> {
-    logger.debug(`👤 Processing user activity: ${activities.length} activities (${role})`);
+    logger.debug(`👤 Processing user activity: ${activities.length} activities for ${userAddress.slice(0, 8)}... (${role})`);
     
-    // TODO: Implementation in Task 1.6
-    throw new Error('Not implemented yet');
+    // Normalize address for comparison (DB already resolved proxies)
+    const normalizedAddress = userAddress.toLowerCase();
+    
+    // Separate sales/mints and transfers
+    const salesAndMints = activities.filter(a => 
+      (a.type === 'sale' || a.type === 'mint') &&
+      a.price?.amount?.decimal !== undefined
+    );
+    const transfers = activities.filter(a => a.type === 'transfer');
+    
+    logger.debug(`   Found ${salesAndMints.length} sales/mints, ${transfers.length} transfers`);
+    
+    // Resolve real buyer/seller for each sale using transfer events (same logic as processTokenHistory)
+    const resolvedActivities = salesAndMints.map(activity => {
+      // Find transfers with same txHash
+      const activityTransfers = transfers.filter(t => 
+        t.txHash.toLowerCase() === activity.txHash.toLowerCase()
+      );
+      
+      let realBuyer = activity.toAddress.toLowerCase();
+      let realSeller = activity.fromAddress.toLowerCase();
+      
+      // If there are transfers in same tx, use them to resolve real addresses
+      if (activityTransfers.length > 0) {
+        // Find the final recipient (last toAddress in transfer chain)
+        const finalTransfer = activityTransfers[activityTransfers.length - 1];
+        if (finalTransfer.toAddress) {
+          realBuyer = finalTransfer.toAddress.toLowerCase();
+        }
+        
+        // Find the original sender (first fromAddress in transfer chain)
+        const firstTransfer = activityTransfers[0];
+        if (firstTransfer.fromAddress && firstTransfer.fromAddress !== '0x0000000000000000000000000000000000000000') {
+          realSeller = firstTransfer.fromAddress.toLowerCase();
+        }
+      }
+      
+      return {
+        ...activity,
+        resolvedBuyer: realBuyer,
+        resolvedSeller: realSeller
+      };
+    });
+    
+    logger.debug(`   Resolved ${resolvedActivities.length} activities through proxy contracts`);
+    
+    // Separate buys vs sells using RESOLVED addresses
+    const buys = resolvedActivities.filter(a => 
+      a.resolvedBuyer === normalizedAddress
+    );
+    const sells = resolvedActivities.filter(a => 
+      a.resolvedSeller === normalizedAddress &&
+      a.resolvedSeller !== '0x0000000000000000000000000000000000000000' // Exclude mints
+    );
+    
+    logger.debug(`   Buys: ${buys.length}, Sells: ${sells.length}`);
+    
+    // Calculate buy statistics
+    const buysCount = buys.length;
+    const buysVolume = buys.reduce((sum, activity) => 
+      sum + activity.price.amount.decimal, 0
+    );
+    const buysVolumeUsd = buys.reduce((sum, activity) => 
+      sum + activity.price.amount.usd, 0
+    );
+    
+    // Calculate sell statistics
+    const sellsCount = sells.length;
+    const sellsVolume = sells.reduce((sum, activity) => 
+      sum + activity.price.amount.decimal, 0
+    );
+    const sellsVolumeUsd = sells.reduce((sum, activity) => 
+      sum + activity.price.amount.usd, 0
+    );
+    
+    // Calculate PNL (simple: total sells - total buys)
+    const realizedPnl = sellsVolume - buysVolume;
+    const realizedPnlUsd = sellsVolumeUsd - buysVolumeUsd;
+    
+    // Track activity timing
+    const allActivities = [...buys, ...sells];
+    let firstActivityTimestamp: number | null = null;
+    let lastActivityTimestamp: number | null = null;
+    let transactionsPerMonth = 0;
+    
+    if (allActivities.length > 0) {
+      // Sort by timestamp
+      allActivities.sort((a, b) => a.timestamp - b.timestamp);
+      
+      firstActivityTimestamp = allActivities[0].timestamp;
+      lastActivityTimestamp = allActivities[allActivities.length - 1].timestamp;
+      
+      // Calculate transactions per month
+      if (allActivities.length > 1) {
+        const durationSeconds = lastActivityTimestamp - firstActivityTimestamp;
+        const durationMonths = durationSeconds / (30 * 24 * 60 * 60); // Approximate months
+        transactionsPerMonth = durationMonths > 0 ? allActivities.length / durationMonths : allActivities.length;
+      } else {
+        // Only 1 transaction
+        transactionsPerMonth = allActivities.length;
+      }
+    }
+    
+    // Extract top marketplaces from fillSource
+    const marketplaceCounts = new Map<string, number>();
+    
+    for (const activity of allActivities) {
+      if (activity.fillSource?.name) {
+        const marketplace = activity.fillSource.name;
+        marketplaceCounts.set(marketplace, (marketplaceCounts.get(marketplace) || 0) + 1);
+      }
+    }
+    
+    // Sort by count (descending) and take top 3
+    const topMarketplaces = Array.from(marketplaceCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([name]) => name);
+    
+    const stats: UserStats = {
+      address: normalizedAddress,
+      role,
+      buysCount,
+      buysVolume,
+      buysVolumeUsd,
+      sellsCount,
+      sellsVolume,
+      sellsVolumeUsd,
+      realizedPnl,
+      realizedPnlUsd,
+      firstActivityTimestamp,
+      lastActivityTimestamp,
+      transactionsPerMonth,
+      topMarketplaces
+    };
+    
+    logger.debug(`   ✅ User stats: ${buysCount} buys (${buysVolume.toFixed(4)} ETH), ${sellsCount} sells (${sellsVolume.toFixed(4)} ETH)`);
+    logger.debug(`      PNL: ${realizedPnl >= 0 ? '+' : ''}${realizedPnl.toFixed(4)} ETH (${realizedPnlUsd >= 0 ? '+' : ''}$${realizedPnlUsd.toFixed(2)})`);
+    logger.debug(`      Activity: ${transactionsPerMonth.toFixed(2)} txns/month, Top marketplaces: ${topMarketplaces.join(', ')}`);
+    
+    return stats;
   }
 
   /**
    * Build complete LLM prompt context from all data sources
    * Combines token insights, buyer stats, and seller stats into one package
    * 
-   * @param eventData - Current sale or registration event details
-   * @param tokenActivities - Token's trading history
-   * @param buyerActivities - Buyer's activity history
-   * @param sellerActivities - Seller's activity history (null for registrations)
+   * DATA SOURCES:
+   * - eventData: From DATABASE sale/registration record (master source of truth)
+   * - tokenActivities: From Magic Eden API (historical token trading data)
+   * - buyerActivities: From Magic Eden API (buyer's ENS trading history)
+   * - sellerActivities: From Magic Eden API (seller's ENS trading history)
+   * 
+   * @param eventData - Current sale/registration event from DB record
+   *                    Should include: txHash (for Magic Eden filtering),
+   *                    buyer/seller addresses, price (ETH + USD), timestamp
+   * @param tokenActivities - Token's trading history from Magic Eden
+   * @param buyerActivities - Buyer's activity history from Magic Eden
+   * @param sellerActivities - Seller's activity history from Magic Eden (null for registrations)
    * @returns Complete context for LLM prompt
    */
   async buildLLMContext(
@@ -335,16 +487,19 @@ export class DataProcessingService {
       type: 'sale' | 'registration';
       tokenName: string;
       price: number;
+      priceUsd: number;
       currency: string;
       timestamp: number;
       buyerAddress: string;
       sellerAddress?: string;
+      txHash: string; // Required for filtering Magic Eden historical data
     },
     tokenActivities: TokenActivity[],
     buyerActivities: TokenActivity[],
     sellerActivities: TokenActivity[] | null
   ): Promise<LLMPromptContext> {
     logger.info(`🧠 Building LLM context for ${eventData.type}: ${eventData.tokenName}`);
+    logger.debug(`   Event from DB: ${eventData.price} ETH ($${eventData.priceUsd}), txHash: ${eventData.txHash.slice(0, 10)}...`);
     
     // TODO: Implementation in Task 1.7
     throw new Error('Not implemented yet');
