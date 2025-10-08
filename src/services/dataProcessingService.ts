@@ -181,11 +181,17 @@ export class DataProcessingService {
    * 
    * @param activities - Token activity history from Magic Eden (sales, mints, transfers)
    * @param currentTxHash - Transaction hash of current sale (to exclude from history)
+   * @param currentSellerAddress - Address of seller in current transaction (for PNL tracking)
+   * @param currentSalePrice - Price of current sale in ETH (for PNL calculation)
+   * @param currentSalePriceUsd - Price of current sale in USD (for PNL calculation)
    * @returns Structured token insights
    */
   async processTokenHistory(
     activities: TokenActivity[],
-    currentTxHash?: string
+    currentTxHash?: string,
+    currentSellerAddress?: string,
+    currentSalePrice?: number,
+    currentSalePriceUsd?: number
   ): Promise<TokenInsights> {
     logger.debug(`🔍 Processing token history: ${activities.length} total activities`);
     if (currentTxHash) {
@@ -322,26 +328,51 @@ export class DataProcessingService {
     let sellerPnlUsd: number | null = null;
     let sellerHoldDuration: number | null = null;
     
-    // Check if last sale's seller was the previous sale's buyer
-    if (resolvedSales.length >= 2) {
-      const previousSale = resolvedSales[resolvedSales.length - 2];
-      const currentSeller = lastSale.resolvedSeller;
-      const previousBuyer = previousSale.resolvedBuyer;
+    // If we have the current seller's address, search through history to find their acquisition
+    if (currentSellerAddress && resolvedSales.length > 0) {
+      const normalizedSellerAddress = currentSellerAddress.toLowerCase();
+      logger.debug(`   🔍 Searching for seller's acquisition: ${normalizedSellerAddress.slice(0, 8)}...`);
       
-      if (currentSeller === previousBuyer) {
-        // Seller acquired it in the previous sale!
+      // Get all sales AND mints (seller might have minted it)
+      const allAcquisitions = [
+        ...resolvedSales,
+        ...activities.filter(a => a.type === 'mint' && a.price?.amount?.decimal !== undefined)
+      ];
+      
+      // Sort by timestamp (newest first) and filter out current tx
+      const historicalAcquisitions = allAcquisitions
+        .filter(a => !currentTxHash || a.txHash.toLowerCase() !== currentTxHash.toLowerCase())
+        .sort((a, b) => b.timestamp - a.timestamp);
+      
+      // Find where seller acquired this token (most recent acquisition by this address)
+      const sellerAcquisition = historicalAcquisitions.find(activity => {
+        const recipientAddress = activity.toAddress?.toLowerCase();
+        return recipientAddress === normalizedSellerAddress;
+      });
+      
+      if (sellerAcquisition) {
         sellerAcquisitionTracked = true;
-        sellerBuyPrice = previousSale.price.amount.decimal;
-        sellerBuyPriceUsd = previousSale.price.amount.usd;
-        sellerPnl = lastSale.price.amount.decimal - sellerBuyPrice;
-        sellerPnlUsd = lastSale.price.amount.usd - sellerBuyPriceUsd;
-        sellerHoldDuration = (lastSale.timestamp - previousSale.timestamp) / 3600; // hours
+        sellerBuyPrice = sellerAcquisition.price.amount.decimal;
+        sellerBuyPriceUsd = sellerAcquisition.price.amount.usd;
         
-        logger.debug(`   ✅ Seller PNL tracked: bought for ${sellerBuyPrice.toFixed(4)} ETH ($${sellerBuyPriceUsd.toFixed(2)}), held ${sellerHoldDuration.toFixed(1)}h`);
-        logger.debug(`      PNL: ${sellerPnl >= 0 ? '+' : ''}${sellerPnl.toFixed(4)} ETH (${sellerPnlUsd >= 0 ? '+' : ''}$${sellerPnlUsd.toFixed(2)})`);
+        // Calculate PNL using current sale price (if provided)
+        if (currentSalePrice !== undefined && currentSalePriceUsd !== undefined) {
+          sellerPnl = currentSalePrice - sellerBuyPrice;
+          sellerPnlUsd = currentSalePriceUsd - sellerBuyPriceUsd;
+          const currentTimestamp = Math.floor(Date.now() / 1000); // Current time as fallback
+          sellerHoldDuration = (currentTimestamp - sellerAcquisition.timestamp) / 3600; // hours
+        }
+        
+        const acquisitionType = sellerAcquisition.type === 'mint' ? 'minted' : 'bought';
+        logger.debug(`   ✅ Seller ${acquisitionType} for ${sellerBuyPrice.toFixed(4)} ETH ($${sellerBuyPriceUsd.toFixed(2)}) at ${new Date(sellerAcquisition.timestamp * 1000).toISOString().slice(0, 10)}`);
+        if (sellerPnl !== null && sellerPnlUsd !== null && sellerHoldDuration !== null) {
+          logger.debug(`      PNL: ${sellerPnl >= 0 ? '+' : ''}${sellerPnl.toFixed(4)} ETH (${sellerPnlUsd >= 0 ? '+' : ''}$${sellerPnlUsd.toFixed(2)}), held ${(sellerHoldDuration / 24).toFixed(1)} days`);
+        }
       } else {
-        logger.debug(`   ❌ Seller PNL not trackable: seller ${currentSeller.slice(0, 8)}... ≠ previous buyer ${previousBuyer.slice(0, 8)}...`);
+        logger.debug(`   ❌ Seller acquisition not found in history (may have acquired via transfer)`);
       }
+    } else if (!currentSellerAddress) {
+      logger.debug(`   ℹ️  No seller address provided (likely a registration), skipping PNL tracking`);
     }
     
     const insights: TokenInsights = {
@@ -576,7 +607,13 @@ export class DataProcessingService {
     
     // Step 1: Process token history (exclude current transaction)
     logger.debug(`   📊 Processing token history...`);
-    const tokenInsights = await this.processTokenHistory(tokenActivities, eventData.txHash);
+    const tokenInsights = await this.processTokenHistory(
+      tokenActivities,
+      eventData.txHash,
+      eventData.sellerAddress, // For sales, track seller's acquisition
+      eventData.price,          // Current sale price in ETH
+      eventData.priceUsd        // Current sale price in USD
+    );
     
     // Step 2: Process buyer activity
     logger.debug(`   👤 Processing buyer activity...`);
