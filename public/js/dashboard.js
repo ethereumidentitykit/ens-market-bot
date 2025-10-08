@@ -2070,7 +2070,7 @@ Issued At: ${issuedAt}`;
             this.aiReplyMessage = '';
         },
 
-        async generateAIReply() {
+        async generateAIReply(forceRegenerate = false) {
             if (!this.aiReplyTransactionId) {
                 this.showAIReplyMessage('Please select a transaction', 'error');
                 return;
@@ -2083,23 +2083,36 @@ Issued At: ${issuedAt}`;
 
             try {
                 this.aiReplyGenerating = true;
-                this.clearAIReply();
+                if (!forceRegenerate) {
+                    this.clearAIReply();
+                }
 
                 const response = await this.fetch('/api/ai-reply-generate', {
                     method: 'POST',
                     body: JSON.stringify({
                         type: this.aiReplyType,
-                        id: parseInt(this.aiReplyTransactionId)
+                        id: parseInt(this.aiReplyTransactionId),
+                        forceRegenerate: forceRegenerate
                     })
                 });
 
                 if (response.ok) {
                     const data = await response.json();
                     this.generatedAIReply = data.reply;
-                    this.showAIReplyMessage(
-                        data.message || 'AI reply generated successfully',
-                        'success'
-                    );
+                    
+                    if (data.alreadyExists && !forceRegenerate) {
+                        this.generatedAIReply.alreadyExists = true;
+                        this.showAIReplyMessage(
+                            'Reply already exists. Click "Regenerate" to create a new one.',
+                            'info'
+                        );
+                    } else {
+                        this.generatedAIReply.alreadyExists = false;
+                        this.showAIReplyMessage(
+                            forceRegenerate ? 'New AI reply generated successfully' : 'AI reply generated successfully',
+                            'success'
+                        );
+                    }
                 } else {
                     const data = await response.json();
                     this.showAIReplyMessage(
@@ -2113,6 +2126,10 @@ Issued At: ${issuedAt}`;
             } finally {
                 this.aiReplyGenerating = false;
             }
+        },
+
+        async regenerateAIReply() {
+            await this.generateAIReply(true);
         },
 
         async sendAIReplyPost() {

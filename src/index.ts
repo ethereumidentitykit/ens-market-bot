@@ -611,7 +611,7 @@ async function startApplication(): Promise<void> {
     // AI Reply Generation Endpoint
     app.post('/api/ai-reply-generate', requireAuth, async (req, res) => {
       try {
-        const { type, id } = req.body;
+        const { type, id, forceRegenerate } = req.body;
 
         // Validate inputs
         if (!type || !id) {
@@ -636,7 +636,7 @@ async function startApplication(): Promise<void> {
           });
         }
 
-        logger.info(`🤖 AI Reply Generation requested: ${type} ${transactionId}`);
+        logger.info(`🤖 AI Reply Generation requested: ${type} ${transactionId}${forceRegenerate ? ' (regenerate)' : ''}`);
 
         // Step 1: Check if AI replies are enabled
         const aiEnabled = await databaseService.isAIRepliesEnabled();
@@ -652,11 +652,12 @@ async function startApplication(): Promise<void> {
           ? await databaseService.getAIReplyBySaleId(transactionId)
           : await databaseService.getAIReplyByRegistrationId(transactionId);
 
-        if (existingReply) {
+        if (existingReply && !forceRegenerate) {
           logger.info(`   Reply already exists (ID: ${existingReply.id})`);
           return res.json({
             success: true,
-            message: 'Reply already exists',
+            alreadyExists: true,
+            message: 'Reply already exists. Set forceRegenerate=true to generate a new one.',
             reply: {
               id: existingReply.id,
               text: existingReply.replyText,
@@ -670,6 +671,11 @@ async function startApplication(): Promise<void> {
               createdAt: existingReply.createdAt
             }
           });
+        }
+
+        // If regenerating, update the existing reply instead of creating duplicate
+        if (existingReply && forceRegenerate) {
+          logger.info(`   Regenerating reply (will update existing ID: ${existingReply.id})...`);
         }
 
         // Step 3: Fetch transaction from database
@@ -765,26 +771,53 @@ async function startApplication(): Promise<void> {
         logger.debug('   Generating AI reply...');
         const generatedReply = await openaiService.generateReply(llmContext, nameResearch);
 
-        // Step 7: Store in database
-        logger.debug('   Storing AI reply in database...');
-        const replyId = await databaseService.insertAIReply({
-          saleId: isSale ? transactionId : undefined,
-          registrationId: !isSale ? transactionId : undefined,
-          originalTweetId: transaction.tweetId,
-          replyTweetId: undefined, // Not posted yet
-          transactionType: type,
-          transactionHash: transaction.transactionHash,
-          modelUsed: generatedReply.modelUsed,
-          promptTokens: generatedReply.promptTokens,
-          completionTokens: generatedReply.completionTokens,
-          totalTokens: generatedReply.totalTokens,
-          costUsd: 0, // Not tracked per requirements
-          replyText: generatedReply.tweetText,
-          status: 'pending', // Generated but not posted
-          errorMessage: undefined
-        });
-
-        logger.info(`✅ AI reply generated and stored (ID: ${replyId})`);
+        // Step 7: Store in database (update existing or insert new)
+        let replyId: number;
+        if (existingReply && forceRegenerate && existingReply.id) {
+          logger.debug('   Updating existing AI reply in database...');
+          // Update the existing reply
+          await databaseService.pgPool.query(`
+            UPDATE ai_replies 
+            SET 
+              model_used = $1,
+              prompt_tokens = $2,
+              completion_tokens = $3,
+              total_tokens = $4,
+              reply_text = $5,
+              status = 'pending',
+              error_message = NULL,
+              created_at = NOW()
+            WHERE id = $6
+          `, [
+            generatedReply.modelUsed,
+            generatedReply.promptTokens,
+            generatedReply.completionTokens,
+            generatedReply.totalTokens,
+            generatedReply.tweetText,
+            existingReply.id
+          ]);
+          replyId = existingReply.id;
+          logger.info(`✅ AI reply regenerated and updated (ID: ${replyId})`);
+        } else {
+          logger.debug('   Inserting new AI reply in database...');
+          replyId = await databaseService.insertAIReply({
+            saleId: isSale ? transactionId : undefined,
+            registrationId: !isSale ? transactionId : undefined,
+            originalTweetId: transaction.tweetId,
+            replyTweetId: undefined, // Not posted yet
+            transactionType: type,
+            transactionHash: transaction.transactionHash,
+            modelUsed: generatedReply.modelUsed,
+            promptTokens: generatedReply.promptTokens,
+            completionTokens: generatedReply.completionTokens,
+            totalTokens: generatedReply.totalTokens,
+            costUsd: 0, // Not tracked per requirements
+            replyText: generatedReply.tweetText,
+            status: 'pending', // Generated but not posted
+            errorMessage: undefined
+          });
+          logger.info(`✅ AI reply generated and stored (ID: ${replyId})`);
+        }
 
         // Step 8: Return response
         res.json({

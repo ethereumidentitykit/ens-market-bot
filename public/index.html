@@ -1116,15 +1116,28 @@
 
                         <!-- Generate AI Reply Button -->
                         <div class="mb-4">
-                            <button 
-                                @click="generateAIReply()" 
-                                :disabled="!aiReplyTransactionId || aiReplyGenerating || !aiRepliesEnabled"
-                                class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                <i class="fas fa-robot mr-2" :class="{'loading': aiReplyGenerating}"></i>
-                                <span x-show="!aiReplyGenerating">Generate AI Reply</span>
-                                <span x-show="aiReplyGenerating">Generating...</span>
-                            </button>
+                            <div class="flex items-center space-x-3">
+                                <button 
+                                    @click="generateAIReply()" 
+                                    :disabled="!aiReplyTransactionId || aiReplyGenerating || !aiRepliesEnabled"
+                                    class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    <i class="fas fa-robot mr-2" :class="{'loading': aiReplyGenerating}"></i>
+                                    <span x-show="!aiReplyGenerating">Generate AI Reply</span>
+                                    <span x-show="aiReplyGenerating">Generating...</span>
+                                </button>
+                                
+                                <!-- Regenerate Button (shows when reply already exists) -->
+                                <button 
+                                    x-show="generatedAIReply?.alreadyExists"
+                                    @click="regenerateAIReply()" 
+                                    :disabled="aiReplyGenerating"
+                                    class="inline-flex items-center px-4 py-2 border border-orange-500 text-sm font-medium rounded-md shadow-sm text-orange-700 bg-white hover:bg-orange-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    <i class="fas fa-sync mr-2" :class="{'loading': aiReplyGenerating}"></i>
+                                    Regenerate New Reply
+                                </button>
+                            </div>
                             <p class="mt-1 text-xs text-gray-500">Generate contextual AI reply using GPT-5-mini with web search</p>
                         </div>
 
