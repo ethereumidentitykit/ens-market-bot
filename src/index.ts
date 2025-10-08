@@ -713,27 +713,40 @@ async function startApplication(): Promise<void> {
 
         logger.debug(`   📋 Addresses from DB: Buyer=${eventData.buyerAddress.slice(0, 10)}..., Seller=${eventData.sellerAddress ? eventData.sellerAddress.slice(0, 10) + '...' : 'N/A'}`);
         
-        // Warn if buyer and seller are the same (unusual but possible)
+        // Error if buyer and seller are the same (data issue)
         if (eventData.sellerAddress && eventData.buyerAddress.toLowerCase() === eventData.sellerAddress.toLowerCase()) {
-          logger.warn(`   ⚠️ WARNING: Buyer and seller are the same address! This may be incorrect.`);
+          logger.error(`   ❌ ERROR: Buyer and seller are the same address! This is a data error.`);
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid transaction data: buyer and seller addresses are identical. This may indicate a data ingestion error.'
+          });
         }
 
-        logger.debug('   Fetching Magic Eden data...');
-        const tokenActivities = await magicEdenService.getTokenActivityHistory(
-          transaction.contractAddress,
-          transaction.tokenId
-        );
-
-        const buyerActivities = await magicEdenService.getUserActivityHistory(
-          eventData.buyerAddress
-        );
-
-        let sellerActivities: TokenActivity[] | null = null;
-        if (eventData.sellerAddress) {
-          sellerActivities = await magicEdenService.getUserActivityHistory(
-            eventData.sellerAddress
-          );
-        }
+        logger.debug('   Fetching data in parallel (Magic Eden + name research)...');
+        
+        // Start all API calls in parallel for speed (including name research)
+        const openaiService = new OpenAIService();
+        const [tokenActivities, buyerActivities, sellerActivities, nameResearch] = await Promise.all([
+          magicEdenService.getTokenActivityHistory(
+            transaction.contractAddress,
+            transaction.tokenId
+          ),
+          magicEdenService.getUserActivityHistory(
+            eventData.buyerAddress
+          ),
+          eventData.sellerAddress
+            ? magicEdenService.getUserActivityHistory(eventData.sellerAddress)
+            : Promise.resolve(null),
+          // Start name research in parallel
+          (async () => {
+            try {
+              return await openaiService.researchName(tokenName);
+            } catch (error) {
+              logger.error('Name research failed, continuing without it:', error);
+              return '';
+            }
+          })()
+        ]);
 
         // Step 5: Build LLM context
         logger.debug('   Building LLM context...');
@@ -748,10 +761,9 @@ async function startApplication(): Promise<void> {
           ensWorkerService
         );
 
-        // Step 6: Generate reply using OpenAI
+        // Step 6: Generate reply using OpenAI (name research already done in parallel)
         logger.debug('   Generating AI reply...');
-        const openaiService = new OpenAIService();
-        const generatedReply = await openaiService.generateReply(llmContext);
+        const generatedReply = await openaiService.generateReply(llmContext, nameResearch);
 
         // Step 7: Store in database
         logger.debug('   Storing AI reply in database...');

@@ -165,70 +165,39 @@ export class OpenAIService {
    * @param tokenName - Full ENS name (e.g., "example.eth")
    * @returns Research summary about the name
    */
-  private async researchName(tokenName: string): Promise<string> {
+  async researchName(tokenName: string): Promise<string> {
     try {
       // Extract label (remove .eth suffix)
       const label = tokenName.replace(/\.eth$/i, '');
       
       logger.info(`🔍 Researching name: ${label}...`);
       
-      // Build comprehensive research prompt
-      const researchPrompt = `ROLE
-Act as a senior domain/name researcher and brand strategist. Your task is to evaluate the single-label name "${label}" (no TLD assumed) for meaning, significance, and potential value across web2 domains and web3 naming systems.
+      // Build focused research prompt
+      const researchPrompt = `Research the name "${label}" for ENS market context.
 
-TOOLS
-You MUST use web.run for every factual claim that isn't obvious. Prioritize authoritative sources. Include concise inline citations after the statements they support.
+FOCUS AREAS:
+1. Meaning & Context
+   - What does ${label} mean? (dictionary definition, translations in major languages)
+   - Is it a common word, brand name, person name, or acronym?
+   - Any cultural or industry significance?
 
-SCOPE
-1) Semantics & usage
-• Identify common meanings, translations, and connotations of ${label} across major languages and regions relevant to global use.
-• Disambiguate entities sharing this label (companies, products, people, places). Note notoriety or newsworthiness.
-• Check slang/NSFW/negative meanings.
-• Assess acronym expansions if ${label} is 3–5 letters; rank by prevalence.
+2. Market Interest
+   - Is this name registered on major TLDs (.com, .io, .ai)?
+   - Any notable sales of similar names? (check NameBio, DNJournal)
+   - General search interest or trend relevance
 
-2) Brandability & linguistics
-• Length, character class (letters/digits/hyphen), pronounceability (IPA approximation), syllable count, phonotactics, memorability, radio test.
-• Confusables/homographs (IDN lookalikes), common misspellings, homophones.
-• Globality: does it travel well across Latin/non-Latin markets?
+3. Issues (if any)
+   - Trademark conflicts
+   - Negative meanings or controversies
 
-3) Demand signals & SEO
-• Keyword intent (navigational/informational/transactional).
-• Trend direction and seasonality (high level if exact indices unavailable).
-• SERP landscape snapshot: dominant categories/brands.
-• If possible, approximate search interest and competitive density using reputable sources.
+OUTPUT (keep brief, 200 words max):
+- Key meaning/context in 1-2 sentences
+- Market relevance (if notable)
+- Any red flags
 
-4) Market comparables & availability snapshot
-• Recent public sales comps of exact/close variants (e.g., ${label}.com/.io/.ai; ${label}.eth; plural/singular; hyphenated). Prioritize NameBio, DNJournal, marketplace sold pages.
-• Current availability/ask indications for major TLDs (.com/.net/.org/.io/.ai) and notable ccTLDs. If listed, capture indicative ask (not an appraisal).
-• Check if the above TLDs are registered / non-registered for ${label}
-• Social handle checks (read-only): note whether @${label} appears obviously taken on major platforms.
-• ignore any .eth sales of this exact name.
+IMPORTANT: Be honest. If there's nothing particularly interesting or significant about this name, just say so. Don't inflate its importance or make up significance that isn't there. A common generic word is fine to describe as such.
 
-5) Legal/reputation risk
-• Trademark screening: exact-match and close variants in USPTO, EUIPO, WIPO Global Brand DB. Note Nice classes and status (LIVE/DEAD).
-• Notable disputes, scandals, or sensitivities tied to the label or famous marks.
-
-METHOD (use web.run)
-• Run multiple search_query calls varying: "${label}", "${label} meaning", "${label} acronym", "${label} slang", "${label} brand", "${label} trademark", "${label} site:.gov|.edu", "${label} wiki", "${label}.com sale".
-• When multilingual is relevant, query top languages where the string plausibly has meaning.
-• Prefer primary/authoritative sources: Wikipedia/Wikidata, reputable dictionaries, news orgs, NameBio/DNJournal/marketplaces, USPTO/EUIPO/WIPO, major analytics sources.
-• Cite 1–3 strongest sources per subsection. Do not over-cite.
-
-
-OUTPUT
-1) Executive summary (≤120 words)
-2) Pros (bullets, 3–6 items).
-3) Cons (bullets, 3–6 items).
-4) Sales comps table (if any): {name | TLD/namespace | price | date | source}.
-5) Snapshot table: {TLD | status | indicative ask (if any) | source}.
-6) Risk notes (trademark/NSFW/controversy) with citations.
-
-
-CONSTRAINTS
-• Be concise and evidence-driven.
-• If evidence is weak or conflicting, state uncertainty explicitly and why.
-
-BEGIN with research for: ${label}`;
+Research: ${label}`;
 
       // Call GPT-5 with web search (with retry logic)
       const response = await this.withRetry(
@@ -291,14 +260,17 @@ BEGIN with research for: ${label}`;
    * 2. Generate tweet using GPT-5 with research + transaction context
    * 
    * @param context - Complete LLM prompt context with event, token, and user data
+   * @param preComputedResearch - Optional pre-computed name research (to avoid duplicate API calls)
    * @returns Generated tweet text and metadata
    */
-  async generateReply(context: LLMPromptContext): Promise<GeneratedReply> {
+  async generateReply(context: LLMPromptContext, preComputedResearch?: string): Promise<GeneratedReply> {
     try {
       logger.info(`🎨 Generating AI reply for ${context.event.tokenName}...`);
       
-      // Step 1: Research the name (separate API call with web search)
-      const nameResearch = await this.researchName(context.event.tokenName);
+      // Step 1: Research the name (use pre-computed if available, otherwise fetch)
+      const nameResearch = preComputedResearch !== undefined 
+        ? preComputedResearch 
+        : await this.researchName(context.event.tokenName);
       
       // Step 2: Build prompts with research results
       const systemPrompt = this.buildSystemPrompt();
@@ -372,47 +344,47 @@ BEGIN with research for: ${label}`;
    * Defines the AI's role, tone, and constraints
    */
   private buildSystemPrompt(): string {
-    return `You are an expert domain name market analyst who provides insightful, clear commentary on ENS domain transactions.
+    return `You are a market analyst writing about ENS domain sales. Your job is to pick out what's interesting and explain it clearly.
 
-Your role is to write straightforward, informative replies that provide context about sales and registrations.
+YOUR TASK:
+Look at all the data provided (name meaning, buyer/seller activity, transaction history) and decide what's actually interesting to market watchers. Don't just list everything. Tell the story that matters.
 
-TONE & STYLE:
-- Write in clear, professional language that's easy to understand
-- Be direct and informative, NOT overly casual or slangy
-- Avoid colloquialisms like "on a tear," "swing," "grabbed," etc.
-- Use simple sentence structure for clarity
-- Professional but engaging, like a knowledgeable analyst
-- but dont be too formal or technical
+WRITING STYLE:
+- Use simple, everyday words (not "consolidator" or "monetizing" unless it's the clearest word)
+- Short sentences that are easy to read
+- Professional but not stuffy
+- No slang or casual phrases like "on a tear," "swing," "nabbed"
+- You have 1000 characters max
 
-FORMATTING RULES:
-- NEVER use em dashes (—) or en dashes (–) 
-- NEVER start lines with hyphens/dashes for bullet points
-- Use periods and commas for natural flow
-- Write in clear paragraphs with natural breaks
+FORMATTING:
+- NEVER use dashes (—, –, or - at start of lines)
+- Use periods and commas
+- Write in short paragraphs
 
-CONTENT GUIDELINES:
-- You have up to 1000 characters (Twitter Premium limit)
-- Do NOT repeat the sale price or name in the first line (already shown in the main tweet)
-- Focus on: name significance, buyer/seller behavior, market context, timing
-- Highlight interesting patterns (collecting behavior, flipping, wash trading, etc.)
-- Use the name research to add cultural, linguistic, or industry context
-- Include specific numbers when relevant (volume, PNL, collection size)
-- Keep it straightforward and easy to understand
+WHAT TO FOCUS ON:
+1. **Name meaning**: Only explain if it's unusual or unclear. Skip obvious ones like "students" or "coffee." Explain obscure names, non-English words, or technical terms.
 
-GOOD EXAMPLES:
+2. **Trading patterns**: Only mention if notable:
+   - Someone buying lots of similar names (what kind?)
+   - Quick flips or unusual timing
+   - 🚩 Wash trading red flags (fresh wallets, round numbers, rapid flips)
+   - Big profit or loss on this specific sale
 
-"The buyer has acquired 47 names in 3 months, with a focus on Portuguese first names. This continues that pattern. The seller minted this 418 days ago for 0.69 ETH and held patiently. The exit at 4.8 ETH represents a 7x return, showing how patience can pay off with premium first names."
+3. **Market context**: Why does this transaction matter?
+   - Is this name type trending?
+   - Unusual price for this category?
+   - Notable buyer or seller behavior?
 
-"João is equivalent to John in Portuguese-speaking countries and ranks among the most common names globally. International first names are gaining attention as ENS expands. This buyer focuses on culturally significant names across languages. The seller has been taking profits recently with 8 sales this month."
+WHAT TO SKIP:
+- Don't explain obvious name meanings
+- Don't list stats just because you have them
+- Don't repeat the price or name from the main tweet
 
-"🚩 This account minted 12 names in 3 weeks and immediately sold them all to fresh wallets with no history. The buyer account shows no prior activity and all prices are round numbers. This appears to be wash trading to create artificial market activity."
+GOOD EXAMPLE:
+"The buyer has been focused on education terms, picking up 6 names in this category over 2 months. No flips, just holding. The seller waited over 3 years and made 4x. These utility names are seeing more interest as communities look for brandable domains."
 
-WHAT TO AVOID:
-- Opening with "X.eth just sold for Y ETH" (already in main tweet)
-- Casual slang or overly informal language
-- Em dashes (—) and bullet point dashes
-- Complex sentence structures that are hard to follow
-- Generic observations without specific details`;
+BAD EXAMPLE:
+"This descriptive education label shows strong SEO potential. The acquirer powergrails.eth demonstrates consolidator behavior with 6 acquisitions. The monetizer ncaa.eth shows steady activity patterns."`;
   }
 
   /**
@@ -497,7 +469,16 @@ WHAT TO AVOID:
       }
     }
 
-    prompt += `\nBased on all the data above (especially the name research), write an engaging Twitter reply that tells the story of this transaction. You have up to 1000 characters - use that space to provide real insight and context. What makes this transaction interesting or noteworthy? Connect the dots between the name, the participants, and the market context.`;
+    prompt += `\n---
+
+YOUR TASK: Look at all this data and pick out what's ACTUALLY INTERESTING to market watchers. Not all of it matters.
+
+Ask yourself:
+- Is the name meaning worth explaining? (Skip if obvious like "students")
+- Is there a notable pattern in how the buyer or seller trades?
+- What's the story here that people should know?
+
+Write a clear, simple reply (up to 1000 chars) that focuses on what matters. Use everyday words.`;
 
     return prompt;
   }
