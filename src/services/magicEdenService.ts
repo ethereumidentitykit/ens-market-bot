@@ -550,7 +550,7 @@ export class MagicEdenService {
   ): Promise<TokenActivity[]> {
     // Set defaults
     const limit = options.limit || 20;  // Magic Eden max is 20
-    const types = options.types || ['sale', 'mint'];
+    const types = options.types || ['sale', 'mint', 'transfer'];  // Include transfers for proxy resolution
     const maxPages = options.maxPages || 10;
 
     logger.info(`📚 Fetching token activity history for ${contract}:${tokenId}`);
