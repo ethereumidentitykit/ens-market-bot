@@ -177,31 +177,22 @@ export class OpenAIService {
 
 FOCUS AREAS:
 1. Meaning & Context
-   - What does ${label} mean? (dictionary definition, translations in major languages)
-   - Is it a common word, brand name, person name, acronym, technical term, or romanized foreign language?
+   - What does ${label} mean? (dictionary definitions or comman usages), etymology if uncommon or interesting.
+   - Is it a common word, brand name, person name, or acronym?
    - Any cultural or industry significance?
-   - Skip obvious common words like "students", "coffee", "angel" - just state "common English word" for these
 
-2. Name Popularity & Usage (IMPORTANT FOR PERSON NAMES)
-   - If it's a person name, check forebears.io for detailed statistics:
-     * Global ranking (e.g., "101st most popular name globally")
-     * Number of bearers worldwide
-     * Geographic distribution (which countries it's most common in)
-   - For common names, include the ranking data (e.g., "sam is 101st most popular name in the world, mostly in US and UK")
+2. Name Popularity & Usage
+   - If it's a person name, check forebears.io or other sources for usage statistics (how common is it globally?)
    - Search interest or trend relevance
+   - Geographic distribution if it's a name
 
 3. Market Interest
    - Is this name registered on major TLDs (.com, .io, .ai)?
    - Any notable sales of similar names? (check NameBio, DNJournal if available)
    - General market demand for this type of name
 
-OUTPUT (keep brief, 200 words max):
-- Key meaning/context in 1-2 sentences
-- For person names: Include forebears ranking and geographic distribution
-- For obscure names/acronyms/romanized text: Explain what it means
-- Market relevance (if notable)
 
-IMPORTANT: Be honest. If there's nothing particularly interesting or significant about this name, just say so. Don't inflate its importance. A common generic word is fine to describe as such.
+Be honest. If there's nothing interesting or significant about this name, say so. Don't inflate its importance or significance. If it's a word or string without wide recognition - thats good info to return.
 
 Research: ${label}`;
 
@@ -309,7 +300,7 @@ Research: ${label}`;
       const rawText = response.output_text?.trim() || '';
       
       // Add title/header to the tweet
-      const tweetText = `AI insight:\n${rawText}`;
+      const tweetText = `Grails AI insight:\n${rawText}`;
       
       // Validate response (with title included)
       if (!this.validateResponse(tweetText)) {
@@ -390,8 +381,13 @@ WHAT TO FOCUS ON:
    - name buying frequency
    - buyer and seller total volumes
    - Quick flips or unusual timing
-   - 🚩 Wash trading red flags (buyer or seller has no or little prior tx history, round numbers, rapid flips for big profits)
    - Big profit or loss on this specific sale
+   
+   🚩 **WASH TRADING DETECTION** (critical - don't downplay):
+   - Fresh buyer wallet (no/little history) + serial mint-flipper seller = LIKELY COORDINATED
+   - Multiple red flags together = suspicious, not "ordinary market churn"
+   - Red flags: fresh wallets, round numbers, rapid mint-flips for profit, repeated pattern
+   - If it looks coordinated, SAY SO. Don't dismiss it as normal activity.
 
 4. **Market context**: anything interesting about this transaction?
    - Notable buyer or seller behavior?
@@ -412,7 +408,9 @@ GOOD EXAMPLE:
 BAD EXAMPLES:
 "This descriptive education label shows strong SEO potential. The acquirer powergrails.eth demonstrates consolidator behavior with 6 acquisitions."
 
-"Common given name, nothing exotic. Note there are live trademark filings using the same word, so commercial uses could carry legal risk in some industries."`;
+"Common given name, nothing exotic. Note there are live trademark filings using the same word, so commercial uses could carry legal risk in some industries."
+
+"The seller shows clear mint-and-flip behavior with dozens of mints and quick flips. The buyer has almost no history and only one recorded buy. No obvious wash-trade signals here though. The story is ordinary market churn." ❌ WRONG: These ARE wash signals - fresh buyer + serial flipper = coordinated activity.`;
   }
 
   /**
