@@ -34,7 +34,8 @@ function dashboard() {
             twitterEnabled: true,
             moralisEnabled: true,
             magicEdenEnabled: true,
-            openaiEnabled: true
+            openaiEnabled: true,
+            aiAutoPostingEnabled: false
         },
         
         // Price Tier Configuration
@@ -554,6 +555,7 @@ function dashboard() {
                     this.apiToggles.magicEdenEnabled = data.magicEdenEnabled;
                     this.apiToggles.openaiEnabled = data.openaiEnabled;
                     this.autoPostSettings.enabled = data.autoPostingEnabled;
+                    this.apiToggles.aiAutoPostingEnabled = data.aiAutoPostingEnabled;
                 }
             } catch (error) {
                 console.error('Failed to load toggle states:', error);
@@ -1745,15 +1747,44 @@ function dashboard() {
                 if (response.ok) {
                     this.autoPostSettings.enabled = newState;
                     this.showMessage(
-                        `Auto-posting ${newState ? 'enabled' : 'disabled'}`,
+                        `Event auto-posting ${newState ? 'enabled' : 'disabled'}`,
                         'success'
                     );
                 } else {
-                    throw new Error('Failed to toggle auto-posting');
+                    throw new Error('Failed to toggle event auto-posting');
                 }
             } catch (error) {
                 console.error('Toggle auto-posting error:', error);
-                this.showMessage('Failed to toggle auto-posting', 'error');
+                this.showMessage('Failed to toggle event auto-posting', 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async toggleAIAutoPosting() {
+            try {
+                this.loading = true;
+                const newState = !this.apiToggles.aiAutoPostingEnabled;
+                
+                const response = await fetch('/api/admin/toggle-ai-auto-posting', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: newState })
+                });
+                
+                if (response.ok) {
+                    this.apiToggles.aiAutoPostingEnabled = newState;
+                    this.showMessage(
+                        `AI auto-posting ${newState ? 'enabled' : 'disabled'}`,
+                        'success'
+                    );
+                } else {
+                    const data = await response.json();
+                    throw new Error(data.error || 'Failed to toggle AI auto-posting');
+                }
+            } catch (error) {
+                console.error('Toggle AI auto-posting error:', error);
+                this.showMessage(error.message || 'Failed to toggle AI auto-posting', 'error');
             } finally {
                 this.loading = false;
             }

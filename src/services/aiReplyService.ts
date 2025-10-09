@@ -227,6 +227,14 @@ export class AIReplyService {
       };
     }
 
+    // Check if AI auto-posting is enabled
+    if (!this.apiToggleService.isAIAutoPostingEnabled()) {
+      return {
+        valid: false,
+        reason: 'AI auto-posting is disabled via admin toggle'
+      };
+    }
+
     // Fetch transaction
     const transaction = type === 'sale'
       ? await this.databaseService.getSaleById(recordId)

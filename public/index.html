@@ -292,18 +292,30 @@
                                 <i class="fas fa-robot mr-2"></i>
                                 Automatic Posting
                             </h2>
-                            <p class="text-blue-100 text-sm mt-1">Configure automated ENS sales posting to Twitter</p>
+                            <p class="text-blue-100 text-sm mt-1">Configure automated ENS posting and AI replies to Twitter</p>
                         </div>
-                        <!-- Master Auto-Posting Toggle -->
-                        <button 
-                            @click="toggleAutoPosting()"
-                            :disabled="loading || !apiToggles.twitterEnabled"
-                            :class="autoPostSettings.enabled ? 'bg-green-500 hover:bg-green-600' : 'bg-red-500 hover:bg-red-600'"
-                            class="relative inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            <i :class="autoPostSettings.enabled ? 'fas fa-play' : 'fas fa-pause'" class="mr-2"></i>
-                            <span x-text="autoPostSettings.enabled ? 'Auto-Posting ON' : 'Auto-Posting OFF'"></span>
-                        </button>
+                        <div class="flex gap-3">
+                            <!-- Master Event Auto-Posting Toggle -->
+                            <button 
+                                @click="toggleAutoPosting()"
+                                :disabled="loading || !apiToggles.twitterEnabled"
+                                :class="autoPostSettings.enabled ? 'bg-green-500 hover:bg-green-600' : 'bg-red-500 hover:bg-red-600'"
+                                class="relative inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                <i :class="autoPostSettings.enabled ? 'fas fa-play' : 'fas fa-pause'" class="mr-2"></i>
+                                <span x-text="autoPostSettings.enabled ? 'Event auto-posting ON' : 'Event auto-posting OFF'"></span>
+                            </button>
+                            <!-- Master AI Auto-Posting Toggle -->
+                            <button 
+                                @click="toggleAIAutoPosting()"
+                                :disabled="loading || !apiToggles.twitterEnabled || !apiToggles.openaiEnabled"
+                                :class="apiToggles.aiAutoPostingEnabled ? 'bg-purple-500 hover:bg-purple-600' : 'bg-gray-500 hover:bg-gray-600'"
+                                class="relative inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                <i :class="apiToggles.aiAutoPostingEnabled ? 'fas fa-brain' : 'fas fa-pause'" class="mr-2"></i>
+                                <span x-text="apiToggles.aiAutoPostingEnabled ? 'AI auto-posting ON' : 'AI auto-posting OFF'"></span>
+                            </button>
+                        </div>
                     </div>
                     
                                         <!-- Transaction-Specific Settings Grid -->

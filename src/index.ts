@@ -1286,6 +1286,33 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    app.post('/api/admin/toggle-ai-auto-posting', requireAuth, async (req, res) => {
+      try {
+        const { enabled } = req.body;
+        if (typeof enabled !== 'boolean') {
+          return res.status(400).json({
+            success: false,
+            error: 'enabled must be a boolean'
+          });
+        }
+
+        await apiToggleService.setAIAutoPostingEnabled(enabled);
+        logger.info(`AI auto-posting ${enabled ? 'enabled' : 'disabled'} via admin toggle`);
+        
+        const state = apiToggleService.getState();
+        res.json({
+          success: true,
+          aiAutoPostingEnabled: state.aiAutoPostingEnabled
+        });
+      } catch (error: any) {
+        logger.error('Toggle AI auto-posting error:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     app.get('/api/admin/toggle-status', requireAuth, (req, res) => {
       const state = apiToggleService.getState();
       res.json({

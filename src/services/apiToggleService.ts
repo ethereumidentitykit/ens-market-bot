@@ -11,6 +11,7 @@ export interface APIToggleState {
   magicEdenEnabled: boolean;
   openaiEnabled: boolean;
   autoPostingEnabled: boolean;
+  aiAutoPostingEnabled: boolean;
 }
 
 export class APIToggleService {
@@ -20,7 +21,8 @@ export class APIToggleService {
     moralisEnabled: true,
     magicEdenEnabled: true,
     openaiEnabled: true,
-    autoPostingEnabled: false
+    autoPostingEnabled: false,
+    aiAutoPostingEnabled: false
   };
   private dbService: IDatabaseService | null = null;
   private initialized = false;
@@ -57,6 +59,7 @@ export class APIToggleService {
       const magicEdenState = await this.dbService.getSystemState('api_toggle_magic_eden');
       const openaiState = await this.dbService.getSystemState('api_toggle_openai');
       const autoPostState = await this.dbService.getSystemState('api_toggle_auto_post');
+      const aiAutoPostState = await this.dbService.getSystemState('api_toggle_ai_auto_post');
 
       // Parse and apply states, keeping defaults if not found
       if (twitterState) {
@@ -73,6 +76,9 @@ export class APIToggleService {
       }
       if (autoPostState) {
         this.state.autoPostingEnabled = autoPostState === 'true';
+      }
+      if (aiAutoPostState) {
+        this.state.aiAutoPostingEnabled = aiAutoPostState === 'true';
       }
 
       logger.info('Toggle states loaded from database:', this.state);
@@ -93,6 +99,7 @@ export class APIToggleService {
       await this.dbService.setSystemState('api_toggle_magic_eden', this.state.magicEdenEnabled.toString());
       await this.dbService.setSystemState('api_toggle_openai', this.state.openaiEnabled.toString());
       await this.dbService.setSystemState('api_toggle_auto_post', this.state.autoPostingEnabled.toString());
+      await this.dbService.setSystemState('api_toggle_ai_auto_post', this.state.aiAutoPostingEnabled.toString());
       
       logger.debug('Toggle states saved to database');
     } catch (error: any) {
@@ -133,6 +140,13 @@ export class APIToggleService {
    */
   isAutoPostingEnabled(): boolean {
     return this.state.autoPostingEnabled;
+  }
+
+  /**
+   * Check if AI auto-posting is enabled
+   */
+  isAIAutoPostingEnabled(): boolean {
+    return this.state.aiAutoPostingEnabled;
   }
 
   /**
@@ -189,6 +203,23 @@ export class APIToggleService {
       throw new Error('Cannot enable auto-posting when Twitter API is disabled');
     }
     this.state.autoPostingEnabled = enabled;
+    await this.saveToDatabase();
+  }
+
+  /**
+   * Set AI auto-posting toggle state
+   */
+  async setAIAutoPostingEnabled(enabled: boolean): Promise<void> {
+    // Can only enable if both Twitter API and OpenAI API are enabled
+    if (enabled && !this.state.twitterEnabled) {
+      throw new Error('Cannot enable AI auto-posting when Twitter API is disabled');
+    }
+    if (enabled && !this.state.openaiEnabled) {
+      throw new Error('Cannot enable AI auto-posting when OpenAI API is disabled');
+    }
+    this.state.aiAutoPostingEnabled = enabled;
+    
+    // If disabling AI auto-posting, no cascading effects needed
     await this.saveToDatabase();
   }
 }
