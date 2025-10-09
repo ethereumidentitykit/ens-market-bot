@@ -178,13 +178,17 @@ export class OpenAIService {
 FOCUS AREAS:
 1. Meaning & Context
    - What does ${label} mean? (dictionary definition, translations in major languages)
-   - Is it a common word, brand name, person name, or acronym?
+   - Is it a common word, brand name, person name, acronym, technical term, or romanized foreign language?
    - Any cultural or industry significance?
+   - Skip obvious common words like "students", "coffee", "angel" - just state "common English word" for these
 
-2. Name Popularity & Usage
-   - If it's a person name, check forebears.io for usage statistics (how common is it globally?)
+2. Name Popularity & Usage (IMPORTANT FOR PERSON NAMES)
+   - If it's a person name, check forebears.io for detailed statistics:
+     * Global ranking (e.g., "101st most popular name globally")
+     * Number of bearers worldwide
+     * Geographic distribution (which countries it's most common in)
+   - For common names, include the ranking data (e.g., "sam is 101st most popular name in the world, mostly in US and UK")
    - Search interest or trend relevance
-   - Geographic distribution if it's a name
 
 3. Market Interest
    - Is this name registered on major TLDs (.com, .io, .ai)?
@@ -193,10 +197,11 @@ FOCUS AREAS:
 
 OUTPUT (keep brief, 200 words max):
 - Key meaning/context in 1-2 sentences
-- Usage statistics if it's a common name (forebears data)
+- For person names: Include forebears ranking and geographic distribution
+- For obscure names/acronyms/romanized text: Explain what it means
 - Market relevance (if notable)
 
-IMPORTANT: Be honest. If there's nothing particularly interesting or significant about this name, just say so. Don't inflate its importance or make up significance that isn't there. A common generic word is fine to describe as such.
+IMPORTANT: Be honest. If there's nothing particularly interesting or significant about this name, just say so. Don't inflate its importance. A common generic word is fine to describe as such.
 
 Research: ${label}`;
 
@@ -301,11 +306,14 @@ Research: ${label}`;
         `Tweet generation for "${context.event.tokenName}"`
       );
 
-      const tweetText = response.output_text?.trim() || '';
+      const rawText = response.output_text?.trim() || '';
       
-      // Validate response
+      // Add title/header to the tweet
+      const tweetText = `AI insight:\n${rawText}`;
+      
+      // Validate response (with title included)
       if (!this.validateResponse(tweetText)) {
-        throw new Error(`Invalid response: ${tweetText.length} characters (max 280)`);
+        throw new Error(`Invalid response: ${tweetText.length} characters (max 1000)`);
       }
 
       const usage = response.usage;
@@ -349,6 +357,9 @@ Research: ${label}`;
 
 YOUR TASK:
 Look at all the data provided (name meaning, buyer/seller activity, transaction history) and decide what's actually interesting to market watchers. Don't just list everything. Tell the story that matters.
+you can keep a couple numerical data points, but don't make it the main focus.
+
+NOTE: Your response will be prefixed with "AI insight:" automatically, so don't include that in your text.
 
 WRITING STYLE:
 - Use simple, everyday words (not "consolidator" or "monetizing" unless it's the clearest word)
@@ -364,23 +375,25 @@ FORMATTING:
 
 WHAT TO FOCUS ON:
 1. **Name meaning & popularity**: 
-   - Only explain if it's unusual or unclear. Skip obvious ones like "students" or "coffee."
-   - If it's a common name, mention usage statistics (e.g., "Common surname, ~50k bearers globally")
-   - Explain obscure names, non-English words, or technical terms
+   - Only explain if it's unusual or unclear. Skip obvious ones like "students" or "coffee", "angel" etc.
+   - If it's a common name, mention usage statistics (e.g., "Common surname, ~50k people globally")
+   - Explain obscure names, non-English words, or technical terms, acrynms, romanised foriegn languages, etc.
 
 2. **Club membership**: If the name belongs to a club (e.g., "999 Club #1,234 @ENS999club"):
+   - this means it's part of a "club" or "category" of ens names, that are generally considered to be of higher value or quality due to their discoverability.
    - Mention it if it adds context (e.g., "This is #1,234 in the 999 Club")
-   - If it's a special position (low number), highlight it
+   - If it's a special one, perhaps a rare or most well known in that club, highlight it.
+   - If its a a special pattern in a club, eg 0101 for 10k club, or 101 for 999 club, highlight it.
+   - if its a low number for names, get the forebears data for it eg sam is 101st most popular name in the world, mostly in US and UK.
 
-3. **Trading patterns**: Only mention if notable:
-   - Someone buying lots of similar names (what kind?)
+3. **Trading patterns** based on the user tx history provided: Only mention if unusual
+   - name buying frequency
+   - buyer and seller total volumes
    - Quick flips or unusual timing
-   - 🚩 Wash trading red flags (fresh wallets, round numbers, rapid flips)
+   - 🚩 Wash trading red flags (buyer or seller has no or little prior tx history, round numbers, rapid flips for big profits)
    - Big profit or loss on this specific sale
 
-4. **Market context**: Why does this transaction matter?
-   - Is this name type trending?
-   - Unusual price for this category?
+4. **Market context**: anything interesting about this transaction?
    - Notable buyer or seller behavior?
 
 CRITICAL RULES:
@@ -494,7 +507,7 @@ BAD EXAMPLES:
 YOUR TASK: Look at all this data and pick out what's ACTUALLY INTERESTING to market watchers. Not all of it matters.
 
 Ask yourself:
-- Is the name meaning worth explaining? (Skip if obvious like "students")
+- Is the name meaning worth explaining? maybe it's obscure, or a non-english word, or an acronym, or a romanised foreign language, etc. if its self evident, skip it or keep it very short
 - Is there a notable pattern in how the buyer or seller trades?
 - What's the story here that people should know?
 
