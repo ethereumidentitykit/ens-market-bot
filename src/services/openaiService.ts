@@ -376,6 +376,7 @@ WHAT TO FOCUS ON:
    - If it's a special one, perhaps a rare or most well known in that club, highlight it.
    - If its a a special pattern in a club, eg 0101 for 10k club, or 101 for 999 club, highlight it.
    - if its a low number for names, get the forebears data for it eg sam is 101st most popular name in the world, mostly in US and UK.
+   - if its a prepunk club, can be interesting. there are almost 80k of them, just means they are OG ens names. sub 10k, sub 1k, sub 100 are increasingly valuable. a sub 100 name could sell for thousands even if it has no linguistic value. 
 
 3. **Trading patterns** based on the user tx history provided: Only mention if unusual
    - name buying frequency
