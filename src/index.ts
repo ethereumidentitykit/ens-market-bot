@@ -76,11 +76,31 @@ async function startApplication(): Promise<void> {
     const autoTweetService = new AutoTweetService(newTweetFormatter, twitterService, rateLimitService, databaseService, worldTimeService);
     const schedulerService = new SchedulerService(salesProcessingService, bidsProcessingService, autoTweetService, databaseService);
     
-    // Initialize database event service for real-time processing
+    // Phase 3.4: Initialize AI Reply Service for automated contextual replies
+    const { OpenAIService } = await import('./services/openaiService');
+    const { DataProcessingService } = await import('./services/dataProcessingService');
+    const { AIReplyService } = await import('./services/aiReplyService');
+    
+    const openaiService = new OpenAIService();
+    const dataProcessingService = new DataProcessingService();
+    const aiReplyService = new AIReplyService(
+      openaiService,
+      databaseService,
+      twitterService,
+      dataProcessingService,
+      magicEdenService,
+      openSeaService,
+      ethIdentityService
+    );
+    
+    logger.info('AI Reply Service initialized');
+    
+    // Initialize database event service for real-time processing (with AI Reply Service)
     const databaseEventService = new DatabaseEventService(
       autoTweetService,
       databaseService,
-      process.env.POSTGRES_URL || process.env.DATABASE_URL!
+      process.env.POSTGRES_URL || process.env.DATABASE_URL!,
+      aiReplyService  // Phase 3.4: Pass AI Reply Service
     );
 
     // Initialize database
@@ -897,6 +917,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
+
     // Processing endpoints
     app.get('/api/process-sales', requireAuth, async (req, res) => {
       try {
@@ -1297,16 +1318,27 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    // Database trigger setup for real-time processing
+    // Database trigger setup for real-time processing (sales, registrations, bids, AI replies)
     app.post('/api/admin/setup-triggers', requireAuth, async (req, res) => {
       try {
-        logger.info('🔧 Setting up database triggers for real-time sale processing...');
+        logger.info('🔧 Setting up all database triggers for real-time processing...');
         
+        // Set up all notification triggers (same as auto-initialization)
         await databaseService.setupSaleNotificationTriggers();
+        await databaseService.setupRegistrationNotificationTriggers();
+        await databaseService.setupBidNotificationTriggers();
+        await databaseService.setupAIReplyNotificationTriggers(); // Phase 3.4
         
         res.json({
           success: true,
-          message: 'Database triggers setup successfully',
+          message: 'All database triggers setup successfully',
+          details: {
+            salesTrigger: 'new_sale trigger on processed_sales',
+            registrationTrigger: 'new_registration trigger on ens_registrations',
+            bidTrigger: 'new_bid trigger on ens_bids',
+            aiReplySalesTrigger: 'posted_sale trigger on processed_sales (Phase 3.4)',
+            aiReplyRegistrationsTrigger: 'posted_registration trigger on ens_registrations (Phase 3.4)'
+          },
           timestamp: new Date().toISOString()
         });
       } catch (error: any) {

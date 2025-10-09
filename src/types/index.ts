@@ -282,6 +282,7 @@ export interface IDatabaseService {
   setupSaleNotificationTriggers(): Promise<void>;
   setupRegistrationNotificationTriggers(): Promise<void>;
   setupBidNotificationTriggers(): Promise<void>;
+  setupAIReplyNotificationTriggers(): Promise<void>; // Phase 3.4
   checkSaleNotificationTriggers(): Promise<boolean>;
 }
 
