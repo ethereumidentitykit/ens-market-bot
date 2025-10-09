@@ -2,6 +2,7 @@ import { logger } from '../utils/logger';
 import { TokenActivity } from './magicEdenService';
 import { ENSWorkerService } from './ensWorkerService';
 import { ClubService } from './clubService';
+import { CurrencyUtils } from '../utils/currencyUtils';
 
 /**
  * Insights extracted from token's trading history
@@ -349,9 +350,12 @@ export class DataProcessingService {
     
     // Calculate total volume (ETH and USD) - includes both sales AND mints
     // Mints are real costs paid in a free market (registration fees)
-    const totalVolume = allTransactions.reduce((sum, tx) => 
-      sum + (tx.price?.amount?.decimal || 0), 0
-    );
+    const totalVolume = allTransactions.reduce((sum, tx) => {
+      const currencyContract = tx.price.currency.contract;
+      const isEth = CurrencyUtils.isETHEquivalent(currencyContract);
+      const ethValue = isEth ? tx.price.amount.decimal : (tx.price.amount.native || 0);
+      return sum + ethValue;
+    }, 0);
     const totalVolumeUsd = allTransactions.reduce((sum, tx) => 
       sum + (tx.price?.amount?.usd || 0), 0
     );
@@ -395,8 +399,10 @@ export class DataProcessingService {
       if (sellerAcquisition) {
         sellerAcquisitionTracked = true;
         sellerAcquisitionType = sellerAcquisition.type === 'mint' ? 'mint' : 'sale';
-        sellerBuyPrice = sellerAcquisition.price.amount.decimal;
-        sellerBuyPriceUsd = sellerAcquisition.price.amount.usd;
+        const currencyContract = sellerAcquisition.price.currency.contract;
+        const isEth = CurrencyUtils.isETHEquivalent(currencyContract);
+        sellerBuyPrice = isEth ? sellerAcquisition.price.amount.decimal : (sellerAcquisition.price.amount.native || 0);
+        sellerBuyPriceUsd = sellerAcquisition.price.amount.usd || 0;
         
         // Calculate PNL using current sale price (if provided)
         if (currentSalePrice !== undefined && currentSalePriceUsd !== undefined) {
@@ -418,19 +424,26 @@ export class DataProcessingService {
       logger.debug(`   ℹ️  No seller address provided (likely a registration), skipping PNL tracking`);
     }
     
+    // Helper to get ETH price from activity
+    const getEthPrice = (tx: any) => {
+      const currencyContract = tx.price.currency.contract;
+      const isEth = CurrencyUtils.isETHEquivalent(currencyContract);
+      return isEth ? tx.price.amount.decimal : (tx.price.amount.native || 0);
+    };
+    
     const insights: TokenInsights = {
       firstTx: {
         type: firstTx.type as 'mint' | 'sale',
-        price: firstTx.price.amount.decimal,
-        priceUsd: firstTx.price.amount.usd,
+        price: getEthPrice(firstTx),
+        priceUsd: firstTx.price.amount.usd || 0,
         timestamp: firstTx.timestamp,
         buyer: firstTx.resolvedBuyer,
         seller: firstTx.resolvedSeller
       },
       previousTx: {
         type: previousTx.type as 'mint' | 'sale',
-        price: previousTx.price.amount.decimal,
-        priceUsd: previousTx.price.amount.usd,
+        price: getEthPrice(previousTx),
+        priceUsd: previousTx.price.amount.usd || 0,
         timestamp: previousTx.timestamp,
         buyer: previousTx.resolvedBuyer,
         seller: previousTx.resolvedSeller
@@ -533,20 +546,26 @@ export class DataProcessingService {
     
     // Calculate buy statistics
     const buysCount = buys.length;
-    // Use 'native' (ETH-equivalent) for volume, not 'decimal' (which is in the transaction's currency)
-    const buysVolume = buys.reduce((sum, activity) => 
-      sum + (activity.price.amount.native || 0), 0
-    );
+    // Use 'native' for non-ETH currencies (converts to ETH), 'decimal' for ETH (more precise)
+    const buysVolume = buys.reduce((sum, activity) => {
+      const currencyContract = activity.price.currency.contract;
+      const isEth = CurrencyUtils.isETHEquivalent(currencyContract);
+      const ethValue = isEth ? activity.price.amount.decimal : (activity.price.amount.native || 0);
+      return sum + ethValue;
+    }, 0);
     const buysVolumeUsd = buys.reduce((sum, activity) => 
       sum + (activity.price.amount.usd || 0), 0
     );
     
     // Calculate sell statistics
     const sellsCount = sells.length;
-    // Use 'native' (ETH-equivalent) for volume, not 'decimal' (which is in the transaction's currency)
-    const sellsVolume = sells.reduce((sum, activity) => 
-      sum + (activity.price.amount.native || 0), 0
-    );
+    // Use 'native' for non-ETH currencies (converts to ETH), 'decimal' for ETH (more precise)
+    const sellsVolume = sells.reduce((sum, activity) => {
+      const currencyContract = activity.price.currency.contract;
+      const isEth = CurrencyUtils.isETHEquivalent(currencyContract);
+      const ethValue = isEth ? activity.price.amount.decimal : (activity.price.amount.native || 0);
+      return sum + ethValue;
+    }, 0);
     const sellsVolumeUsd = sells.reduce((sum, activity) => 
       sum + (activity.price.amount.usd || 0), 0
     );
@@ -744,13 +763,17 @@ export class DataProcessingService {
       .map(a => {
         const normalizedBuyerAddress = eventData.buyerAddress.toLowerCase();
         const role = a.toAddress.toLowerCase() === normalizedBuyerAddress ? 'buyer' : 'seller';
+        // Convert price to ETH: use 'decimal' for ETH (precise), 'native' for other currencies (converted)
+        const currencyContract = a.price.currency.contract;
+        const isEth = CurrencyUtils.isETHEquivalent(currencyContract);
+        const priceEth = isEth ? a.price.amount.decimal : (a.price.amount.native || 0);
         return {
           type: a.type as 'mint' | 'sale',
           timestamp: a.timestamp,
           tokenName: a.token?.tokenName ?? undefined,
           role: role as 'buyer' | 'seller',
-          price: a.price.amount.decimal,
-          priceUsd: a.price.amount.usd,
+          price: priceEth,
+          priceUsd: a.price.amount.usd || 0,
           txHash: a.txHash
         };
       })
@@ -764,13 +787,17 @@ export class DataProcessingService {
         .map(a => {
           const normalizedSellerAddress = eventData.sellerAddress!.toLowerCase();
           const role = a.toAddress.toLowerCase() === normalizedSellerAddress ? 'buyer' : 'seller';
+          // Convert price to ETH: use 'decimal' for ETH (precise), 'native' for other currencies (converted)
+          const currencyContract = a.price.currency.contract;
+          const isEth = CurrencyUtils.isETHEquivalent(currencyContract);
+          const priceEth = isEth ? a.price.amount.decimal : (a.price.amount.native || 0);
           return {
             type: a.type as 'mint' | 'sale',
             timestamp: a.timestamp,
             tokenName: a.token?.tokenName ?? undefined,
             role: role as 'buyer' | 'seller',
-            price: a.price.amount.decimal,
-            priceUsd: a.price.amount.usd,
+            price: priceEth,
+            priceUsd: a.price.amount.usd || 0,
             txHash: a.txHash
           };
         })

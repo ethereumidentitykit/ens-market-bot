@@ -304,7 +304,7 @@ Research: ${label}`;
       const rawText = response.output_text?.trim() || '';
       
       // Add title/header to the tweet
-      const tweetText = `Grails AI insight:\n${rawText}`;
+      const tweetText = `🤖 Grails AI insight (beta):\n${rawText}`;
       
       // Validate response (with title included)
       if (!this.validateResponse(tweetText)) {
