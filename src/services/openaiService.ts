@@ -402,7 +402,10 @@ CRITICAL RULES:
 - Don't list stats just because you have them
 - Don't repeat the price or name from the main tweet
 - Skip legal/trademark topics unless it's a major red flag
-- dont mention the ABSENCE of problems (e.g., "no wash trading signals", "no red flags", "nothing suspicious")
+- NEVER mention the ABSENCE of problems (e.g., "no wash trading signals", "no red flags", "nothing suspicious")
+- NEVER use negative phrasing or "not X" statements:
+  ❌ BAD: "not quick flipping", "not a flipper", "not selling"
+  ✅ GOOD: "building a collection", "holding long-term", "accumulating", "31 buys with all names retained"
 - Only report what IS present and interesting, never what ISN'T
 - NEVER offer personal services or suggest you can help ("I can look up..." "let me know if...")
 - NEVER ask questions to the reader
@@ -431,10 +434,12 @@ When mentioning the buyer or seller, use the exact formatted handle from the EVE
 Examples: "The buyer jim.eth @jim has been collecting..." or "The buyer 0x23af...07s3 is a fresh wallet..."
 
 GOOD EXAMPLE:
-"Edward is one of the most common English names globally (forebears shows ~600k bearers). The buyer collector.eth @collector has been focused on traditional first names, picking up 6 premium ones over 2 months. No flips, just holding. The seller waited over 3 years and made 4x. Classic identity names are seeing renewed interest."
+"Edward is one of the most common English names globally (forebears shows ~600k bearers). The buyer collector.eth @collector has been focused on traditional first names, picking up 6 premium ones over 2 months and holding all of them. The seller held for ~3 years and made 4x. Classic identity names are seeing renewed interest."
 
 BAD EXAMPLES:
-"Common given name, nothing exotic. Note there are live trademark filings using the same word, so commercial uses could carry legal risk in some industries." ❌ LEGAL FOCUS`;
+"Common given name, nothing exotic. Note there are live trademark filings using the same word, so commercial uses could carry legal risk in some industries." ❌ LEGAL FOCUS
+
+"The buyer has 31 buys with zero sells, not quick flipping." ❌ WRONG: Don't use "not X" phrasing. Instead say: "The buyer has accumulated 31 names with all holdings retained, building a focused collection."`;
   }
 
   /**
@@ -561,27 +566,17 @@ BAD EXAMPLES:
       }
     }
 
-    // Format buyer current holdings
+    // Format buyer current holdings (all names)
     if (buyerStats.currentHoldings && buyerStats.currentHoldings.length > 0) {
       prompt += `\nBUYER CURRENT HOLDINGS (${buyerStats.currentHoldings.length} names${buyerStats.holdingsIncomplete ? ' - incomplete data' : ''}):\n`;
-      // Show first 20 names for pattern detection
-      const namesToShow = buyerStats.currentHoldings.slice(0, 20);
-      prompt += namesToShow.join(', ');
-      if (buyerStats.currentHoldings.length > 20) {
-        prompt += `, ... (${buyerStats.currentHoldings.length - 20} more)`;
-      }
+      prompt += buyerStats.currentHoldings.join(', ');
       prompt += `\n`;
     }
 
-    // Format seller current holdings
+    // Format seller current holdings (all names)
     if (sellerStats && sellerStats.currentHoldings && sellerStats.currentHoldings.length > 0) {
       prompt += `\nSELLER CURRENT HOLDINGS (${sellerStats.currentHoldings.length} names${sellerStats.holdingsIncomplete ? ' - incomplete data' : ''}):\n`;
-      // Show first 20 names for pattern detection
-      const namesToShow = sellerStats.currentHoldings.slice(0, 20);
-      prompt += namesToShow.join(', ');
-      if (sellerStats.currentHoldings.length > 20) {
-        prompt += `, ... (${sellerStats.currentHoldings.length - 20} more)`;
-      }
+      prompt += sellerStats.currentHoldings.join(', ');
       prompt += `\n`;
     }
 
