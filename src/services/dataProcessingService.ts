@@ -63,6 +63,10 @@ export interface UserStats {
   
   // Marketplace preferences
   topMarketplaces: string[]; // Most frequently used marketplaces
+  
+  // Current ENS holdings (from OpenSea)
+  currentHoldings: string[] | null; // Array of ENS names they currently hold
+  holdingsIncomplete: boolean; // True if holdings fetch was incomplete
 }
 
 /**
@@ -464,7 +468,8 @@ export class DataProcessingService {
     activities: TokenActivity[],
     userAddress: string,
     role: 'buyer' | 'seller',
-    magicEdenService?: any
+    magicEdenService?: any,
+    currentHoldings?: { names: string[]; incomplete: boolean } | null
   ): Promise<UserStats> {
     logger.debug(`👤 Processing user activity: ${activities.length} activities for ${userAddress.slice(0, 8)}... (${role})`);
     
@@ -597,11 +602,16 @@ export class DataProcessingService {
       firstActivityTimestamp,
       lastActivityTimestamp,
       transactionsPerMonth,
-      topMarketplaces
+      topMarketplaces,
+      currentHoldings: currentHoldings?.names || null,
+      holdingsIncomplete: currentHoldings?.incomplete || false
     };
     
     logger.debug(`   ✅ User stats: ${buysCount} buys (${buysVolume.toFixed(4)} ETH / $${buysVolumeUsd.toFixed(2)}), ${sellsCount} sells (${sellsVolume.toFixed(4)} ETH / $${sellsVolumeUsd.toFixed(2)})`);
     logger.debug(`      Activity: ${transactionsPerMonth.toFixed(2)} txns/month, Top marketplaces: ${topMarketplaces.join(', ')}`);
+    if (currentHoldings) {
+      logger.debug(`      Current holdings: ${currentHoldings.names.length} names${currentHoldings.incomplete ? ' (incomplete)' : ''}`);
+    }
     
     return stats;
   }
@@ -645,6 +655,10 @@ export class DataProcessingService {
       tokenDataIncomplete: boolean;
       buyerDataIncomplete: boolean;
       sellerDataIncomplete: boolean;
+    },
+    holdingsData?: {
+      buyerHoldings: { names: string[]; incomplete: boolean } | null;
+      sellerHoldings: { names: string[]; incomplete: boolean } | null;
     }
   ): Promise<LLMPromptContext> {
     logger.info(`🧠 Building LLM context for ${eventData.type}: ${eventData.tokenName}`);
@@ -694,7 +708,8 @@ export class DataProcessingService {
       buyerActivities,
       eventData.buyerAddress,
       'buyer',
-      magicEdenService
+      magicEdenService,
+      holdingsData?.buyerHoldings || null
     );
     
     // Step 3: Process seller activity (if this is a sale)
@@ -705,7 +720,8 @@ export class DataProcessingService {
         sellerActivities,
         eventData.sellerAddress,
         'seller',
-        magicEdenService
+        magicEdenService,
+        holdingsData?.sellerHoldings || null
       );
     } else {
       logger.debug(`   ⏭️  No seller data (registration)`);

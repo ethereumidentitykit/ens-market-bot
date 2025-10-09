@@ -731,16 +731,19 @@ async function startApplication(): Promise<void> {
           });
         }
 
-        logger.debug('   Fetching data in parallel (Magic Eden + name research)...');
+        logger.debug('   Fetching data in parallel (Magic Eden, ENS holdings, + name research)...');
         
-        // Start all API calls in parallel for speed (including name research)
+        // Start all API calls in parallel for speed (including name research and holdings)
         // Track which API calls failed or returned incomplete data
         const openaiService = new OpenAIService();
+        const { OpenSeaService } = await import('./services/openSeaService');
+        const openSeaService = new OpenSeaService();
+        
         let tokenDataIncomplete = false;
         let buyerDataIncomplete = false;
         let sellerDataIncomplete = false;
         
-        const [tokenResult, buyerResult, sellerResult, nameResearch] = await Promise.all([
+        const [tokenResult, buyerResult, sellerResult, buyerHoldings, sellerHoldings, nameResearch] = await Promise.all([
           magicEdenService.getTokenActivityHistory(
             transaction.contractAddress,
             transaction.tokenId
@@ -758,6 +761,18 @@ async function startApplication(): Promise<void> {
             ? magicEdenService.getUserActivityHistory(eventData.sellerAddress).catch((error: any) => {
                 logger.error('Seller activity fetch failed:', error.message);
                 return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0 };
+              })
+            : Promise.resolve(null),
+          // Fetch buyer's current ENS holdings
+          openSeaService.getENSHoldings(eventData.buyerAddress, { limit: 200, maxPages: 5 }).catch((error: any) => {
+            logger.error('Buyer holdings fetch failed:', error.message);
+            return { names: [], incomplete: true, totalFetched: 0 };
+          }),
+          // Fetch seller's current ENS holdings (if sale)
+          eventData.sellerAddress
+            ? openSeaService.getENSHoldings(eventData.sellerAddress, { limit: 200, maxPages: 5 }).catch((error: any) => {
+                logger.error('Seller holdings fetch failed:', error.message);
+                return { names: [], incomplete: true, totalFetched: 0 };
               })
             : Promise.resolve(null),
           // Start name research in parallel
@@ -795,6 +810,10 @@ async function startApplication(): Promise<void> {
             tokenDataIncomplete,
             buyerDataIncomplete,
             sellerDataIncomplete
+          },
+          {
+            buyerHoldings: buyerHoldings || null,
+            sellerHoldings: sellerHoldings || null
           }
         );
 

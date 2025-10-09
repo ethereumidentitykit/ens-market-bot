@@ -379,11 +379,12 @@ WHAT TO FOCUS ON:
    - if its a low number for names, get the forebears data for it eg sam is 101st most popular name in the world, mostly in US and UK.
    - if its a prepunk club, can be interesting. there are almost 80k of them, just means they are OG ens names. sub 10k, sub 1k, sub 100 are increasingly valuable. a sub 100 name could sell for thousands even if it has no linguistic value. 
 
-3. **Trading patterns** based on the user tx history provided: Only mention if unusual
+3. **Trading patterns** based on the user tx history and current holdings provided: Only mention if unusual
    - name buying frequency
    - buyer and seller total volumes (NOTE: High ETH volume + low USD volume = OG buyer from early days when ETH was cheaper)
    - Quick flips or unusual timing
    - Big profit or loss on this specific sale
+   - **Current holdings patterns**: Look for themes in what they're collecting (e.g., all animals, all 3-letter names, all dictionary words, all numbers, specific category focus). Don't list names, just describe the pattern if there is one.
    
    🚩 **WASH TRADING DETECTION** (critical - don't downplay):
    - Fresh buyer wallet (no/little history) + serial mint-flipper seller = LIKELY COORDINATED
@@ -406,6 +407,7 @@ CRITICAL RULES:
 - NEVER offer personal services or suggest you can help ("I can look up..." "let me know if...")
 - NEVER ask questions to the reader
 - You are an automated analysis bot, not a person offering services
+- NEVER use the word "edgy" - use alternatives like "bold", "distinctive", "unconventional", or just describe what type of name it is (gaming, dark/fantasy themed, etc.)
 
 FORMATTING NUMBERS & TIME:
 - **Time references**: Convert days to human-readable format
@@ -557,6 +559,30 @@ BAD EXAMPLES:
         const tokenName = activity.tokenName ? activity.tokenName.slice(0, 20) : 'unknown';
         prompt += `- ${date}: ${activity.type} ${tokenName} for ${activity.price.toFixed(4)} ETH [${activity.role}]\n`;
       }
+    }
+
+    // Format buyer current holdings
+    if (buyerStats.currentHoldings && buyerStats.currentHoldings.length > 0) {
+      prompt += `\nBUYER CURRENT HOLDINGS (${buyerStats.currentHoldings.length} names${buyerStats.holdingsIncomplete ? ' - incomplete data' : ''}):\n`;
+      // Show first 20 names for pattern detection
+      const namesToShow = buyerStats.currentHoldings.slice(0, 20);
+      prompt += namesToShow.join(', ');
+      if (buyerStats.currentHoldings.length > 20) {
+        prompt += `, ... (${buyerStats.currentHoldings.length - 20} more)`;
+      }
+      prompt += `\n`;
+    }
+
+    // Format seller current holdings
+    if (sellerStats && sellerStats.currentHoldings && sellerStats.currentHoldings.length > 0) {
+      prompt += `\nSELLER CURRENT HOLDINGS (${sellerStats.currentHoldings.length} names${sellerStats.holdingsIncomplete ? ' - incomplete data' : ''}):\n`;
+      // Show first 20 names for pattern detection
+      const namesToShow = sellerStats.currentHoldings.slice(0, 20);
+      prompt += namesToShow.join(', ');
+      if (sellerStats.currentHoldings.length > 20) {
+        prompt += `, ... (${sellerStats.currentHoldings.length - 20} more)`;
+      }
+      prompt += `\n`;
     }
 
     // Add data quality notes if APIs returned incomplete data
