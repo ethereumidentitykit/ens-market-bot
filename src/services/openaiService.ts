@@ -368,13 +368,17 @@ WHAT TO FOCUS ON:
    - If it's a common name, mention usage statistics (e.g., "Common surname, ~50k bearers globally")
    - Explain obscure names, non-English words, or technical terms
 
-2. **Trading patterns**: Only mention if notable:
+2. **Club membership**: If the name belongs to a club (e.g., "999 Club #1,234 @ENS999club"):
+   - Mention it if it adds context (e.g., "This is #1,234 in the 999 Club")
+   - If it's a special position (low number), highlight it
+
+3. **Trading patterns**: Only mention if notable:
    - Someone buying lots of similar names (what kind?)
    - Quick flips or unusual timing
    - 🚩 Wash trading red flags (fresh wallets, round numbers, rapid flips)
    - Big profit or loss on this specific sale
 
-3. **Market context**: Why does this transaction matter?
+4. **Market context**: Why does this transaction matter?
    - Is this name type trending?
    - Unusual price for this category?
    - Notable buyer or seller behavior?
@@ -406,7 +410,7 @@ BAD EXAMPLES:
    * @returns Formatted prompt string
    */
   private buildUserPrompt(context: LLMPromptContext, nameResearch?: string): string {
-    const { event, tokenInsights, buyerStats, sellerStats, buyerActivityHistory, sellerActivityHistory } = context;
+    const { event, tokenInsights, buyerStats, sellerStats, buyerActivityHistory, sellerActivityHistory, clubInfo } = context;
 
     // Format event details
     let prompt = `EVENT:\n`;
@@ -417,6 +421,11 @@ BAD EXAMPLES:
     
     if (event.type === 'sale' && event.sellerAddress) {
       prompt += `- Seller: ${event.sellerEnsName || event.sellerAddress.slice(0, 10) + '...'}\n`;
+    }
+    
+    // Include club membership if available
+    if (clubInfo) {
+      prompt += `- Club: ${clubInfo}\n`;
     }
 
     // Include name research if available

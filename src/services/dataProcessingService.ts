@@ -1,6 +1,7 @@
 import { logger } from '../utils/logger';
 import { TokenActivity } from './magicEdenService';
 import { ENSWorkerService } from './ensWorkerService';
+import { ClubService } from './clubService';
 
 /**
  * Insights extracted from token's trading history
@@ -118,6 +119,9 @@ export interface LLMPromptContext {
     buyerActivityCount: number;
     sellerActivityCount: number;
   };
+  
+  // Club membership info (if name belongs to any clubs)
+  clubInfo: string | null; // Formatted club string (e.g., "999 Club #1,234 @ENS999club")
 }
 
 /**
@@ -131,6 +135,9 @@ export class DataProcessingService {
     '0xe6ee2b1eaac6520be709e77780abb50e7fffcccd', // Seaport proxy
     '0x00ca04c45da318d5b7e7b14d5381ca59f09c73f0', // Additional proxy
   ];
+  
+  // Club service for checking ENS name club memberships
+  private readonly clubService = new ClubService();
 
   constructor() {
     logger.info('🔬 DataProcessingService initialized');
@@ -742,6 +749,15 @@ export class DataProcessingService {
       logger.debug(`   ✅ Seller activity history: ${sellerActivityHistory.length} entries`);
     }
     
+    // Step 3.75: Check club membership
+    logger.debug(`   🎯 Checking club membership for ${eventData.tokenName}...`);
+    const clubInfo = this.clubService.getFormattedClubString(eventData.tokenName);
+    if (clubInfo) {
+      logger.debug(`   ✅ Club membership found: ${clubInfo}`);
+    } else {
+      logger.debug(`   ℹ️  No club membership found`);
+    }
+    
     // Step 4: Assemble complete context
     const context: LLMPromptContext = {
       event: {
@@ -767,7 +783,8 @@ export class DataProcessingService {
         tokenActivityCount: tokenActivities.length,
         buyerActivityCount: buyerActivities.length,
         sellerActivityCount: sellerActivities?.length || 0
-      }
+      },
+      clubInfo
     };
     
     const processingTime = Date.now() - startTime;
