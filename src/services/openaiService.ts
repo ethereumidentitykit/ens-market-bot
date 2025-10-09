@@ -75,6 +75,28 @@ export class OpenAIService {
   }
 
   /**
+   * Sanitize ENS label to prevent prompt injection
+   * @param label - Raw ENS label (without .eth)
+   * @returns Sanitized label safe for prompt interpolation
+   */
+  private sanitizeLabel(label: string): string {
+    // Remove any potential prompt injection characters
+    // Keep only alphanumeric, common punctuation, and emojis
+    let sanitized = label
+      .replace(/[`"'\\\n\r\t]/g, '') // Remove quotes, backticks, newlines, tabs
+      .replace(/\{|\}/g, '') // Remove curly braces (markdown/formatting)
+      .replace(/\[|\]/g, '') // Remove square brackets
+      .trim();
+    
+    // Limit length to prevent prompt overflow (max 100 chars for ENS label)
+    if (sanitized.length > 100) {
+      sanitized = sanitized.substring(0, 100);
+    }
+    
+    return sanitized;
+  }
+
+  /**
    * Sleep for a specified duration
    * @param ms - Milliseconds to sleep
    */
@@ -170,14 +192,17 @@ export class OpenAIService {
       // Extract label (remove .eth suffix)
       const label = tokenName.replace(/\.eth$/i, '');
       
+      // Sanitize label to prevent prompt injection
+      const sanitizedLabel = this.sanitizeLabel(label);
+      
       logger.info(`🔍 Researching name: ${label}...`);
       
-      // Build focused research prompt
-      const researchPrompt = `Research the name "${label}" for ENS market context.
+      // Build focused research prompt (using sanitized label)
+      const researchPrompt = `Research the name "${sanitizedLabel}" for ENS market context.
 
 FOCUS AREAS:
 1. Meaning & Context
-   - What does ${label} mean? (dictionary definitions or common usages), etymology if uncommon or interesting.
+   - What does ${sanitizedLabel} mean? (dictionary definitions or common usages), etymology if uncommon or interesting.
    - Is it a common word, brand name, person name, or acronym?
    - Any cultural significance in gaming, crypto, or online communities?
 
@@ -198,7 +223,7 @@ SKIP:
 
 Be honest. If there's nothing interesting or significant about this name, say so. Don't inflate its importance or significance. If it's a word or string without wide recognition - thats good info to return.
 
-Research: ${label}`;
+Research: ${sanitizedLabel}`;
 
       // Call GPT-5 with web search (with retry logic)
       const response = await this.withRetry(
@@ -304,7 +329,7 @@ Research: ${label}`;
       const rawText = response.output_text?.trim() || '';
       
       // Add title/header to the tweet
-      const tweetText = `🤖 Grails AI insight (beta):\n\n${rawText}`;
+      const tweetText = `🤖 GrailsAI (beta):\n\n${rawText}`;
       
       // Validate response (with title included)
       if (!this.validateResponse(tweetText)) {
@@ -476,17 +501,22 @@ TERMINOLOGY:
     twitter: string | null | undefined,
     address: string
   ): string {
-    const cleanedTwitter = twitter ? this.cleanTwitterHandle(twitter) : null;
+    // Sanitize ENS name to prevent prompt injection
+    const sanitizedEnsName = ensName ? this.sanitizeLabel(ensName.replace(/\.eth$/i, '')) + '.eth' : null;
     
-    if (ensName && cleanedTwitter) {
-      return `${ensName} @${cleanedTwitter}`;
-    } else if (ensName) {
-      return ensName;
-    } else if (cleanedTwitter) {
-      return `@${cleanedTwitter}`;
+    // Clean and sanitize Twitter handle
+    const cleanedTwitter = twitter ? this.cleanTwitterHandle(twitter) : null;
+    const sanitizedTwitter = cleanedTwitter ? this.sanitizeLabel(cleanedTwitter) : null;
+    
+    if (sanitizedEnsName && sanitizedTwitter) {
+      return `${sanitizedEnsName} @${sanitizedTwitter}`;
+    } else if (sanitizedEnsName) {
+      return sanitizedEnsName;
+    } else if (sanitizedTwitter) {
+      return `@${sanitizedTwitter}`;
     }
     
-    // Fallback to truncated address
+    // Fallback to truncated address (already safe as it's a hex string)
     return `${address.slice(0, 6)}...${address.slice(-4)}`;
   }
 
@@ -500,6 +530,9 @@ TERMINOLOGY:
   private buildUserPrompt(context: LLMPromptContext, nameResearch?: string): string {
     const { event, tokenInsights, buyerStats, sellerStats, buyerActivityHistory, sellerActivityHistory, clubInfo } = context;
 
+    // Sanitize token name to prevent prompt injection
+    const sanitizedTokenName = this.sanitizeLabel(event.tokenName.replace(/\.eth$/i, '')) + '.eth';
+
     // Format display handles for buyer and seller
     const buyerHandle = this.formatDisplayHandle(event.buyerEnsName, event.buyerTwitter, event.buyerAddress);
     const sellerHandle = event.sellerAddress 
@@ -509,7 +542,7 @@ TERMINOLOGY:
     // Format event details
     let prompt = `EVENT:\n`;
     prompt += `- Type: ${event.type}\n`;
-    prompt += `- Name: ${event.tokenName}\n`;
+    prompt += `- Name: ${sanitizedTokenName}\n`;
     prompt += `- Price: ${event.price} ETH ($${event.priceUsd.toLocaleString()})\n`;
     prompt += `- Buyer: ${buyerHandle}\n`;
     
@@ -517,9 +550,10 @@ TERMINOLOGY:
       prompt += `- Seller: ${sellerHandle}\n`;
     }
     
-    // Include club membership if available
+    // Include club membership if available (sanitized)
     if (clubInfo) {
-      prompt += `- Club: ${clubInfo}\n`;
+      const sanitizedClubInfo = this.sanitizeLabel(clubInfo);
+      prompt += `- Club: ${sanitizedClubInfo}\n`;
     }
 
     // Include name research if available
