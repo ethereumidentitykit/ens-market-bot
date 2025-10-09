@@ -29,6 +29,10 @@ export class AIReplyService {
   private openSeaService: OpenSeaService;
   private ensWorkerService: ENSWorkerService;
 
+  // Timeout constants (in milliseconds)
+  private readonly NAME_RESEARCH_TIMEOUT = 8 * 60 * 1000; // 8 minutes
+  private readonly AI_GENERATION_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+
   constructor(
     openaiService: OpenAIService,
     databaseService: IDatabaseService,
@@ -45,6 +49,18 @@ export class AIReplyService {
     this.magicEdenService = magicEdenService;
     this.openSeaService = openSeaService;
     this.ensWorkerService = ensWorkerService;
+  }
+
+  /**
+   * Helper: Execute a promise with a timeout
+   */
+  private withTimeout<T>(promise: Promise<T>, timeoutMs: number, operationName: string): Promise<T> {
+    return Promise.race([
+      promise,
+      new Promise<T>((_, reject) =>
+        setTimeout(() => reject(new Error(`${operationName} timed out after ${timeoutMs / 1000}s`)), timeoutMs)
+      )
+    ]);
   }
 
   /**
@@ -113,11 +129,12 @@ export class AIReplyService {
         }
       );
 
-      // Step 5: Generate AI reply
+      // Step 5: Generate AI reply (5-minute timeout)
       logger.debug(`   [AI Reply] Step 5: Generating AI reply with OpenAI...`);
-      const generatedReply = await this.openaiService.generateReply(
-        llmContext,
-        contextData.nameResearch
+      const generatedReply = await this.withTimeout(
+        this.openaiService.generateReply(llmContext, contextData.nameResearch),
+        this.AI_GENERATION_TIMEOUT,
+        'AI reply generation'
       );
 
       // Step 6: Post threaded reply to Twitter
@@ -335,12 +352,16 @@ export class AIReplyService {
           })
         : Promise.resolve(null),
       
-      // Name research with web search
+      // Name research with web search (8-minute timeout)
       (async () => {
         try {
-          return await this.openaiService.researchName(eventData.tokenName);
-        } catch (error) {
-          logger.error('      Name research failed, continuing without it:', error);
+          return await this.withTimeout(
+            this.openaiService.researchName(eventData.tokenName),
+            this.NAME_RESEARCH_TIMEOUT,
+            'Name research'
+          );
+        } catch (error: any) {
+          logger.error('      Name research failed, continuing without it:', error.message);
           return '';
         }
       })()
