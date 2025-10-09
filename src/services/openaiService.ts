@@ -380,6 +380,7 @@ WHAT TO FOCUS ON:
    - Mention it if it adds context (e.g., "This is #1,234 in the 999 Club")
    - If it's a special one, perhaps a rare or most well known in that club, highlight it.
    - If its a a special pattern in a club, eg 0101 for 10k club, or 101 for 999 club, highlight it.
+   - 999 club and 10k clubs do not need much explination. their value is self-evident by the frequent trades, and high floor prices.
    - if its a low number for names, get the forebears data for it eg sam is 101st most popular name in the world, mostly in US and UK.
    - if its a prepunk club, can be interesting. there are almost 80k of them, just means they are OG ens names. sub 10k, sub 1k, sub 100 are increasingly valuable. a sub 100 name could sell for thousands even if it has no linguistic value. 
 
@@ -407,6 +408,7 @@ CRITICAL RULES:
 - Don't repeat the price or name from the main tweet
 - NEVER mention legal/trademark/IP/copyright issues - these are boring and irrelevant for web3 names
 - give low weight "commercial uses" or "brand protection" - ENS names are primarily usernames/identities
+- not interested in brandability or how it could be used in a brand or company name.
 - NEVER mention the ABSENCE of problems (e.g., "no wash trading signals", "no red flags", "nothing suspicious")
 - NEVER use negative phrasing or "not X" statements:
   ❌ BAD: "not quick flipping", "not a flipper", "not selling"
