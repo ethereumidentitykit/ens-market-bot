@@ -1232,6 +1232,33 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    app.post('/api/admin/toggle-openai', requireAuth, async (req, res) => {
+      try {
+        const { enabled } = req.body;
+        if (typeof enabled !== 'boolean') {
+          return res.status(400).json({
+            success: false,
+            error: 'enabled must be a boolean'
+          });
+        }
+
+        await apiToggleService.setOpenAIEnabled(enabled);
+        logger.info(`OpenAI API ${enabled ? 'enabled' : 'disabled'} via admin toggle`);
+        
+        const state = apiToggleService.getState();
+        res.json({
+          success: true,
+          openaiEnabled: state.openaiEnabled
+        });
+      } catch (error: any) {
+        logger.error('Toggle OpenAI API error:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     app.post('/api/admin/toggle-auto-posting', requireAuth, async (req, res) => {
       try {
         const { enabled } = req.body;

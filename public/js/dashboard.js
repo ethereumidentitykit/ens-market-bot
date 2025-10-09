@@ -33,7 +33,8 @@ function dashboard() {
         apiToggles: {
             twitterEnabled: true,
             moralisEnabled: true,
-            magicEdenEnabled: true
+            magicEdenEnabled: true,
+            openaiEnabled: true
         },
         
         // Price Tier Configuration
@@ -551,6 +552,7 @@ function dashboard() {
                     this.apiToggles.twitterEnabled = data.twitterEnabled;
                     this.apiToggles.moralisEnabled = data.moralisEnabled;
                     this.apiToggles.magicEdenEnabled = data.magicEdenEnabled;
+                    this.apiToggles.openaiEnabled = data.openaiEnabled;
                     this.autoPostSettings.enabled = data.autoPostingEnabled;
                 }
             } catch (error) {
@@ -1698,6 +1700,32 @@ function dashboard() {
             } catch (error) {
                 console.error('Toggle Magic Eden API error:', error);
                 this.showMessage('Failed to toggle Magic Eden API', 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async toggleOpenAIAPI() {
+            try {
+                this.loading = true;
+                const response = await fetch('/api/admin/toggle-openai', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: !this.apiToggles.openaiEnabled })
+                });
+                
+                if (response.ok) {
+                    this.apiToggles.openaiEnabled = !this.apiToggles.openaiEnabled;
+                    this.showMessage(
+                        `OpenAI API ${this.apiToggles.openaiEnabled ? 'enabled' : 'disabled'}`,
+                        'success'
+                    );
+                } else {
+                    throw new Error('Failed to toggle OpenAI API');
+                }
+            } catch (error) {
+                console.error('Toggle OpenAI API error:', error);
+                this.showMessage('Failed to toggle OpenAI API', 'error');
             } finally {
                 this.loading = false;
             }

@@ -19,6 +19,7 @@ import { DataProcessingService } from './dataProcessingService';
 import { MagicEdenService, TokenActivity } from './magicEdenService';
 import { OpenSeaService } from './openSeaService';
 import { ENSWorkerService } from './ensWorkerService';
+import { APIToggleService } from './apiToggleService';
 
 export class AIReplyService {
   private openaiService: OpenAIService;
@@ -28,6 +29,7 @@ export class AIReplyService {
   private magicEdenService: MagicEdenService;
   private openSeaService: OpenSeaService;
   private ensWorkerService: ENSWorkerService;
+  private apiToggleService: APIToggleService;
 
   // Timeout constants (in milliseconds)
   private readonly NAME_RESEARCH_TIMEOUT = 8 * 60 * 1000; // 8 minutes
@@ -49,6 +51,7 @@ export class AIReplyService {
     this.magicEdenService = magicEdenService;
     this.openSeaService = openSeaService;
     this.ensWorkerService = ensWorkerService;
+    this.apiToggleService = APIToggleService.getInstance();
   }
 
   /**
@@ -213,6 +216,14 @@ export class AIReplyService {
       return {
         valid: false,
         reason: 'AI replies are disabled in settings'
+      };
+    }
+
+    // Check if OpenAI API is enabled
+    if (!this.apiToggleService.isOpenAIEnabled()) {
+      return {
+        valid: false,
+        reason: 'OpenAI API is disabled via admin toggle'
       };
     }
 
