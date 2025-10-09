@@ -80,8 +80,10 @@ export interface LLMPromptContext {
     timestamp: number;
     buyerAddress: string;
     buyerEnsName: string | null; // Resolved ENS name for buyer (e.g., "trader.eth")
+    buyerTwitter: string | null; // Twitter handle from ENS records (e.g., "handle" without @)
     sellerAddress?: string; // Not present for registrations
     sellerEnsName?: string | null; // Resolved ENS name for seller (if applicable)
+    sellerTwitter?: string | null; // Twitter handle from ENS records (if applicable)
     txHash: string; // Transaction hash from DB
   };
   
@@ -642,19 +644,23 @@ export class DataProcessingService {
     
     const startTime = Date.now();
     
-    // Step 0: Resolve ENS names for buyer and seller
+    // Step 0: Resolve ENS names and Twitter handles for buyer and seller
     let buyerEnsName: string | null = null;
     let sellerEnsName: string | null = null;
+    let buyerTwitter: string | null = null;
+    let sellerTwitter: string | null = null;
     
     if (ensWorkerService) {
-      logger.debug(`   🔍 Resolving ENS names...`);
+      logger.debug(`   🔍 Resolving ENS names and Twitter handles...`);
       try {
         const buyerAccount = await ensWorkerService.getFullAccountData(eventData.buyerAddress);
         buyerEnsName = buyerAccount?.name || null;
+        buyerTwitter = buyerAccount?.records?.['com.twitter'] || null;
         
         if (eventData.sellerAddress) {
           const sellerAccount = await ensWorkerService.getFullAccountData(eventData.sellerAddress);
           sellerEnsName = sellerAccount?.name || null;
+          sellerTwitter = sellerAccount?.records?.['com.twitter'] || null;
         }
         
         logger.debug(`   ✅ Buyer: ${buyerEnsName || eventData.buyerAddress.slice(0, 8) + '...'}, Seller: ${sellerEnsName || (eventData.sellerAddress?.slice(0, 8) + '...') || 'N/A'}`);
@@ -769,8 +775,10 @@ export class DataProcessingService {
         timestamp: eventData.timestamp,
         buyerAddress: eventData.buyerAddress,
         buyerEnsName,
+        buyerTwitter,
         sellerAddress: eventData.sellerAddress,
         sellerEnsName,
+        sellerTwitter,
         txHash: eventData.txHash
       },
       tokenInsights,

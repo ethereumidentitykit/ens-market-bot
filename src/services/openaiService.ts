@@ -389,6 +389,7 @@ WHAT TO FOCUS ON:
    - Multiple red flags together = suspicious, not "ordinary market churn"
    - Red flags: fresh wallets, round numbers, rapid mint-flips for profit, repeated pattern
    - If it looks coordinated, SAY SO. Don't dismiss it as normal activity.
+   - **IMPORTANT**: If there are NO red flags, do not mention wash trading at all. Only report suspicious activity if it exists.
 
 4. **Market context**: anything interesting about this transaction?
    - Notable buyer or seller behavior?
@@ -399,19 +400,58 @@ CRITICAL RULES:
 - Don't list stats just because you have them
 - Don't repeat the price or name from the main tweet
 - Skip legal/trademark topics unless it's a major red flag
+- dont mention the ABSENCE of problems (e.g., "no wash trading signals", "no red flags", "nothing suspicious")
+- Only report what IS present and interesting, never what ISN'T
 - NEVER offer personal services or suggest you can help ("I can look up..." "let me know if...")
 - NEVER ask questions to the reader
 - You are an automated analysis bot, not a person offering services
 
+REFERENCING BUYERS/SELLERS:
+When mentioning the buyer or seller, use the exact formatted handle from the EVENT section:
+- If shown as "name.eth @handle" → use "name.eth @handle"
+- If shown as "name.eth" → use "name.eth"
+- If shown as "0xabcd...1234" → use "0xabcd...1234"
+Examples: "The buyer jim.eth @jim has been collecting..." or "The buyer 0x23af...07s3 is a fresh wallet..."
+
 GOOD EXAMPLE:
-"Edward is one of the most common English names globally (forebears shows ~600k bearers). The buyer has been focused on traditional first names, picking up 6 premium ones over 2 months. No flips, just holding. The seller waited over 3 years and made 4x. Classic identity names are seeing renewed interest."
+"Edward is one of the most common English names globally (forebears shows ~600k bearers). The buyer collector.eth @collector has been focused on traditional first names, picking up 6 premium ones over 2 months. No flips, just holding. The seller waited over 3 years and made 4x. Classic identity names are seeing renewed interest."
 
 BAD EXAMPLES:
-"This descriptive education label shows strong SEO potential. The acquirer powergrails.eth demonstrates consolidator behavior with 6 acquisitions."
+"Common given name, nothing exotic. Note there are live trademark filings using the same word, so commercial uses could carry legal risk in some industries." ❌ LEGAL FOCUS`;
+  }
 
-"Common given name, nothing exotic. Note there are live trademark filings using the same word, so commercial uses could carry legal risk in some industries."
+  /**
+   * Clean Twitter handle (remove @ prefix and whitespace)
+   */
+  private cleanTwitterHandle(handle: string): string {
+    return handle.replace(/^@/, '').trim();
+  }
 
-"The seller shows clear mint-and-flip behavior with dozens of mints and quick flips. The buyer has almost no history and only one recorded buy. No obvious wash-trade signals here though. The story is ordinary market churn." ❌ WRONG: These ARE wash signals - fresh buyer + serial flipper = coordinated activity.`;
+  /**
+   * Format a display handle for buyer/seller references in AI prompts
+   * Matches the tweet formatter's getDisplayHandle logic:
+   * - "name.eth @handle" (if both ENS and Twitter exist)
+   * - "name.eth" (if only ENS exists)
+   * - "@handle" (if only Twitter exists - edge case)
+   * - "0xabcd...1234" (truncated address fallback)
+   */
+  private formatDisplayHandle(
+    ensName: string | null | undefined,
+    twitter: string | null | undefined,
+    address: string
+  ): string {
+    const cleanedTwitter = twitter ? this.cleanTwitterHandle(twitter) : null;
+    
+    if (ensName && cleanedTwitter) {
+      return `${ensName} @${cleanedTwitter}`;
+    } else if (ensName) {
+      return ensName;
+    } else if (cleanedTwitter) {
+      return `@${cleanedTwitter}`;
+    }
+    
+    // Fallback to truncated address
+    return `${address.slice(0, 6)}...${address.slice(-4)}`;
   }
 
   /**
@@ -424,15 +464,21 @@ BAD EXAMPLES:
   private buildUserPrompt(context: LLMPromptContext, nameResearch?: string): string {
     const { event, tokenInsights, buyerStats, sellerStats, buyerActivityHistory, sellerActivityHistory, clubInfo } = context;
 
+    // Format display handles for buyer and seller
+    const buyerHandle = this.formatDisplayHandle(event.buyerEnsName, event.buyerTwitter, event.buyerAddress);
+    const sellerHandle = event.sellerAddress 
+      ? this.formatDisplayHandle(event.sellerEnsName, event.sellerTwitter, event.sellerAddress)
+      : null;
+
     // Format event details
     let prompt = `EVENT:\n`;
     prompt += `- Type: ${event.type}\n`;
     prompt += `- Name: ${event.tokenName}\n`;
     prompt += `- Price: ${event.price} ETH ($${event.priceUsd.toLocaleString()})\n`;
-    prompt += `- Buyer: ${event.buyerEnsName || event.buyerAddress.slice(0, 10) + '...'}\n`;
+    prompt += `- Buyer: ${buyerHandle}\n`;
     
-    if (event.type === 'sale' && event.sellerAddress) {
-      prompt += `- Seller: ${event.sellerEnsName || event.sellerAddress.slice(0, 10) + '...'}\n`;
+    if (event.type === 'sale' && sellerHandle) {
+      prompt += `- Seller: ${sellerHandle}\n`;
     }
     
     // Include club membership if available
