@@ -304,7 +304,7 @@ Research: ${label}`;
       const rawText = response.output_text?.trim() || '';
       
       // Add title/header to the tweet
-      const tweetText = `🤖 Grails AI insight (beta):\n${rawText}`;
+      const tweetText = `🤖 Grails AI insight (beta):\n\n${rawText}`;
       
       // Validate response (with title included)
       if (!this.validateResponse(tweetText)) {
@@ -396,6 +396,7 @@ WHAT TO FOCUS ON:
    - Multiple red flags together = suspicious, not "ordinary market churn"
    - Red flags: fresh wallets, round numbers, rapid mint-flips for profit, repeated pattern
    - If it looks coordinated, SAY SO. Don't dismiss it as normal activity.
+   - however for 10k and 999 clubs, be far more lenient, wash trading doesn't really exist for these clubs.
    - **IMPORTANT**: If there are NO red flags, do not mention wash trading at all. Only report suspicious activity if it exists.
 
 4. **Market context**: anything interesting about this transaction?
