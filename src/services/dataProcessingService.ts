@@ -533,20 +533,22 @@ export class DataProcessingService {
     
     // Calculate buy statistics
     const buysCount = buys.length;
+    // Use 'native' (ETH-equivalent) for volume, not 'decimal' (which is in the transaction's currency)
     const buysVolume = buys.reduce((sum, activity) => 
-      sum + activity.price.amount.decimal, 0
+      sum + (activity.price.amount.native || 0), 0
     );
     const buysVolumeUsd = buys.reduce((sum, activity) => 
-      sum + activity.price.amount.usd, 0
+      sum + (activity.price.amount.usd || 0), 0
     );
     
     // Calculate sell statistics
     const sellsCount = sells.length;
+    // Use 'native' (ETH-equivalent) for volume, not 'decimal' (which is in the transaction's currency)
     const sellsVolume = sells.reduce((sum, activity) => 
-      sum + activity.price.amount.decimal, 0
+      sum + (activity.price.amount.native || 0), 0
     );
     const sellsVolumeUsd = sells.reduce((sum, activity) => 
-      sum + activity.price.amount.usd, 0
+      sum + (activity.price.amount.usd || 0), 0
     );
     
     // Track activity timing

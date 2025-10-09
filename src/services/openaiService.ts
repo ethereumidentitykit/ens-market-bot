@@ -191,6 +191,10 @@ FOCUS AREAS:
    - Is it short, memorable, and distinctive for personal branding?
    - Popular in gaming, crypto, or social communities?
 
+SKIP:
+- Legal/trademark/IP/copyright issues (not relevant for web3 usernames)
+- "Commercial use" or brand protection concerns
+- Corporate domain valuation frameworks
 
 Be honest. If there's nothing interesting or significant about this name, say so. Don't inflate its importance or significance. If it's a word or string without wide recognition - thats good info to return.
 
@@ -401,7 +405,8 @@ CRITICAL RULES:
 - Don't explain obvious name meanings
 - Don't list stats just because you have them
 - Don't repeat the price or name from the main tweet
-- Skip legal/trademark topics unless it's a major red flag
+- NEVER mention legal/trademark/IP/copyright issues - these are boring and irrelevant for web3 names
+- give low weight "commercial uses" or "brand protection" - ENS names are primarily usernames/identities
 - NEVER mention the ABSENCE of problems (e.g., "no wash trading signals", "no red flags", "nothing suspicious")
 - NEVER use negative phrasing or "not X" statements:
   ❌ BAD: "not quick flipping", "not a flipper", "not selling"
@@ -437,9 +442,15 @@ GOOD EXAMPLE:
 "Edward is one of the most common English names globally (forebears shows ~600k bearers). The buyer collector.eth @collector has been focused on traditional first names, picking up 6 premium ones over 2 months and holding all of them. The seller held for ~3 years and made 4x. Classic identity names are seeing renewed interest."
 
 BAD EXAMPLES:
-"Common given name, nothing exotic. Note there are live trademark filings using the same word, so commercial uses could carry legal risk in some industries." ❌ LEGAL FOCUS
+"Common given name, nothing exotic. Note there are live trademark filings using the same word, so commercial uses could carry legal risk in some industries." ❌ BORING: Skip legal/IP/trademark talk
 
-"The buyer has 31 buys with zero sells, not quick flipping." ❌ WRONG: Don't use "not X" phrasing. Instead say: "The buyer has accumulated 31 names with all holdings retained, building a focused collection."`;
+"Umbreon sits under Pokémon Company IP, which limits commercial listing and resale paths." ❌ BORING: Don't discuss IP ownership or "commercial" concerns
+
+"The buyer has 31 buys with zero sells, not quick flipping." ❌ WRONG: Don't use "not X" phrasing. Instead say: "The buyer has accumulated 31 names with all holdings retained, building a focused collection."
+
+TERMINOLOGY:
+- Use "fandom names", "fan community names", or "community clubs" instead of "franchise names"
+- ENS names are usernames/identities/gamertags, generally not corporate assets.`;
   }
 
   /**
