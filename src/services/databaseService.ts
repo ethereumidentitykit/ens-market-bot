@@ -38,6 +38,7 @@ export class DatabaseService implements IDatabaseService {
       await this.setupSaleNotificationTriggers();
       await this.setupRegistrationNotificationTriggers();
       await this.setupBidNotificationTriggers();
+      await this.setupAIReplyNotificationTriggers();
       
       logger.info('PostgreSQL database initialized successfully');
     } catch (error: any) {
@@ -2009,6 +2010,102 @@ export class DatabaseService implements IDatabaseService {
 
     } catch (error: any) {
       logger.error('❌ Failed to setup bid notification triggers:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Set up database notification triggers for AI reply generation
+   * Triggers fire when tweets are successfully posted (posted = TRUE)
+   * 
+   * Phase 3.1: Auto-queue AI reply generation when sales/registrations are tweeted
+   */
+  async setupAIReplyNotificationTriggers(): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      // ===== SALES TRIGGER =====
+      
+      // Step 1a: Create the sale trigger function
+      const createSaleFunctionQuery = `
+        CREATE OR REPLACE FUNCTION notify_posted_sale() 
+        RETURNS TRIGGER AS $$
+        BEGIN
+          -- Only notify when a sale is successfully posted to Twitter
+          -- posted changes FALSE → TRUE and tweet_id exists
+          IF NEW.posted = TRUE AND NEW.tweet_id IS NOT NULL THEN
+            PERFORM pg_notify('posted_sale', NEW.id::text);
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+      `;
+
+      await this.pool.query(createSaleFunctionQuery);
+      logger.info('✅ Created notify_posted_sale() trigger function');
+
+      // Step 1b: Create the sale trigger (UPDATE only, with WHEN condition)
+      const createSaleTriggerQuery = `
+        DO $$
+        BEGIN
+          -- Drop old trigger if it exists
+          DROP TRIGGER IF EXISTS posted_sale_trigger ON processed_sales;
+          
+          -- Create new trigger with WHEN condition
+          CREATE TRIGGER posted_sale_trigger 
+            AFTER UPDATE ON processed_sales 
+            FOR EACH ROW 
+            WHEN (OLD.posted = FALSE AND NEW.posted = TRUE)
+            EXECUTE FUNCTION notify_posted_sale();
+        END $$;
+      `;
+
+      await this.pool.query(createSaleTriggerQuery);
+      logger.info('✅ Created posted_sale_trigger on processed_sales table');
+
+      // ===== REGISTRATION TRIGGER =====
+      
+      // Step 2a: Create the registration trigger function
+      const createRegistrationFunctionQuery = `
+        CREATE OR REPLACE FUNCTION notify_posted_registration() 
+        RETURNS TRIGGER AS $$
+        BEGIN
+          -- Only notify when a registration is successfully posted to Twitter
+          -- posted changes FALSE → TRUE and tweet_id exists
+          IF NEW.posted = TRUE AND NEW.tweet_id IS NOT NULL THEN
+            PERFORM pg_notify('posted_registration', NEW.id::text);
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+      `;
+
+      await this.pool.query(createRegistrationFunctionQuery);
+      logger.info('✅ Created notify_posted_registration() trigger function');
+
+      // Step 2b: Create the registration trigger (UPDATE only, with WHEN condition)
+      const createRegistrationTriggerQuery = `
+        DO $$
+        BEGIN
+          -- Drop old trigger if it exists
+          DROP TRIGGER IF EXISTS posted_registration_trigger ON ens_registrations;
+          
+          -- Create new trigger with WHEN condition
+          CREATE TRIGGER posted_registration_trigger 
+            AFTER UPDATE ON ens_registrations 
+            FOR EACH ROW 
+            WHEN (OLD.posted = FALSE AND NEW.posted = TRUE)
+            EXECUTE FUNCTION notify_posted_registration();
+        END $$;
+      `;
+
+      await this.pool.query(createRegistrationTriggerQuery);
+      logger.info('✅ Created posted_registration_trigger on ens_registrations table');
+
+      logger.info('🎯 AI Reply notification triggers setup complete - ready for automatic AI reply generation!');
+
+    } catch (error: any) {
+      logger.error('❌ Failed to setup AI reply notification triggers:', error.message);
       throw error;
     }
   }
