@@ -12,10 +12,10 @@ import { MONITORED_CONTRACTS } from './config/contracts';
 import { MoralisService } from './services/moralisService';
 import { AlchemyService } from './services/alchemyService';
 import { DatabaseService } from './services/databaseService';
-import { IDatabaseService, ENSRegistration } from './types';
+import { IDatabaseService, ENSRegistration, ProcessedSale } from './types';
 import { SalesProcessingService } from './services/salesProcessingService';
 import { BidsProcessingService } from './services/bidsProcessingService';
-import { MagicEdenService } from './services/magicEdenService';
+import { MagicEdenService, TokenActivity } from './services/magicEdenService';
 import { SchedulerService } from './services/schedulerService';
 import { TwitterService } from './services/twitterService';
 import { NewTweetFormatter } from './services/newTweetFormatter';
@@ -31,6 +31,7 @@ import { OpenSeaService } from './services/openSeaService';
 import { ENSMetadataService } from './services/ensMetadataService';
 import { ENSTokenUtils } from './services/ensTokenUtils';
 import { DatabaseEventService } from './services/databaseEventService';
+import { OpenAIService } from './services/openaiService';
 import pgSession from 'connect-pg-simple';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -75,11 +76,31 @@ async function startApplication(): Promise<void> {
     const autoTweetService = new AutoTweetService(newTweetFormatter, twitterService, rateLimitService, databaseService, worldTimeService);
     const schedulerService = new SchedulerService(salesProcessingService, bidsProcessingService, autoTweetService, databaseService);
     
-    // Initialize database event service for real-time processing
+    // Phase 3.4: Initialize AI Reply Service for automated contextual replies
+    const { OpenAIService } = await import('./services/openaiService');
+    const { DataProcessingService } = await import('./services/dataProcessingService');
+    const { AIReplyService } = await import('./services/aiReplyService');
+    
+    const openaiService = new OpenAIService();
+    const dataProcessingService = new DataProcessingService();
+    const aiReplyService = new AIReplyService(
+      openaiService,
+      databaseService,
+      twitterService,
+      dataProcessingService,
+      magicEdenService,
+      openSeaService,
+      ethIdentityService
+    );
+    
+    logger.info('AI Reply Service initialized');
+    
+    // Initialize database event service for real-time processing (with AI Reply Service)
     const databaseEventService = new DatabaseEventService(
       autoTweetService,
       databaseService,
-      process.env.POSTGRES_URL || process.env.DATABASE_URL!
+      process.env.POSTGRES_URL || process.env.DATABASE_URL!,
+      aiReplyService  // Phase 3.4: Pass AI Reply Service
     );
 
     // Initialize database
@@ -474,6 +495,429 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    // AI Reply Preview Endpoint
+    app.get('/api/ai-reply-preview', requireAuth, async (req, res) => {
+      try {
+        const { type, id } = req.query;
+
+        // Validate inputs
+        if (!type || !id) {
+          return res.status(400).json({
+            success: false,
+            error: 'Missing required parameters: type and id'
+          });
+        }
+
+        if (type !== 'sale' && type !== 'registration') {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid type. Must be "sale" or "registration"'
+          });
+        }
+
+        const transactionId = parseInt(id as string, 10);
+        if (isNaN(transactionId)) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid id. Must be a number'
+          });
+        }
+
+        logger.info(`🔍 AI Reply Preview requested: ${type} ${transactionId}`);
+
+        // Step 1: Fetch transaction from database
+        logger.debug('   Fetching transaction from database...');
+        const transaction = type === 'sale'
+          ? await databaseService.getSaleById(transactionId)
+          : await databaseService.getRegistrationById(transactionId);
+
+        if (!transaction) {
+          return res.status(404).json({
+            success: false,
+            error: `${type} with id ${transactionId} not found`
+          });
+        }
+
+        // Step 2: Type-safe access to transaction properties
+        const isSale = type === 'sale';
+        const sale = isSale ? transaction as ProcessedSale : null;
+        const registration = !isSale ? transaction as ENSRegistration : null;
+
+        const tokenName = isSale ? (sale!.nftName || 'Unknown') : registration!.fullName;
+        logger.debug(`   Found transaction: ${tokenName}`);
+
+        // Step 3: Prepare event data for context building
+        const eventData = {
+          type: type as 'sale' | 'registration',
+          tokenName,
+          price: parseFloat(isSale ? sale!.priceEth : (registration!.costEth || '0')),
+          priceUsd: parseFloat(isSale ? (sale!.priceUsd || '0') : (registration!.costUsd || '0')),
+          currency: 'ETH',
+          timestamp: new Date(transaction.blockTimestamp).getTime() / 1000,
+          buyerAddress: isSale ? sale!.buyerAddress : registration!.ownerAddress,
+          sellerAddress: isSale ? sale!.sellerAddress : undefined,
+          txHash: transaction.transactionHash
+        };
+
+        // Step 3: Fetch Magic Eden data (use defaults: 20 pages, 30s timeout)
+        logger.debug('   Fetching token activity from Magic Eden...');
+        const tokenResult = await magicEdenService.getTokenActivityHistory(
+          transaction.contractAddress,
+          transaction.tokenId
+          // No options = use service defaults (maxPages: 20, timeout: 30s)
+        );
+        const tokenActivities = tokenResult.activities;
+
+        logger.debug('   Fetching buyer activity from Magic Eden...');
+        const buyerResult = await magicEdenService.getUserActivityHistory(
+          eventData.buyerAddress
+          // No options = use service defaults (maxPages: 20, timeout: 30s)
+        );
+        const buyerActivities = buyerResult.activities;
+
+        let sellerActivities: TokenActivity[] | null = null;
+        if (eventData.sellerAddress) {
+          logger.debug('   Fetching seller activity from Magic Eden...');
+          const sellerResult = await magicEdenService.getUserActivityHistory(
+            eventData.sellerAddress
+            // No options = use service defaults (maxPages: 20, timeout: 30s)
+          );
+          sellerActivities = sellerResult.activities;
+        }
+
+        // Step 4: Build LLM context using DataProcessingService
+        logger.debug('   Building LLM context...');
+        const { dataProcessingService } = await import('./services/dataProcessingService');
+        const ensWorkerService = new ENSWorkerService();
+        const llmContext = await dataProcessingService.buildLLMContext(
+          eventData,
+          tokenActivities,
+          buyerActivities,
+          sellerActivities,
+          magicEdenService,  // Pass for on-demand proxy resolution
+          ensWorkerService   // Pass for ENS name resolution
+        );
+
+        logger.info(`✅ AI Reply Preview generated for ${type} ${transactionId}`);
+
+        // Step 5: Return preview JSON
+        res.json({
+          success: true,
+          preview: {
+            transaction: {
+              id: transaction.id,
+              type: type,
+              tokenName: eventData.tokenName,
+              price: eventData.price,
+              priceUsd: eventData.priceUsd,
+              txHash: eventData.txHash,
+              blockTimestamp: transaction.blockTimestamp
+            },
+            dataFetched: {
+              tokenActivities: tokenActivities.length,
+              buyerActivities: buyerActivities.length,
+              sellerActivities: sellerActivities?.length || 0
+            },
+            llmContext: llmContext
+          }
+        });
+
+      } catch (error: any) {
+        logger.error('❌ AI Reply Preview error:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    // AI Reply Generation Endpoint
+    app.post('/api/ai-reply-generate', requireAuth, async (req, res) => {
+      try {
+        const { type, id, forceRegenerate } = req.body;
+
+        // Validate inputs
+        if (!type || !id) {
+          return res.status(400).json({
+            success: false,
+            error: 'Missing required parameters: type and id'
+          });
+        }
+
+        if (type !== 'sale' && type !== 'registration') {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid type. Must be "sale" or "registration"'
+          });
+        }
+
+        const transactionId = parseInt(id as string, 10);
+        if (isNaN(transactionId)) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid id. Must be a number'
+          });
+        }
+
+        logger.info(`🤖 AI Reply Generation requested: ${type} ${transactionId}${forceRegenerate ? ' (regenerate)' : ''}`);
+
+        // Step 1: Check if AI replies are enabled
+        const aiEnabled = await databaseService.isAIRepliesEnabled();
+        if (!aiEnabled) {
+          return res.status(403).json({
+            success: false,
+            error: 'AI replies are currently disabled. Enable them in admin settings.'
+          });
+        }
+
+        // Step 2: Check if reply already exists
+        const existingReply = type === 'sale'
+          ? await databaseService.getAIReplyBySaleId(transactionId)
+          : await databaseService.getAIReplyByRegistrationId(transactionId);
+
+        if (existingReply && !forceRegenerate) {
+          logger.info(`   Reply already exists (ID: ${existingReply.id})`);
+          return res.json({
+            success: true,
+            alreadyExists: true,
+            message: 'Reply already exists. Set forceRegenerate=true to generate a new one.',
+            reply: {
+              id: existingReply.id,
+              text: existingReply.replyText,
+              tokens: {
+                prompt: existingReply.promptTokens,
+                completion: existingReply.completionTokens,
+                total: existingReply.totalTokens
+              },
+              modelUsed: existingReply.modelUsed,
+              status: existingReply.status,
+              createdAt: existingReply.createdAt
+            }
+          });
+        }
+
+        // If regenerating, update the existing reply instead of creating duplicate
+        if (existingReply && forceRegenerate) {
+          logger.info(`   Regenerating reply (will update existing ID: ${existingReply.id})...`);
+        }
+
+        // Step 3: Fetch transaction from database
+        logger.debug('   Fetching transaction from database...');
+        const transaction = type === 'sale'
+          ? await databaseService.getSaleById(transactionId)
+          : await databaseService.getRegistrationById(transactionId);
+
+        if (!transaction) {
+          return res.status(404).json({
+            success: false,
+            error: `${type} with id ${transactionId} not found`
+          });
+        }
+
+        // Check if transaction has a tweet_id (required for replies)
+        if (!transaction.tweetId) {
+          return res.status(400).json({
+            success: false,
+            error: `${type} has not been posted to Twitter yet. Cannot generate reply without original tweet.`
+          });
+        }
+
+        // Step 4: Prepare event data and fetch Magic Eden data (reuse preview logic)
+        const isSale = type === 'sale';
+        const sale = isSale ? transaction as ProcessedSale : null;
+        const registration = !isSale ? transaction as ENSRegistration : null;
+        const tokenName = isSale ? (sale!.nftName || 'Unknown') : registration!.fullName;
+
+        const eventData = {
+          type: type as 'sale' | 'registration',
+          tokenName,
+          price: parseFloat(isSale ? sale!.priceEth : (registration!.costEth || '0')),
+          priceUsd: parseFloat(isSale ? (sale!.priceUsd || '0') : (registration!.costUsd || '0')),
+          currency: 'ETH',
+          timestamp: new Date(transaction.blockTimestamp).getTime() / 1000,
+          buyerAddress: isSale ? sale!.buyerAddress : registration!.ownerAddress,
+          sellerAddress: isSale ? sale!.sellerAddress : undefined,
+          txHash: transaction.transactionHash
+        };
+
+        logger.debug(`   📋 Addresses from DB: Buyer=${eventData.buyerAddress.slice(0, 10)}..., Seller=${eventData.sellerAddress ? eventData.sellerAddress.slice(0, 10) + '...' : 'N/A'}`);
+        
+        // Error if buyer and seller are the same (data issue)
+        if (eventData.sellerAddress && eventData.buyerAddress.toLowerCase() === eventData.sellerAddress.toLowerCase()) {
+          logger.error(`   ❌ ERROR: Buyer and seller are the same address! This is a data error.`);
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid transaction data: buyer and seller addresses are identical. This may indicate a data ingestion error.'
+          });
+        }
+
+        logger.debug('   Fetching data in parallel (Magic Eden, ENS holdings, + name research)...');
+        
+        // Start all API calls in parallel for speed (including name research and holdings)
+        // Track which API calls failed or returned incomplete data
+        const openaiService = new OpenAIService();
+        const { OpenSeaService } = await import('./services/openSeaService');
+        const openSeaService = new OpenSeaService();
+        
+        let tokenDataIncomplete = false;
+        let buyerDataIncomplete = false;
+        let sellerDataIncomplete = false;
+        
+        const [tokenResult, buyerResult, sellerResult, buyerHoldings, sellerHoldings, nameResearch] = await Promise.all([
+          magicEdenService.getTokenActivityHistory(
+            transaction.contractAddress,
+            transaction.tokenId
+          ).catch((error: any) => {
+            logger.error('Token activity fetch failed:', error.message);
+            return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0 };
+          }),
+          magicEdenService.getUserActivityHistory(
+            eventData.buyerAddress
+          ).catch((error: any) => {
+            logger.error('Buyer activity fetch failed:', error.message);
+            return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0 };
+          }),
+          eventData.sellerAddress
+            ? magicEdenService.getUserActivityHistory(eventData.sellerAddress).catch((error: any) => {
+                logger.error('Seller activity fetch failed:', error.message);
+                return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0 };
+              })
+            : Promise.resolve(null),
+          // Fetch buyer's current ENS holdings
+          openSeaService.getENSHoldings(eventData.buyerAddress, { limit: 200, maxPages: 5 }).catch((error: any) => {
+            logger.error('Buyer holdings fetch failed:', error.message);
+            return { names: [], incomplete: true, totalFetched: 0 };
+          }),
+          // Fetch seller's current ENS holdings (if sale)
+          eventData.sellerAddress
+            ? openSeaService.getENSHoldings(eventData.sellerAddress, { limit: 200, maxPages: 5 }).catch((error: any) => {
+                logger.error('Seller holdings fetch failed:', error.message);
+                return { names: [], incomplete: true, totalFetched: 0 };
+              })
+            : Promise.resolve(null),
+          // Start name research in parallel
+          (async () => {
+            try {
+              return await openaiService.researchName(tokenName);
+            } catch (error) {
+              logger.error('Name research failed, continuing without it:', error);
+              return '';
+            }
+          })()
+        ]);
+
+        // Extract activities and track incomplete status
+        const tokenActivities = tokenResult.activities;
+        const buyerActivities = buyerResult.activities;
+        const sellerActivities = sellerResult?.activities || null;
+        
+        tokenDataIncomplete = tokenResult.incomplete;
+        buyerDataIncomplete = buyerResult.incomplete;
+        sellerDataIncomplete = sellerResult?.incomplete || false;
+
+        // Step 5: Build LLM context
+        logger.debug('   Building LLM context...');
+        const { dataProcessingService } = await import('./services/dataProcessingService');
+        const ensWorkerService = new ENSWorkerService();
+        const llmContext = await dataProcessingService.buildLLMContext(
+          eventData,
+          tokenActivities,
+          buyerActivities,
+          sellerActivities,
+          magicEdenService,
+          ensWorkerService,
+          {
+            tokenDataIncomplete,
+            buyerDataIncomplete,
+            sellerDataIncomplete
+          },
+          {
+            buyerHoldings: buyerHoldings || null,
+            sellerHoldings: sellerHoldings || null
+          }
+        );
+
+        // Step 6: Generate reply using OpenAI (name research already done in parallel)
+        logger.debug('   Generating AI reply...');
+        const generatedReply = await openaiService.generateReply(llmContext, nameResearch);
+
+        // Step 7: Store in database (update existing or insert new)
+        let replyId: number;
+        if (existingReply && forceRegenerate && existingReply.id) {
+          logger.debug('   Updating existing AI reply in database...');
+          // Update the existing reply
+          await databaseService.pgPool.query(`
+            UPDATE ai_replies 
+            SET 
+              model_used = $1,
+              prompt_tokens = $2,
+              completion_tokens = $3,
+              total_tokens = $4,
+              reply_text = $5,
+              status = 'pending',
+              error_message = NULL,
+              created_at = NOW()
+            WHERE id = $6
+          `, [
+            generatedReply.modelUsed,
+            generatedReply.promptTokens,
+            generatedReply.completionTokens,
+            generatedReply.totalTokens,
+            generatedReply.tweetText,
+            existingReply.id
+          ]);
+          replyId = existingReply.id;
+          logger.info(`✅ AI reply regenerated and updated (ID: ${replyId})`);
+        } else {
+          logger.debug('   Inserting new AI reply in database...');
+          replyId = await databaseService.insertAIReply({
+            saleId: isSale ? transactionId : undefined,
+            registrationId: !isSale ? transactionId : undefined,
+            originalTweetId: transaction.tweetId,
+            replyTweetId: undefined, // Not posted yet
+            transactionType: type,
+            transactionHash: transaction.transactionHash,
+            modelUsed: generatedReply.modelUsed,
+            promptTokens: generatedReply.promptTokens,
+            completionTokens: generatedReply.completionTokens,
+            totalTokens: generatedReply.totalTokens,
+            costUsd: 0, // Not tracked per requirements
+            replyText: generatedReply.tweetText,
+            status: 'pending', // Generated but not posted
+            errorMessage: undefined
+          });
+          logger.info(`✅ AI reply generated and stored (ID: ${replyId})`);
+        }
+
+        // Step 8: Return response
+        res.json({
+          success: true,
+          message: 'AI reply generated successfully',
+          reply: {
+            id: replyId,
+            text: generatedReply.tweetText,
+            tokens: {
+              prompt: generatedReply.promptTokens,
+              completion: generatedReply.completionTokens,
+              total: generatedReply.totalTokens
+            },
+            modelUsed: generatedReply.modelUsed,
+            status: 'pending',
+            nameResearch: generatedReply.nameResearch ? 'Available' : 'Not available'
+          }
+        });
+
+      } catch (error: any) {
+        logger.error('❌ AI Reply Generation error:', error.message);
+        logger.error(error.stack);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+
     // Processing endpoints
     app.get('/api/process-sales', requireAuth, async (req, res) => {
       try {
@@ -788,6 +1232,33 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    app.post('/api/admin/toggle-openai', requireAuth, async (req, res) => {
+      try {
+        const { enabled } = req.body;
+        if (typeof enabled !== 'boolean') {
+          return res.status(400).json({
+            success: false,
+            error: 'enabled must be a boolean'
+          });
+        }
+
+        await apiToggleService.setOpenAIEnabled(enabled);
+        logger.info(`OpenAI API ${enabled ? 'enabled' : 'disabled'} via admin toggle`);
+        
+        const state = apiToggleService.getState();
+        res.json({
+          success: true,
+          openaiEnabled: state.openaiEnabled
+        });
+      } catch (error: any) {
+        logger.error('Toggle OpenAI API error:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     app.post('/api/admin/toggle-auto-posting', requireAuth, async (req, res) => {
       try {
         const { enabled } = req.body;
@@ -815,6 +1286,33 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    app.post('/api/admin/toggle-ai-auto-posting', requireAuth, async (req, res) => {
+      try {
+        const { enabled } = req.body;
+        if (typeof enabled !== 'boolean') {
+          return res.status(400).json({
+            success: false,
+            error: 'enabled must be a boolean'
+          });
+        }
+
+        await apiToggleService.setAIAutoPostingEnabled(enabled);
+        logger.info(`AI auto-posting ${enabled ? 'enabled' : 'disabled'} via admin toggle`);
+        
+        const state = apiToggleService.getState();
+        res.json({
+          success: true,
+          aiAutoPostingEnabled: state.aiAutoPostingEnabled
+        });
+      } catch (error: any) {
+        logger.error('Toggle AI auto-posting error:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     app.get('/api/admin/toggle-status', requireAuth, (req, res) => {
       const state = apiToggleService.getState();
       res.json({
@@ -823,16 +1321,78 @@ async function startApplication(): Promise<void> {
       });
     });
 
-    // Database trigger setup for real-time processing
+    // AI Replies endpoints
+    app.post('/api/admin/toggle-ai-replies', requireAuth, async (req, res) => {
+      try {
+        const { enabled } = req.body;
+        if (typeof enabled !== 'boolean') {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid enabled value'
+          });
+        }
+
+        await databaseService.setAIRepliesEnabled(enabled);
+        
+        logger.info(`AI Replies ${enabled ? 'enabled' : 'disabled'}`);
+        res.json({
+          success: true,
+          enabled: enabled
+        });
+      } catch (error: any) {
+        logger.error('Failed to toggle AI replies:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.get('/api/admin/ai-replies-status', requireAuth, async (req, res) => {
+      try {
+        const enabled = await databaseService.isAIRepliesEnabled();
+        const openaiConfigured = !!process.env.OPENAI_API_KEY;
+        
+        // Get count of generated replies
+        const recentReplies = await databaseService.getRecentAIReplies(1000);
+        const generatedCount = recentReplies.length;
+
+        res.json({
+          success: true,
+          enabled: enabled,
+          openaiConfigured: openaiConfigured,
+          generatedCount: generatedCount
+        });
+      } catch (error: any) {
+        logger.error('Failed to get AI replies status:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    // Database trigger setup for real-time processing (sales, registrations, bids, AI replies)
     app.post('/api/admin/setup-triggers', requireAuth, async (req, res) => {
       try {
-        logger.info('🔧 Setting up database triggers for real-time sale processing...');
+        logger.info('🔧 Setting up all database triggers for real-time processing...');
         
+        // Set up all notification triggers (same as auto-initialization)
         await databaseService.setupSaleNotificationTriggers();
+        await databaseService.setupRegistrationNotificationTriggers();
+        await databaseService.setupBidNotificationTriggers();
+        await databaseService.setupAIReplyNotificationTriggers(); // Phase 3.4
         
         res.json({
           success: true,
-          message: 'Database triggers setup successfully',
+          message: 'All database triggers setup successfully',
+          details: {
+            salesTrigger: 'new_sale trigger on processed_sales',
+            registrationTrigger: 'new_registration trigger on ens_registrations',
+            bidTrigger: 'new_bid trigger on ens_bids',
+            aiReplySalesTrigger: 'posted_sale trigger on processed_sales (Phase 3.4)',
+            aiReplyRegistrationsTrigger: 'posted_registration trigger on ens_registrations (Phase 3.4)'
+          },
           timestamp: new Date().toISOString()
         });
       } catch (error: any) {

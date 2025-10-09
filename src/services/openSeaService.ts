@@ -83,6 +83,28 @@ export interface OpenSeaEventsResponse {
   next: string | null;
 }
 
+export interface OpenSeaAccountNFT {
+  identifier: string;
+  collection: string;
+  contract: string;
+  token_standard: string;
+  name: string;
+  description: string;
+  image_url: string;
+  display_image_url: string;
+  display_animation_url: string | null;
+  metadata_url: string;
+  opensea_url: string;
+  updated_at: string;
+  is_disabled: boolean;
+  is_nsfw: boolean;
+}
+
+export interface OpenSeaAccountNFTsResponse {
+  nfts: OpenSeaAccountNFT[];
+  next: string | null;
+}
+
 export interface ResolvedAddresses {
   buyer: string;
   seller: string;
@@ -410,6 +432,95 @@ export class OpenSeaService {
     } catch (error: any) {
       logger.error('❌ OpenSea API connection test failed:', error.message);
       return false;
+    }
+  }
+
+  /**
+   * Get ENS names currently held by an address
+   * Supports pagination to fetch all holdings (max 200 per request)
+   * @param address - Wallet address to check
+   * @param options - Pagination options
+   * @returns Array of ENS names (cleaned) and cursor status
+   */
+  async getENSHoldings(
+    address: string,
+    options: {
+      limit?: number;  // Max 200
+      maxPages?: number;  // Max pages to fetch (default: 10 = 2000 names max)
+    } = {}
+  ): Promise<{ names: string[]; incomplete: boolean; totalFetched: number }> {
+    if (!config.opensea?.apiKey) {
+      logger.debug('OpenSea API key not configured, skipping ENS holdings request');
+      return { names: [], incomplete: false, totalFetched: 0 };
+    }
+
+    const limit = Math.min(options.limit || 200, 200); // OpenSea max is 200
+    const maxPages = options.maxPages || 10; // Default to 10 pages (2000 names max)
+    
+    logger.info(`📚 Fetching ENS holdings for ${address} (limit: ${limit}, maxPages: ${maxPages})`);
+    
+    const allNames: string[] = [];
+    let cursor: string | null = null;
+    let pageCount = 0;
+    let incomplete = false;
+
+    try {
+      while (pageCount < maxPages) {
+        pageCount++;
+        
+        // Enforce rate limiting
+        await this.enforceRateLimit();
+        
+        // Build URL with pagination
+        let url = `${this.baseUrl}/chain/ethereum/account/${address.toLowerCase()}/nfts?collection=ens&limit=${limit}`;
+        if (cursor) {
+          url += `&next=${cursor}`;
+        }
+        
+        logger.debug(`   Page ${pageCount}: Fetching from OpenSea...`);
+        
+        const response: AxiosResponse<OpenSeaAccountNFTsResponse> = await axios.get(url, {
+          timeout: this.timeout,
+          headers: {
+            'accept': 'application/json',
+            'x-api-key': config.opensea.apiKey,
+            'User-Agent': 'ENS-TwitterBot/1.0'
+          }
+        });
+        
+        const nfts = response.data.nfts || [];
+        
+        // Break if no NFTs returned
+        if (nfts.length === 0) {
+          logger.debug(`   Page ${pageCount}: No more NFTs, stopping pagination`);
+          break;
+        }
+        
+        // Extract and clean ENS names
+        const names = nfts
+          .map(nft => this.cleanEnsName(nft.name))
+          .filter(name => name && name.endsWith('.eth')); // Only valid ENS names
+        
+        allNames.push(...names);
+        logger.debug(`   Page ${pageCount}: Fetched ${names.length} ENS names (total: ${allNames.length})`);
+        
+        // Check for continuation cursor
+        cursor = response.data.next || null;
+        if (!cursor) {
+          logger.debug(`   Page ${pageCount}: No continuation cursor, reached end of holdings`);
+          break;
+        }
+      }
+      
+      logger.info(`✅ ENS holdings fetch complete: ${allNames.length} names across ${pageCount} pages${incomplete ? ' (INCOMPLETE - error occurred)' : ''}`);
+      return { names: allNames, incomplete, totalFetched: allNames.length };
+      
+    } catch (error: any) {
+      logger.error(`❌ Error fetching ENS holdings for ${address}: ${error.message}`);
+      incomplete = true;
+      // Return whatever we collected before the error
+      logger.warn(`   ⚠️  Returning incomplete data: ${allNames.length} names from ${pageCount} pages`);
+      return { names: allNames, incomplete, totalFetched: allNames.length };
     }
   }
 

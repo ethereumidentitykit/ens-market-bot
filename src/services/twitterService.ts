@@ -179,6 +179,86 @@ export class TwitterService {
   }
 
   /**
+   * Post a threaded reply to an existing tweet
+   * Phase 3.3: AI Reply functionality
+   */
+  async postReply(content: string, inReplyToTweetId: string): Promise<TwitterPostResult> {
+    if (!this.checkApiEnabled()) {
+      return { 
+        success: false, 
+        error: 'Twitter API is disabled via admin toggle' 
+      };
+    }
+
+    try {
+      // Validate content is not empty
+      if (content.trim().length === 0) {
+        const error = 'Reply content cannot be empty';
+        logger.error(error);
+        return { success: false, error };
+      }
+
+      // Validate reply-to tweet ID
+      if (!inReplyToTweetId || inReplyToTweetId.trim().length === 0) {
+        const error = 'Reply-to tweet ID cannot be empty';
+        logger.error(error);
+        return { success: false, error };
+      }
+
+      logger.info(`Posting reply to tweet ${inReplyToTweetId}: "${content.substring(0, 50)}..."`);
+
+      const requestData = {
+        url: 'https://api.twitter.com/2/tweets',
+        method: 'POST',
+      };
+
+      const token = {
+        key: config.twitter.accessToken,
+        secret: config.twitter.accessTokenSecret,
+      };
+
+      const authHeader = this.oauth.toHeader(this.oauth.authorize(requestData, token));
+      
+      // Build tweet data with reply parameter
+      const tweetData: any = {
+        text: content,
+        reply: {
+          in_reply_to_tweet_id: inReplyToTweetId
+        }
+      };
+      
+      const postData = JSON.stringify(tweetData);
+      
+      const response = await this.makeRequest(
+        requestData.url, 
+        'POST', 
+        authHeader.Authorization,
+        postData,
+        { 'Content-Type': 'application/json' }
+      );
+      
+      if (response.success && response.data) {
+        const responseData = JSON.parse(response.data);
+        
+        if (responseData.data && responseData.data.id) {
+          const tweetId = responseData.data.id;
+          logger.info(`Reply posted successfully - ID: ${tweetId} (in reply to: ${inReplyToTweetId})`);
+          return { success: true, tweetId };
+        } else {
+          logger.error('Unexpected Twitter API response format:', response.data);
+          return { success: false, error: 'Unexpected API response format' };
+        }
+      } else {
+        logger.error('Failed to post reply:', response.error);
+        return { success: false, error: response.error };
+      }
+    } catch (error: any) {
+      logger.error('Error posting reply:', error.message);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
    * Upload media to Twitter
    */
   private async uploadMedia(imageBuffer: Buffer): Promise<string | null> {

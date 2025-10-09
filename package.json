@@ -47,6 +47,7 @@
     "helmet": "^8.1.0",
     "ntp-client": "^0.5.3",
     "oauth-1.0a": "^2.2.6",
+    "openai": "^6.2.0",
     "pg": "^8.16.3",
     "puppeteer": "^24.16.1",
     "puppeteer-core": "^24.16.1",

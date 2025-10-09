@@ -95,6 +95,14 @@ export class MagicEdenService {
   private readonly ensContracts: string[];
   private readonly axiosInstance: AxiosInstance;
   private readonly apiToggleService: APIToggleService;
+
+  // Known marketplace proxy contracts (from existing QuickNode sales processing)
+  // These intermediary addresses obscure the real buyer/seller
+  private readonly KNOWN_PROXY_CONTRACTS = [
+    '0x0000a26b00c1f0df003000390027140000faa719', // OpenSea WETH wrapper
+    '0xe6ee2b1eaac6520be709e77780abb50e7fffcccd', // Seaport proxy
+    '0x00ca04c45da318d5b7e7b14d5381ca59f09c73f0', // Additional proxy
+  ];
   
   // Configurable thresholds
   private readonly historicalThresholdEth: number = 0.1; // Only show historical data if >= 0.1 ETH
@@ -474,7 +482,7 @@ export class MagicEdenService {
   }
 
   /**
-   * Get token activity from Magic Eden API with pagination
+   * Get token activity from Magic Eden API with pagination (single page)
    */
   async getTokenActivity(
     contractAddress: string,
@@ -493,7 +501,7 @@ export class MagicEdenService {
       let urlParams = new URLSearchParams();
       urlParams.set('limit', limit.toString());
       urlParams.set('sortBy', 'eventTimestamp');
-      urlParams.set('includeMetadata', 'true');
+      urlParams.set('includeMetadata', 'false');
       
       if (continuation) {
         urlParams.set('continuation', continuation);
@@ -514,7 +522,7 @@ export class MagicEdenService {
             'Accept': '*/*',
             'User-Agent': 'ENS-TwitterBot/1.0'
           },
-          timeout: 10000
+          timeout: 30000  // 30 seconds for complete activity history
         }
       );
 
@@ -528,6 +536,266 @@ export class MagicEdenService {
         continuation: null
       };
     }
+  }
+
+  /**
+   * Get complete token activity history with automatic pagination
+   * Aggregates multiple pages of token activity into a single array
+   * 
+   * @param contract - ENS contract address
+   * @param tokenId - Token ID
+   * @param options - Optional pagination settings
+   * @returns Array of token activities (aggregated from all pages)
+   */
+  async getTokenActivityHistory(
+    contract: string,
+    tokenId: string,
+    options: {
+      limit?: number;  // Items per request (default: 20, Magic Eden max)
+      types?: ('sale' | 'mint' | 'transfer' | 'ask' | 'bid' | 'ask_cancel' | 'bid_cancel')[];
+      maxPages?: number;  // Maximum pages to fetch (default: 60)
+    } = {}
+  ): Promise<{ activities: TokenActivity[]; incomplete: boolean; pagesFetched: number }> {
+    // Set defaults
+    const limit = options.limit || 20;  // Magic Eden max is 20
+    const types = options.types || ['sale', 'mint', 'transfer'];  // Include transfers for proxy resolution
+    const maxPages = options.maxPages || 60;  // Fetch more pages for complete history (60x20 = 1200 items)
+
+    logger.info(`📚 Fetching token activity history for ${contract}:${tokenId}`);
+    logger.debug(`   Settings: limit=${limit}, types=[${types.join(',')}], maxPages=${maxPages}`);
+
+    const allActivities: TokenActivity[] = [];
+    let continuation: string | undefined;
+    let pageCount = 0;
+    let incomplete = false;
+
+    try {
+      // Loop through pages until we hit maxPages or run out of data
+      while (pageCount < maxPages) {
+        pageCount++;
+        
+        // Fetch single page using existing method
+        const response = await this.getTokenActivity(
+          contract,
+          tokenId,
+          limit,
+          continuation,
+          types as string[]
+        );
+
+        // Break if no activities returned
+        if (!response.activities || response.activities.length === 0) {
+          logger.debug(`   Page ${pageCount}: No more activities, stopping pagination`);
+          break;
+        }
+
+        // Add activities to aggregated array
+        allActivities.push(...response.activities);
+        logger.debug(`   Page ${pageCount}: Fetched ${response.activities.length} activities (total: ${allActivities.length})`);
+
+        // Check for continuation cursor
+        continuation = response.continuation || undefined;
+        if (!continuation) {
+          logger.debug(`   Page ${pageCount}: No continuation cursor, reached end of data`);
+          break;
+        }
+
+        // Rate limiting between requests (1000-1100ms randomized delay to avoid rate limits)
+        if (continuation) {
+          const delay = 1000 + Math.random() * 100; // Random delay between 1000ms and 1100ms
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+
+      logger.info(`✅ Token activity history complete: ${allActivities.length} activities across ${pageCount} pages${incomplete ? ' (INCOMPLETE - error occurred)' : ''}`);
+      return { activities: allActivities, incomplete, pagesFetched: pageCount };
+
+    } catch (error: any) {
+      logger.error(`❌ Error fetching token activity history: ${error.message}`);
+      incomplete = true;
+      // Return whatever we collected before the error
+      logger.warn(`   ⚠️  Returning incomplete data: ${allActivities.length} activities from ${pageCount} pages`);
+      return { activities: allActivities, incomplete, pagesFetched: pageCount };
+    }
+  }
+
+  /**
+   * Get complete user activity history with automatic pagination
+   * Fetches user's ENS activities across BOTH ENS contracts
+   * 
+   * NOTE: Defaults to 'sale' and 'mint' ONLY. Excludes:
+   * - 'bid': Excessive bot activity creates noise (hundreds per user)
+   * - 'transfer': Creates massive result sets (10x+ more data than sales/mints)
+   * 
+   * Proxy contract resolution: Activities with known proxy addresses are filtered
+   * out during processing rather than resolved via transfers (performance optimization).
+   * 
+   * @param address - User wallet address
+   * @param options - Optional pagination settings
+   * @returns Array of user activities (aggregated from all pages)
+   */
+  async getUserActivityHistory(
+    address: string,
+    options: {
+      limit?: number;  // Items per request (default: 20, Magic Eden max)
+      types?: ('sale' | 'mint' | 'transfer' | 'ask' | 'bid' | 'ask_cancel' | 'bid_cancel')[];
+      maxPages?: number;  // Maximum pages to fetch (default: 60)
+    } = {}
+  ): Promise<{ activities: TokenActivity[]; incomplete: boolean; pagesFetched: number }> {
+    // Set defaults - NOTE: Excludes 'bid' and 'transfer' types
+    // Transfers excluded because they create massive result sets (10x more data)
+    // Proxy resolution happens via known proxy list, not transfer tracing
+    const limit = options.limit || 20;  // Magic Eden caps at 20 for user activity
+    const types = options.types || ['sale', 'mint'];  // NO transfers by default
+    const maxPages = options.maxPages || 60;  // Increased to 60 pages (20x60 = 1200 items)
+
+    logger.info(`👤 Fetching user activity history for ${address}`);
+    logger.debug(`   Settings: limit=${limit}, types=[${types.join(',')}], maxPages=${maxPages}`);
+
+    const allActivities: TokenActivity[] = [];
+    let continuation: string | undefined;
+    let pageCount = 0;
+    let incomplete = false;
+
+    try {
+      // Loop through pages until we hit maxPages or run out of data
+      while (pageCount < maxPages) {
+        pageCount++;
+        
+        // Build query params - must include BOTH ENS contracts
+        const params: any = {
+          users: address,
+          limit: limit,
+          sortBy: 'eventTimestamp',
+          includeMetadata: false  // Reduces payload size, improves reliability
+        };
+
+        // Add both ENS contracts
+        params.collection = this.ensContracts;
+
+        // Add types filter
+        if (types && types.length > 0) {
+          params.types = types;
+          logger.debug(`   🎯 Filtering by types: ${types.join(', ')}`);
+        }
+
+        // Add continuation cursor if available
+        if (continuation) {
+          params.continuation = continuation;
+        }
+
+        // Build URL string for debug logging
+        const urlParams = new URLSearchParams();
+        urlParams.append('users', address);
+        this.ensContracts.forEach(c => urlParams.append('collection', c));
+        urlParams.append('limit', limit.toString());
+        urlParams.append('sortBy', 'eventTimestamp');
+        urlParams.append('includeMetadata', 'false');
+        if (types && types.length > 0) {
+          types.forEach(type => urlParams.append('types', type));
+        }
+        if (continuation) {
+          urlParams.append('continuation', continuation);
+        }
+        logger.debug(`   🌐 Full API URL: /users/activity/v6?${urlParams.toString()}`);
+
+        // Fetch single page
+        const response: AxiosResponse<TokenActivityResponse> = await this.axiosInstance.get(
+          '/users/activity/v6',
+          {
+            params,
+            headers: {
+              'Accept': '*/*',
+              'User-Agent': 'ENS-TwitterBot/1.0'
+            },
+            timeout: 30000  // 30 seconds for complete activity history
+          }
+        );
+
+        // Break if no activities returned
+        if (!response.data.activities || response.data.activities.length === 0) {
+          logger.debug(`   Page ${pageCount}: No more activities, stopping pagination`);
+          break;
+        }
+
+        // Add activities to aggregated array
+        allActivities.push(...response.data.activities);
+        logger.debug(`   Page ${pageCount}: Fetched ${response.data.activities.length} activities (total: ${allActivities.length})`);
+
+        // Check for continuation cursor
+        continuation = response.data.continuation || undefined;
+        if (!continuation) {
+          logger.debug(`   Page ${pageCount}: No continuation cursor, reached end of data`);
+          break;
+        }
+
+        // Rate limiting between requests (1000-1100ms randomized delay to avoid rate limits)
+        if (continuation) {
+          const delay = 1000 + Math.random() * 100; // Random delay between 1000ms and 1100ms
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+
+      logger.info(`✅ User activity history complete: ${allActivities.length} activities across ${pageCount} pages${incomplete ? ' (INCOMPLETE - error occurred)' : ''}`);
+      return { activities: allActivities, incomplete, pagesFetched: pageCount };
+
+    } catch (error: any) {
+      logger.error(`❌ Error fetching user activity history: ${error.message}`);
+      incomplete = true;
+      // Return whatever we collected before the error
+      logger.warn(`   ⚠️  Returning incomplete data: ${allActivities.length} activities from ${pageCount} pages`);
+      return { activities: allActivities, incomplete, pagesFetched: pageCount };
+    }
+  }
+
+  /**
+   * Fetch activities for multiple users in parallel
+   * Useful for fetching buyer + seller activities simultaneously
+   * 
+   * @param addresses - Array of wallet addresses to fetch
+   * @param options - Optional pagination settings (applied to all fetches)
+   * @returns Map of address -> activities (normalized to lowercase keys)
+   */
+  async getMultipleUserActivities(
+    addresses: string[],
+    options?: {
+      limit?: number;
+      types?: ('sale' | 'mint' | 'transfer' | 'ask' | 'bid' | 'ask_cancel' | 'bid_cancel')[];
+      maxPages?: number;
+    }
+  ): Promise<Map<string, TokenActivity[]>> {
+    logger.info(`👥 Fetching activities for ${addresses.length} users in parallel`);
+
+    // Normalize addresses to lowercase for consistent map keys
+    const normalizedAddresses = addresses.map(addr => addr.toLowerCase());
+
+    // Create promises for parallel fetching
+    const fetchPromises = normalizedAddresses.map(address =>
+      this.getUserActivityHistory(address, options)
+    );
+
+    // Use Promise.allSettled to handle failures gracefully
+    const results = await Promise.allSettled(fetchPromises);
+
+    // Build map from results
+    const activitiesMap = new Map<string, TokenActivity[]>();
+
+    results.forEach((result, index) => {
+      const address = normalizedAddresses[index];
+      
+      if (result.status === 'fulfilled') {
+        const { activities, incomplete } = result.value;
+        activitiesMap.set(address, activities);
+        logger.debug(`   ✅ ${address}: ${activities.length} activities${incomplete ? ' (incomplete)' : ''}`);
+      } else {
+        // On failure, store empty array and log warning
+        activitiesMap.set(address, []);
+        logger.warn(`   ❌ ${address}: Failed to fetch - ${result.reason}`);
+      }
+    });
+
+    logger.info(`✅ Parallel fetch complete: ${activitiesMap.size} users processed`);
+    return activitiesMap;
   }
 
   /**

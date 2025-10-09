@@ -33,7 +33,9 @@ function dashboard() {
         apiToggles: {
             twitterEnabled: true,
             moralisEnabled: true,
-            magicEdenEnabled: true
+            magicEdenEnabled: true,
+            openaiEnabled: true,
+            aiAutoPostingEnabled: false
         },
         
         // Price Tier Configuration
@@ -121,6 +123,20 @@ function dashboard() {
         tweetImageUrl: null,
         tweetGenerating: false,
         tweetSending: false,
+
+        // AI Replies state
+        aiRepliesEnabled: false,
+        openaiConfigured: false,
+        aiRepliesGenerated: 0,
+        aiReplyType: 'sale', // 'sale' or 'registration'
+        aiReplyTransactionId: '',
+        postedSales: [],
+        postedRegistrations: [],
+        generatedAIReply: null,
+        aiReplyGenerating: false,
+        aiReplySending: false,
+        aiReplyMessage: '',
+        aiReplyMessageType: 'info',
 
         // Database management state
         databaseResetting: false,
@@ -510,6 +526,8 @@ function dashboard() {
             await this.loadUnpostedBids();
             await this.loadContracts();
             await this.loadTweetHistory();
+            await this.loadAIRepliesStatus();
+            await this.refreshPostedTransactions();
             await this.databaseView.loadPage(1);
             await this.registrationsView.loadPage(1);
             await this.bidsView.loadPage(1);
@@ -535,7 +553,9 @@ function dashboard() {
                     this.apiToggles.twitterEnabled = data.twitterEnabled;
                     this.apiToggles.moralisEnabled = data.moralisEnabled;
                     this.apiToggles.magicEdenEnabled = data.magicEdenEnabled;
+                    this.apiToggles.openaiEnabled = data.openaiEnabled;
                     this.autoPostSettings.enabled = data.autoPostingEnabled;
+                    this.apiToggles.aiAutoPostingEnabled = data.aiAutoPostingEnabled;
                 }
             } catch (error) {
                 console.error('Failed to load toggle states:', error);
@@ -1153,6 +1173,10 @@ function dashboard() {
             // Initialize Sales Slider
             const salesSlider = document.getElementById('sales-slider');
             if (salesSlider && typeof noUiSlider !== 'undefined') {
+                // Destroy existing slider if it exists
+                if (salesSlider.noUiSlider) {
+                    salesSlider.noUiSlider.destroy();
+                }
                 noUiSlider.create(salesSlider, {
                     start: [
                         this.priceTiers.sales.tier1,
@@ -1184,6 +1208,10 @@ function dashboard() {
             // Initialize Registrations Slider
             const registrationsSlider = document.getElementById('registrations-slider');
             if (registrationsSlider && typeof noUiSlider !== 'undefined') {
+                // Destroy existing slider if it exists
+                if (registrationsSlider.noUiSlider) {
+                    registrationsSlider.noUiSlider.destroy();
+                }
                 noUiSlider.create(registrationsSlider, {
                     start: [
                         this.priceTiers.registrations.tier1,
@@ -1679,6 +1707,32 @@ function dashboard() {
             }
         },
 
+        async toggleOpenAIAPI() {
+            try {
+                this.loading = true;
+                const response = await fetch('/api/admin/toggle-openai', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: !this.apiToggles.openaiEnabled })
+                });
+                
+                if (response.ok) {
+                    this.apiToggles.openaiEnabled = !this.apiToggles.openaiEnabled;
+                    this.showMessage(
+                        `OpenAI API ${this.apiToggles.openaiEnabled ? 'enabled' : 'disabled'}`,
+                        'success'
+                    );
+                } else {
+                    throw new Error('Failed to toggle OpenAI API');
+                }
+            } catch (error) {
+                console.error('Toggle OpenAI API error:', error);
+                this.showMessage('Failed to toggle OpenAI API', 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
         async toggleAutoPosting() {
             try {
                 this.loading = true;
@@ -1693,15 +1747,44 @@ function dashboard() {
                 if (response.ok) {
                     this.autoPostSettings.enabled = newState;
                     this.showMessage(
-                        `Auto-posting ${newState ? 'enabled' : 'disabled'}`,
+                        `Event auto-posting ${newState ? 'enabled' : 'disabled'}`,
                         'success'
                     );
                 } else {
-                    throw new Error('Failed to toggle auto-posting');
+                    throw new Error('Failed to toggle event auto-posting');
                 }
             } catch (error) {
                 console.error('Toggle auto-posting error:', error);
-                this.showMessage('Failed to toggle auto-posting', 'error');
+                this.showMessage('Failed to toggle event auto-posting', 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async toggleAIAutoPosting() {
+            try {
+                this.loading = true;
+                const newState = !this.apiToggles.aiAutoPostingEnabled;
+                
+                const response = await fetch('/api/admin/toggle-ai-auto-posting', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: newState })
+                });
+                
+                if (response.ok) {
+                    this.apiToggles.aiAutoPostingEnabled = newState;
+                    this.showMessage(
+                        `AI auto-posting ${newState ? 'enabled' : 'disabled'}`,
+                        'success'
+                    );
+                } else {
+                    const data = await response.json();
+                    throw new Error(data.error || 'Failed to toggle AI auto-posting');
+                }
+            } catch (error) {
+                console.error('Toggle AI auto-posting error:', error);
+                this.showMessage(error.message || 'Failed to toggle AI auto-posting', 'error');
             } finally {
                 this.loading = false;
             }
@@ -1961,6 +2044,206 @@ Issued At: ${issuedAt}`;
             } catch (error) {
                 console.error('Logout failed:', error);
             }
+        },
+
+        // ===== AI Replies Functions =====
+
+        async loadAIRepliesStatus() {
+            try {
+                const statusResponse = await this.fetch('/api/admin/ai-replies-status');
+                if (statusResponse.ok) {
+                    const data = await statusResponse.json();
+                    this.aiRepliesEnabled = data.enabled || false;
+                    this.openaiConfigured = data.openaiConfigured || false;
+                    this.aiRepliesGenerated = data.generatedCount || 0;
+                }
+            } catch (error) {
+                console.error('Failed to load AI replies status:', error);
+            }
+        },
+
+        async toggleAIReplies() {
+            try {
+                this.loading = true;
+                const newState = !this.aiRepliesEnabled;
+
+                const response = await this.fetch('/api/admin/toggle-ai-replies', {
+                    method: 'POST',
+                    body: JSON.stringify({ enabled: newState })
+                });
+
+                if (response.ok) {
+                    this.aiRepliesEnabled = newState;
+                    this.showAIReplyMessage(
+                        `AI Replies ${newState ? 'enabled' : 'disabled'} successfully`,
+                        'success'
+                    );
+                } else {
+                    const data = await response.json();
+                    this.showAIReplyMessage(data.error || 'Failed to toggle AI replies', 'error');
+                }
+            } catch (error) {
+                console.error('Toggle AI replies failed:', error);
+                this.showAIReplyMessage(error.message, 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async refreshPostedTransactions() {
+            try {
+                this.loading = true;
+
+                // Load posted sales (those with tweet_id)
+                const salesResponse = await this.fetch('/api/database/sales?limit=500&page=1');
+                if (salesResponse.ok) {
+                    const salesData = await salesResponse.json();
+                    const sales = salesData.data?.sales || [];
+                    console.log('📊 Total sales fetched:', sales.length);
+                    console.log('📊 Sample sale object:', sales[0]);
+                    console.log('📊 Sales with tweetId:', sales.filter(s => s.tweetId).length);
+                    this.postedSales = sales.filter(sale => sale.tweetId);
+                    console.log('✅ Posted sales:', this.postedSales.length);
+                }
+
+                // Load posted registrations (those with tweet_id)
+                const regsResponse = await this.fetch('/api/database/registrations?limit=500&page=1');
+                if (regsResponse.ok) {
+                    const regsData = await regsResponse.json();
+                    const registrations = regsData.data?.registrations || [];
+                    console.log('📊 Total registrations fetched:', registrations.length);
+                    console.log('📊 Sample registration object:', registrations[0]);
+                    console.log('📊 Registrations with tweetId:', registrations.filter(r => r.tweetId).length);
+                    this.postedRegistrations = registrations.filter(reg => reg.tweetId);
+                    console.log('✅ Posted registrations:', this.postedRegistrations.length);
+                }
+            } catch (error) {
+                console.error('Failed to refresh posted transactions:', error);
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        clearAIReply() {
+            this.generatedAIReply = null;
+            this.aiReplyMessage = '';
+        },
+
+        async generateAIReply(forceRegenerate = false) {
+            if (!this.aiReplyTransactionId) {
+                this.showAIReplyMessage('Please select a transaction', 'error');
+                return;
+            }
+
+            if (!this.aiRepliesEnabled) {
+                this.showAIReplyMessage('AI Replies are disabled. Please enable them first.', 'error');
+                return;
+            }
+
+            try {
+                this.aiReplyGenerating = true;
+                if (!forceRegenerate) {
+                    this.clearAIReply();
+                }
+
+                const response = await this.fetch('/api/ai-reply-generate', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        type: this.aiReplyType,
+                        id: parseInt(this.aiReplyTransactionId),
+                        forceRegenerate: forceRegenerate
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    this.generatedAIReply = data.reply;
+                    
+                    if (data.alreadyExists && !forceRegenerate) {
+                        this.generatedAIReply.alreadyExists = true;
+                        this.showAIReplyMessage(
+                            'Reply already exists. Click "Regenerate" to create a new one.',
+                            'info'
+                        );
+                    } else {
+                        this.generatedAIReply.alreadyExists = false;
+                        this.showAIReplyMessage(
+                            forceRegenerate ? 'New AI reply generated successfully' : 'AI reply generated successfully',
+                            'success'
+                        );
+                    }
+                } else {
+                    const data = await response.json();
+                    this.showAIReplyMessage(
+                        data.error || 'Failed to generate AI reply',
+                        'error'
+                    );
+                }
+            } catch (error) {
+                console.error('Generate AI reply failed:', error);
+                this.showAIReplyMessage(error.message, 'error');
+            } finally {
+                this.aiReplyGenerating = false;
+            }
+        },
+
+        async regenerateAIReply() {
+            await this.generateAIReply(true);
+        },
+
+        async sendAIReplyPost() {
+            if (!this.generatedAIReply) {
+                this.showAIReplyMessage('No AI reply to send', 'error');
+                return;
+            }
+
+            try {
+                this.aiReplySending = true;
+
+                // Post reply to Twitter
+                // This endpoint doesn't exist yet - placeholder
+                const response = await this.fetch('/api/ai-reply-post', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        replyId: this.generatedAIReply.id
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    this.showAIReplyMessage(
+                        'AI reply posted successfully!',
+                        'success'
+                    );
+                    
+                    // Clear the generated reply after posting
+                    setTimeout(() => {
+                        this.clearAIReply();
+                        this.aiReplyTransactionId = '';
+                    }, 2000);
+                } else {
+                    const data = await response.json();
+                    this.showAIReplyMessage(
+                        data.error || 'Failed to post AI reply',
+                        'error'
+                    );
+                }
+            } catch (error) {
+                console.error('Send AI reply failed:', error);
+                this.showAIReplyMessage(error.message, 'error');
+            } finally {
+                this.aiReplySending = false;
+            }
+        },
+
+        showAIReplyMessage(message, type = 'info') {
+            this.aiReplyMessage = message;
+            this.aiReplyMessageType = type;
+            
+            // Auto-hide message after 5 seconds
+            setTimeout(() => {
+                this.aiReplyMessage = '';
+            }, 5000);
         }
     };
 }

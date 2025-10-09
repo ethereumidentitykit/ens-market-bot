@@ -118,6 +118,27 @@ export interface ENSRegistration {
   updatedAt?: string;
 }
 
+// AI Reply Record
+export interface AIReply {
+  id?: number;
+  saleId?: number;                    // Reference to processed_sales
+  registrationId?: number;            // Reference to ens_registrations
+  originalTweetId: string;            // The tweet we're replying to
+  replyTweetId?: string;              // The AI-generated reply tweet ID
+  transactionType: 'sale' | 'registration';
+  transactionHash: string;
+  modelUsed: string;                  // e.g., "gpt-4o", "gpt-4o-mini"
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  costUsd: number;
+  replyText: string;                  // The generated reply content
+  status: 'pending' | 'posted' | 'failed' | 'skipped';
+  errorMessage?: string;
+  createdAt?: string;
+  postedAt?: string;
+}
+
 // Configuration
 export interface Config {
   alchemy: {
@@ -190,6 +211,15 @@ export interface IDatabaseService {
   markAsPosted(id: number, tweetId: string): Promise<void>;
   getSystemState(key: string): Promise<string | null>;
   setSystemState(key: string, value: string): Promise<void>;
+  // AI Configuration methods
+  isAIRepliesEnabled(): Promise<boolean>;
+  setAIRepliesEnabled(enabled: boolean): Promise<void>;
+  getAIModel(): Promise<string>;
+  setAIModel(model: string): Promise<void>;
+  getAITemperature(): Promise<number>;
+  setAITemperature(temperature: number): Promise<void>;
+  getAIMaxTokens(): Promise<number>;
+  setAIMaxTokens(maxTokens: number): Promise<void>;
   getStats(): Promise<{
     totalSales: number;
     postedSales: number;
@@ -240,10 +270,19 @@ export interface IDatabaseService {
   deleteAdminSession(sessionId: string): Promise<void>;
   cleanupExpiredSessions(): Promise<void>;
   
+  // AI Reply methods
+  insertAIReply(reply: Omit<AIReply, 'id' | 'createdAt' | 'postedAt'>): Promise<number>;
+  getAIReplyBySaleId(saleId: number): Promise<AIReply | null>;
+  getAIReplyByRegistrationId(registrationId: number): Promise<AIReply | null>;
+  getRecentAIReplies(limit?: number): Promise<AIReply[]>;
+  updateAIReplyTweetId(id: number, replyTweetId: string): Promise<void>;
+  updateAIReplyStatus(id: number, status: AIReply['status'], errorMessage?: string): Promise<void>;
+  
   // Real-time notification trigger methods
   setupSaleNotificationTriggers(): Promise<void>;
   setupRegistrationNotificationTriggers(): Promise<void>;
   setupBidNotificationTriggers(): Promise<void>;
+  setupAIReplyNotificationTriggers(): Promise<void>; // Phase 3.4
   checkSaleNotificationTriggers(): Promise<boolean>;
 }
 
