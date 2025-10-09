@@ -3,6 +3,11 @@ import { logger } from '../utils/logger';
 import { AutoTweetService } from './autoTweetService';
 import { IDatabaseService } from '../types';
 
+// Forward declaration - will be created in Phase 3.3
+export interface IAIReplyService {
+  generateAndPostAIReply(type: 'sale' | 'registration', recordId: number): Promise<void>;
+}
+
 export class DatabaseEventService {
   private client: Client | null = null;
   private isListening = false;
@@ -15,6 +20,7 @@ export class DatabaseEventService {
   // Services for processing notifications
   private autoTweetService: AutoTweetService;
   private databaseService: IDatabaseService;
+  private aiReplyService: IAIReplyService | null = null;
 
   // Separate queues for handling sales, registrations, and bids
   private saleNotificationQueue: number[] = [];
@@ -24,13 +30,22 @@ export class DatabaseEventService {
   private isProcessingRegistrations = false;
   private isProcessingBids = false;
 
+  // AI Reply queues (Phase 3.2)
+  private aiReplySaleQueue: number[] = [];
+  private aiReplyRegistrationQueue: number[] = [];
+  private isProcessingAIReplies = false;
+  private aiReplyDelayMs = 30000; // 30 seconds between AI reply posts
+  private lastAIReplyTime = 0;
+
   constructor(
     autoTweetService: AutoTweetService,
     databaseService: IDatabaseService,
-    connectionString: string
+    connectionString: string,
+    aiReplyService?: IAIReplyService | null
   ) {
     this.autoTweetService = autoTweetService;
     this.databaseService = databaseService;
+    this.aiReplyService = aiReplyService || null;
     
     // Create client with connection string
     this.client = new Client({
@@ -129,10 +144,14 @@ export class DatabaseEventService {
       await this.client.query('LISTEN new_registration');
       await this.client.query('LISTEN new_bid');
       
+      // Phase 3.2: Listen for AI reply triggers (posted sales/registrations)
+      await this.client.query('LISTEN posted_sale');
+      await this.client.query('LISTEN posted_registration');
+      
       this.isListening = true;
       this.reconnectAttempts = 0; // Reset on successful connection
       
-      logger.info('✅ Database listener connected and listening for new_sale, new_registration, and new_bid notifications');
+      logger.info('✅ Database listener connected and listening for new_sale, new_registration, new_bid, posted_sale, and posted_registration notifications');
 
     } catch (error: any) {
       this.isListening = false;
@@ -142,7 +161,7 @@ export class DatabaseEventService {
   }
 
   /**
-   * Handle incoming sale and registration notifications
+   * Handle incoming sale, registration, bid, and AI reply notifications
    */
   private handleNotification(msg: any): void {
     try {
@@ -178,6 +197,30 @@ export class DatabaseEventService {
 
         logger.info(`🚨 NEW BID NOTIFICATION: ID ${bidId} - adding to bids queue`);
         this.addBidToQueue(bidId);
+        
+      } else if (msg.channel === 'posted_sale' && msg.payload) {
+        // Phase 3.2: AI Reply trigger for posted sale
+        const saleId = parseInt(msg.payload);
+        
+        if (isNaN(saleId)) {
+          logger.warn(`Invalid sale ID in posted_sale notification: ${msg.payload}`);
+          return;
+        }
+
+        logger.info(`🤖 POSTED SALE AI REPLY TRIGGER: ID ${saleId} - adding to AI reply queue`);
+        this.addSaleToAIReplyQueue(saleId);
+        
+      } else if (msg.channel === 'posted_registration' && msg.payload) {
+        // Phase 3.2: AI Reply trigger for posted registration
+        const registrationId = parseInt(msg.payload);
+        
+        if (isNaN(registrationId)) {
+          logger.warn(`Invalid registration ID in posted_registration notification: ${msg.payload}`);
+          return;
+        }
+
+        logger.info(`🤖 POSTED REGISTRATION AI REPLY TRIGGER: ID ${registrationId} - adding to AI reply queue`);
+        this.addRegistrationToAIReplyQueue(registrationId);
       }
     } catch (error: any) {
       logger.error('Error handling notification:', error.message);
@@ -229,6 +272,50 @@ export class DatabaseEventService {
     // Start processing if not already running
     if (!this.isProcessingBids) {
       this.processBidsQueue();
+    }
+  }
+
+  /**
+   * Phase 3.2: Add sale ID to AI reply queue
+   */
+  private addSaleToAIReplyQueue(saleId: number): void {
+    // Check if AI reply service is available
+    if (!this.aiReplyService) {
+      logger.debug(`AI Reply Service not initialized, skipping AI reply for sale ${saleId}`);
+      return;
+    }
+
+    // Avoid duplicates in queue
+    if (!this.aiReplySaleQueue.includes(saleId)) {
+      this.aiReplySaleQueue.push(saleId);
+      logger.info(`🤖 Added sale ${saleId} to AI reply queue (queue length: ${this.aiReplySaleQueue.length})`);
+    }
+
+    // Start processing if not already running
+    if (!this.isProcessingAIReplies) {
+      this.processAIReplyQueue();
+    }
+  }
+
+  /**
+   * Phase 3.2: Add registration ID to AI reply queue
+   */
+  private addRegistrationToAIReplyQueue(registrationId: number): void {
+    // Check if AI reply service is available
+    if (!this.aiReplyService) {
+      logger.debug(`AI Reply Service not initialized, skipping AI reply for registration ${registrationId}`);
+      return;
+    }
+
+    // Avoid duplicates in queue
+    if (!this.aiReplyRegistrationQueue.includes(registrationId)) {
+      this.aiReplyRegistrationQueue.push(registrationId);
+      logger.info(`🤖 Added registration ${registrationId} to AI reply queue (queue length: ${this.aiReplyRegistrationQueue.length})`);
+    }
+
+    // Start processing if not already running
+    if (!this.isProcessingAIReplies) {
+      this.processAIReplyQueue();
     }
   }
 
@@ -305,6 +392,89 @@ export class DatabaseEventService {
 
     this.isProcessingBids = false;
     logger.info('✅ Bids queue processing complete');
+  }
+
+  /**
+   * Phase 3.2: Process the AI reply queue with rate limiting
+   * Processes both sales and registrations in FIFO order with configurable delays
+   */
+  private async processAIReplyQueue(): Promise<void> {
+    if (this.isProcessingAIReplies) {
+      return;
+    }
+
+    const totalQueueLength = this.aiReplySaleQueue.length + this.aiReplyRegistrationQueue.length;
+    if (totalQueueLength === 0) {
+      return;
+    }
+
+    this.isProcessingAIReplies = true;
+    logger.info(`🤖 Starting AI reply queue processing (${this.aiReplySaleQueue.length} sales, ${this.aiReplyRegistrationQueue.length} registrations)`);
+
+    while ((this.aiReplySaleQueue.length > 0 || this.aiReplyRegistrationQueue.length > 0) && !this.isShuttingDown) {
+      // Rate limiting: Check if enough time has passed since last AI reply
+      const now = Date.now();
+      const timeSinceLastReply = now - this.lastAIReplyTime;
+      
+      if (this.lastAIReplyTime > 0 && timeSinceLastReply < this.aiReplyDelayMs) {
+        const waitTime = this.aiReplyDelayMs - timeSinceLastReply;
+        logger.info(`⏳ Rate limiting: Waiting ${Math.round(waitTime / 1000)}s before next AI reply...`);
+        await this.sleep(waitTime);
+      }
+
+      // Process sales first (FIFO within each type)
+      if (this.aiReplySaleQueue.length > 0) {
+        const saleId = this.aiReplySaleQueue.shift()!;
+        
+        try {
+          await this.processSingleAIReply('sale', saleId);
+          this.lastAIReplyTime = Date.now();
+        } catch (error: any) {
+          logger.error(`Failed to process AI reply for sale ${saleId}:`, error.message);
+          // Don't update lastAIReplyTime on error - we didn't actually post
+        }
+      } else if (this.aiReplyRegistrationQueue.length > 0) {
+        const registrationId = this.aiReplyRegistrationQueue.shift()!;
+        
+        try {
+          await this.processSingleAIReply('registration', registrationId);
+          this.lastAIReplyTime = Date.now();
+        } catch (error: any) {
+          logger.error(`Failed to process AI reply for registration ${registrationId}:`, error.message);
+          // Don't update lastAIReplyTime on error - we didn't actually post
+        }
+      }
+    }
+
+    this.isProcessingAIReplies = false;
+    logger.info('✅ AI reply queue processing complete');
+  }
+
+  /**
+   * Phase 3.2: Process a single AI reply (sale or registration)
+   */
+  private async processSingleAIReply(type: 'sale' | 'registration', recordId: number): Promise<void> {
+    if (!this.aiReplyService) {
+      logger.warn(`AI Reply Service not available for ${type} ${recordId}`);
+      return;
+    }
+
+    try {
+      logger.info(`🤖 Generating AI reply for ${type} ${recordId}...`);
+      await this.aiReplyService.generateAndPostAIReply(type, recordId);
+      logger.info(`✅ Successfully generated and posted AI reply for ${type} ${recordId}`);
+    } catch (error: any) {
+      logger.error(`❌ Failed to generate AI reply for ${type} ${recordId}:`, error.message);
+      // Could implement retry logic here with exponential backoff
+      throw error;
+    }
+  }
+
+  /**
+   * Helper: Sleep for specified milliseconds
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   /**
@@ -607,6 +777,10 @@ export class DatabaseEventService {
     isProcessingSales: boolean;
     isProcessingRegistrations: boolean;
     reconnectAttempts: number;
+    aiReplySalesQueueLength: number;
+    aiReplyRegistrationsQueueLength: number;
+    isProcessingAIReplies: boolean;
+    aiReplyServiceAvailable: boolean;
   } {
     return {
       isListening: this.isListening,
@@ -615,6 +789,10 @@ export class DatabaseEventService {
       isProcessingSales: this.isProcessingSales,
       isProcessingRegistrations: this.isProcessingRegistrations,
       reconnectAttempts: this.reconnectAttempts,
+      aiReplySalesQueueLength: this.aiReplySaleQueue.length,
+      aiReplyRegistrationsQueueLength: this.aiReplyRegistrationQueue.length,
+      isProcessingAIReplies: this.isProcessingAIReplies,
+      aiReplyServiceAvailable: this.aiReplyService !== null,
     };
   }
 }
