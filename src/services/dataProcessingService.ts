@@ -120,6 +120,10 @@ export interface LLMPromptContext {
     tokenActivityCount: number;
     buyerActivityCount: number;
     sellerActivityCount: number;
+    // API fetch status tracking (incomplete = partial data returned, not all pages fetched)
+    tokenDataIncomplete: boolean;
+    buyerDataIncomplete: boolean;
+    sellerDataIncomplete: boolean;
   };
   
   // Club membership info (if name belongs to any clubs)
@@ -636,7 +640,12 @@ export class DataProcessingService {
     buyerActivities: TokenActivity[],
     sellerActivities: TokenActivity[] | null,
     magicEdenService?: any,
-    ensWorkerService?: ENSWorkerService
+    ensWorkerService?: ENSWorkerService,
+    fetchStatus?: {
+      tokenDataIncomplete: boolean;
+      buyerDataIncomplete: boolean;
+      sellerDataIncomplete: boolean;
+    }
   ): Promise<LLMPromptContext> {
     logger.info(`🧠 Building LLM context for ${eventData.type}: ${eventData.tokenName}`);
     logger.debug(`   Event from DB: ${eventData.price} ETH ($${eventData.priceUsd}), txHash: ${eventData.txHash.slice(0, 10)}...`);
@@ -790,7 +799,10 @@ export class DataProcessingService {
         dataFetchedAt: Date.now(),
         tokenActivityCount: tokenActivities.length,
         buyerActivityCount: buyerActivities.length,
-        sellerActivityCount: sellerActivities?.length || 0
+        sellerActivityCount: sellerActivities?.length || 0,
+        tokenDataIncomplete: fetchStatus?.tokenDataIncomplete || false,
+        buyerDataIncomplete: fetchStatus?.buyerDataIncomplete || false,
+        sellerDataIncomplete: fetchStatus?.sellerDataIncomplete || false
       },
       clubInfo
     };

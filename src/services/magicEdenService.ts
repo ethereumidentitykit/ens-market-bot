@@ -555,7 +555,7 @@ export class MagicEdenService {
       types?: ('sale' | 'mint' | 'transfer' | 'ask' | 'bid' | 'ask_cancel' | 'bid_cancel')[];
       maxPages?: number;  // Maximum pages to fetch (default: 60)
     } = {}
-  ): Promise<TokenActivity[]> {
+  ): Promise<{ activities: TokenActivity[]; incomplete: boolean; pagesFetched: number }> {
     // Set defaults
     const limit = options.limit || 20;  // Magic Eden max is 20
     const types = options.types || ['sale', 'mint', 'transfer'];  // Include transfers for proxy resolution
@@ -567,6 +567,7 @@ export class MagicEdenService {
     const allActivities: TokenActivity[] = [];
     let continuation: string | undefined;
     let pageCount = 0;
+    let incomplete = false;
 
     try {
       // Loop through pages until we hit maxPages or run out of data
@@ -606,13 +607,15 @@ export class MagicEdenService {
         }
       }
 
-      logger.info(`✅ Token activity history complete: ${allActivities.length} activities across ${pageCount} pages`);
-      return allActivities;
+      logger.info(`✅ Token activity history complete: ${allActivities.length} activities across ${pageCount} pages${incomplete ? ' (INCOMPLETE - error occurred)' : ''}`);
+      return { activities: allActivities, incomplete, pagesFetched: pageCount };
 
     } catch (error: any) {
       logger.error(`❌ Error fetching token activity history: ${error.message}`);
+      incomplete = true;
       // Return whatever we collected before the error
-      return allActivities;
+      logger.warn(`   ⚠️  Returning incomplete data: ${allActivities.length} activities from ${pageCount} pages`);
+      return { activities: allActivities, incomplete, pagesFetched: pageCount };
     }
   }
 
@@ -638,7 +641,7 @@ export class MagicEdenService {
       types?: ('sale' | 'mint' | 'transfer' | 'ask' | 'bid' | 'ask_cancel' | 'bid_cancel')[];
       maxPages?: number;  // Maximum pages to fetch (default: 60)
     } = {}
-  ): Promise<TokenActivity[]> {
+  ): Promise<{ activities: TokenActivity[]; incomplete: boolean; pagesFetched: number }> {
     // Set defaults - NOTE: Excludes 'bid' and 'transfer' types
     // Transfers excluded because they create massive result sets (10x more data)
     // Proxy resolution happens via known proxy list, not transfer tracing
@@ -652,6 +655,7 @@ export class MagicEdenService {
     const allActivities: TokenActivity[] = [];
     let continuation: string | undefined;
     let pageCount = 0;
+    let incomplete = false;
 
     try {
       // Loop through pages until we hit maxPages or run out of data
@@ -732,13 +736,15 @@ export class MagicEdenService {
         }
       }
 
-      logger.info(`✅ User activity history complete: ${allActivities.length} activities across ${pageCount} pages`);
-      return allActivities;
+      logger.info(`✅ User activity history complete: ${allActivities.length} activities across ${pageCount} pages${incomplete ? ' (INCOMPLETE - error occurred)' : ''}`);
+      return { activities: allActivities, incomplete, pagesFetched: pageCount };
 
     } catch (error: any) {
       logger.error(`❌ Error fetching user activity history: ${error.message}`);
+      incomplete = true;
       // Return whatever we collected before the error
-      return allActivities;
+      logger.warn(`   ⚠️  Returning incomplete data: ${allActivities.length} activities from ${pageCount} pages`);
+      return { activities: allActivities, incomplete, pagesFetched: pageCount };
     }
   }
 
@@ -778,8 +784,9 @@ export class MagicEdenService {
       const address = normalizedAddresses[index];
       
       if (result.status === 'fulfilled') {
-        activitiesMap.set(address, result.value);
-        logger.debug(`   ✅ ${address}: ${result.value.length} activities`);
+        const { activities, incomplete } = result.value;
+        activitiesMap.set(address, activities);
+        logger.debug(`   ✅ ${address}: ${activities.length} activities${incomplete ? ' (incomplete)' : ''}`);
       } else {
         // On failure, store empty array and log warning
         activitiesMap.set(address, []);

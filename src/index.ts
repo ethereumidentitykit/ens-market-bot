@@ -541,25 +541,28 @@ async function startApplication(): Promise<void> {
 
         // Step 3: Fetch Magic Eden data (use defaults: 20 pages, 30s timeout)
         logger.debug('   Fetching token activity from Magic Eden...');
-        const tokenActivities = await magicEdenService.getTokenActivityHistory(
+        const tokenResult = await magicEdenService.getTokenActivityHistory(
           transaction.contractAddress,
           transaction.tokenId
           // No options = use service defaults (maxPages: 20, timeout: 30s)
         );
+        const tokenActivities = tokenResult.activities;
 
         logger.debug('   Fetching buyer activity from Magic Eden...');
-        const buyerActivities = await magicEdenService.getUserActivityHistory(
+        const buyerResult = await magicEdenService.getUserActivityHistory(
           eventData.buyerAddress
           // No options = use service defaults (maxPages: 20, timeout: 30s)
         );
+        const buyerActivities = buyerResult.activities;
 
         let sellerActivities: TokenActivity[] | null = null;
         if (eventData.sellerAddress) {
           logger.debug('   Fetching seller activity from Magic Eden...');
-          sellerActivities = await magicEdenService.getUserActivityHistory(
+          const sellerResult = await magicEdenService.getUserActivityHistory(
             eventData.sellerAddress
             // No options = use service defaults (maxPages: 20, timeout: 30s)
           );
+          sellerActivities = sellerResult.activities;
         }
 
         // Step 4: Build LLM context using DataProcessingService
@@ -731,17 +734,31 @@ async function startApplication(): Promise<void> {
         logger.debug('   Fetching data in parallel (Magic Eden + name research)...');
         
         // Start all API calls in parallel for speed (including name research)
+        // Track which API calls failed or returned incomplete data
         const openaiService = new OpenAIService();
-        const [tokenActivities, buyerActivities, sellerActivities, nameResearch] = await Promise.all([
+        let tokenDataIncomplete = false;
+        let buyerDataIncomplete = false;
+        let sellerDataIncomplete = false;
+        
+        const [tokenResult, buyerResult, sellerResult, nameResearch] = await Promise.all([
           magicEdenService.getTokenActivityHistory(
             transaction.contractAddress,
             transaction.tokenId
-          ),
+          ).catch((error: any) => {
+            logger.error('Token activity fetch failed:', error.message);
+            return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0 };
+          }),
           magicEdenService.getUserActivityHistory(
             eventData.buyerAddress
-          ),
+          ).catch((error: any) => {
+            logger.error('Buyer activity fetch failed:', error.message);
+            return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0 };
+          }),
           eventData.sellerAddress
-            ? magicEdenService.getUserActivityHistory(eventData.sellerAddress)
+            ? magicEdenService.getUserActivityHistory(eventData.sellerAddress).catch((error: any) => {
+                logger.error('Seller activity fetch failed:', error.message);
+                return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0 };
+              })
             : Promise.resolve(null),
           // Start name research in parallel
           (async () => {
@@ -754,6 +771,15 @@ async function startApplication(): Promise<void> {
           })()
         ]);
 
+        // Extract activities and track incomplete status
+        const tokenActivities = tokenResult.activities;
+        const buyerActivities = buyerResult.activities;
+        const sellerActivities = sellerResult?.activities || null;
+        
+        tokenDataIncomplete = tokenResult.incomplete;
+        buyerDataIncomplete = buyerResult.incomplete;
+        sellerDataIncomplete = sellerResult?.incomplete || false;
+
         // Step 5: Build LLM context
         logger.debug('   Building LLM context...');
         const { dataProcessingService } = await import('./services/dataProcessingService');
@@ -764,7 +790,12 @@ async function startApplication(): Promise<void> {
           buyerActivities,
           sellerActivities,
           magicEdenService,
-          ensWorkerService
+          ensWorkerService,
+          {
+            tokenDataIncomplete,
+            buyerDataIncomplete,
+            sellerDataIncomplete
+          }
         );
 
         // Step 6: Generate reply using OpenAI (name research already done in parallel)

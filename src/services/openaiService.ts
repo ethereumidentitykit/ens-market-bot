@@ -177,19 +177,19 @@ export class OpenAIService {
 
 FOCUS AREAS:
 1. Meaning & Context
-   - What does ${label} mean? (dictionary definitions or comman usages), etymology if uncommon or interesting.
+   - What does ${label} mean? (dictionary definitions or common usages), etymology if uncommon or interesting.
    - Is it a common word, brand name, person name, or acronym?
-   - Any cultural or industry significance?
+   - Any cultural significance in gaming, crypto, or online communities?
 
 2. Name Popularity & Usage
    - If it's a person name, check forebears.io or other sources for usage statistics (how common is it globally?)
    - Search interest or trend relevance
    - Geographic distribution if it's a name
 
-3. Market Interest
-   - Is this name registered on major TLDs (.com, .io, .ai)?
-   - Any notable sales of similar names? (check NameBio, DNJournal if available)
-   - General market demand for this type of name
+3. Username/Identity Value (focus here for ENS)
+   - Would this work well as a username, gamertag, or online identity? (e.g., demon, killer, anon, legend, chad)
+   - Is it short, memorable, and distinctive for personal branding?
+   - Popular in gaming, crypto, or social communities?
 
 
 Be honest. If there's nothing interesting or significant about this name, say so. Don't inflate its importance or significance. If it's a word or string without wide recognition - thats good info to return.
@@ -369,6 +369,7 @@ WHAT TO FOCUS ON:
    - Only explain if it's unusual or unclear. Skip obvious ones like "students" or "coffee", "angel" etc.
    - If it's a common name, mention usage statistics (e.g., "Common surname, ~50k people globally")
    - Explain obscure names, non-English words, or technical terms, acrynms, romanised foriegn languages, etc.
+   - **Username/Gamertag value**: If the name is highly suited as a username or gamertag (demon, killer, anon, legend, chad, ghost, etc), mention it. These are valuable for personal branding in gaming/crypto communities.
 
 2. **Club membership**: If the name belongs to a club (e.g., "999 Club #1,234 @ENS999club"):
    - this means it's part of a "club" or "category" of ens names, that are generally considered to be of higher value or quality due to their discoverability.
@@ -380,7 +381,7 @@ WHAT TO FOCUS ON:
 
 3. **Trading patterns** based on the user tx history provided: Only mention if unusual
    - name buying frequency
-   - buyer and seller total volumes
+   - buyer and seller total volumes (NOTE: High ETH volume + low USD volume = OG buyer from early days when ETH was cheaper)
    - Quick flips or unusual timing
    - Big profit or loss on this specific sale
    
@@ -513,9 +514,6 @@ BAD EXAMPLES:
     prompt += `- Buys: ${buyerStats.buysCount} (${buyerStats.buysVolume.toFixed(4)} ETH / $${buyerStats.buysVolumeUsd.toLocaleString()})\n`;
     prompt += `- Sells: ${buyerStats.sellsCount} (${buyerStats.sellsVolume.toFixed(4)} ETH / $${buyerStats.sellsVolumeUsd.toLocaleString()})\n`;
     prompt += `- Activity: ${buyerStats.transactionsPerMonth.toFixed(1)} txns/month\n`;
-    if (buyerStats.topMarketplaces.length > 0) {
-      prompt += `- Top markets: ${buyerStats.topMarketplaces.slice(0, 2).join(', ')}\n`;
-    }
 
     // Format seller stats (if sale)
     if (sellerStats) {
@@ -545,6 +543,24 @@ BAD EXAMPLES:
         const tokenName = activity.tokenName ? activity.tokenName.slice(0, 20) : 'unknown';
         prompt += `- ${date}: ${activity.type} ${tokenName} for ${activity.price.toFixed(4)} ETH [${activity.role}]\n`;
       }
+    }
+
+    // Add data quality notes if APIs returned incomplete data
+    const { metadata } = context;
+    const dataIssues: string[] = [];
+    
+    if (metadata.tokenDataIncomplete) {
+      dataIssues.push('token history incomplete (pagination stopped early)');
+    }
+    if (metadata.buyerDataIncomplete) {
+      dataIssues.push('buyer history incomplete (pagination stopped early)');
+    }
+    if (metadata.sellerDataIncomplete && event.type === 'sale') {
+      dataIssues.push('seller history incomplete (pagination stopped early)');
+    }
+    
+    if (dataIssues.length > 0) {
+      prompt += `\n⚠️ DATA LIMITATIONS: ${dataIssues.join(', ')}. The data shown is partial, not complete. Don't draw fundamental conclusions about trading patterns or behavior. Focus on what we can verify.\n`;
     }
 
     prompt += `\n---
