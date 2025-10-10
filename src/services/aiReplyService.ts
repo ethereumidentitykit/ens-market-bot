@@ -160,7 +160,8 @@ export class AIReplyService {
         await this.updateReplyAsPosted(
           existingReply.id,
           tweetResult.tweetId,
-          generatedReply
+          generatedReply,
+          contextData.nameResearch
         );
       } else {
         // Insert new reply
@@ -169,7 +170,8 @@ export class AIReplyService {
           recordId,
           transaction,
           tweetResult.tweetId,
-          generatedReply
+          generatedReply,
+          contextData.nameResearch
         );
       }
 
@@ -407,7 +409,8 @@ export class AIReplyService {
   private async updateReplyAsPosted(
     replyId: number,
     replyTweetId: string,
-    generatedReply: any
+    generatedReply: any,
+    nameResearch?: string
   ): Promise<void> {
     await this.databaseService.pgPool.query(`
       UPDATE ai_replies 
@@ -418,10 +421,11 @@ export class AIReplyService {
         completion_tokens = $4,
         total_tokens = $5,
         reply_text = $6,
+        name_research = $7,
         status = 'posted',
         posted_at = NOW(),
         error_message = NULL
-      WHERE id = $7
+      WHERE id = $8
     `, [
       replyTweetId,
       generatedReply.modelUsed,
@@ -429,6 +433,7 @@ export class AIReplyService {
       generatedReply.completionTokens,
       generatedReply.totalTokens,
       generatedReply.tweetText,
+      nameResearch,
       replyId
     ]);
 
@@ -443,7 +448,8 @@ export class AIReplyService {
     transactionId: number,
     transaction: ProcessedSale | ENSRegistration,
     replyTweetId: string,
-    generatedReply: any
+    generatedReply: any,
+    nameResearch?: string
   ): Promise<void> {
     await this.databaseService.insertAIReply({
       saleId: type === 'sale' ? transactionId : undefined,
@@ -458,6 +464,7 @@ export class AIReplyService {
       totalTokens: generatedReply.totalTokens,
       costUsd: 0, // Not tracked per requirements
       replyText: generatedReply.tweetText,
+      nameResearch: nameResearch,
       status: 'posted',
       errorMessage: undefined
     });

@@ -133,6 +133,7 @@ export interface AIReply {
   totalTokens: number;
   costUsd: number;
   replyText: string;                  // The generated reply content
+  nameResearch?: string;              // Research about the name (from web search)
   status: 'pending' | 'posted' | 'failed' | 'skipped';
   errorMessage?: string;
   createdAt?: string;

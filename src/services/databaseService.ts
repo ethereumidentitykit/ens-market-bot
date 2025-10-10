@@ -314,6 +314,7 @@ export class DatabaseService implements IDatabaseService {
           total_tokens INTEGER NOT NULL,
           cost_usd DECIMAL(10,6) NOT NULL,
           reply_text TEXT NOT NULL,
+          name_research TEXT,
           status VARCHAR(20) NOT NULL CHECK (status IN ('pending', 'posted', 'failed', 'skipped')) DEFAULT 'pending',
           error_message TEXT,
           created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -323,6 +324,19 @@ export class DatabaseService implements IDatabaseService {
             (sale_id IS NULL AND registration_id IS NOT NULL)
           )
         )
+      `);
+
+      // Add name_research column if it doesn't exist (migration for existing databases)
+      await this.pool.query(`
+        DO $$ 
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'ai_replies' AND column_name = 'name_research'
+          ) THEN
+            ALTER TABLE ai_replies ADD COLUMN name_research TEXT;
+          END IF;
+        END $$;
       `);
 
       // Create indexes for ai_replies
@@ -1633,8 +1647,8 @@ export class DatabaseService implements IDatabaseService {
           sale_id, registration_id, original_tweet_id, reply_tweet_id,
           transaction_type, transaction_hash, model_used,
           prompt_tokens, completion_tokens, total_tokens, cost_usd,
-          reply_text, status, error_message
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+          reply_text, name_research, status, error_message
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
         RETURNING id
       `, [
         reply.saleId || null,
@@ -1649,6 +1663,7 @@ export class DatabaseService implements IDatabaseService {
         reply.totalTokens,
         reply.costUsd,
         reply.replyText,
+        reply.nameResearch || null,
         reply.status,
         reply.errorMessage || null
       ]);
@@ -1675,7 +1690,7 @@ export class DatabaseService implements IDatabaseService {
           transaction_type as "transactionType", transaction_hash as "transactionHash",
           model_used as "modelUsed", prompt_tokens as "promptTokens",
           completion_tokens as "completionTokens", total_tokens as "totalTokens",
-          cost_usd as "costUsd", reply_text as "replyText", status,
+          cost_usd as "costUsd", reply_text as "replyText", name_research as "nameResearch", status,
           error_message as "errorMessage", created_at as "createdAt",
           posted_at as "postedAt"
         FROM ai_replies
@@ -1703,7 +1718,7 @@ export class DatabaseService implements IDatabaseService {
           transaction_type as "transactionType", transaction_hash as "transactionHash",
           model_used as "modelUsed", prompt_tokens as "promptTokens",
           completion_tokens as "completionTokens", total_tokens as "totalTokens",
-          cost_usd as "costUsd", reply_text as "replyText", status,
+          cost_usd as "costUsd", reply_text as "replyText", name_research as "nameResearch", status,
           error_message as "errorMessage", created_at as "createdAt",
           posted_at as "postedAt"
         FROM ai_replies
@@ -1731,7 +1746,7 @@ export class DatabaseService implements IDatabaseService {
           transaction_type as "transactionType", transaction_hash as "transactionHash",
           model_used as "modelUsed", prompt_tokens as "promptTokens",
           completion_tokens as "completionTokens", total_tokens as "totalTokens",
-          cost_usd as "costUsd", reply_text as "replyText", status,
+          cost_usd as "costUsd", reply_text as "replyText", name_research as "nameResearch", status,
           error_message as "errorMessage", created_at as "createdAt",
           posted_at as "postedAt"
         FROM ai_replies

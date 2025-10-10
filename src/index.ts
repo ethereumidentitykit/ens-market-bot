@@ -854,16 +854,18 @@ async function startApplication(): Promise<void> {
               completion_tokens = $3,
               total_tokens = $4,
               reply_text = $5,
+              name_research = $6,
               status = 'pending',
               error_message = NULL,
               created_at = NOW()
-            WHERE id = $6
+            WHERE id = $7
           `, [
             generatedReply.modelUsed,
             generatedReply.promptTokens,
             generatedReply.completionTokens,
             generatedReply.totalTokens,
             generatedReply.tweetText,
+            nameResearch,
             existingReply.id
           ]);
           replyId = existingReply.id;
@@ -883,6 +885,7 @@ async function startApplication(): Promise<void> {
             totalTokens: generatedReply.totalTokens,
             costUsd: 0, // Not tracked per requirements
             replyText: generatedReply.tweetText,
+            nameResearch: nameResearch,
             status: 'pending', // Generated but not posted
             errorMessage: undefined
           });
