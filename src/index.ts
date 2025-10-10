@@ -917,6 +917,105 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    // AI Reply Post endpoint - manually post a generated AI reply to Twitter
+    app.post('/api/ai-reply-post', requireAuth, async (req, res) => {
+      try {
+        const { replyId } = req.body;
+
+        // Validate input
+        if (!replyId) {
+          return res.status(400).json({
+            success: false,
+            error: 'Missing required parameter: replyId'
+          });
+        }
+
+        const numericReplyId = parseInt(replyId, 10);
+        if (isNaN(numericReplyId)) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid replyId. Must be a number'
+          });
+        }
+
+        logger.info(`📤 Manual AI Reply Post requested: Reply ID ${numericReplyId}`);
+
+        // Step 1: Fetch the reply from database
+        const result = await databaseService.pgPool.query(
+          'SELECT * FROM ai_replies WHERE id = $1',
+          [numericReplyId]
+        );
+
+        if (result.rows.length === 0) {
+          return res.status(404).json({
+            success: false,
+            error: `AI reply with ID ${numericReplyId} not found`
+          });
+        }
+
+        const reply = result.rows[0];
+
+        // Step 2: Check if already posted
+        if (reply.status === 'posted' && reply.reply_tweet_id) {
+          return res.status(400).json({
+            success: false,
+            error: 'This reply has already been posted to Twitter',
+            tweetId: reply.reply_tweet_id
+          });
+        }
+
+        // Step 3: Validate we have an original tweet ID to reply to
+        if (!reply.original_tweet_id) {
+          return res.status(400).json({
+            success: false,
+            error: 'Cannot post reply: original tweet ID is missing'
+          });
+        }
+
+        // Step 4: Post to Twitter
+        logger.debug(`   Posting reply to Twitter (in reply to ${reply.original_tweet_id})...`);
+        const tweetResult = await twitterService.postReply(
+          reply.reply_text,
+          reply.original_tweet_id
+        );
+
+        if (!tweetResult.success || !tweetResult.tweetId) {
+          throw new Error(`Failed to post reply: ${tweetResult.error}`);
+        }
+
+        logger.info(`   ✅ Reply posted to Twitter - ID: ${tweetResult.tweetId}`);
+
+        // Step 5: Update database with posted status
+        await databaseService.pgPool.query(`
+          UPDATE ai_replies 
+          SET 
+            reply_tweet_id = $1,
+            status = 'posted',
+            posted_at = NOW(),
+            error_message = NULL
+          WHERE id = $2
+        `, [tweetResult.tweetId, numericReplyId]);
+
+        logger.info(`✅ AI reply posted successfully (Reply ID: ${numericReplyId}, Tweet ID: ${tweetResult.tweetId})`);
+
+        // Step 6: Return success response
+        res.json({
+          success: true,
+          message: 'AI reply posted to Twitter successfully',
+          tweetId: tweetResult.tweetId,
+          replyId: numericReplyId
+        });
+
+      } catch (error: any) {
+        logger.error('❌ AI Reply Post error:', error.message);
+        logger.error(error.stack);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
 
     // Processing endpoints
     app.get('/api/process-sales', requireAuth, async (req, res) => {

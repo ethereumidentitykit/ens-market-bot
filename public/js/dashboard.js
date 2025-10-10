@@ -2,7 +2,11 @@
 function dashboard() {
     // Helper function to ensure credentials are always included
     async function fetchWithCredentials(url, options = {}) {
-        return fetch(url, {
+        // Support custom timeout (default: none, for long-running operations)
+        const timeout = options.timeout;
+        delete options.timeout; // Remove from options before passing to fetch
+        
+        const fetchPromise = fetch(url, {
             ...options,
             credentials: 'include', // Always include cookies for authentication
             headers: {
@@ -10,6 +14,16 @@ function dashboard() {
                 ...(options.headers || {})
             }
         });
+        
+        // If timeout specified, race against timeout
+        if (timeout) {
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error(`Request timeout after ${timeout}ms`)), timeout)
+            );
+            return Promise.race([fetchPromise, timeoutPromise]);
+        }
+        
+        return fetchPromise;
     }
     
     return {
@@ -2152,7 +2166,8 @@ Issued At: ${issuedAt}`;
                         type: this.aiReplyType,
                         id: parseInt(this.aiReplyTransactionId),
                         forceRegenerate: forceRegenerate
-                    })
+                    }),
+                    timeout: 10 * 60 * 1000 // 10 minute timeout for AI generation
                 });
 
                 if (response.ok) {
