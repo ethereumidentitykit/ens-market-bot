@@ -240,6 +240,7 @@ export class SchedulerService {
 
   /**
    * Execute the sales sync process (runs every 5 minutes)
+   * NOTE: Moralis sales processing disabled - QuickNode webhooks handle all sales in real-time
    */
   private async runSalesSync(): Promise<void> {
     if (!this.isRunning) {
@@ -260,14 +261,21 @@ export class SchedulerService {
       // Refresh NTP time cache before processing
       await this.autoTweetService.refreshTimeCache();
       
-      // Process new sales from Moralis (store in database only)
-      // Tweet processing is now handled by DatabaseEventService via NOTIFY/LISTEN
-      const moralisResult = await this.salesProcessingService.processNewSales();
-      logger.info(`📊 Moralis processing complete: ${moralisResult.newSales} new sales stored in database`);
+      // ⚠️ MORALIS SALES PROCESSING DISABLED ⚠️
+      // QuickNode webhooks now handle ALL sales ingestion in real-time
+      // Moralis was causing duplicates due to incorrect log_index extraction
+      // and never provided data that QuickNode didn't already capture
       
-      if (moralisResult.newSales > 0) {
-        logger.info(`⚡ DatabaseEventService will handle instant tweet processing for ${moralisResult.newSales} new sales`);
-      }
+      logger.info(`✅ Sales sync skipped - QuickNode webhooks handle all sales in real-time`);
+      
+      // Mock result for stats tracking
+      const moralisResult = {
+        fetched: 0,
+        newSales: 0,
+        duplicates: 0,
+        filtered: 0,
+        errors: 0
+      };
       
       this.lastRunTime = startTime;
       this.lastRunStats = moralisResult;
@@ -281,11 +289,6 @@ export class SchedulerService {
         duplicates: moralisResult.duplicates,
         errors: moralisResult.errors
       });
-
-      // Log notable events
-      if (moralisResult.newSales > 0) {
-        logger.info(`📈 Found ${moralisResult.newSales} new sales from Moralis - DatabaseEventService will handle instant posting`);
-      }
       
       if (moralisResult.errors > 0) {
         logger.warn(`⚠️ Encountered ${moralisResult.errors} errors during Moralis processing`);
@@ -482,7 +485,7 @@ export class SchedulerService {
 
   /**
    * Manually trigger sales, registration, and bid sync (doesn't affect the schedule)
-   * NOTE: Registration tweet processing handled by real-time DatabaseEventService
+   * NOTE: Sales handled by QuickNode webhooks (real-time), Registration handled by DatabaseEventService (real-time)
    */
   async triggerManualSync(): Promise<{
     success: boolean;
@@ -490,17 +493,17 @@ export class SchedulerService {
     error?: string;
   }> {
     try {
-      logger.info('Manual sync triggered - running sales, registration, and bid processing');
-      logger.info('Registration tweet processing is handled in real-time by DatabaseEventService');
+      logger.info('Manual sync triggered - running registration and bid processing');
+      logger.info('Sales: QuickNode webhooks (real-time), Registration tweets: DatabaseEventService (real-time)');
       
-      // Run all sync methods manually
-      await this.runSalesSync();
+      // Run all sync methods manually (sales sync is now a no-op)
+      await this.runSalesSync(); // No-op: QuickNode handles sales
       await this.runRegistrationSync();
       await this.runBidsSync();
       
       return {
         success: true,
-        stats: { message: 'Sales, registration, and bid sync completed (registration tweets handled in real-time)' }
+        stats: { message: 'Registration and bid sync completed (sales handled by QuickNode webhooks)' }
       };
     } catch (error: any) {
       logger.error('Manual sync failed:', error.message);
