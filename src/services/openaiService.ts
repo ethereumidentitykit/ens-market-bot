@@ -450,7 +450,7 @@ WHAT TO FOCUS ON:
      - BAD: Buying "aug.eth" and they own "0000000002.eth" and "04040404.eth" (NOT similar - don't mention)
      - BAD: Buying "sam.eth" and they own "12345.eth" (NOT similar - don't mention)
    - If you can't find genuinely similar names, just describe the general pattern without examples
-   - Keep it to 1-2 example names max - only if they're truly relevant
+   - Keep it to 1-2 example names max - only if they're relevant
    - **CRITICAL**: When describing patterns, ONLY say what they ARE doing. NEVER add "rather than", "instead of", or "as opposed to" phrases.
    
    🚩 **WASH TRADING DETECTION** (critical - don't downplay):
