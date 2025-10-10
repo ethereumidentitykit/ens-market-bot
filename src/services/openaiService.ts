@@ -329,7 +329,7 @@ Research: ${sanitizedLabel}`;
       const rawText = response.output_text?.trim() || '';
       
       // Add title/header to the tweet
-      const tweetText = `🤖 GrailsAI (beta):\n\n${rawText}`;
+      const tweetText = `🤖 GrailsAI Insight (beta):\n\n${rawText}`;
       
       // Validate response (with title included)
       if (!this.validateResponse(tweetText)) {
