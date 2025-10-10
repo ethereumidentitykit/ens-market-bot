@@ -321,8 +321,11 @@ export class AIReplyService {
    */
   private async getOrFetchNameResearch(ensName: string): Promise<string> {
     try {
+      // Normalize name to always include .eth suffix for consistency
+      const normalizedName = ensName.toLowerCase().endsWith('.eth') ? ensName : `${ensName}.eth`;
+      
       // 1. Check if research exists in database
-      const existingResearch = await this.databaseService.getNameResearch(ensName);
+      const existingResearch = await this.databaseService.getNameResearch(normalizedName);
       
       if (existingResearch) {
         // 2. Check if research is fresh
@@ -330,30 +333,30 @@ export class AIReplyService {
         const ageInDays = researchAge / (1000 * 60 * 60 * 24);
         
         if (ageInDays < this.RESEARCH_MAX_AGE_DAYS) {
-          logger.info(`♻️ Using cached research for ${ensName} (${ageInDays.toFixed(1)} days old)`);
+          logger.info(`♻️ Using cached research for ${normalizedName} (${ageInDays.toFixed(1)} days old)`);
           return existingResearch.researchText;
         } else {
-          logger.info(`🔄 Research for ${ensName} is stale (${ageInDays.toFixed(1)} days), refreshing...`);
+          logger.info(`🔄 Research for ${normalizedName} is stale (${ageInDays.toFixed(1)} days), refreshing...`);
         }
       }
       
       // 3. Fetch new research with timeout
-      logger.info(`🔍 Fetching new research for ${ensName}...`);
+      logger.info(`🔍 Fetching new research for ${normalizedName}...`);
       const newResearch = await this.withTimeout(
         this.openaiService.researchName(ensName),
         this.NAME_RESEARCH_TIMEOUT,
         'Name research'
       );
       
-      // 4. Store in database
+      // 4. Store in database with normalized name
       if (newResearch) {
         await this.databaseService.insertNameResearch({
-          ensName,
+          ensName: normalizedName,
           researchText: newResearch,
           researchedAt: new Date().toISOString(),
           source: 'web_search'
         });
-        logger.info(`💾 Stored new research for ${ensName}`);
+        logger.info(`💾 Stored new research for ${normalizedName}`);
       }
       
       return newResearch;
@@ -363,9 +366,11 @@ export class AIReplyService {
       
       // 5. Fallback to stale research if available
       try {
-        const fallbackResearch = await this.databaseService.getNameResearch(ensName);
+        // Use normalized name for fallback lookup too
+        const normalizedName = ensName.toLowerCase().endsWith('.eth') ? ensName : `${ensName}.eth`;
+        const fallbackResearch = await this.databaseService.getNameResearch(normalizedName);
         if (fallbackResearch) {
-          logger.warn(`⚠️ Using stale research for ${ensName} as fallback`);
+          logger.warn(`⚠️ Using stale research for ${normalizedName} as fallback`);
           return fallbackResearch.researchText;
         }
       } catch (fallbackError: any) {
@@ -505,7 +510,9 @@ export class AIReplyService {
   ): Promise<void> {
     // Get name research ID from database
     const tokenName = ('nftName' in transaction) ? transaction.nftName : ('ensName' in transaction ? transaction.ensName : null);
-    const nameResearchRecord = tokenName ? await this.databaseService.getNameResearch(tokenName) : null;
+    // Normalize name to always include .eth suffix for consistency
+    const normalizedName = tokenName && tokenName.toLowerCase().endsWith('.eth') ? tokenName : (tokenName ? `${tokenName}.eth` : null);
+    const nameResearchRecord = normalizedName ? await this.databaseService.getNameResearch(normalizedName) : null;
     
     await this.databaseService.insertAIReply({
       saleId: type === 'sale' ? transactionId : undefined,

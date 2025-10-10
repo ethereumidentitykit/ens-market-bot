@@ -631,7 +631,7 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    // AI Reply Generation Endpoint
+    // AI Reply Generation Endpoint (uses unified pipeline)
     app.post('/api/ai-reply-generate', requireAuth, async (req, res) => {
       try {
         const { type, id, forceRegenerate } = req.body;
@@ -661,7 +661,7 @@ async function startApplication(): Promise<void> {
 
         logger.info(`🤖 AI Reply Generation requested: ${type} ${transactionId}${forceRegenerate ? ' (regenerate)' : ''}`);
 
-        // Step 1: Check if AI replies are enabled
+        // Check if AI replies are enabled
         const aiEnabled = await databaseService.isAIRepliesEnabled();
         if (!aiEnabled) {
           return res.status(403).json({
@@ -670,7 +670,7 @@ async function startApplication(): Promise<void> {
           });
         }
 
-        // Step 2: Check if reply already exists
+        // Check if reply already exists
         const existingReply = type === 'sale'
           ? await databaseService.getAIReplyBySaleId(transactionId)
           : await databaseService.getAIReplyByRegistrationId(transactionId);
@@ -696,217 +696,63 @@ async function startApplication(): Promise<void> {
           });
         }
 
-        // If regenerating, update the existing reply instead of creating duplicate
-        if (existingReply && forceRegenerate) {
-          logger.info(`   Regenerating reply (will update existing ID: ${existingReply.id})...`);
+        // If forceRegenerate and reply already posted, delete it first
+        if (forceRegenerate && existingReply && existingReply.status === 'posted') {
+          logger.info(`   Deleting existing posted reply (ID: ${existingReply.id}) before regenerating...`);
+          await databaseService.pgPool.query(
+            'DELETE FROM ai_replies WHERE id = $1',
+            [existingReply.id]
+          );
         }
 
-        // Step 3: Fetch transaction from database
-        logger.debug('   Fetching transaction from database...');
-        const transaction = type === 'sale'
-          ? await databaseService.getSaleById(transactionId)
-          : await databaseService.getRegistrationById(transactionId);
-
-        if (!transaction) {
-          return res.status(404).json({
-            success: false,
-            error: `${type} with id ${transactionId} not found`
-          });
-        }
-
-        // Check if transaction has a tweet_id (required for replies)
-        if (!transaction.tweetId) {
-          return res.status(400).json({
-            success: false,
-            error: `${type} has not been posted to Twitter yet. Cannot generate reply without original tweet.`
-          });
-        }
-
-        // Step 4: Prepare event data and fetch Magic Eden data (reuse preview logic)
-        const isSale = type === 'sale';
-        const sale = isSale ? transaction as ProcessedSale : null;
-        const registration = !isSale ? transaction as ENSRegistration : null;
-        const tokenName = isSale ? (sale!.nftName || 'Unknown') : registration!.fullName;
-
-        const eventData = {
-          type: type as 'sale' | 'registration',
-          tokenName,
-          price: parseFloat(isSale ? sale!.priceEth : (registration!.costEth || '0')),
-          priceUsd: parseFloat(isSale ? (sale!.priceUsd || '0') : (registration!.costUsd || '0')),
-          currency: 'ETH',
-          timestamp: new Date(transaction.blockTimestamp).getTime() / 1000,
-          buyerAddress: isSale ? sale!.buyerAddress : registration!.ownerAddress,
-          sellerAddress: isSale ? sale!.sellerAddress : undefined,
-          txHash: transaction.transactionHash
-        };
-
-        logger.debug(`   📋 Addresses from DB: Buyer=${eventData.buyerAddress.slice(0, 10)}..., Seller=${eventData.sellerAddress ? eventData.sellerAddress.slice(0, 10) + '...' : 'N/A'}`);
-        
-        // Error if buyer and seller are the same (data issue)
-        if (eventData.sellerAddress && eventData.buyerAddress.toLowerCase() === eventData.sellerAddress.toLowerCase()) {
-          logger.error(`   ❌ ERROR: Buyer and seller are the same address! This is a data error.`);
-          return res.status(400).json({
-            success: false,
-            error: 'Invalid transaction data: buyer and seller addresses are identical. This may indicate a data ingestion error.'
-          });
-        }
-
-        logger.debug('   Fetching data in parallel (Magic Eden, ENS holdings, + name research)...');
-        
-        // Start all API calls in parallel for speed (including name research and holdings)
-        // Track which API calls failed or returned incomplete data
-        const openaiService = new OpenAIService();
+        // Use the unified AIReplyService pipeline (same as automatic generation)
+        const { AIReplyService } = await import('./services/aiReplyService');
         const { OpenSeaService } = await import('./services/openSeaService');
-        const openSeaService = new OpenSeaService();
-        
-        let tokenDataIncomplete = false;
-        let buyerDataIncomplete = false;
-        let sellerDataIncomplete = false;
-        
-        const [tokenResult, buyerResult, sellerResult, buyerHoldings, sellerHoldings, nameResearch] = await Promise.all([
-          magicEdenService.getTokenActivityHistory(
-            transaction.contractAddress,
-            transaction.tokenId
-          ).catch((error: any) => {
-            logger.error('Token activity fetch failed:', error.message);
-            return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0 };
-          }),
-          magicEdenService.getUserActivityHistory(
-            eventData.buyerAddress
-          ).catch((error: any) => {
-            logger.error('Buyer activity fetch failed:', error.message);
-            return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0 };
-          }),
-          eventData.sellerAddress
-            ? magicEdenService.getUserActivityHistory(eventData.sellerAddress).catch((error: any) => {
-                logger.error('Seller activity fetch failed:', error.message);
-                return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0 };
-              })
-            : Promise.resolve(null),
-          // Fetch buyer's current ENS holdings
-          openSeaService.getENSHoldings(eventData.buyerAddress, { limit: 200, maxPages: 5 }).catch((error: any) => {
-            logger.error('Buyer holdings fetch failed:', error.message);
-            return { names: [], incomplete: true, totalFetched: 0 };
-          }),
-          // Fetch seller's current ENS holdings (if sale)
-          eventData.sellerAddress
-            ? openSeaService.getENSHoldings(eventData.sellerAddress, { limit: 200, maxPages: 5 }).catch((error: any) => {
-                logger.error('Seller holdings fetch failed:', error.message);
-                return { names: [], incomplete: true, totalFetched: 0 };
-              })
-            : Promise.resolve(null),
-          // Start name research in parallel
-          (async () => {
-            try {
-              return await openaiService.researchName(tokenName);
-            } catch (error) {
-              logger.error('Name research failed, continuing without it:', error);
-              return '';
-            }
-          })()
-        ]);
-
-        // Extract activities and track incomplete status
-        const tokenActivities = tokenResult.activities;
-        const buyerActivities = buyerResult.activities;
-        const sellerActivities = sellerResult?.activities || null;
-        
-        tokenDataIncomplete = tokenResult.incomplete;
-        buyerDataIncomplete = buyerResult.incomplete;
-        sellerDataIncomplete = sellerResult?.incomplete || false;
-
-        // Step 5: Build LLM context
-        logger.debug('   Building LLM context...');
         const { dataProcessingService } = await import('./services/dataProcessingService');
+        const openaiService = new OpenAIService();
+        const openSeaService = new OpenSeaService();
         const ensWorkerService = new ENSWorkerService();
-        const llmContext = await dataProcessingService.buildLLMContext(
-          eventData,
-          tokenActivities,
-          buyerActivities,
-          sellerActivities,
+        
+        const aiReplyService = new AIReplyService(
+          openaiService,
+          databaseService,
+          twitterService,
+          dataProcessingService,
           magicEdenService,
-          ensWorkerService,
-          {
-            tokenDataIncomplete,
-            buyerDataIncomplete,
-            sellerDataIncomplete
-          },
-          {
-            buyerHoldings: buyerHoldings || null,
-            sellerHoldings: sellerHoldings || null
-          }
+          openSeaService,
+          ensWorkerService
         );
 
-        // Step 6: Generate reply using OpenAI (name research already done in parallel)
-        logger.debug('   Generating AI reply...');
-        const generatedReply = await openaiService.generateReply(llmContext, nameResearch);
+        // Generate and post reply using the unified pipeline (does NOT auto-post, only generates)
+        await aiReplyService.generateAndPostAIReply(
+          type as 'sale' | 'registration',
+          transactionId
+        );
 
-        // Step 7: Store in database (update existing or insert new)
-        let replyId: number;
-        if (existingReply && forceRegenerate && existingReply.id) {
-          logger.debug('   Updating existing AI reply in database...');
-          // Update the existing reply
-          await databaseService.pgPool.query(`
-            UPDATE ai_replies 
-            SET 
-              model_used = $1,
-              prompt_tokens = $2,
-              completion_tokens = $3,
-              total_tokens = $4,
-              reply_text = $5,
-              name_research = $6,
-              status = 'pending',
-              error_message = NULL,
-              created_at = NOW()
-            WHERE id = $7
-          `, [
-            generatedReply.modelUsed,
-            generatedReply.promptTokens,
-            generatedReply.completionTokens,
-            generatedReply.totalTokens,
-            generatedReply.tweetText,
-            nameResearch,
-            existingReply.id
-          ]);
-          replyId = existingReply.id;
-          logger.info(`✅ AI reply regenerated and updated (ID: ${replyId})`);
-        } else {
-          logger.debug('   Inserting new AI reply in database...');
-          replyId = await databaseService.insertAIReply({
-            saleId: isSale ? transactionId : undefined,
-            registrationId: !isSale ? transactionId : undefined,
-            originalTweetId: transaction.tweetId,
-            replyTweetId: undefined, // Not posted yet
-            transactionType: type,
-            transactionHash: transaction.transactionHash,
-            modelUsed: generatedReply.modelUsed,
-            promptTokens: generatedReply.promptTokens,
-            completionTokens: generatedReply.completionTokens,
-            totalTokens: generatedReply.totalTokens,
-            costUsd: 0, // Not tracked per requirements
-            replyText: generatedReply.tweetText,
-            nameResearch: nameResearch,
-            status: 'pending', // Generated but not posted
-            errorMessage: undefined
-          });
-          logger.info(`✅ AI reply generated and stored (ID: ${replyId})`);
+        // Fetch the generated reply to return details
+        const generatedReply = type === 'sale'
+          ? await databaseService.getAIReplyBySaleId(transactionId)
+          : await databaseService.getAIReplyByRegistrationId(transactionId);
+
+        if (!generatedReply) {
+          throw new Error('Reply generation completed but reply not found in database');
         }
 
-        // Step 8: Return response
+        // Return response
         res.json({
           success: true,
-          message: 'AI reply generated successfully',
+          message: forceRegenerate ? 'AI reply regenerated successfully' : 'AI reply generated successfully',
           reply: {
-            id: replyId,
-            text: generatedReply.tweetText,
+            id: generatedReply.id,
+            text: generatedReply.replyText,
             tokens: {
               prompt: generatedReply.promptTokens,
               completion: generatedReply.completionTokens,
               total: generatedReply.totalTokens
             },
             modelUsed: generatedReply.modelUsed,
-            status: 'pending',
-            nameResearch: generatedReply.nameResearch ? 'Available' : 'Not available'
+            status: generatedReply.status,
+            createdAt: generatedReply.createdAt
           }
         });
 
