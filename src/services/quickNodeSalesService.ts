@@ -99,11 +99,14 @@ export class QuickNodeSalesService {
           continue;
         }
 
-        // Check if already processed
-        const isAlreadyProcessed = await this.databaseService.isSaleProcessed(saleData.tokenId);
+        // Check if already processed (using transaction hash + log index)
+        const isAlreadyProcessed = await this.databaseService.isSaleProcessed(
+          saleData.transactionHash, 
+          saleData.logIndex
+        );
         if (isAlreadyProcessed) {
           results.skipped++;
-          logger.info(`⚡ QuickNode sale already processed: ${saleData.tokenId} (${order.txHash})`);
+          logger.info(`⚡ QuickNode sale already processed: ${saleData.tokenId} (tx: ${order.txHash}, log: ${saleData.logIndex})`);
           continue;
         }
 
@@ -146,6 +149,7 @@ export class QuickNodeSalesService {
     priceEth: string;
     blockNumber: number;
     blockTimestamp: string;
+    logIndex: number;
   } | null> {
     try {
       // Find ENS token in either offer OR consideration 
@@ -293,8 +297,9 @@ export class QuickNodeSalesService {
         logger.warn(`⚠️ Buyer and seller are the same address: ${buyerAddress} - this may indicate a self-transfer or parsing error`);
       }
 
-      // Convert hex block number to decimal
+      // Convert hex block number and log index to decimal
       const blockNumber = parseInt(order.blockNumber, 16);
+      const logIndex = parseInt(order.logIndex, 16);
       
       // Use current timestamp as fallback (matches existing sales processing behavior)
       // TODO: Could fetch actual block timestamp from Alchemy if needed for accuracy
@@ -308,7 +313,8 @@ export class QuickNodeSalesService {
         sellerAddress,
         priceEth,
         blockNumber,
-        blockTimestamp
+        blockTimestamp,
+        logIndex
       };
       
     } catch (error: any) {
@@ -331,6 +337,7 @@ export class QuickNodeSalesService {
     priceEth: string;
     blockNumber: number;
     blockTimestamp: string;
+    logIndex: number;
   }): Promise<Omit<ProcessedSale, 'id'> | null> {
     try {
       logger.debug(`Enriching sale data for token ${saleData.tokenId}`);
@@ -416,6 +423,7 @@ export class QuickNodeSalesService {
         priceUsd,
         blockNumber: saleData.blockNumber,
         blockTimestamp: saleData.blockTimestamp,
+        logIndex: saleData.logIndex,
         processedAt: new Date().toISOString(),
         posted: false,
         // Enriched metadata (no description)

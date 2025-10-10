@@ -60,7 +60,7 @@ export class DatabaseService implements IDatabaseService {
           id SERIAL PRIMARY KEY,
           transaction_hash VARCHAR(66) NOT NULL,
           contract_address VARCHAR(42) NOT NULL,
-          token_id VARCHAR(255) NOT NULL UNIQUE,
+          token_id VARCHAR(255) NOT NULL,
           marketplace VARCHAR(50) NOT NULL,
           buyer_address VARCHAR(42) NOT NULL,
           seller_address VARCHAR(42) NOT NULL,
@@ -68,6 +68,7 @@ export class DatabaseService implements IDatabaseService {
           price_usd DECIMAL(12,2),
           block_number INTEGER NOT NULL,
           block_timestamp TIMESTAMP NOT NULL,
+          log_index INTEGER,
           processed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
           tweet_id VARCHAR(255),
           posted BOOLEAN DEFAULT FALSE,
@@ -80,7 +81,8 @@ export class DatabaseService implements IDatabaseService {
           current_usd_value TEXT,
           verified_collection BOOLEAN DEFAULT FALSE,
           created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT unique_tx_log UNIQUE (transaction_hash, log_index)
         )
       `);
 
@@ -367,10 +369,10 @@ export class DatabaseService implements IDatabaseService {
         INSERT INTO processed_sales (
           transaction_hash, contract_address, token_id, marketplace,
           buyer_address, seller_address, price_eth, price_usd,
-          block_number, block_timestamp, processed_at, posted,
+          block_number, block_timestamp, log_index, processed_at, posted,
           collection_name, collection_logo, nft_name, nft_image,
           nft_description, marketplace_logo, current_usd_value, verified_collection
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
         RETURNING id
       `, [
         sale.transactionHash,
@@ -383,6 +385,7 @@ export class DatabaseService implements IDatabaseService {
         sale.priceUsd ? parseFloat(sale.priceUsd) : null,
         sale.blockNumber,
         new Date(sale.blockTimestamp),
+        sale.logIndex || null,
         new Date(sale.processedAt),
         sale.posted,
         sale.collectionName || null,
@@ -406,14 +409,15 @@ export class DatabaseService implements IDatabaseService {
 
   /**
    * Check if a sale has already been processed
+   * Uses transaction_hash + log_index for true uniqueness (allows multiple sales of same ENS name)
    */
-  async isSaleProcessed(tokenId: string): Promise<boolean> {
+  async isSaleProcessed(transactionHash: string, logIndex: number): Promise<boolean> {
     if (!this.pool) throw new Error('Database not initialized');
 
     try {
       const result = await this.pool.query(
-        'SELECT id FROM processed_sales WHERE token_id = $1',
-        [tokenId]
+        'SELECT id FROM processed_sales WHERE transaction_hash = $1 AND log_index = $2',
+        [transactionHash, logIndex]
       );
 
       return result.rows.length > 0;
@@ -435,7 +439,7 @@ export class DatabaseService implements IDatabaseService {
           id, transaction_hash as "transactionHash", contract_address as "contractAddress",
           token_id as "tokenId", marketplace, buyer_address as "buyerAddress",
           seller_address as "sellerAddress", price_eth as "priceEth", price_usd as "priceUsd",
-          block_number as "blockNumber", block_timestamp as "blockTimestamp",
+          block_number as "blockNumber", block_timestamp as "blockTimestamp", log_index as "logIndex",
           processed_at as "processedAt", tweet_id as "tweetId", posted,
           collection_name as "collectionName", collection_logo as "collectionLogo",
           nft_name as "nftName", nft_image as "nftImage", nft_description as "nftDescription",
@@ -471,7 +475,7 @@ export class DatabaseService implements IDatabaseService {
           id, transaction_hash as "transactionHash", contract_address as "contractAddress",
           token_id as "tokenId", marketplace, buyer_address as "buyerAddress",
           seller_address as "sellerAddress", price_eth as "priceEth", price_usd as "priceUsd",
-          block_number as "blockNumber", block_timestamp as "blockTimestamp",
+          block_number as "blockNumber", block_timestamp as "blockTimestamp", log_index as "logIndex",
           processed_at as "processedAt", tweet_id as "tweetId", posted,
           collection_name as "collectionName", collection_logo as "collectionLogo",
           nft_name as "nftName", nft_image as "nftImage", nft_description as "nftDescription",
@@ -559,7 +563,7 @@ export class DatabaseService implements IDatabaseService {
           id, transaction_hash as "transactionHash", contract_address as "contractAddress",
           token_id as "tokenId", marketplace, buyer_address as "buyerAddress",
           seller_address as "sellerAddress", price_eth as "priceEth", price_usd as "priceUsd",
-          block_number as "blockNumber", block_timestamp as "blockTimestamp",
+          block_number as "blockNumber", block_timestamp as "blockTimestamp", log_index as "logIndex",
           processed_at as "processedAt", tweet_id as "tweetId", posted,
           collection_name as "collectionName", collection_logo as "collectionLogo",
           nft_name as "nftName", nft_image as "nftImage", nft_description as "nftDescription",

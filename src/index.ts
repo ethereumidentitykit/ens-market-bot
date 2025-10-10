@@ -1064,12 +1064,15 @@ async function startApplication(): Promise<void> {
           
           for (const trade of fetchResults.trades) {
             try {
-              // Check if already processed (duplicate detection)
-              const isAlreadyProcessed = await databaseService.isSaleProcessed(trade.tokenId);
+              // Check if already processed (duplicate detection using tx hash + log index)
+              const isAlreadyProcessed = await databaseService.isSaleProcessed(
+                trade.transactionHash,
+                trade.logIndex
+              );
               
               if (isAlreadyProcessed) {
                 duplicateSales++;
-                logger.debug(`Skipping duplicate sale: ${trade.transactionHash}`);
+                logger.debug(`Skipping duplicate sale: ${trade.transactionHash} (log: ${trade.logIndex})`);
                 continue;
               }
 

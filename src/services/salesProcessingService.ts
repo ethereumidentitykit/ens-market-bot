@@ -332,12 +332,15 @@ export class SalesProcessingService {
 
       for (const sale of recentSales) {
         try {
-          // Check if already processed
-          const isAlreadyProcessed = await this.databaseService.isSaleProcessed(sale.tokenId);
+          // Check if already processed (using tx hash + log index)
+          const isAlreadyProcessed = await this.databaseService.isSaleProcessed(
+            sale.transactionHash,
+            sale.logIndex
+          );
           
           if (isAlreadyProcessed) {
             stats.duplicates++;
-            logger.info(`🚀 QuickNode beat Moralis! Sale already processed: ${sale.transactionHash} (${sale.tokenId})`);
+            logger.info(`🚀 QuickNode beat Moralis! Sale already processed: ${sale.transactionHash} (log: ${sale.logIndex})`);
             continue;
           }
 

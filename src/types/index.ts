@@ -77,6 +77,7 @@ export interface ProcessedSale {
   priceUsd?: string;
   blockNumber: number;
   blockTimestamp: string;
+  logIndex?: number; // Event index within transaction (for unique identification)
   processedAt: string;
   tweetId?: string;
   posted: boolean;
@@ -205,7 +206,7 @@ export interface IDatabaseService {
   pgPool: Pool; // Connection pool for external libraries like connect-pg-simple
   initialize(): Promise<void>;
   insertSale(sale: Omit<ProcessedSale, 'id'>): Promise<number>;
-  isSaleProcessed(tokenId: string): Promise<boolean>;
+  isSaleProcessed(transactionHash: string, logIndex: number): Promise<boolean>;
   getRecentSales(limit?: number): Promise<ProcessedSale[]>;
   getSaleById(id: number): Promise<ProcessedSale | null>;
   getUnpostedSales(limit?: number, maxAgeHours?: number): Promise<ProcessedSale[]>;
