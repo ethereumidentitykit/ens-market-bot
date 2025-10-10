@@ -333,7 +333,7 @@ Research: ${sanitizedLabel}`;
       
       // Validate response (with title included)
       if (!this.validateResponse(tweetText)) {
-        throw new Error(`Invalid response: ${tweetText.length} characters (max 1000)`);
+        throw new Error(`Invalid response: ${tweetText.length} characters (max 1200)`);
       }
 
       const usage = response.usage;
@@ -381,12 +381,19 @@ you can keep a couple numerical data points, but don't make it the main focus.
 
 NOTE: Your response will be prefixed with "AI insight:" automatically, so don't include that in your text.
 
+STRUCTURE (IMPORTANT):
+Your response MUST have TWO parts:
+1. **First paragraph (TL;DR)**: A concise 1-2 sentence summary of the most interesting insight
+2. **Remaining paragraphs**: Detailed explanation and context
+
+The TL;DR should capture the main story in 100-150 characters. Then expand with supporting details.
+
 WRITING STYLE:
 - Use simple, everyday words (not "consolidator" or "monetizing" unless it's the clearest word)
 - Short sentences that are easy to read
 - Professional but not stuffy
 - No slang or casual phrases like "on a tear," "swing," "nabbed"
-- You have 1000 characters max
+- You have 1200 characters max (TL;DR + details combined)
 
 FORMATTING:
 - NEVER use dashes (—, –, or - at start of lines)
@@ -466,8 +473,10 @@ When mentioning the buyer or seller, use the exact formatted handle from the EVE
 - If shown as "0xabcd...1234" → use "0xabcd...1234"
 Examples: "The buyer jim.eth @jim has been collecting..." or "The buyer 0x23af...07s3 is a fresh wallet..."
 
-GOOD EXAMPLE:
-"Edward is one of the most common English names globally (forebears shows ~600k bearers). The buyer collector.eth @collector has been focused on traditional first names, picking up 6 premium ones over 2 months and holding all of them. The seller held for ~3 years and made 4x. Classic identity names are seeing renewed interest."
+GOOD EXAMPLE WITH TL;DR:
+"TL;DR: Premium first name with 4x return after 3-year hold.
+
+Edward is one of the most common English names globally (forebears shows ~600k bearers). The buyer collector.eth @collector has been focused on traditional first names, picking up 6 premium ones over 2 months and holding all of them. The seller held for ~3 years and made 4x. Classic identity names are seeing renewed interest."
 
 BAD EXAMPLES:
 "Common given name, nothing exotic. Note there are live trademark filings using the same word, so commercial uses could carry legal risk in some industries." ❌ BORING: Skip legal/IP/trademark talk
@@ -677,8 +686,8 @@ REMEMBER:
       return false;
     }
 
-    if (text.length > 1000) {
-      logger.warn(`Response too long: ${text.length} characters (max 1000 for Twitter Premium)`);
+    if (text.length > 1200) {
+      logger.warn(`Response too long: ${text.length} characters (max 1200 for Twitter Premium)`);
       return false;
     }
 
