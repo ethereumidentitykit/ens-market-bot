@@ -210,6 +210,7 @@ FOCUS AREAS:
    - Is this name connected to any NOTABLE crypto projects, protocols, or products? (tokens, DeFi platforms, DAOs, NFT projects)
    - Recent announcements or launches in crypto/web3 space using this name? check articles etc.
    - Token tickers, protocol names, stablecoin names, or blockchain infrastructure
+   - need to be very careful when mentioning tokens, there are a lot of scammy tokens out there with fake market caps. make sure to check carefully.
    - Web3 brands, wallets, or crypto infrastructure using this name?
    - **FOR TOKENS: CHECK COINGECKO OR COINMARKETCAP**
      - Look up the token's market cap and ranking
@@ -233,6 +234,7 @@ IMPORTANT PERSPECTIVE:
 - Names that cross boundaries (e.g., person name + crypto term + gaming reference) = HIGH MARKET DEMAND
 - "Search noise" or "ambiguity" are NOT negatives - they indicate cross-market appeal
 - Think usernames, not web2 domains: versatility and multiple interpretations = valuable
+- never ask questions, you are making a report. if you are uncertain about something, put that in your report.
 
 SKIP:
 - Legal/trademark/IP/copyright issues (not relevant for web3 usernames)
