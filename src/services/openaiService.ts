@@ -223,10 +223,17 @@ FOCUS AREAS:
    - Is it short, memorable, and distinctive for personal branding?
    - Popular in gaming, crypto, or social communities?
 
+IMPORTANT PERSPECTIVE:
+- Multiple meanings or uses = GOOD (more potential buyers from different communities)
+- Names that cross boundaries (e.g., person name + crypto term + gaming reference) = HIGH MARKET DEMAND
+- "Search noise" or "ambiguity" are NOT negatives - they indicate cross-market appeal
+- Think usernames, not web2 domains: versatility and multiple interpretations = valuable
+
 SKIP:
 - Legal/trademark/IP/copyright issues (not relevant for web3 usernames)
 - "Commercial use" or brand protection concerns
 - Corporate domain valuation frameworks
+- SEO/branding "noise" concerns (these are web2 concepts, not relevant here)
 
 Be honest. If there's nothing interesting or significant about this name, say so. Don't inflate its importance or significance. If it's a word or string without wide recognition - thats good info to return.
 
@@ -409,10 +416,11 @@ FORMATTING:
 
 WHAT TO FOCUS ON:
 1. **Crypto/Web3 connections (HIGHEST PRIORITY)**:
-   - If the name research found ANY crypto/web3 connections, mention them prominently
+   - If the name research found SIGNIFICANT crypto/web3 connections, mention them, especially if very recent news (within days)
    - Token tickers, protocol names, recent crypto announcements, DeFi platforms, stablecoins, etc.
    - This is often the MOST interesting insight for obscure-looking names
    - Example: If research finds it's a new stablecoin ticker or protocol name, lead with that
+   - **IMPORTANT**: Only mention if it's a real, notable use case. Skip "small crypto ticker activity" or minor/obscure projects
 
 2. **Name meaning & popularity**: 
    - Only explain if it's unusual or unclear. Skip obvious ones like "students" or "coffee", "angel" etc.
@@ -435,8 +443,14 @@ WHAT TO FOCUS ON:
    - Quick flips or unusual timing
    - Big profit or loss on this specific sale
    - **Current holdings patterns**: Look for themes in what they're collecting (e.g., all animals, all 3-letter names, all dictionary words, all numbers, specific category focus).
-   - **NAME EXAMPLES**: If the buyer already owns similar names, mention one or two specific examples to show the pattern. For example: "The buyer already owns other first names like nathan.eth and emma.eth" or "Their portfolio includes similar words like coffee.eth and tea.eth"
-   - Keep it to 2-3 example names max - just enough to prove the pattern
+   - **NAME EXAMPLES**: ONLY if the buyer already owns DIRECTLY SIMILAR names to the one being purchased, mention one or two specific examples. The names must be genuinely related.
+     - GOOD: Buying "aug.eth" and they own "sep.eth" and "oct.eth" (all months)
+     - GOOD: Buying "nathan.eth" and they own "emma.eth" and "sarah.eth" (all first names)
+     - GOOD: Buying "coffee.eth" and they own "tea.eth" and "latte.eth" (all beverages)
+     - BAD: Buying "aug.eth" and they own "0000000002.eth" and "04040404.eth" (NOT similar - don't mention)
+     - BAD: Buying "sam.eth" and they own "12345.eth" (NOT similar - don't mention)
+   - If you can't find genuinely similar names, just describe the general pattern without examples
+   - Keep it to 1-2 example names max - only if they're truly relevant
    - **CRITICAL**: When describing patterns, ONLY say what they ARE doing. NEVER add "rather than", "instead of", or "as opposed to" phrases.
    
    🚩 **WASH TRADING DETECTION** (critical - don't downplay):
@@ -459,6 +473,11 @@ CRITICAL RULES:
 - give low weight "commercial uses" or "brand protection" - ENS names are primarily usernames/identities
 - not interested in brandability or how it could be used in a brand or company name.
 - NEVER mention the ABSENCE of problems (e.g., "no wash trading signals", "no red flags", "nothing suspicious")
+- **MULTIPLE MEANINGS = GOOD**: If a name has multiple meanings or uses, frame this as POSITIVE (cross-market appeal, more potential buyers). NEVER use phrases like "brings search noise", "ambiguous", "confusing", or other negative framing for versatility.
+  - BAD: "also brings search noise from other AUG uses"
+  - GOOD: "works across multiple contexts - crypto ticker, common abbreviation, and username appeal"
+  - Think: versatility = more potential buyers = market strength
+  
 - **ABSOLUTELY FORBIDDEN PHRASES** - These will make your response invalid:
   ❌ "rather than x"
   ❌ "instead of x"  
@@ -466,6 +485,8 @@ CRITICAL RULES:
   ❌ "not a flipper" / "not flipping" / "not selling"
   ❌ "one-off flips" in contrast statements
   ❌ "speculative flips" when contrasting with what they ARE doing
+  ❌ "small crypto ticker activity" or any minimizing language about crypto uses (either mention it prominently or skip it)
+  ❌ "marginal upside" or "adds marginal value" (don't mention if not significant)
   
 - **CORRECT WAY** - State only the positive behavior:
   ✅ "building a collection"
@@ -511,6 +532,10 @@ BAD EXAMPLES:
 "Umbreon sits under Pokémon Company IP, which limits commercial listing and resale paths." ❌ BORING: Don't discuss IP ownership or "commercial" concerns
 
 "The buyer has 31 buys with zero sells, not quick flipping." ❌ WRONG: Don't use "not X" phrasing. Instead say: "The buyer has accumulated 31 names with all holdings retained, building a focused collection."
+
+"aug.eth is a three-letter string with gaming, biotech, and music uses, and some small crypto ticker activity." ❌ WRONG: Don't minimize crypto uses with "small" - either highlight it prominently or skip it entirely.
+
+"The buyer shows an accumulation pattern, holding short and numeric identities like 0000000002.eth and 04040404.eth." ❌ WRONG when buying "aug.eth": These aren't similar names! Only mention holdings if they're directly related to the name being purchased.
 
 "That pattern points to building utility-first identities rather than speculative one-off flips." ❌ WRONG: Delete everything after "identities". Just say: "That pattern points to building utility-first identities." The "rather than" comparison is unnecessary and breaks the positive-only rule.
 
