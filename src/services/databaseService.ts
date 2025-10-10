@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
-import { ProcessedSale, IDatabaseService, TwitterPost, ENSRegistration, ENSBid, PriceTier, SiweSession, AIReply } from '../types';
+import { ProcessedSale, IDatabaseService, TwitterPost, ENSRegistration, ENSBid, PriceTier, SiweSession, AIReply, NameResearch } from '../types';
 
 /**
  * PostgreSQL database service 
@@ -1640,6 +1640,89 @@ export class DatabaseService implements IDatabaseService {
   }
 
   /**
+   * Get name research by ENS name
+   */
+  async getNameResearch(ensName: string): Promise<NameResearch | null> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        SELECT 
+          id, ens_name as "ensName", research_text as "researchText",
+          researched_at as "researchedAt", updated_at as "updatedAt",
+          source, created_at as "createdAt"
+        FROM name_research
+        WHERE ens_name = $1
+      `, [ensName]);
+
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      const row = result.rows[0];
+      return {
+        id: row.id,
+        ensName: row.ensName,
+        researchText: row.researchText,
+        researchedAt: row.researchedAt.toISOString(),
+        updatedAt: row.updatedAt.toISOString(),
+        source: row.source,
+        createdAt: row.createdAt ? row.createdAt.toISOString() : undefined
+      };
+    } catch (error: any) {
+      logger.error('Failed to get name research:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Insert new name research
+   */
+  async insertNameResearch(research: Omit<NameResearch, 'id' | 'createdAt' | 'updatedAt'>): Promise<number> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        INSERT INTO name_research (ens_name, research_text, researched_at, source)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (ens_name) 
+        DO UPDATE SET 
+          research_text = $2,
+          researched_at = $3,
+          updated_at = CURRENT_TIMESTAMP
+        RETURNING id
+      `, [research.ensName, research.researchText, research.researchedAt, research.source]);
+
+      const id = result.rows[0].id;
+      logger.info(`Stored name research for ${research.ensName} (ID: ${id})`);
+      return id;
+    } catch (error: any) {
+      logger.error('Failed to insert name research:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Update existing name research with fresh data
+   */
+  async updateNameResearch(ensName: string, researchText: string): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      await this.pool.query(`
+        UPDATE name_research
+        SET research_text = $1, researched_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        WHERE ens_name = $2
+      `, [researchText, ensName]);
+
+      logger.info(`Updated name research for ${ensName}`);
+    } catch (error: any) {
+      logger.error('Failed to update name research:', error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Insert a new AI reply record
    */
   async insertAIReply(reply: Omit<AIReply, 'id' | 'createdAt' | 'postedAt'>): Promise<number> {
@@ -1651,8 +1734,8 @@ export class DatabaseService implements IDatabaseService {
           sale_id, registration_id, original_tweet_id, reply_tweet_id,
           transaction_type, transaction_hash, model_used,
           prompt_tokens, completion_tokens, total_tokens, cost_usd,
-          reply_text, name_research, status, error_message
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+          reply_text, name_research_id, name_research, status, error_message
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
         RETURNING id
       `, [
         reply.saleId || null,
@@ -1667,7 +1750,8 @@ export class DatabaseService implements IDatabaseService {
         reply.totalTokens,
         reply.costUsd,
         reply.replyText,
-        reply.nameResearch || null,
+        reply.nameResearchId || null,
+        reply.nameResearch || null, // Keep for backward compatibility during migration
         reply.status,
         reply.errorMessage || null
       ]);
@@ -1732,6 +1816,34 @@ export class DatabaseService implements IDatabaseService {
       return result.rows.length > 0 ? result.rows[0] : null;
     } catch (error: any) {
       logger.error('Failed to get AI reply by registration ID:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get AI reply by ID
+   */
+  async getAIReplyById(replyId: number): Promise<AIReply | null> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        SELECT 
+          id, sale_id as "saleId", registration_id as "registrationId",
+          original_tweet_id as "originalTweetId", reply_tweet_id as "replyTweetId",
+          transaction_type as "transactionType", transaction_hash as "transactionHash",
+          model_used as "modelUsed", prompt_tokens as "promptTokens",
+          completion_tokens as "completionTokens", total_tokens as "totalTokens",
+          cost_usd as "costUsd", reply_text as "replyText", name_research as "nameResearch", status,
+          error_message as "errorMessage", created_at as "createdAt",
+          posted_at as "postedAt"
+        FROM ai_replies
+        WHERE id = $1
+      `, [replyId]);
+
+      return result.rows.length > 0 ? result.rows[0] : null;
+    } catch (error: any) {
+      logger.error('Failed to get AI reply by ID:', error.message);
       throw error;
     }
   }

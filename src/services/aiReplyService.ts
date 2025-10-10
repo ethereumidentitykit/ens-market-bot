@@ -34,6 +34,7 @@ export class AIReplyService {
   // Timeout constants (in milliseconds)
   private readonly NAME_RESEARCH_TIMEOUT = 8 * 60 * 1000; // 8 minutes
   private readonly AI_GENERATION_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+  private readonly RESEARCH_MAX_AGE_DAYS = 30; // Research older than this is considered stale
 
   constructor(
     openaiService: OpenAIService,
@@ -67,24 +68,24 @@ export class AIReplyService {
   }
 
   /**
-   * Core method: Generate and post AI reply for a sale or registration
-   * Called by DatabaseEventService when a tweet is posted
+   * Generate AI reply and store as 'pending' (does NOT post to Twitter)
+   * Used by: Admin dashboard manual generation
+   * @returns The ID of the generated reply
    */
-  async generateAndPostAIReply(
+  async generateReply(
     type: 'sale' | 'registration',
     recordId: number
-  ): Promise<void> {
+  ): Promise<number> {
     const startTime = Date.now();
     logger.info(`🤖 [AI Reply] Starting generation for ${type} ${recordId}`);
 
     try {
-      // Step 1: Validate prerequisites
+      // Step 1: Validate prerequisites (skip auto-posting checks)
       logger.debug(`   [AI Reply] Step 1: Validating prerequisites...`);
-      const validation = await this.validateReplyConditions(type, recordId);
+      const validation = await this.validateReplyConditions(type, recordId, false); // skipAutoPostChecks
       
       if (!validation.valid || !validation.transaction) {
-        logger.warn(`   [AI Reply] ❌ Validation failed: ${validation.reason}`);
-        return; // Skip this reply
+        throw new Error(`Validation failed: ${validation.reason}`);
       }
 
       const transaction = validation.transaction;
@@ -97,12 +98,7 @@ export class AIReplyService {
       // Validate buyer ≠ seller (data error check)
       if (eventData.sellerAddress && 
           eventData.buyerAddress.toLowerCase() === eventData.sellerAddress.toLowerCase()) {
-        logger.error(`   [AI Reply] ❌ Data error: buyer and seller are the same address!`);
-        // Store error in database
-        if (existingReply) {
-          await this.updateReplyError(existingReply.id!, 'Data error: buyer and seller addresses are identical');
-        }
-        return;
+        throw new Error('Data error: buyer and seller addresses are identical');
       }
 
       // Step 3: Fetch all context data in parallel
@@ -140,43 +136,121 @@ export class AIReplyService {
         'AI reply generation'
       );
 
-      // Step 6: Post threaded reply to Twitter
-      logger.debug(`   [AI Reply] Step 6: Posting threaded reply to Twitter...`);
+      // Step 6: Store in database as 'pending' (NOT posted)
+      logger.debug(`   [AI Reply] Step 6: Storing reply as pending...`);
+      const replyId = await this.insertNewReplyAsPending(
+        type,
+        recordId,
+        transaction,
+        generatedReply,
+        contextData.nameResearch
+      );
+
+      const totalTime = Date.now() - startTime;
+      logger.info(`✅ [AI Reply] ${type} ${recordId} generated in ${totalTime}ms - Reply ID: ${replyId} (pending)`);
+
+      return replyId;
+
+    } catch (error: any) {
+      const totalTime = Date.now() - startTime;
+      logger.error(`❌ [AI Reply] ${type} ${recordId} failed after ${totalTime}ms:`, error.message);
+      logger.error(error.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * Post an existing pending AI reply to Twitter
+   * Used by: Admin dashboard manual post button, or automatic post after generation
+   * @param replyId The ID of the pending reply to post
+   */
+  async postReply(replyId: number): Promise<void> {
+    const startTime = Date.now();
+    logger.info(`📤 [AI Reply] Posting reply ${replyId} to Twitter...`);
+
+    try {
+      // Fetch the pending reply
+      const reply = await this.databaseService.getAIReplyById(replyId);
+      if (!reply) {
+        throw new Error(`Reply ${replyId} not found in database`);
+      }
+
+      if (reply.status === 'posted' && reply.replyTweetId) {
+        logger.info(`   Reply ${replyId} already posted - Tweet ID: ${reply.replyTweetId}`);
+        return;
+      }
+
+      if (!reply.originalTweetId) {
+        throw new Error(`Reply ${replyId} has no original tweet ID`);
+      }
+
+      // Post to Twitter
       const tweetResult = await this.twitterService.postReply(
-        generatedReply.tweetText,
-        transaction.tweetId!
+        reply.replyText,
+        reply.originalTweetId
       );
 
       if (!tweetResult.success || !tweetResult.tweetId) {
         throw new Error(`Failed to post reply: ${tweetResult.error}`);
       }
 
-      logger.info(`   [AI Reply] ✅ Reply posted to Twitter - ID: ${tweetResult.tweetId}`);
+      logger.info(`   ✅ Reply posted to Twitter - ID: ${tweetResult.tweetId}`);
 
-      // Step 7: Update or insert database record
-      logger.debug(`   [AI Reply] Step 7: Updating database...`);
-      if (existingReply && existingReply.id) {
-        // Update existing reply
-        await this.updateReplyAsPosted(
-          existingReply.id,
-          tweetResult.tweetId,
-          generatedReply,
-          contextData.nameResearch
-        );
-      } else {
-        // Insert new reply
-        await this.insertNewReply(
-          type,
-          recordId,
-          transaction,
-          tweetResult.tweetId,
-          generatedReply,
-          contextData.nameResearch
-        );
-      }
+      // Update database to mark as posted
+      await this.databaseService.pgPool.query(
+        `UPDATE ai_replies 
+         SET status = 'posted', reply_tweet_id = $1, error_message = NULL 
+         WHERE id = $2`,
+        [tweetResult.tweetId, replyId]
+      );
 
       const totalTime = Date.now() - startTime;
-      logger.info(`🎉 [AI Reply] ${type} ${recordId} complete in ${totalTime}ms - Tweet: ${tweetResult.tweetId}`);
+      logger.info(`🎉 [AI Reply] Reply ${replyId} posted in ${totalTime}ms - Tweet: ${tweetResult.tweetId}`);
+
+    } catch (error: any) {
+      const totalTime = Date.now() - startTime;
+      logger.error(`❌ [AI Reply] Reply ${replyId} post failed after ${totalTime}ms:`, error.message);
+      
+      // Record error in database
+      try {
+        await this.updateReplyError(replyId, error.message);
+      } catch (dbError: any) {
+        logger.error('   Failed to record error in database:', dbError.message);
+      }
+
+      throw error;
+    }
+  }
+
+  /**
+   * Generate and post AI reply (automatic flow)
+   * Called by DatabaseEventService when a tweet is posted
+   * This is a thin wrapper that calls generateReply() then postReply()
+   */
+  async generateAndPostAIReply(
+    type: 'sale' | 'registration',
+    recordId: number
+  ): Promise<void> {
+    const startTime = Date.now();
+    logger.info(`🤖 [AI Reply] Starting automatic generation+post for ${type} ${recordId}`);
+
+    try {
+      // Validate auto-posting is enabled
+      const validation = await this.validateReplyConditions(type, recordId, true); // requireAutoPostChecks
+      
+      if (!validation.valid || !validation.transaction) {
+        logger.warn(`   [AI Reply] ❌ Validation failed: ${validation.reason}`);
+        return; // Skip this reply
+      }
+
+      // Generate reply (stores as pending)
+      const replyId = await this.generateReply(type, recordId);
+
+      // Post to Twitter
+      await this.postReply(replyId);
+
+      const totalTime = Date.now() - startTime;
+      logger.info(`🎉 [AI Reply] ${type} ${recordId} complete (auto-posted) in ${totalTime}ms`);
 
     } catch (error: any) {
       const totalTime = Date.now() - startTime;
@@ -202,10 +276,12 @@ export class AIReplyService {
 
   /**
    * Helper: Validate that all prerequisites are met for generating a reply
+   * @param requireAutoPostChecks If true, validates auto-posting is enabled (for automatic flow)
    */
   private async validateReplyConditions(
     type: 'sale' | 'registration',
-    recordId: number
+    recordId: number,
+    requireAutoPostChecks: boolean = true
   ): Promise<{
     valid: boolean;
     reason?: string;
@@ -229,8 +305,8 @@ export class AIReplyService {
       };
     }
 
-    // Check if AI auto-posting is enabled
-    if (!this.apiToggleService.isAIAutoPostingEnabled()) {
+    // Check if AI auto-posting is enabled (only for automatic flow)
+    if (requireAutoPostChecks && !this.apiToggleService.isAIAutoPostingEnabled()) {
       return {
         valid: false,
         reason: 'AI auto-posting is disabled via admin toggle'
@@ -314,6 +390,73 @@ export class AIReplyService {
   }
 
   /**
+   * Get or fetch name research with caching and staleness checking
+   * @param ensName - The ENS name to research
+   * @returns Research text or empty string on failure
+   */
+  private async getOrFetchNameResearch(ensName: string): Promise<string> {
+    try {
+      // Normalize name to always include .eth suffix for consistency
+      const normalizedName = ensName.toLowerCase().endsWith('.eth') ? ensName : `${ensName}.eth`;
+      
+      // 1. Check if research exists in database
+      const existingResearch = await this.databaseService.getNameResearch(normalizedName);
+      
+      if (existingResearch) {
+        // 2. Check if research is fresh
+        const researchAge = Date.now() - new Date(existingResearch.researchedAt).getTime();
+        const ageInDays = researchAge / (1000 * 60 * 60 * 24);
+        
+        if (ageInDays < this.RESEARCH_MAX_AGE_DAYS) {
+          logger.info(`♻️ Using cached research for ${normalizedName} (${ageInDays.toFixed(1)} days old)`);
+          return existingResearch.researchText;
+        } else {
+          logger.info(`🔄 Research for ${normalizedName} is stale (${ageInDays.toFixed(1)} days), refreshing...`);
+        }
+      }
+      
+      // 3. Fetch new research with timeout
+      logger.info(`🔍 Fetching new research for ${normalizedName}...`);
+      const newResearch = await this.withTimeout(
+        this.openaiService.researchName(ensName),
+        this.NAME_RESEARCH_TIMEOUT,
+        'Name research'
+      );
+      
+      // 4. Store in database with normalized name
+      if (newResearch) {
+        await this.databaseService.insertNameResearch({
+          ensName: normalizedName,
+          researchText: newResearch,
+          researchedAt: new Date().toISOString(),
+          source: 'web_search'
+        });
+        logger.info(`💾 Stored new research for ${normalizedName}`);
+      }
+      
+      return newResearch;
+      
+    } catch (error: any) {
+      logger.error(`      Name research failed for ${ensName}:`, error.message);
+      
+      // 5. Fallback to stale research if available
+      try {
+        // Use normalized name for fallback lookup too
+        const normalizedName = ensName.toLowerCase().endsWith('.eth') ? ensName : `${ensName}.eth`;
+        const fallbackResearch = await this.databaseService.getNameResearch(normalizedName);
+        if (fallbackResearch) {
+          logger.warn(`⚠️ Using stale research for ${normalizedName} as fallback`);
+          return fallbackResearch.researchText;
+        }
+      } catch (fallbackError: any) {
+        logger.error(`      Fallback research fetch failed:`, fallbackError.message);
+      }
+      
+      return ''; // Return empty if all attempts fail
+    }
+  }
+
+  /**
    * Helper: Fetch all context data in parallel (Magic Eden, OpenSea, name research)
    */
   private async fetchContextData(
@@ -373,19 +516,8 @@ export class AIReplyService {
           })
         : Promise.resolve(null),
       
-      // Name research with web search (8-minute timeout)
-      (async () => {
-        try {
-          return await this.withTimeout(
-            this.openaiService.researchName(eventData.tokenName),
-            this.NAME_RESEARCH_TIMEOUT,
-            'Name research'
-          );
-        } catch (error: any) {
-          logger.error('      Name research failed, continuing without it:', error.message);
-          return '';
-        }
-      })()
+      // Name research - check cache first, fetch if needed
+      this.getOrFetchNameResearch(eventData.tokenName)
     ]);
 
     logger.debug(`      Data fetched: Token=${tokenResult.activities.length}, Buyer=${buyerResult.activities.length}, Seller=${sellerResult?.activities.length || 0}, Name research=${nameResearch ? 'Yes' : 'No'}`);
@@ -451,6 +583,12 @@ export class AIReplyService {
     generatedReply: any,
     nameResearch?: string
   ): Promise<void> {
+    // Get name research ID from database
+    const tokenName = ('nftName' in transaction) ? transaction.nftName : ('ensName' in transaction ? transaction.ensName : null);
+    // Normalize name to always include .eth suffix for consistency
+    const normalizedName = tokenName && tokenName.toLowerCase().endsWith('.eth') ? tokenName : (tokenName ? `${tokenName}.eth` : null);
+    const nameResearchRecord = normalizedName ? await this.databaseService.getNameResearch(normalizedName) : null;
+    
     await this.databaseService.insertAIReply({
       saleId: type === 'sale' ? transactionId : undefined,
       registrationId: type === 'registration' ? transactionId : undefined,
@@ -464,12 +602,52 @@ export class AIReplyService {
       totalTokens: generatedReply.totalTokens,
       costUsd: 0, // Not tracked per requirements
       replyText: generatedReply.tweetText,
-      nameResearch: nameResearch,
+      nameResearchId: nameResearchRecord?.id, // Link to research table
+      nameResearch: nameResearch, // Keep for backward compatibility
       status: 'posted',
       errorMessage: undefined
     });
 
     logger.debug(`      Inserted new reply record for ${type} ${transactionId}`);
+  }
+
+  /**
+   * Helper: Insert new reply record as 'pending' (NOT posted to Twitter yet)
+   */
+  private async insertNewReplyAsPending(
+    type: 'sale' | 'registration',
+    transactionId: number,
+    transaction: ProcessedSale | ENSRegistration,
+    generatedReply: any,
+    nameResearch?: string
+  ): Promise<number> {
+    // Get name research ID from database
+    const tokenName = ('nftName' in transaction) ? transaction.nftName : ('ensName' in transaction ? transaction.ensName : null);
+    // Normalize name to always include .eth suffix for consistency
+    const normalizedName = tokenName && tokenName.toLowerCase().endsWith('.eth') ? tokenName : (tokenName ? `${tokenName}.eth` : null);
+    const nameResearchRecord = normalizedName ? await this.databaseService.getNameResearch(normalizedName) : null;
+    
+    const replyId = await this.databaseService.insertAIReply({
+      saleId: type === 'sale' ? transactionId : undefined,
+      registrationId: type === 'registration' ? transactionId : undefined,
+      originalTweetId: transaction.tweetId!,
+      replyTweetId: undefined, // Not posted yet
+      transactionType: type,
+      transactionHash: transaction.transactionHash,
+      modelUsed: generatedReply.modelUsed,
+      promptTokens: generatedReply.promptTokens,
+      completionTokens: generatedReply.completionTokens,
+      totalTokens: generatedReply.totalTokens,
+      costUsd: 0, // Not tracked per requirements
+      replyText: generatedReply.tweetText,
+      nameResearchId: nameResearchRecord?.id, // Link to research table
+      nameResearch: nameResearch, // Keep for backward compatibility
+      status: 'pending', // NOT posted yet
+      errorMessage: undefined
+    });
+
+    logger.debug(`      Inserted new pending reply record (ID: ${replyId}) for ${type} ${transactionId}`);
+    return replyId;
   }
 
   /**
