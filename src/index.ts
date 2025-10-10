@@ -723,16 +723,14 @@ async function startApplication(): Promise<void> {
           ensWorkerService
         );
 
-        // Generate and post reply using the unified pipeline (does NOT auto-post, only generates)
-        await aiReplyService.generateAndPostAIReply(
+        // Generate reply (stores as 'pending', does NOT auto-post)
+        const replyId = await aiReplyService.generateReply(
           type as 'sale' | 'registration',
           transactionId
         );
 
         // Fetch the generated reply to return details
-        const generatedReply = type === 'sale'
-          ? await databaseService.getAIReplyBySaleId(transactionId)
-          : await databaseService.getAIReplyByRegistrationId(transactionId);
+        const generatedReply = await databaseService.getAIReplyById(replyId);
 
         if (!generatedReply) {
           throw new Error('Reply generation completed but reply not found in database');

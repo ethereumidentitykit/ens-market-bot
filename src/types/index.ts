@@ -293,6 +293,7 @@ export interface IDatabaseService {
   insertAIReply(reply: Omit<AIReply, 'id' | 'createdAt' | 'postedAt'>): Promise<number>;
   getAIReplyBySaleId(saleId: number): Promise<AIReply | null>;
   getAIReplyByRegistrationId(registrationId: number): Promise<AIReply | null>;
+  getAIReplyById(replyId: number): Promise<AIReply | null>;
   getRecentAIReplies(limit?: number): Promise<AIReply[]>;
   updateAIReplyTweetId(id: number, replyTweetId: string): Promise<void>;
   updateAIReplyStatus(id: number, status: AIReply['status'], errorMessage?: string): Promise<void>;

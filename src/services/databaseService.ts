@@ -1821,6 +1821,34 @@ export class DatabaseService implements IDatabaseService {
   }
 
   /**
+   * Get AI reply by ID
+   */
+  async getAIReplyById(replyId: number): Promise<AIReply | null> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        SELECT 
+          id, sale_id as "saleId", registration_id as "registrationId",
+          original_tweet_id as "originalTweetId", reply_tweet_id as "replyTweetId",
+          transaction_type as "transactionType", transaction_hash as "transactionHash",
+          model_used as "modelUsed", prompt_tokens as "promptTokens",
+          completion_tokens as "completionTokens", total_tokens as "totalTokens",
+          cost_usd as "costUsd", reply_text as "replyText", name_research as "nameResearch", status,
+          error_message as "errorMessage", created_at as "createdAt",
+          posted_at as "postedAt"
+        FROM ai_replies
+        WHERE id = $1
+      `, [replyId]);
+
+      return result.rows.length > 0 ? result.rows[0] : null;
+    } catch (error: any) {
+      logger.error('Failed to get AI reply by ID:', error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Get recent AI replies
    */
   async getRecentAIReplies(limit: number = 50): Promise<AIReply[]> {
