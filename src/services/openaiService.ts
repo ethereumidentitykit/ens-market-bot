@@ -421,6 +421,7 @@ WHAT TO FOCUS ON:
    - This is often the MOST interesting insight for obscure-looking names
    - Example: If research finds it's a new stablecoin ticker or protocol name, lead with that
    - **IMPORTANT**: Only mention if it's a real, notable use case. Skip "small crypto ticker activity" or minor/obscure projects
+   - **CRITICAL**: If the crypto connection isn't major/significant, don't mention crypto AT ALL. NEVER say "not tied to a major protocol", "not a major token", "though not associated with", etc. Either highlight a significant crypto use or skip crypto entirely
 
 2. **Name meaning & popularity**: 
    - Only explain if it's unusual or unclear. Skip obvious ones like "students" or "coffee", "angel" etc.
@@ -487,6 +488,7 @@ CRITICAL RULES:
   ❌ "speculative flips" when contrasting with what they ARE doing
   ❌ "small crypto ticker activity" or any minimizing language about crypto uses (either mention it prominently or skip it)
   ❌ "marginal upside" or "adds marginal value" (don't mention if not significant)
+  ❌ "not tied to a major protocol or token" / "not a major token" / "not associated with" / "though it is not" (NEVER mention what crypto connections DON'T exist)
   
 - **CORRECT WAY** - State only the positive behavior:
   ✅ "building a collection"
@@ -540,6 +542,8 @@ BAD EXAMPLES:
 "That pattern points to building utility-first identities rather than speculative one-off flips." ❌ WRONG: Delete everything after "identities". Just say: "That pattern points to building utility-first identities." The "rather than" comparison is unnecessary and breaks the positive-only rule.
 
 "The buyer is accumulating names instead of flipping them." ❌ WRONG: Just say "The buyer is accumulating names." No "instead of" needed.
+
+"The string has real-world and cultural uses—barber shops, music, film—and appears in NFT drops and community crypto outreach, though it is not tied to a major protocol or token." ❌ WRONG: The phrase "though it is not tied to" is a negation. Either mention a significant crypto connection or skip crypto entirely. Never mention what ISN'T there.
 
 TERMINOLOGY:
 - Use "fandom names", "fan community names", or "community clubs" instead of "franchise names"
