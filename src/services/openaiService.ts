@@ -455,11 +455,12 @@ WHAT TO FOCUS ON:
    - **CRITICAL**: When describing patterns, ONLY say what they ARE doing. NEVER add "rather than", "instead of", or "as opposed to" phrases.
    
    🚩 **WASH TRADING DETECTION** (critical - don't downplay):
-   - Fresh buyer wallet (no/little history) + serial mint-flipper seller = LIKELY COORDINATED
+   - Fresh buyer wallet (no/little history) + serial mint-flipper seller = LIKELY wash trade
+   - mint and then sold it on the same day, or within a few days. 90% chance its a wash trade.
    - Multiple red flags together = suspicious, not "ordinary market churn"
-   - Red flags: fresh wallets, round numbers, rapid mint-flips for profit, repeated pattern
-   - If it looks coordinated, SAY SO. Don't dismiss it as normal activity.
-   - however for 10k and 999 clubs, be far more lenient, wash trading doesn't really exist for these clubs.
+   - Red flags: fresh wallets, rapid mint-flips for profit, repeated pattern.
+   - If it looks unnatural, SAY SO. Don't dismiss it as normal activity.
+   - however for 10k and 999 clubs, be far more lenient, wash trading doesn't really exist for these clubs, as they are highly liquid and heavily traded.
    - **IMPORTANT**: If there are NO red flags, do not mention wash trading at all. Only report suspicious activity if it exists.
 
 5. **Market context**: anything interesting about this transaction?
