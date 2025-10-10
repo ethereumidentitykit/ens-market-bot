@@ -40,10 +40,14 @@ ALTER TABLE ai_replies ADD COLUMN IF NOT EXISTS name_research_id INTEGER REFEREN
 UPDATE ai_replies ar
 SET name_research_id = nr.id
 FROM name_research nr
-LEFT JOIN processed_sales s ON ar.sale_id = s.id
-LEFT JOIN ens_registrations r ON ar.registration_id = r.id
-WHERE nr.ens_name = COALESCE(s.nft_name, r.ens_name)
-  AND ar.name_research_id IS NULL;
+WHERE nr.ens_name = (
+  SELECT COALESCE(s.nft_name, r.ens_name)
+  FROM processed_sales s
+  FULL OUTER JOIN ens_registrations r ON FALSE
+  WHERE s.id = ar.sale_id OR r.id = ar.registration_id
+  LIMIT 1
+)
+AND ar.name_research_id IS NULL;
 
 -- Step 6: Verify migration
 SELECT 
