@@ -206,12 +206,11 @@ FOCUS AREAS:
    - Is it a common word, brand name, person name, or acronym?
    - Any cultural significance in gaming, crypto, or online communities?
 
-2. **Crypto/Web3 Connections (CRITICAL - Check this first)**
-   - Is this name connected to any crypto projects, protocols, or products? (tokens, DeFi platforms, DAOs, NFT projects)
-   - Recent announcements or launches in crypto/web3 space using this name or ticker? check articles etc.
-   - Token tickers, protocol names, stablecoin names, or blockchain infrastructure?
+2. Crypto/Web3 Connections 
+   - Is this name connected to any NOTABLE crypto projects, protocols, or products? (tokens, DeFi platforms, DAOs, NFT projects)
+   - Recent announcements or launches in crypto/web3 space using this name? check articles etc.
+   - Token tickers, protocol names, stablecoin names, or blockchain infrastructure
    - Web3 brands, wallets, or crypto infrastructure using this name?
-   - Search specifically for: "${sanitizedLabel} crypto", "${sanitizedLabel} token", "${sanitizedLabel} protocol", "${sanitizedLabel} web3"
    - Even obscure-looking names may have specific crypto meanings - check thoroughly
 
 3. Name Popularity & Usage
