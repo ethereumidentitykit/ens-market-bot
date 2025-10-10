@@ -206,11 +206,16 @@ FOCUS AREAS:
    - Is it a common word, brand name, person name, or acronym?
    - Any cultural significance in gaming, crypto, or online communities?
 
-2. Crypto/Web3 Connections 
+2. Crypto/Web3 Connections (CHECK MARKET CAP!)
    - Is this name connected to any NOTABLE crypto projects, protocols, or products? (tokens, DeFi platforms, DAOs, NFT projects)
    - Recent announcements or launches in crypto/web3 space using this name? check articles etc.
    - Token tickers, protocol names, stablecoin names, or blockchain infrastructure
    - Web3 brands, wallets, or crypto infrastructure using this name?
+   - **FOR TOKENS: CHECK COINGECKO OR COINMARKETCAP**
+     - Look up the token's market cap and ranking
+     - Only consider tokens with market cap ABOVE $5 million as notable
+     - Tokens under $5M market cap (typically ranked 2000+ on CoinGecko) are too small to mention
+     - Example: A token at $60k market cap, rank 8500 = NOT notable, skip it
    - Even obscure-looking names may have specific crypto meanings - check thoroughly
 
 3. Name Popularity & Usage
@@ -420,6 +425,7 @@ WHAT TO FOCUS ON:
    - Token tickers, protocol names, recent crypto announcements, DeFi platforms, stablecoins, etc.
    - This is often the MOST interesting insight for obscure-looking names
    - Example: If research finds it's a new stablecoin ticker or protocol name, lead with that
+   - **TOKEN MARKET CAP THRESHOLD**: Only mention tokens with market cap ABOVE $5 million. Tokens under $5M (typically ranked 2000+ on CoinGecko) are NOT significant. Example: $60k market cap at rank 8500 = skip entirely
    - **IMPORTANT**: Only mention if it's a real, notable use case. Skip "small crypto ticker activity" or minor/obscure projects
    - **CRITICAL**: If the crypto connection isn't major/significant, don't mention crypto AT ALL. NEVER say "not tied to a major protocol", "not a major token", "though not associated with", etc. Either highlight a significant crypto use or skip crypto entirely
 
@@ -545,6 +551,8 @@ BAD EXAMPLES:
 "The buyer is accumulating names instead of flipping them." ❌ WRONG: Just say "The buyer is accumulating names." No "instead of" needed.
 
 "The string has real-world and cultural uses—barber shops, music, film—and appears in NFT drops and community crypto outreach, though it is not tied to a major protocol or token." ❌ WRONG: The phrase "though it is not tied to" is a negation. Either mention a significant crypto connection or skip crypto entirely. Never mention what ISN'T there.
+
+"This string links to a Solana token called JPOW AI, and it works as a compact gamer handle." ❌ WRONG: If the research shows this token has only $60k market cap and ranks 8500 on CoinGecko, it's NOT notable. Tokens under $5M market cap should be completely ignored. Skip the crypto mention entirely.
 
 TERMINOLOGY:
 - Use "fandom names", "fan community names", or "community clubs" instead of "franchise names"
