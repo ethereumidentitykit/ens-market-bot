@@ -34,6 +34,7 @@ export class AIReplyService {
   // Timeout constants (in milliseconds)
   private readonly NAME_RESEARCH_TIMEOUT = 8 * 60 * 1000; // 8 minutes
   private readonly AI_GENERATION_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+  private readonly RESEARCH_MAX_AGE_DAYS = 30; // Research older than this is considered stale
 
   constructor(
     openaiService: OpenAIService,
@@ -314,6 +315,68 @@ export class AIReplyService {
   }
 
   /**
+   * Get or fetch name research with caching and staleness checking
+   * @param ensName - The ENS name to research
+   * @returns Research text or empty string on failure
+   */
+  private async getOrFetchNameResearch(ensName: string): Promise<string> {
+    try {
+      // 1. Check if research exists in database
+      const existingResearch = await this.databaseService.getNameResearch(ensName);
+      
+      if (existingResearch) {
+        // 2. Check if research is fresh
+        const researchAge = Date.now() - new Date(existingResearch.researchedAt).getTime();
+        const ageInDays = researchAge / (1000 * 60 * 60 * 24);
+        
+        if (ageInDays < this.RESEARCH_MAX_AGE_DAYS) {
+          logger.info(`♻️ Using cached research for ${ensName} (${ageInDays.toFixed(1)} days old)`);
+          return existingResearch.researchText;
+        } else {
+          logger.info(`🔄 Research for ${ensName} is stale (${ageInDays.toFixed(1)} days), refreshing...`);
+        }
+      }
+      
+      // 3. Fetch new research with timeout
+      logger.info(`🔍 Fetching new research for ${ensName}...`);
+      const newResearch = await this.withTimeout(
+        this.openaiService.researchName(ensName),
+        this.NAME_RESEARCH_TIMEOUT,
+        'Name research'
+      );
+      
+      // 4. Store in database
+      if (newResearch) {
+        await this.databaseService.insertNameResearch({
+          ensName,
+          researchText: newResearch,
+          researchedAt: new Date().toISOString(),
+          source: 'web_search'
+        });
+        logger.info(`💾 Stored new research for ${ensName}`);
+      }
+      
+      return newResearch;
+      
+    } catch (error: any) {
+      logger.error(`      Name research failed for ${ensName}:`, error.message);
+      
+      // 5. Fallback to stale research if available
+      try {
+        const fallbackResearch = await this.databaseService.getNameResearch(ensName);
+        if (fallbackResearch) {
+          logger.warn(`⚠️ Using stale research for ${ensName} as fallback`);
+          return fallbackResearch.researchText;
+        }
+      } catch (fallbackError: any) {
+        logger.error(`      Fallback research fetch failed:`, fallbackError.message);
+      }
+      
+      return ''; // Return empty if all attempts fail
+    }
+  }
+
+  /**
    * Helper: Fetch all context data in parallel (Magic Eden, OpenSea, name research)
    */
   private async fetchContextData(
@@ -373,19 +436,8 @@ export class AIReplyService {
           })
         : Promise.resolve(null),
       
-      // Name research with web search (8-minute timeout)
-      (async () => {
-        try {
-          return await this.withTimeout(
-            this.openaiService.researchName(eventData.tokenName),
-            this.NAME_RESEARCH_TIMEOUT,
-            'Name research'
-          );
-        } catch (error: any) {
-          logger.error('      Name research failed, continuing without it:', error.message);
-          return '';
-        }
-      })()
+      // Name research - check cache first, fetch if needed
+      this.getOrFetchNameResearch(eventData.tokenName)
     ]);
 
     logger.debug(`      Data fetched: Token=${tokenResult.activities.length}, Buyer=${buyerResult.activities.length}, Seller=${sellerResult?.activities.length || 0}, Name research=${nameResearch ? 'Yes' : 'No'}`);
@@ -451,6 +503,10 @@ export class AIReplyService {
     generatedReply: any,
     nameResearch?: string
   ): Promise<void> {
+    // Get name research ID from database
+    const tokenName = ('nftName' in transaction) ? transaction.nftName : ('ensName' in transaction ? transaction.ensName : null);
+    const nameResearchRecord = tokenName ? await this.databaseService.getNameResearch(tokenName) : null;
+    
     await this.databaseService.insertAIReply({
       saleId: type === 'sale' ? transactionId : undefined,
       registrationId: type === 'registration' ? transactionId : undefined,
@@ -464,7 +520,8 @@ export class AIReplyService {
       totalTokens: generatedReply.totalTokens,
       costUsd: 0, // Not tracked per requirements
       replyText: generatedReply.tweetText,
-      nameResearch: nameResearch,
+      nameResearchId: nameResearchRecord?.id, // Link to research table
+      nameResearch: nameResearch, // Keep for backward compatibility
       status: 'posted',
       errorMessage: undefined
     });

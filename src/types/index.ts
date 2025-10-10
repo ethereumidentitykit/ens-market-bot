@@ -119,6 +119,17 @@ export interface ENSRegistration {
   updatedAt?: string;
 }
 
+// Name Research Record (cached research for ENS names)
+export interface NameResearch {
+  id?: number;
+  ensName: string;                    // The ENS name (e.g., "vitalik.eth")
+  researchText: string;               // Research content from web search
+  researchedAt: string;               // When research was last performed
+  updatedAt: string;                  // Last update timestamp
+  source: string;                     // 'web_search', 'migrated', 'manual'
+  createdAt?: string;
+}
+
 // AI Reply Record
 export interface AIReply {
   id?: number;
@@ -134,7 +145,8 @@ export interface AIReply {
   totalTokens: number;
   costUsd: number;
   replyText: string;                  // The generated reply content
-  nameResearch?: string;              // Research about the name (from web search)
+  nameResearchId?: number;            // Reference to name_research table
+  nameResearch?: string;              // DEPRECATED: Legacy field, use nameResearchId
   status: 'pending' | 'posted' | 'failed' | 'skipped';
   errorMessage?: string;
   createdAt?: string;
@@ -271,6 +283,11 @@ export interface IDatabaseService {
   getAdminSession(sessionId: string): Promise<SiweSession | null>;
   deleteAdminSession(sessionId: string): Promise<void>;
   cleanupExpiredSessions(): Promise<void>;
+  
+  // Name Research methods
+  getNameResearch(ensName: string): Promise<NameResearch | null>;
+  insertNameResearch(research: Omit<NameResearch, 'id' | 'createdAt' | 'updatedAt'>): Promise<number>;
+  updateNameResearch(ensName: string, researchText: string): Promise<void>;
   
   // AI Reply methods
   insertAIReply(reply: Omit<AIReply, 'id' | 'createdAt' | 'postedAt'>): Promise<number>;
