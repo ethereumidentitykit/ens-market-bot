@@ -85,6 +85,9 @@ export class QuickNodeSalesService {
 
     logger.info(`🚀 Processing ${webhookData.orderFulfilled.length} QuickNode orders`);
 
+    // Track (tokenId, txHash) pairs within this batch to prevent duplicate ingestion
+    const seenInBatch = new Set<string>();
+
     for (const order of webhookData.orderFulfilled) {
       try {
         results.processed++;
@@ -98,6 +101,15 @@ export class QuickNodeSalesService {
           logger.info(`Skipped order ${order.orderHash} - ${skipReason}`);
           continue;
         }
+
+        // Check if we've already processed this (tokenId, txHash) pair in this batch
+        const batchKey = `${saleData.tokenId}:${saleData.transactionHash}`;
+        if (seenInBatch.has(batchKey)) {
+          results.skipped++;
+          logger.info(`🔁 Duplicate token in same tx - skipping: ${saleData.tokenId} (tx: ${saleData.transactionHash.slice(0, 10)}..., log: ${saleData.logIndex})`);
+          continue;
+        }
+        seenInBatch.add(batchKey);
 
         // Check if already processed (using transaction hash + log index)
         const isAlreadyProcessed = await this.databaseService.isSaleProcessed(
