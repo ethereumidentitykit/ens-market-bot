@@ -384,30 +384,15 @@ export class SchedulerService {
       // Step 1: Process new bids from Magic Eden API
       const processingResult = await this.bidsProcessingService.processNewBids();
       
-      // Load auto-posting settings first to get age limits
-      const autoPostSettings = await this.autoTweetService.getSettings();
+      // ⚠️ SCHEDULED BID AUTO-POSTING DISABLED ⚠️
+      // Real-time database notifications (databaseEventService) now handle all bid auto-posting
+      // This prevents duplicate posts caused by racing between scheduled polling and real-time triggers
+      // Magic Eden API ingestion (above) remains active to fetch new bids into the database
       
-      // Step 2: Auto-post unposted bids if enabled (with age filtering at database level)
-      const unpostedBids = await this.databaseService.getUnpostedBids(10, autoPostSettings.bids.maxAgeHours);
-      let bidAutoPostResults: PostResult[] = [];
+      logger.debug('✅ Scheduled bid polling disabled - real-time notifications handle auto-posting');
       
-      if (unpostedBids.length > 0) {
-        // Check global AND bids-specific toggles
-        if (autoPostSettings.enabled && autoPostSettings.bids.enabled) {
-          logger.info(`✋ Auto-posting ${unpostedBids.length} unposted bids (within ${autoPostSettings.bids.maxAgeHours}h)...`);
-          bidAutoPostResults = await this.autoTweetService.processNewBids(unpostedBids, autoPostSettings);
-          
-          const posted = bidAutoPostResults.filter(r => r.success).length;
-          const skipped = bidAutoPostResults.filter(r => r.skipped).length;
-          const failed = bidAutoPostResults.filter(r => !r.success && !r.skipped).length;
-          
-          logger.info(`✋ Bid auto-posting results: ${posted} posted, ${skipped} skipped, ${failed} failed`);
-        } else {
-          logger.debug(`✋ Skipping bids auto-posting - Global: ${autoPostSettings.enabled}, Bids: ${autoPostSettings.bids.enabled}`);
-        }
-      } else {
-        logger.debug(`✋ No unposted bids found within ${autoPostSettings.bids.maxAgeHours} hours`);
-      }
+      const unpostedBids: any[] = []; // Empty for stats
+      const bidAutoPostResults: PostResult[] = [];
 
       const duration = Date.now() - startTime.getTime();
       const bidsPosted = bidAutoPostResults.filter(r => r.success).length;
