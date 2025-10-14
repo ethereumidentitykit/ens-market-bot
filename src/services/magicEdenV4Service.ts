@@ -577,6 +577,216 @@ export class MagicEdenV4Service {
   }
 
   /**
+   * Get user activity history with automatic pagination (matches V3 API)
+   * 
+   * @param address - Ethereum address
+   * @param options - Configuration options
+   * @returns All activities up to maxPages, with metadata
+   */
+  async getUserActivityHistory(
+    address: string,
+    options: {
+      limit?: number;  // Items per request (note: API currently returns 20 regardless)
+      types?: MagicEdenV4ActivityType[];  // Activity types to filter
+      maxPages?: number;  // Maximum pages to fetch (default: 60)
+    } = {}
+  ): Promise<{ activities: MagicEdenV4Activity[]; incomplete: boolean; pagesFetched: number }> {
+    // Set defaults to match V3 behavior
+    const limit = options.limit || 20;  // Note: API currently ignores this
+    const types = options.types || ['TRADE', 'TRANSFER'];  // Default to sales and transfers
+    const maxPages = options.maxPages || 60;  // Match V3 default
+
+    logger.info(`👤 Fetching user activity history for ${address} (V4 API)`);
+    logger.debug(`   Settings: limit=${limit}, types=[${types.join(',')}], maxPages=${maxPages}`);
+
+    const allActivities: MagicEdenV4Activity[] = [];
+    let continuation: string | undefined;
+    let pageCount = 0;
+    let incomplete = false;
+
+    try {
+      // Loop through pages until we hit maxPages or run out of data
+      while (pageCount < maxPages) {
+        pageCount++;
+        
+        // Fetch single page using primitive method
+        const response = await this.getUserActivityPage(
+          address,
+          types,
+          continuation,
+          limit
+        );
+
+        // Break if no activities returned
+        if (!response.activities || response.activities.length === 0) {
+          logger.debug(`   Page ${pageCount}: No more activities, stopping pagination`);
+          break;
+        }
+
+        // Add activities to aggregated array
+        allActivities.push(...response.activities);
+        logger.debug(`   Page ${pageCount}: Fetched ${response.activities.length} ENS activities (total: ${allActivities.length})`);
+
+        // Check for continuation cursor
+        continuation = response.continuation;
+        if (!continuation) {
+          logger.debug(`   Page ${pageCount}: No continuation cursor, reached end of data`);
+          break;
+        }
+
+        // Rate limiting between requests (1000-1100ms randomized delay)
+        if (continuation) {
+          const delay = 1000 + Math.random() * 100;
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+
+      // Check if we hit maxPages limit (incomplete data)
+      if (pageCount >= maxPages && continuation) {
+        logger.warn(`   ⚠️  Hit maxPages limit (${maxPages}), more data may be available`);
+        incomplete = true;
+      }
+
+      logger.info(`✅ User activity history complete: ${allActivities.length} activities from ${pageCount} pages${incomplete ? ' (incomplete)' : ''}`);
+
+      return {
+        activities: allActivities,
+        incomplete,
+        pagesFetched: pageCount
+      };
+
+    } catch (error: any) {
+      logger.error(`❌ Failed to fetch user activity history: ${error.message}`);
+      
+      // Return partial results if we got any
+      return {
+        activities: allActivities,
+        incomplete: true,  // Mark as incomplete on error
+        pagesFetched: pageCount
+      };
+    }
+  }
+
+  /**
+   * Get single page of user activity from V4 API with ENS contract filtering (primitive method)
+   * Note: limit parameter doesn't work yet (API always returns 20), will be fixed in 1 week
+   * 
+   * @param walletAddress - Ethereum address (without chain prefix)
+   * @param activityTypes - Activity types to fetch (optional, defaults to all)
+   * @param cursor - Cursor timestamp for pagination (ISO 8601)
+   * @param limit - Requested limit (note: API currently ignores this and returns 20)
+   * @param retryCount - Current retry attempt (internal use only)
+   * @returns Filtered ENS activities and next cursor
+   */
+  private async getUserActivityPage(
+    walletAddress: string,
+    activityTypes?: MagicEdenV4ActivityType[],
+    cursor?: string,
+    limit: number = 20,
+    retryCount: number = 0
+  ): Promise<{ activities: MagicEdenV4Activity[]; continuation?: string }> {
+    const maxRetries = 3;
+    const isTimeout = (error: any) => 
+      error.code === 'ECONNABORTED' || 
+      error.message?.includes('timeout');
+    
+    try {
+      // Format wallet address with chain prefix
+      const formattedAddress = `ethereum:${walletAddress.toLowerCase()}`;
+      
+      logger.info(`🔍 Fetching user activity from Magic Eden V4 API`);
+      logger.info(`👤 Wallet: ${walletAddress}, Cursor: ${cursor || 'none'}, Limit: ${limit}`);
+
+      // Build query parameters
+      const params: any = {
+        walletAddress: formattedAddress,
+        sortBy: 'timestamp',
+        sortDir: 'desc',
+        limit: limit // Note: Currently ignored by API, always returns 20
+      };
+
+      // Add activity types if specified
+      if (activityTypes && activityTypes.length > 0) {
+        params.activityType = activityTypes;
+      }
+
+      // Add cursor for pagination if provided
+      if (cursor) {
+        params.cursorTimestamp = cursor;
+      }
+
+      const response: AxiosResponse<MagicEdenV4ActivityResponse> = await this.axiosInstance.get(
+        '/activity/user',
+        {
+          params,
+          headers: {
+            'Accept': '*/*',
+            'User-Agent': 'ENS-TwitterBot/2.0'
+          },
+          timeout: 30000 // 30 seconds
+        }
+      );
+
+      const allActivities = response.data.activities || [];
+      const nextCursor = response.data.pagination?.cursorTimestamp;
+      
+      // Filter to only ENS contracts (local filtering until API adds this feature)
+      const ensActivities = allActivities.filter(activity => {
+        const contractAddress = activity.asset?.contractAddress?.toLowerCase();
+        return this.ensContracts.includes(contractAddress || '');
+      });
+      
+      logger.info(`✅ Magic Eden V4 API: Retrieved ${allActivities.length} activities, ${ensActivities.length} ENS activities`);
+      
+      if (nextCursor) {
+        logger.debug(`📄 Next cursor: ${nextCursor}`);
+      }
+
+      return {
+        activities: ensActivities,
+        continuation: nextCursor
+      };
+
+    } catch (error: any) {
+      const isTimeoutError = isTimeout(error);
+      
+      // Log error details
+      logger.error(`❌ Magic Eden V4 User Activity Error (attempt ${retryCount + 1}/${maxRetries + 1}):`, {
+        message: error.message,
+        status: error.response?.status,
+        code: error.code,
+        isTimeout: isTimeoutError
+      });
+
+      // Retry logic
+      if (retryCount < maxRetries) {
+        const waitTime = Math.min(1000 * Math.pow(2, retryCount), 5000); // Exponential backoff, max 5s
+        
+        // If timeout and first retry, reduce limit (though it doesn't work yet)
+        let newLimit = limit;
+        if (isTimeoutError && retryCount === 0 && limit > 10) {
+          newLimit = 10;
+          logger.warn(`⚠️  Timeout detected, reducing limit from ${limit} to ${newLimit} and retrying...`);
+        } else {
+          logger.warn(`⚠️  Retrying in ${waitTime}ms...`);
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        
+        // Recursive retry with potentially reduced limit
+        return this.getUserActivityPage(walletAddress, activityTypes, cursor, newLimit, retryCount + 1);
+      }
+
+      // Max retries exceeded - return empty result
+      logger.error(`❌ Max retries (${maxRetries}) exceeded for Magic Eden V4 User Activity API`);
+      return {
+        activities: [],
+        continuation: undefined
+      };
+    }
+  }
+
+  /**
    * Calculate human-readable duration from timestamps
    */
   calculateBidDuration(validFrom: number, validUntil: number): string {
