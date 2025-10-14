@@ -48,7 +48,7 @@ export interface TransformedBid {
  * Both V3 and V4 services implement this interface
  */
 export interface IMagicEdenBidsService {
-  getNewBidsSince(boundaryTimestamp: number): Promise<MagicEdenBid[]>;
+  getNewBidsSince(boundaryTimestamp: number): Promise<{ bids: MagicEdenBid[]; newestTimestampSeen: number | null }>;
   transformBid(bid: MagicEdenBid): TransformedBid;
   calculateBidDuration(validFrom: number, validUntil: number): string;
   getCurrencyDisplayName(symbol: string): string;
@@ -104,11 +104,15 @@ export class BidsProcessingService {
       logger.info(`📈 Cursoring for bids newer than: ${boundaryTimestamp} (${new Date(boundaryTimestamp).toISOString()})`);
 
       // Cursor through API until we hit the boundary timestamp
-      const newBidsUnsorted = await this.magicEdenService.getNewBidsSince(boundaryTimestamp);
+      const { bids: newBidsUnsorted, newestTimestampSeen } = await this.magicEdenService.getNewBidsSince(boundaryTimestamp);
       logger.info(`📊 Cursor-based fetch: Retrieved ${newBidsUnsorted.length} new bids`);
 
       if (newBidsUnsorted.length === 0) {
         logger.info('✅ No new bids found - all up to date');
+        // Use the newest timestamp from API (if any), otherwise use boundary + 1 minute
+        const timestampToStore = newestTimestampSeen || (boundaryTimestamp + 60000);
+        await this.databaseService.setLastProcessedBidTimestamp(timestampToStore);
+        logger.info(`📍 Updated last processed timestamp to: ${timestampToStore} (${new Date(timestampToStore).toISOString()}) - no new bids`);
         return stats;
       }
 

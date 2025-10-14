@@ -277,14 +277,15 @@ export class MagicEdenV4Service {
    * Uses timestamp-based pagination for reliable recovery after downtime
    * 
    * @param boundaryTimestamp - Unix timestamp in milliseconds
-   * @returns Array of new bids created after boundary
+   * @returns Object with bids and the newest timestamp seen from API (for safe bookmark updates)
    */
-  async getNewBidsSince(boundaryTimestamp: number): Promise<MagicEdenBid[]> {
+  async getNewBidsSince(boundaryTimestamp: number): Promise<{ bids: MagicEdenBid[]; newestTimestampSeen: number | null }> {
     logger.info(`📈 Cursoring for bids newer than: ${boundaryTimestamp} (${new Date(boundaryTimestamp).toISOString()})`);
     
     const startTime = Date.now();
     let cursor: string | undefined;
     let allNewBids: MagicEdenBid[] = [];
+    let newestTimestampSeen: number | null = null; // Track newest timestamp from API
     let totalPages = 0;
     const maxPages = 10; // Safety limit (1000 bids max)
     let consecutiveEmptyPages = 0;
@@ -306,6 +307,11 @@ export class MagicEdenV4Service {
         const validUntil = bid.validUntil * 1000; // Convert Unix seconds to milliseconds
         const now = Date.now();
         const fifteenMinutes = 15 * 60 * 1000; // 15 minutes in milliseconds
+        
+        // Track the newest timestamp we've seen from the API (even if filtered out)
+        if (newestTimestampSeen === null || bidTimestamp > newestTimestampSeen) {
+          newestTimestampSeen = bidTimestamp;
+        }
         
         const isNewerThanBoundary = bidTimestamp > boundaryTimestamp;
         const hasValidityRemaining = validUntil > (now + fifteenMinutes); // Must have >15min remaining
@@ -369,7 +375,14 @@ export class MagicEdenV4Service {
       logger.debug(`⚡ Average: ${avgTimePerPage}s per page (includes 1s rate limiting)`);
     }
     
-    return allNewBids;
+    if (newestTimestampSeen) {
+      logger.debug(`📍 Newest timestamp from API: ${new Date(newestTimestampSeen).toISOString()}`);
+    }
+    
+    return {
+      bids: allNewBids,
+      newestTimestampSeen
+    };
   }
 
   /**

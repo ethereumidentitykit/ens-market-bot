@@ -233,12 +233,13 @@ export class MagicEdenService {
    * Get all new bids by cursoring until we hit the boundary timestamp
    * Robust approach that doesn't rely on API timestamp filtering
    */
-  async getNewBidsSince(boundaryTimestamp: number): Promise<MagicEdenBid[]> {
+  async getNewBidsSince(boundaryTimestamp: number): Promise<{ bids: MagicEdenBid[]; newestTimestampSeen: number | null }> {
     logger.info(`📈 Cursoring for bids newer than: ${boundaryTimestamp} (${new Date(boundaryTimestamp).toISOString()})`);
     
     const startTime = Date.now();
     let cursor: string | undefined;
     let allNewBids: MagicEdenBid[] = [];
+    let newestTimestampSeen: number | null = null; // Track newest timestamp from API
     let totalPages = 0;
     const maxPages = 10; // Increased limit for better coverage (1000 bids max)
     
@@ -254,6 +255,11 @@ export class MagicEdenService {
         const validUntil = bid.validUntil * 1000; // Convert to milliseconds
         const now = Date.now();
         const thirtyMinutes = 30 * 60 * 1000; // 30 minutes in milliseconds
+        
+        // Track the newest timestamp we've seen from the API (even if filtered out)
+        if (newestTimestampSeen === null || bidTimestamp > newestTimestampSeen) {
+          newestTimestampSeen = bidTimestamp;
+        }
         
         const isNewerThanBoundary = bidTimestamp > boundaryTimestamp;
         const hasValidityRemaining = validUntil > (now + thirtyMinutes);
@@ -294,7 +300,14 @@ export class MagicEdenService {
       logger.debug(`⚡ Average: ${avgTimePerPage}s per page (includes 1s rate limiting)`);
     }
     
-    return allNewBids;
+    if (newestTimestampSeen) {
+      logger.debug(`📍 Newest timestamp from API: ${new Date(newestTimestampSeen).toISOString()}`);
+    }
+    
+    return {
+      bids: allNewBids,
+      newestTimestampSeen
+    };
   }
 
   /**
