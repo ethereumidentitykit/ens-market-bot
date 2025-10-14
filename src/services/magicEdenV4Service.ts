@@ -57,7 +57,50 @@ export interface MagicEdenV4Activity {
     standard: string;
   };
   
-  bid: {
+  // For TRANSFER and TRADE activities
+  assetAmount?: string;
+  fromAddress?: string;
+  toAddress?: string;
+  
+  // For TRADE activities
+  unitPrice?: {
+    amount: {
+      raw: string;
+      native: string;
+      fiat?: {
+        usd?: string;
+      };
+    };
+    currency: {
+      contract: string;
+      symbol: string;
+      decimals: number;
+      displayName: string;
+      fiatConversion?: {
+        usd: number;
+      };
+    };
+  };
+  
+  order?: {
+    orderId: string;
+    sourceDomain: string;
+  };
+  
+  fillSource?: {
+    domain: string;
+  };
+  
+  transactionInfo?: {
+    transactionId: string;
+    blockNumber: number;
+    blockHash: string;
+    logIndex: number;
+    batchTransferIndex: number;
+  };
+  
+  // For BID_CREATED activities
+  bid?: {
     id: string; // Order ID
     status: 'active' | 'cancelled' | 'filled' | 'expired';
     maker: string; // Bidder address
@@ -427,6 +470,11 @@ export class MagicEdenV4Service {
    * - activity.bid.expiry -> validFrom/validUntil
    */
   private transformV4ActivityToBid(activity: MagicEdenV4Activity): MagicEdenBid {
+    // This method should only be called for BID_CREATED activities
+    if (!activity.bid) {
+      throw new Error('transformV4ActivityToBid called on non-bid activity');
+    }
+    
     // Parse timestamps - V4 uses ISO strings, we need Unix timestamps (seconds)
     const validFrom = Math.floor(new Date(activity.bid.expiry.validFrom).getTime() / 1000);
     const validUntil = Math.floor(new Date(activity.bid.expiry.validUntil).getTime() / 1000);
@@ -915,6 +963,100 @@ export class MagicEdenV4Service {
       logger.error('❌ Magic Eden V4 API health check failed:', error);
       return false;
     }
+  }
+
+  /**
+   * Transform V4 activity to V3 TokenActivity format
+   * Allows V4 data to work with existing processing logic
+   * 
+   * @param v4Activity - Activity from V4 API
+   * @returns V3-compatible TokenActivity
+   */
+  transformV4ToV3Activity(v4Activity: MagicEdenV4Activity): import('./magicEdenService').TokenActivity {
+    // Map V4 activity types to V3 types
+    const typeMap: Record<string, string> = {
+      'TRADE': 'sale',
+      'MINT': 'mint',
+      'TRANSFER': 'transfer',
+      'ASK_CREATED': 'ask',
+      'BID_CREATED': 'bid',
+      'ASK_CANCELLED': 'ask_cancel',
+      'BID_CANCELLED': 'bid_cancel',
+      'BURN': 'transfer' // Map burn to transfer for compatibility
+    };
+
+    const v3Type = typeMap[v4Activity.activityType] || 'transfer';
+    
+    // Extract price data (TRADE activities have unitPrice, others default to 0)
+    const hasPrice = !!v4Activity.unitPrice;
+    const priceRaw = v4Activity.unitPrice?.amount.raw || '0';
+    const priceDecimal = v4Activity.unitPrice ? parseFloat(v4Activity.unitPrice.amount.native) : 0;
+    const priceUsd = v4Activity.unitPrice ? parseFloat(v4Activity.unitPrice.amount.fiat?.usd || '0') : 0;
+    const currencyContract = v4Activity.unitPrice?.currency.contract || '0x0000000000000000000000000000000000000000';
+    const currencySymbol = v4Activity.unitPrice?.currency.symbol || 'ETH';
+    const currencyDecimals = v4Activity.unitPrice?.currency.decimals || 18;
+
+    // Convert ISO timestamp to Unix timestamp
+    const timestamp = Math.floor(new Date(v4Activity.timestamp).getTime() / 1000);
+
+    return {
+      type: v3Type as any,
+      fromAddress: v4Activity.fromAddress || '0x0000000000000000000000000000000000000000',
+      toAddress: v4Activity.toAddress || '0x0000000000000000000000000000000000000000',
+      price: {
+        currency: {
+          contract: currencyContract,
+          name: hasPrice ? v4Activity.unitPrice!.currency.displayName : 'Ether',
+          symbol: currencySymbol,
+          decimals: currencyDecimals
+        },
+        amount: {
+          raw: priceRaw,
+          decimal: priceDecimal,
+          usd: priceUsd,
+          native: priceDecimal // For V3 compatibility
+        }
+      },
+      amount: parseInt(v4Activity.assetAmount || '1', 10),
+      timestamp: timestamp,
+      createdAt: v4Activity.timestamp,
+      contract: v4Activity.asset.contractAddress,
+      token: {
+        tokenId: v4Activity.asset.tokenId,
+        isSpam: false,
+        isNsfw: false,
+        tokenName: v4Activity.asset.name,
+        tokenImage: v4Activity.asset.mediaV2?.main?.uri || null,
+        rarityScore: null,
+        rarityRank: null
+      },
+      collection: {
+        collectionId: v4Activity.collection.id,
+        isSpam: false,
+        isNsfw: false,
+        collectionName: v4Activity.collection.name,
+        collectionImage: '' // V4 doesn't provide collection images in activity
+      },
+      txHash: v4Activity.transactionInfo?.transactionId || '',
+      logIndex: v4Activity.transactionInfo?.logIndex || 0,
+      batchIndex: v4Activity.transactionInfo?.batchTransferIndex || 1,
+      fillSource: v4Activity.fillSource ? {
+        domain: v4Activity.fillSource.domain,
+        name: v4Activity.fillSource.domain,
+        icon: ''
+      } : undefined,
+      comment: null
+    };
+  }
+
+  /**
+   * Transform V4 activities to V3 format (batch)
+   * 
+   * @param v4Activities - Array of V4 activities
+   * @returns Array of V3-compatible TokenActivities
+   */
+  transformV4ToV3Activities(v4Activities: MagicEdenV4Activity[]): import('./magicEdenService').TokenActivity[] {
+    return v4Activities.map(activity => this.transformV4ToV3Activity(activity));
   }
 }
 

@@ -17,6 +17,7 @@ import { OpenAIService } from './openaiService';
 import { TwitterService } from './twitterService';
 import { DataProcessingService } from './dataProcessingService';
 import { MagicEdenService, TokenActivity } from './magicEdenService';
+import { MagicEdenV4Service } from './magicEdenV4Service';
 import { OpenSeaService } from './openSeaService';
 import { ENSWorkerService } from './ensWorkerService';
 import { APIToggleService } from './apiToggleService';
@@ -27,6 +28,7 @@ export class AIReplyService {
   private twitterService: TwitterService;
   private dataProcessingService: DataProcessingService;
   private magicEdenService: MagicEdenService;
+  private magicEdenV4Service: MagicEdenV4Service;
   private openSeaService: OpenSeaService;
   private ensWorkerService: ENSWorkerService;
   private apiToggleService: APIToggleService;
@@ -42,6 +44,7 @@ export class AIReplyService {
     twitterService: TwitterService,
     dataProcessingService: DataProcessingService,
     magicEdenService: MagicEdenService,
+    magicEdenV4Service: MagicEdenV4Service,
     openSeaService: OpenSeaService,
     ensWorkerService: ENSWorkerService
   ) {
@@ -50,6 +53,7 @@ export class AIReplyService {
     this.twitterService = twitterService;
     this.dataProcessingService = dataProcessingService;
     this.magicEdenService = magicEdenService;
+    this.magicEdenV4Service = magicEdenV4Service;
     this.openSeaService = openSeaService;
     this.ensWorkerService = ensWorkerService;
     this.apiToggleService = APIToggleService.getInstance();
@@ -486,17 +490,29 @@ export class AIReplyService {
         return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0 };
       }),
       
-      // Buyer activity history
-      this.magicEdenService.getUserActivityHistory(
-        eventData.buyerAddress
-      ).catch((error: any) => {
+      // Buyer activity history (V4 API)
+      this.magicEdenV4Service.getUserActivityHistory(
+        eventData.buyerAddress,
+        { types: ['TRADE', 'TRANSFER'], maxPages: 60 }
+      ).then(result => ({
+        activities: this.magicEdenV4Service.transformV4ToV3Activities(result.activities),
+        incomplete: result.incomplete,
+        pagesFetched: result.pagesFetched
+      })).catch((error: any) => {
         logger.error('      Buyer activity fetch failed:', error.message);
         return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0 };
       }),
       
-      // Seller activity history (if applicable)
+      // Seller activity history (if applicable) (V4 API)
       eventData.sellerAddress
-        ? this.magicEdenService.getUserActivityHistory(eventData.sellerAddress).catch((error: any) => {
+        ? this.magicEdenV4Service.getUserActivityHistory(
+            eventData.sellerAddress,
+            { types: ['TRADE', 'TRANSFER'], maxPages: 60 }
+          ).then(result => ({
+            activities: this.magicEdenV4Service.transformV4ToV3Activities(result.activities),
+            incomplete: result.incomplete,
+            pagesFetched: result.pagesFetched
+          })).catch((error: any) => {
             logger.error('      Seller activity fetch failed:', error.message);
             return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0 };
           })
