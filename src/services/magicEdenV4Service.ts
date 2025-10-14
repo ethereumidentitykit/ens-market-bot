@@ -160,19 +160,25 @@ export class MagicEdenV4Service {
   }
 
   /**
-   * Get activities by type from the V4 API
+   * Get activities by type from the V4 API with retry logic
    * Generic method that can fetch any activity type
    * 
    * @param activityTypes - Activity types to fetch (BID_CREATED, ASK_CREATED, TRADE, etc.)
    * @param cursor - Optional cursor timestamp for pagination (ISO 8601)
    * @param limit - Number of activities to fetch (default: 100)
+   * @param retryCount - Current retry attempt (internal use only)
    * @returns Activities and next cursor
    */
   async getActivities(
     activityTypes: MagicEdenV4ActivityType[],
     cursor?: string,
-    limit: number = 100
+    limit: number = 100,
+    retryCount: number = 0
   ): Promise<{ activities: MagicEdenV4Activity[]; continuation?: string }> {
+    const maxRetries = 3;
+    const isTimeout = (error: any) => 
+      error.code === 'ECONNABORTED' || 
+      error.message?.includes('timeout');
     try {
       logger.info(`🔍 Fetching ENS activities from Magic Eden V4 API`);
       logger.info(`📊 Types: ${activityTypes.join(', ')}, Cursor: ${cursor || 'none'}, Limit: ${limit}`);
@@ -219,13 +225,37 @@ export class MagicEdenV4Service {
       };
 
     } catch (error: any) {
-      logger.error('❌ Magic Eden V4 API Error:', {
+      const isTimeoutError = isTimeout(error);
+      
+      // Log error details
+      logger.error(`❌ Magic Eden V4 API Error (attempt ${retryCount + 1}/${maxRetries + 1}):`, {
         message: error.message,
         status: error.response?.status,
-        data: error.response?.data
+        code: error.code,
+        isTimeout: isTimeoutError
       });
 
-      // Return empty result on error rather than throwing
+      // Retry logic
+      if (retryCount < maxRetries) {
+        const waitTime = Math.min(1000 * Math.pow(2, retryCount), 5000); // Exponential backoff, max 5s
+        
+        // If timeout and first retry, reduce limit to 50
+        let newLimit = limit;
+        if (isTimeoutError && retryCount === 0 && limit > 50) {
+          newLimit = 50;
+          logger.warn(`⚠️  Timeout detected, reducing limit from ${limit} to ${newLimit} and retrying...`);
+        } else {
+          logger.warn(`⚠️  Retrying in ${waitTime}ms...`);
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        
+        // Recursive retry with potentially reduced limit
+        return this.getActivities(activityTypes, cursor, newLimit, retryCount + 1);
+      }
+
+      // Max retries exceeded - return empty result
+      logger.error(`❌ Max retries (${maxRetries}) exceeded for Magic Eden V4 API`);
       return {
         activities: [],
         continuation: undefined
