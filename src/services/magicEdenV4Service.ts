@@ -287,6 +287,8 @@ export class MagicEdenV4Service {
     let allNewBids: MagicEdenBid[] = [];
     let totalPages = 0;
     const maxPages = 10; // Safety limit (1000 bids max)
+    let consecutiveEmptyPages = 0;
+    const maxConsecutiveEmpty = 3; // Stop if 3 pages in a row have 0 new bids
     
     do {
       totalPages++;
@@ -296,23 +298,49 @@ export class MagicEdenV4Service {
       
       // Filter bids to only those newer than our boundary AND with >30min validity remaining
       // V4 API uses ISO timestamps, need to convert for comparison
+      let tooOld = 0;
+      let expiringSoon = 0;
+      
       const newBids = bids.filter(bid => {
         const bidTimestamp = new Date(bid.createdAt).getTime();
         const validUntil = bid.validUntil * 1000; // Convert Unix seconds to milliseconds
         const now = Date.now();
-        const thirtyMinutes = 30 * 60 * 1000;
+        const fifteenMinutes = 15 * 60 * 1000; // 15 minutes in milliseconds
         
         const isNewerThanBoundary = bidTimestamp > boundaryTimestamp;
-        const hasValidityRemaining = validUntil > (now + thirtyMinutes); // Must have >30min remaining
+        const hasValidityRemaining = validUntil > (now + fifteenMinutes); // Must have >15min remaining
+        
+        if (!isNewerThanBoundary) tooOld++;
+        if (isNewerThanBoundary && !hasValidityRemaining) expiringSoon++;
         
         return isNewerThanBoundary && hasValidityRemaining;
       });
       
+      if (tooOld > 0 || expiringSoon > 0) {
+        logger.debug(`🔍 Filtered: ${tooOld} too old, ${expiringSoon} expiring soon (<15min remaining)`);
+      }
+      
       allNewBids.push(...newBids);
       logger.debug(`📄 Page ${totalPages}/${maxPages}: ${bids.length} total, ${newBids.length} new, ${allNewBids.length} collected`);
       
+      // Track consecutive empty pages for early exit
+      if (newBids.length === 0) {
+        consecutiveEmptyPages++;
+        if (consecutiveEmptyPages >= maxConsecutiveEmpty) {
+          logger.info(`🛑 Stopping after ${consecutiveEmptyPages} consecutive pages with 0 new bids`);
+          break;
+        }
+      } else {
+        consecutiveEmptyPages = 0; // Reset on successful page
+      }
+      
       // Check if oldest bid in this batch is older than boundary - if so, we're done
       const oldestInBatch = Math.min(...bids.map(bid => new Date(bid.createdAt).getTime()));
+      const boundaryDate = new Date(boundaryTimestamp).toISOString();
+      const oldestDate = new Date(oldestInBatch).toISOString();
+      
+      logger.debug(`🕒 Oldest bid in batch: ${oldestDate}, Boundary: ${boundaryDate}`);
+      
       if (oldestInBatch <= boundaryTimestamp) {
         logger.info(`🎯 Hit boundary timestamp, stopping cursor`);
         break;

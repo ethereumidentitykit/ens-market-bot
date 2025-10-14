@@ -16,6 +16,7 @@ import { IDatabaseService, ENSRegistration, ProcessedSale } from './types';
 import { SalesProcessingService } from './services/salesProcessingService';
 import { BidsProcessingService } from './services/bidsProcessingService';
 import { MagicEdenService, TokenActivity } from './services/magicEdenService';
+import { MagicEdenV4Service } from './services/magicEdenV4Service';
 import { SchedulerService } from './services/schedulerService';
 import { TwitterService } from './services/twitterService';
 import { NewTweetFormatter } from './services/newTweetFormatter';
@@ -63,8 +64,13 @@ async function startApplication(): Promise<void> {
     const databaseService: IDatabaseService = new DatabaseService();
     
     const salesProcessingService = new SalesProcessingService(moralisService, databaseService);
-    const magicEdenService = new MagicEdenService();
-    const bidsProcessingService = new BidsProcessingService(magicEdenService, databaseService, alchemyService);
+    
+    // Magic Eden Services
+    const magicEdenService = new MagicEdenService(); // V3 - Keep for AI replies
+    const magicEdenV4Service = new MagicEdenV4Service(); // V4 - Use for bids
+    
+    // Use V4 service for bids processing
+    const bidsProcessingService = new BidsProcessingService(magicEdenV4Service, databaseService, alchemyService);
     const twitterService = new TwitterService();
     const newTweetFormatter = new NewTweetFormatter(databaseService, alchemyService, openSeaService, ensMetadataService, magicEdenService);
     const rateLimitService = new RateLimitService(databaseService);

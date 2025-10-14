@@ -1,4 +1,5 @@
 import { MagicEdenService } from './magicEdenService';
+import { MagicEdenV4Service } from './magicEdenV4Service';
 import { IDatabaseService, ENSBid, BidProcessingStats, MagicEdenBid } from '../types';
 import { logger } from '../utils/logger';
 import { AlchemyService } from './alchemyService';
@@ -13,14 +14,54 @@ interface ENSMetadata {
   attributes: any[];
 }
 
+/**
+ * Transformed bid format returned by both V3 and V4 services
+ * This is the internal representation used by BidsProcessingService
+ */
+export interface TransformedBid {
+  bidId: string;
+  contractAddress: string;
+  tokenId: string | null;
+  makerAddress: string;
+  takerAddress: string;
+  status: string;
+  priceRaw: string;
+  priceDecimal: string;
+  priceUsd: string;
+  currencyContract: string;
+  currencySymbol: string;
+  sourceDomain: string;
+  sourceName: string;
+  marketplaceFee: number;
+  createdAtApi: string;
+  updatedAtApi: string;
+  validFrom: number;
+  validUntil: number;
+  processedAt: string;
+  ensName?: string;
+  nftImage?: string;
+}
+
+/**
+ * Magic Eden Service Interface for Bids Processing
+ * Defines the minimal interface needed by BidsProcessingService
+ * Both V3 and V4 services implement this interface
+ */
+export interface IMagicEdenBidsService {
+  getNewBidsSince(boundaryTimestamp: number): Promise<MagicEdenBid[]>;
+  transformBid(bid: MagicEdenBid): TransformedBid;
+  calculateBidDuration(validFrom: number, validUntil: number): string;
+  getCurrencyDisplayName(symbol: string): string;
+}
+
 export class BidsProcessingService {
-  private magicEdenService: MagicEdenService;
+  private magicEdenService: IMagicEdenBidsService;
   private databaseService: IDatabaseService;
   private alchemyService: AlchemyService; // For ETH price
   private clubService: ClubService;
 
   constructor(
-    magicEdenService: MagicEdenService, 
+    magicEdenService: IMagicEdenBidsService, 
     databaseService: IDatabaseService,
     alchemyService: AlchemyService
   ) {
@@ -28,6 +69,10 @@ export class BidsProcessingService {
     this.databaseService = databaseService;
     this.alchemyService = alchemyService;
     this.clubService = new ClubService();
+    
+    // Log which version is being used
+    const version = (magicEdenService as any).constructor.name;
+    logger.info(`🔧 BidsProcessingService initialized with ${version}`);
   }
 
 
