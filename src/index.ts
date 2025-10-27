@@ -15,8 +15,7 @@ import { DatabaseService } from './services/databaseService';
 import { IDatabaseService, ENSRegistration, ProcessedSale } from './types';
 import { SalesProcessingService } from './services/salesProcessingService';
 import { BidsProcessingService } from './services/bidsProcessingService';
-import { MagicEdenService, TokenActivity } from './services/magicEdenService';
-import { MagicEdenV4Service } from './services/magicEdenV4Service';
+import { MagicEdenV4Service, TokenActivity } from './services/magicEdenV4Service';
 import { SchedulerService } from './services/schedulerService';
 import { TwitterService } from './services/twitterService';
 import { NewTweetFormatter } from './services/newTweetFormatter';
@@ -65,14 +64,12 @@ async function startApplication(): Promise<void> {
     
     const salesProcessingService = new SalesProcessingService(moralisService, databaseService);
     
-    // Magic Eden Services
-    const magicEdenService = new MagicEdenService(); // V3 - Keep for AI replies
-    const magicEdenV4Service = new MagicEdenV4Service(); // V4 - Use for bids
+    // Magic Eden V4 Service (V3 removed - fully migrated)
+    const magicEdenV4Service = new MagicEdenV4Service();
     
-    // Use V4 service for bids processing
     const bidsProcessingService = new BidsProcessingService(magicEdenV4Service, databaseService, alchemyService);
     const twitterService = new TwitterService();
-    const newTweetFormatter = new NewTweetFormatter(databaseService, alchemyService, openSeaService, ensMetadataService, magicEdenService, magicEdenV4Service);
+    const newTweetFormatter = new NewTweetFormatter(databaseService, alchemyService, openSeaService, ensMetadataService, magicEdenV4Service);
     const rateLimitService = new RateLimitService(databaseService);
     const ethIdentityService = new ENSWorkerService();
     const worldTimeService = new WorldTimeService();
@@ -94,7 +91,6 @@ async function startApplication(): Promise<void> {
       databaseService,
       twitterService,
       dataProcessingService,
-      magicEdenService,
       magicEdenV4Service,
       openSeaService,
       ethIdentityService
@@ -725,7 +721,6 @@ async function startApplication(): Promise<void> {
           databaseService,
           twitterService,
           dataProcessingService,
-          magicEdenService,
           magicEdenV4Service,
           openSeaService,
           ensWorkerService

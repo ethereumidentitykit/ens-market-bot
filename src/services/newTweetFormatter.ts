@@ -9,7 +9,6 @@ import { AlchemyService } from './alchemyService';
 import { OpenSeaService } from './openSeaService';
 import { ENSMetadataService } from './ensMetadataService';
 import { ClubService } from './clubService';
-import { MagicEdenService, HistoricalEvent, ListingPrice } from './magicEdenService';
 import { MagicEdenV4Service } from './magicEdenV4Service';
 import { ENSTokenUtils } from './ensTokenUtils';
 import { TimeUtils } from '../utils/timeUtils';
@@ -42,7 +41,6 @@ export class NewTweetFormatter {
     private alchemyService?: AlchemyService,
     private openSeaService?: OpenSeaService,
     private ensMetadataService?: ENSMetadataService,
-    private magicEdenService?: MagicEdenService,
     private magicEdenV4Service?: MagicEdenV4Service
   ) {
     logger.info('[NewTweetFormatter] Constructor called - ClubService should be initialized');

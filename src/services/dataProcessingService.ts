@@ -1,5 +1,5 @@
 import { logger } from '../utils/logger';
-import { TokenActivity } from './magicEdenService';
+import { TokenActivity } from './magicEdenV4Service';
 import { ENSWorkerService } from './ensWorkerService';
 import { ClubService } from './clubService';
 import { CurrencyUtils } from '../utils/currencyUtils';

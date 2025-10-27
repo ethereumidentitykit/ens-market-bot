@@ -1,4 +1,3 @@
-import { MagicEdenService } from './magicEdenService';
 import { MagicEdenV4Service } from './magicEdenV4Service';
 import { IDatabaseService, ENSBid, BidProcessingStats, MagicEdenBid } from '../types';
 import { logger } from '../utils/logger';

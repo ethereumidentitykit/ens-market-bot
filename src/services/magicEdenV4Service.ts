@@ -233,6 +233,65 @@ export interface MagicEdenV4AsksResponse {
 }
 
 /**
+ * V3 Token Activity Format (Legacy)
+ * V4 API transforms to this format for backward compatibility
+ * This is the shared format used by data processing services
+ */
+export interface TokenActivity {
+  type: 'mint' | 'sale' | 'transfer' | 'ask' | 'bid' | 'ask_cancel' | 'bid_cancel';
+  fromAddress: string;
+  toAddress: string;
+  price: {
+    currency: {
+      contract: string;
+      name: string;
+      symbol: string;
+      decimals: number;
+    };
+    amount: {
+      raw: string;
+      decimal: number;
+      usd: number;
+      native: number;
+    };
+  };
+  amount: number;
+  timestamp: number;
+  createdAt: string;
+  contract: string;
+  token: {
+    tokenId: string;
+    isSpam: boolean;
+    isNsfw: boolean;
+    tokenName: string | null;
+    tokenImage: string | null;
+    rarityScore: number | null;
+    rarityRank: number | null;
+  };
+  collection: {
+    collectionId: string;
+    isSpam: boolean;
+    isNsfw: boolean;
+    collectionName: string;
+    collectionImage: string;
+  };
+  txHash: string;
+  logIndex: number;
+  batchIndex: number;
+  fillSource?: {
+    domain: string;
+    name: string;
+    icon: string;
+  };
+  comment: string | null;
+}
+
+export interface TokenActivityResponse {
+  activities: TokenActivity[];
+  continuation: string | null;
+}
+
+/**
  * Magic Eden V4 API Service
  * Handles fetching ENS bid data using the new V4 activity-based API
  * 
@@ -1488,7 +1547,7 @@ export class MagicEdenV4Service {
    * @param v4Activity - Activity from V4 API
    * @returns V3-compatible TokenActivity
    */
-  transformV4ToV3Activity(v4Activity: MagicEdenV4Activity): import('./magicEdenService').TokenActivity {
+  transformV4ToV3Activity(v4Activity: MagicEdenV4Activity): TokenActivity {
     // Map V4 activity types to V3 types
     const typeMap: Record<string, string> = {
       'TRADE': 'sale',
@@ -1588,7 +1647,7 @@ export class MagicEdenV4Service {
    * @param v4Activities - Array of V4 activities
    * @returns Array of V3-compatible TokenActivities
    */
-  transformV4ToV3Activities(v4Activities: MagicEdenV4Activity[]): import('./magicEdenService').TokenActivity[] {
+  transformV4ToV3Activities(v4Activities: MagicEdenV4Activity[]): TokenActivity[] {
     return v4Activities.map(activity => this.transformV4ToV3Activity(activity));
   }
 }

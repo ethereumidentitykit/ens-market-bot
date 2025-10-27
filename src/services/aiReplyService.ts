@@ -16,8 +16,7 @@ import { IDatabaseService, ProcessedSale, ENSRegistration } from '../types';
 import { OpenAIService } from './openaiService';
 import { TwitterService } from './twitterService';
 import { DataProcessingService } from './dataProcessingService';
-import { MagicEdenService, TokenActivity } from './magicEdenService';
-import { MagicEdenV4Service } from './magicEdenV4Service';
+import { MagicEdenV4Service, TokenActivity } from './magicEdenV4Service';
 import { OpenSeaService } from './openSeaService';
 import { ENSWorkerService } from './ensWorkerService';
 import { APIToggleService } from './apiToggleService';
@@ -27,7 +26,6 @@ export class AIReplyService {
   private databaseService: IDatabaseService;
   private twitterService: TwitterService;
   private dataProcessingService: DataProcessingService;
-  private magicEdenService: MagicEdenService;
   private magicEdenV4Service: MagicEdenV4Service;
   private openSeaService: OpenSeaService;
   private ensWorkerService: ENSWorkerService;
@@ -43,7 +41,6 @@ export class AIReplyService {
     databaseService: IDatabaseService,
     twitterService: TwitterService,
     dataProcessingService: DataProcessingService,
-    magicEdenService: MagicEdenService,
     magicEdenV4Service: MagicEdenV4Service,
     openSeaService: OpenSeaService,
     ensWorkerService: ENSWorkerService
@@ -52,7 +49,6 @@ export class AIReplyService {
     this.databaseService = databaseService;
     this.twitterService = twitterService;
     this.dataProcessingService = dataProcessingService;
-    this.magicEdenService = magicEdenService;
     this.magicEdenV4Service = magicEdenV4Service;
     this.openSeaService = openSeaService;
     this.ensWorkerService = ensWorkerService;
