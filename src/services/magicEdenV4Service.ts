@@ -159,6 +159,80 @@ export interface MagicEdenV4ActivityResponse {
 }
 
 /**
+ * Active Ask (Listing) from V4 /asks endpoint
+ */
+export interface MagicEdenV4Ask {
+  id: string; // Order ID
+  status: 'active' | 'cancelled' | 'filled' | 'expired';
+  maker: string; // Seller address
+  price: {
+    currency: {
+      symbol: string;
+      decimals: number;
+      displayName: string;
+      address: string;
+      assetId: string;
+      fiatConversion?: {
+        usd: number;
+      };
+    };
+    noFeesRaw: string;
+    withRequiredFeesRaw: string;
+  };
+  priceV2: {
+    amount: {
+      raw: string; // Wei
+      native: string; // Decimal (e.g., "0.019")
+      fiat?: {
+        usd?: string;
+      };
+    };
+    currency: {
+      contract: string;
+      symbol: string;
+      decimals: number;
+      displayName: string;
+      fiatConversion?: {
+        usd: number;
+      };
+    };
+  };
+  quantity: {
+    filled: string;
+    remaining: string;
+  };
+  expiry: {
+    validFrom: string; // ISO timestamp
+    validUntil: string; // ISO timestamp
+  };
+  source: string; // "OPENSEA", "BLUR", etc.
+  maxFees: {
+    royaltyBp: number;
+    makerMarketplaceBp: number;
+    takerMarketplaceBp: number;
+    lpFeeBp: number;
+  };
+  createdAt: string; // ISO timestamp
+  updatedAt: string; // ISO timestamp
+  kind: 'ASK';
+  assetId: string; // "contract:tokenId"
+  chain: string;
+  protocol: string; // "ERC721"
+  contract: string;
+  contractData: {
+    orderContractKind: string;
+  };
+}
+
+export interface MagicEdenV4AsksResponse {
+  asks: MagicEdenV4Ask[];
+  asksByAssetId: Array<{
+    assetId: string;
+    asks: MagicEdenV4Ask[];
+  }>;
+}
+
+/**
  * Magic Eden V4 API Service
  * Handles fetching ENS bid data using the new V4 activity-based API
  * 
@@ -1227,6 +1301,60 @@ export class MagicEdenV4Service {
   ): Promise<{ activities: MagicEdenV4Activity[]; continuation?: string }> {
     logger.info(`❌ Fetching bid cancellations from V4 API`);
     return this.getActivities(['BID_CANCELLED'], cursor, limit);
+  }
+
+  /**
+   * Get active asks (listings) for a specific asset
+   * Uses the /v4/asks endpoint which only returns active, valid listings
+   * No validation needed - API filters out expired/cancelled listings
+   * 
+   * @param contract - Contract address
+   * @param tokenId - Token ID
+   * @returns Active asks sorted by price (lowest first)
+   */
+  async getActiveAsks(
+    contract: string,
+    tokenId: string
+  ): Promise<MagicEdenV4Ask[]> {
+    try {
+      const assetId = `${contract.toLowerCase()}:${tokenId}`;
+      
+      logger.info(`🔍 Fetching active asks for ${assetId} from V4 API`);
+
+      // Build URL with array parameters for assetIds
+      const params = new URLSearchParams({
+        chain: 'ethereum',
+        sortDir: 'asc' // Lowest price first
+      });
+      
+      params.append('assetIds[]', assetId);
+
+      const response: AxiosResponse<MagicEdenV4AsksResponse> = await this.axiosInstance.get(
+        `/asks?${params.toString()}`,
+        {
+          headers: {
+            'Accept': '*/*',
+            'User-Agent': 'ENS-TwitterBot/2.0'
+          },
+          timeout: 10000 // 10s timeout
+        }
+      );
+
+      const asks = response.data.asks || [];
+      
+      logger.info(`✅ Found ${asks.length} active asks for ${assetId}`);
+      
+      if (asks.length > 0) {
+        const lowestAsk = asks[0];
+        logger.debug(`   Lowest ask: ${lowestAsk.priceV2.amount.native} ${lowestAsk.priceV2.currency.symbol}`);
+      }
+
+      return asks;
+
+    } catch (error: any) {
+      logger.error(`❌ Error fetching active asks: ${error.message}`);
+      return [];
+    }
   }
 
   /**

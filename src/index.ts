@@ -72,7 +72,7 @@ async function startApplication(): Promise<void> {
     // Use V4 service for bids processing
     const bidsProcessingService = new BidsProcessingService(magicEdenV4Service, databaseService, alchemyService);
     const twitterService = new TwitterService();
-    const newTweetFormatter = new NewTweetFormatter(databaseService, alchemyService, openSeaService, ensMetadataService, magicEdenService);
+    const newTweetFormatter = new NewTweetFormatter(databaseService, alchemyService, openSeaService, ensMetadataService, magicEdenService, magicEdenV4Service);
     const rateLimitService = new RateLimitService(databaseService);
     const ethIdentityService = new ENSWorkerService();
     const worldTimeService = new WorldTimeService();
