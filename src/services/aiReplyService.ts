@@ -498,7 +498,7 @@ export class AIReplyService {
       // Buyer activity history (V4 API)
       this.magicEdenV4Service.getUserActivityHistory(
         eventData.buyerAddress,
-        { types: ['TRADE', 'TRANSFER'], maxPages: 60 }
+        { types: ['TRADE', 'MINT', 'TRANSFER'], maxPages: 60 }
       ).then(result => ({
         activities: this.magicEdenV4Service.transformV4ToV3Activities(result.activities),
         incomplete: result.incomplete,
@@ -512,7 +512,7 @@ export class AIReplyService {
       eventData.sellerAddress
         ? this.magicEdenV4Service.getUserActivityHistory(
             eventData.sellerAddress,
-            { types: ['TRADE', 'TRANSFER'], maxPages: 60 }
+            { types: ['TRADE', 'MINT', 'TRANSFER'], maxPages: 60 }
           ).then(result => ({
             activities: this.magicEdenV4Service.transformV4ToV3Activities(result.activities),
             incomplete: result.incomplete,

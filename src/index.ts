@@ -578,7 +578,7 @@ async function startApplication(): Promise<void> {
         logger.debug('   Fetching buyer activity from Magic Eden V4...');
         const buyerResultV4 = await magicEdenV4Service.getUserActivityHistory(
           eventData.buyerAddress,
-          { types: ['TRADE', 'TRANSFER'], maxPages: 60 }
+          { types: ['TRADE', 'MINT', 'TRANSFER'], maxPages: 60 }
         );
         const buyerActivities = magicEdenV4Service.transformV4ToV3Activities(buyerResultV4.activities);
 
@@ -587,7 +587,7 @@ async function startApplication(): Promise<void> {
           logger.debug('   Fetching seller activity from Magic Eden V4...');
           const sellerResultV4 = await magicEdenV4Service.getUserActivityHistory(
             eventData.sellerAddress,
-            { types: ['TRADE', 'TRANSFER'], maxPages: 60 }
+            { types: ['TRADE', 'MINT', 'TRANSFER'], maxPages: 60 }
           );
           sellerActivities = magicEdenV4Service.transformV4ToV3Activities(sellerResultV4.activities);
         }
