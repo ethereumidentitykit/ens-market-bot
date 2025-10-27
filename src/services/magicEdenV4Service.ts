@@ -226,25 +226,30 @@ export class MagicEdenV4Service {
       logger.info(`🔍 Fetching ENS activities from Magic Eden V4 API`);
       logger.info(`📊 Types: ${activityTypes.join(', ')}, Cursor: ${cursor || 'none'}, Limit: ${limit}`);
 
-      // Build query parameters for activity endpoint
-      const params: any = {
+      // API only accepts ONE collectionId per request, so fetch from primary ENS contract
+      // (0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85 - the main one with most activity)
+      const params = new URLSearchParams({
         chain: 'ethereum',
-        collectionId: this.ensContracts[0], // Primary ENS contract (old registry)
-        activityType: activityTypes, // V4 API accepts array of types
-        limit: limit,
+        collectionId: this.ensContracts[0], // Singular, not array
+        limit: limit.toString(),
         sortBy: 'timestamp',
-        sortDir: 'desc' // Newest first
-      };
+        sortDir: 'desc'
+      });
+
+      // Add activity types as array parameters
+      activityTypes.forEach(type => params.append('activityTypes[]', type));
 
       // Add cursor for pagination if provided
       if (cursor) {
-        params.cursorTimestamp = cursor;
+        params.append('cursorTimestamp', cursor);
       }
 
+      const fullUrl = `/activity/nft?${params.toString()}`;
+      logger.debug(`🌐 Full URL: ${fullUrl}`);
+
       const response: AxiosResponse<MagicEdenV4ActivityResponse> = await this.axiosInstance.get(
-        '/activity/nft',
+        fullUrl,
         {
-          params,
           headers: {
             'Accept': '*/*',
             'User-Agent': 'ENS-TwitterBot/2.0'
@@ -270,10 +275,12 @@ export class MagicEdenV4Service {
     } catch (error: any) {
       const isTimeoutError = isTimeout(error);
       
-      // Log error details
+      // Log error details including response body for debugging
       logger.error(`❌ Magic Eden V4 API Error (attempt ${retryCount + 1}/${maxRetries + 1}):`, {
         message: error.message,
         status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
         code: error.code,
         isTimeout: isTimeoutError
       });
@@ -632,6 +639,7 @@ export class MagicEdenV4Service {
    * @param tokenId - Token ID
    * @param cursor - Cursor timestamp for pagination
    * @param limit - Number of activities (default: 10, API can timeout with higher values)
+   * @param types - Activity types to filter (server-side filtering)
    * @param retryCount - Current retry attempt (internal)
    * @returns Activities and next cursor
    */
@@ -640,6 +648,7 @@ export class MagicEdenV4Service {
     tokenId: string,
     cursor?: string,
     limit: number = 10,
+    types?: MagicEdenV4ActivityType[],
     retryCount: number = 0
   ): Promise<{ activities: MagicEdenV4Activity[]; continuation?: string }> {
     const maxRetries = 3;
@@ -651,24 +660,30 @@ export class MagicEdenV4Service {
       const assetId = `${contract.toLowerCase()}:${tokenId}`;
       
       logger.debug(`🔍 Fetching token activity from V4 API: ${assetId}`);
-      logger.debug(`   Cursor: ${cursor || 'none'}, Limit: ${limit}`);
+      logger.debug(`   Cursor: ${cursor || 'none'}, Limit: ${limit}, Types: ${types?.join(',') || 'all'}`);
 
-      const params: any = {
+      // Build URL with array parameters for activityTypes (server-side filtering)
+      // Magic Eden expects: activityTypes[]=TRADE&activityTypes[]=MINT
+      const params = new URLSearchParams({
         chain: 'ethereum',
         assetId: assetId,
-        limit: limit,
+        limit: limit.toString(),
         sortBy: 'timestamp',
         sortDir: 'desc'
-      };
+      });
 
       if (cursor) {
-        params.cursorTimestamp = cursor;
+        params.append('cursorTimestamp', cursor);
+      }
+
+      // Add activity types as array parameters for server-side filtering
+      if (types && types.length > 0) {
+        types.forEach(type => params.append('activityTypes[]', type));
       }
 
       const response: AxiosResponse<MagicEdenV4ActivityResponse> = await this.axiosInstance.get(
-        '/activity/nft',
+        `/activity/nft?${params.toString()}`,
         {
-          params,
           headers: {
             'Accept': '*/*',
             'User-Agent': 'ENS-TwitterBot/2.0'
@@ -723,7 +738,7 @@ export class MagicEdenV4Service {
         
         await new Promise(resolve => setTimeout(resolve, waitTime));
         
-        return this.getTokenActivityPage(contract, tokenId, cursor, newLimit, retryCount + 1);
+        return this.getTokenActivityPage(contract, tokenId, cursor, newLimit, types, retryCount + 1);
       }
 
       logger.error(`❌ Max retries (${maxRetries}) exceeded for token activity`);
@@ -769,12 +784,13 @@ export class MagicEdenV4Service {
       while (pageCount < maxPages) {
         pageCount++;
         
-        // Fetch single page using primitive method
+        // Fetch single page with server-side filtering
         const response = await this.getTokenActivityPage(
           contract,
           tokenId,
           continuation,
-          limit
+          limit,
+          types  // Server-side filtering by activity types
         );
 
         // Break if no activities returned
@@ -783,12 +799,9 @@ export class MagicEdenV4Service {
           break;
         }
 
-        // Filter by activity types (defaults to TRADE, MINT, TRANSFER)
-        const filteredActivities = response.activities.filter(a => types.includes(a.activityType));
-
-        // Add activities to aggregated array
-        allActivities.push(...filteredActivities);
-        logger.debug(`   Page ${pageCount}: Fetched ${response.activities.length} raw, ${filteredActivities.length} filtered activities (total: ${allActivities.length})`);
+        // Activities are already filtered by API, no need for local filtering
+        allActivities.push(...response.activities);
+        logger.debug(`   Page ${pageCount}: Fetched ${response.activities.length} activities (total: ${allActivities.length})`);
 
         // Check for continuation cursor
         continuation = response.continuation;
@@ -949,30 +962,30 @@ export class MagicEdenV4Service {
       const formattedAddress = `ethereum:${walletAddress.toLowerCase()}`;
       
       logger.info(`🔍 Fetching user activity from Magic Eden V4 API`);
-      logger.info(`👤 Wallet: ${walletAddress}, Cursor: ${cursor || 'none'}, Limit: ${limit}`);
+      logger.info(`👤 Wallet: ${walletAddress}, Types: ${activityTypes?.join(',') || 'all'}, Cursor: ${cursor || 'none'}, Limit: ${limit}`);
 
-      // Build query parameters
-      const params: any = {
+      // Build URL with array parameters (server-side filtering)
+      // Magic Eden expects: activityTypes[]=TRADE&activityTypes[]=TRANSFER
+      const params = new URLSearchParams({
         walletAddress: formattedAddress,
         sortBy: 'timestamp',
         sortDir: 'desc',
-        limit: limit // Note: Currently ignored by API, always returns 20
-      };
+        limit: limit.toString()
+      });
 
-      // Add activity types if specified
+      // Add activity types as array parameters
       if (activityTypes && activityTypes.length > 0) {
-        params.activityType = activityTypes;
+        activityTypes.forEach(type => params.append('activityTypes[]', type));
       }
 
       // Add cursor for pagination if provided
       if (cursor) {
-        params.cursorTimestamp = cursor;
+        params.append('cursorTimestamp', cursor);
       }
 
       const response: AxiosResponse<MagicEdenV4ActivityResponse> = await this.axiosInstance.get(
-        '/activity/user',
+        `/activity/user?${params.toString()}`,
         {
-          params,
           headers: {
             'Accept': '*/*',
             'User-Agent': 'ENS-TwitterBot/2.0'
