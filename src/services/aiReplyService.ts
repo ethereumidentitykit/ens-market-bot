@@ -481,11 +481,16 @@ export class AIReplyService {
 
     // Execute all API calls in parallel
     const [tokenResult, buyerResult, sellerResult, buyerHoldings, sellerHoldings, nameResearch] = await Promise.all([
-      // Token activity history
-      this.magicEdenService.getTokenActivityHistory(
+      // Token activity history (V4 API)
+      this.magicEdenV4Service.getTokenActivityHistory(
         transaction.contractAddress,
-        transaction.tokenId
-      ).catch((error: any) => {
+        transaction.tokenId,
+        { limit: 10, maxPages: 120 } // 2x V3 pages to compensate for lower limit (120x10 = 1200 items)
+      ).then(result => ({
+        activities: this.magicEdenV4Service.transformV4ToV3Activities(result.activities),
+        incomplete: result.incomplete,
+        pagesFetched: result.pagesFetched
+      })).catch((error: any) => {
         logger.error('      Token activity fetch failed:', error.message);
         return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0 };
       }),

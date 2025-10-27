@@ -625,6 +625,212 @@ export class MagicEdenV4Service {
   }
 
   /**
+   * Get token activity (single page) - primitive method
+   * NOTE: API can timeout even with limit=10, so we use retry + scale-back logic
+   * 
+   * @param contract - Contract address
+   * @param tokenId - Token ID
+   * @param cursor - Cursor timestamp for pagination
+   * @param limit - Number of activities (default: 10, API can timeout with higher values)
+   * @param retryCount - Current retry attempt (internal)
+   * @returns Activities and next cursor
+   */
+  private async getTokenActivityPage(
+    contract: string,
+    tokenId: string,
+    cursor?: string,
+    limit: number = 10,
+    retryCount: number = 0
+  ): Promise<{ activities: MagicEdenV4Activity[]; continuation?: string }> {
+    const maxRetries = 3;
+    const isTimeout = (error: any) => 
+      error.code === 'ECONNABORTED' || 
+      error.message?.includes('timeout');
+    
+    try {
+      const assetId = `${contract.toLowerCase()}:${tokenId}`;
+      
+      logger.debug(`🔍 Fetching token activity from V4 API: ${assetId}`);
+      logger.debug(`   Cursor: ${cursor || 'none'}, Limit: ${limit}`);
+
+      const params: any = {
+        chain: 'ethereum',
+        assetId: assetId,
+        limit: limit,
+        sortBy: 'timestamp',
+        sortDir: 'desc'
+      };
+
+      if (cursor) {
+        params.cursorTimestamp = cursor;
+      }
+
+      const response: AxiosResponse<MagicEdenV4ActivityResponse> = await this.axiosInstance.get(
+        '/activity/nft',
+        {
+          params,
+          headers: {
+            'Accept': '*/*',
+            'User-Agent': 'ENS-TwitterBot/2.0'
+          },
+          timeout: 30000 // 30s timeout
+        }
+      );
+
+      const activities = response.data.activities || [];
+      const nextCursor = response.data.pagination?.cursorTimestamp;
+      
+      logger.debug(`✅ Retrieved ${activities.length} token activities`);
+      
+      // Log activity types for debugging
+      if (activities.length > 0) {
+        const activityTypes = activities.map(a => a.activityType).join(', ');
+        logger.debug(`   Activity types: ${activityTypes}`);
+      }
+      
+      if (nextCursor) {
+        logger.debug(`   Next cursor: ${nextCursor}`);
+      }
+
+      return {
+        activities,
+        continuation: nextCursor
+      };
+
+    } catch (error: any) {
+      const isTimeoutError = isTimeout(error);
+      
+      logger.error(`❌ Magic Eden V4 Token Activity Error (attempt ${retryCount + 1}/${maxRetries + 1}):`, {
+        message: error.message,
+        status: error.response?.status,
+        code: error.code,
+        isTimeout: isTimeoutError,
+        contract: contract.slice(0, 10) + '...',
+        tokenId: tokenId.slice(0, 20) + '...'
+      });
+
+      if (retryCount < maxRetries) {
+        const waitTime = Math.min(1000 * Math.pow(2, retryCount), 5000); // Exponential backoff
+        
+        // Scale back limit on timeout
+        let newLimit = limit;
+        if (isTimeoutError && retryCount === 0 && limit > 5) {
+          newLimit = 5; // Reduce to 5 on first timeout
+          logger.warn(`⚠️  Timeout detected, reducing limit from ${limit} to ${newLimit} and retrying...`);
+        } else {
+          logger.warn(`⚠️  Retrying in ${waitTime}ms...`);
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        
+        return this.getTokenActivityPage(contract, tokenId, cursor, newLimit, retryCount + 1);
+      }
+
+      logger.error(`❌ Max retries (${maxRetries}) exceeded for token activity`);
+      return {
+        activities: [],
+        continuation: undefined
+      };
+    }
+  }
+
+  /**
+   * Get token activity history with automatic pagination (matches V3 API)
+   * 
+   * @param contract - Contract address
+   * @param tokenId - Token ID
+   * @param options - Configuration options
+   * @returns All activities up to maxPages, with metadata
+   */
+  async getTokenActivityHistory(
+    contract: string,
+    tokenId: string,
+    options: {
+      limit?: number;  // Items per request (default: 10, API timeouts with higher values)
+      types?: MagicEdenV4ActivityType[];  // Activity types to filter
+      maxPages?: number;  // Maximum pages to fetch (default: 120)
+    } = {}
+  ): Promise<{ activities: MagicEdenV4Activity[]; incomplete: boolean; pagesFetched: number }> {
+    // Set defaults
+    const limit = options.limit || 10;  // Conservative default due to timeout issues
+    const types = options.types || ['TRADE', 'MINT', 'TRANSFER'];  // Match V3 default: sale, mint, transfer
+    const maxPages = options.maxPages || 120;  // 2x V3 to compensate for lower limit (120x10 = 1200 items)
+
+    logger.info(`📚 Fetching token activity history for ${contract}:${tokenId} (V4 API)`);
+    logger.debug(`   Settings: limit=${limit}, types=[${types.join(',')}], maxPages=${maxPages}`);
+
+    const allActivities: MagicEdenV4Activity[] = [];
+    let continuation: string | undefined;
+    let pageCount = 0;
+    let incomplete = false;
+
+    try {
+      // Loop through pages until we hit maxPages or run out of data
+      while (pageCount < maxPages) {
+        pageCount++;
+        
+        // Fetch single page using primitive method
+        const response = await this.getTokenActivityPage(
+          contract,
+          tokenId,
+          continuation,
+          limit
+        );
+
+        // Break if no activities returned
+        if (!response.activities || response.activities.length === 0) {
+          logger.debug(`   Page ${pageCount}: No more activities, stopping pagination`);
+          break;
+        }
+
+        // Filter by activity types (defaults to TRADE, MINT, TRANSFER)
+        const filteredActivities = response.activities.filter(a => types.includes(a.activityType));
+
+        // Add activities to aggregated array
+        allActivities.push(...filteredActivities);
+        logger.debug(`   Page ${pageCount}: Fetched ${response.activities.length} raw, ${filteredActivities.length} filtered activities (total: ${allActivities.length})`);
+
+        // Check for continuation cursor
+        continuation = response.continuation;
+        if (!continuation) {
+          logger.debug(`   Page ${pageCount}: No continuation cursor, reached end of data`);
+          break;
+        }
+
+        // Rate limiting between requests (1000-1100ms randomized delay)
+        if (continuation) {
+          const delay = 1000 + Math.random() * 100;
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+
+      // Check if we hit maxPages limit (incomplete data)
+      if (pageCount >= maxPages && continuation) {
+        logger.warn(`   ⚠️  Hit maxPages limit (${maxPages}), more data may be available`);
+        incomplete = true;
+      }
+
+      logger.info(`✅ Token activity history complete: ${allActivities.length} activities from ${pageCount} pages${incomplete ? ' (incomplete)' : ''}`);
+
+      return {
+        activities: allActivities,
+        incomplete,
+        pagesFetched: pageCount
+      };
+
+    } catch (error: any) {
+      logger.error(`❌ Failed to fetch token activity history: ${error.message}`);
+      
+      // Return partial results if we got any
+      return {
+        activities: allActivities,
+        incomplete: true,  // Mark as incomplete on error
+        pagesFetched: pageCount
+      };
+    }
+  }
+
+  /**
    * Get user activity history with automatic pagination (matches V3 API)
    * 
    * @param address - Ethereum address
@@ -987,17 +1193,34 @@ export class MagicEdenV4Service {
 
     const v3Type = typeMap[v4Activity.activityType] || 'transfer';
     
-    // Extract price data (TRADE activities have unitPrice, others default to 0)
+    // Extract price data (TRADE and MINT activities have unitPrice, others default to 0)
     const hasPrice = !!v4Activity.unitPrice;
     const priceRaw = v4Activity.unitPrice?.amount.raw || '0';
     const priceDecimal = v4Activity.unitPrice ? parseFloat(v4Activity.unitPrice.amount.native) : 0;
-    const priceUsd = v4Activity.unitPrice ? parseFloat(v4Activity.unitPrice.amount.fiat?.usd || '0') : 0;
     const currencyContract = v4Activity.unitPrice?.currency.contract || '0x0000000000000000000000000000000000000000';
     const currencySymbol = v4Activity.unitPrice?.currency.symbol || 'ETH';
     const currencyDecimals = v4Activity.unitPrice?.currency.decimals || 18;
+    
+    // Fix USD conversion for stablecoins (USDC, USDT, DAI)
+    let priceUsd = 0;
+    if (v4Activity.unitPrice) {
+      const isStablecoin = ['USDC', 'USDT', 'DAI'].includes(currencySymbol);
+      if (isStablecoin) {
+        // For stablecoins, the native value IS the USD value (1 USDC = $1)
+        priceUsd = priceDecimal;
+      } else {
+        // For ETH/WETH, use the V4 API's USD conversion
+        priceUsd = parseFloat(v4Activity.unitPrice.amount.fiat?.usd || '0');
+      }
+    }
 
     // Convert ISO timestamp to Unix timestamp
     const timestamp = Math.floor(new Date(v4Activity.timestamp).getTime() / 1000);
+    
+    // Debug logging for TRADE activities
+    if (v4Activity.activityType === 'TRADE' || v4Activity.activityType === 'MINT') {
+      logger.debug(`   🔄 Transforming ${v4Activity.activityType}: ${v4Activity.asset.name}, price: ${priceDecimal} ${currencySymbol} ($${priceUsd})`);
+    }
 
     return {
       type: v3Type as any,

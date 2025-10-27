@@ -566,14 +566,14 @@ async function startApplication(): Promise<void> {
           txHash: transaction.transactionHash
         };
 
-        // Step 3: Fetch Magic Eden data (use V4 API for user activity, V3 for token history)
-        logger.debug('   Fetching token activity from Magic Eden V3...');
-        const tokenResult = await magicEdenService.getTokenActivityHistory(
+        // Step 3: Fetch Magic Eden data (use V4 API for all activity)
+        logger.debug('   Fetching token activity from Magic Eden V4...');
+        const tokenResultV4 = await magicEdenV4Service.getTokenActivityHistory(
           transaction.contractAddress,
-          transaction.tokenId
-          // No options = use service defaults (maxPages: 20, timeout: 30s)
+          transaction.tokenId,
+          { limit: 10, maxPages: 120 } // 2x V3 pages to compensate for lower limit (120x10 = 1200 items)
         );
-        const tokenActivities = tokenResult.activities;
+        const tokenActivities = magicEdenV4Service.transformV4ToV3Activities(tokenResultV4.activities);
 
         logger.debug('   Fetching buyer activity from Magic Eden V4...');
         const buyerResultV4 = await magicEdenV4Service.getUserActivityHistory(
