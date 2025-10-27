@@ -1310,7 +1310,7 @@ export class MagicEdenV4Service {
    * 
    * @param contract - Contract address
    * @param tokenId - Token ID
-   * @returns Active asks sorted by price (lowest first)
+   * @returns Active asks sorted by USD value (lowest first)
    */
   async getActiveAsks(
     contract: string,
@@ -1324,7 +1324,7 @@ export class MagicEdenV4Service {
       // Build URL with array parameters for assetIds
       const params = new URLSearchParams({
         chain: 'ethereum',
-        sortDir: 'asc' // Lowest price first
+        sortDir: 'asc' // Sort by price ascending (native currency)
       });
       
       params.append('assetIds[]', assetId);
@@ -1344,16 +1344,110 @@ export class MagicEdenV4Service {
       
       logger.info(`✅ Found ${asks.length} active asks for ${assetId}`);
       
-      if (asks.length > 0) {
-        const lowestAsk = asks[0];
-        logger.debug(`   Lowest ask: ${lowestAsk.priceV2.amount.native} ${lowestAsk.priceV2.currency.symbol}`);
+      if (asks.length === 0) {
+        return [];
       }
 
-      return asks;
+      // Sort by USD value (lowest first) in case API sorting isn't by USD
+      const sortedAsks = asks.sort((a, b) => {
+        const usdA = parseFloat(a.priceV2.amount.fiat?.usd || '0');
+        const usdB = parseFloat(b.priceV2.amount.fiat?.usd || '0');
+        return usdA - usdB;
+      });
+
+      const lowestAsk = sortedAsks[0];
+      const usdValue = lowestAsk.priceV2.amount.fiat?.usd || '0';
+      logger.debug(`   Lowest USD ask: $${usdValue} (${lowestAsk.priceV2.amount.native} ${lowestAsk.priceV2.currency.symbol})`);
+
+      return sortedAsks;
 
     } catch (error: any) {
       logger.error(`❌ Error fetching active asks: ${error.message}`);
       return [];
+    }
+  }
+
+  /**
+   * Get last sale or registration (mint) for historical context
+   * Fetches token activity and finds most recent sale/mint above threshold
+   * 
+   * @param contract - Contract address
+   * @param tokenId - Token ID
+   * @param currentTxHash - Current transaction hash to exclude
+   * @param thresholdEth - Minimum ETH equivalent price to show (default: 0.01)
+   * @returns Historical event or null
+   */
+  async getLastSaleOrRegistration(
+    contract: string,
+    tokenId: string,
+    currentTxHash?: string,
+    thresholdEth: number = 0.01
+  ): Promise<{ type: 'sale' | 'mint'; priceEth: string; priceUsd: string; timestamp: number; daysAgo: number; currencySymbol: string; currencyContract: string; priceDecimal: number } | null> {
+    try {
+      logger.info(`🔍 Fetching historical sales for ${contract}:${tokenId} (V4 API)`);
+      
+      // Fetch token activity (TRADE and MINT only)
+      const result = await this.getTokenActivityHistory(
+        contract,
+        tokenId,
+        { types: ['TRADE', 'MINT'], maxPages: 10 } // Limit to 10 pages for performance
+      );
+      
+      const activities = this.transformV4ToV3Activities(result.activities);
+      
+      logger.debug(`   Retrieved ${activities.length} trade/mint activities`);
+      
+      // Find first sale or mint that meets threshold and isn't current transaction
+      for (const activity of activities) {
+        // Skip if this is the current transaction
+        if (currentTxHash && activity.txHash.toLowerCase() === currentTxHash.toLowerCase()) {
+          logger.debug(`   ⏭️  Skipping current transaction: ${activity.txHash}`);
+          continue;
+        }
+        
+        // Check if activity has valid price
+        if (!activity.price?.amount?.decimal || activity.price.amount.decimal <= 0) {
+          continue;
+        }
+        
+        const priceDecimal = activity.price.amount.decimal;
+        const currencyContract = activity.price.currency.contract;
+        const currencySymbol = activity.price.currency.symbol;
+        
+        // For threshold comparison, use ETH equivalent for non-ETH currencies
+        const isEth = currencyContract === '0x0000000000000000000000000000000000000000' || 
+                      currencyContract === '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'; // ETH or WETH
+        const thresholdPrice = isEth ? priceDecimal : (activity.price.amount.native || 0);
+        
+        // Check if meets threshold
+        if (thresholdPrice >= thresholdEth) {
+          const daysAgo = Math.floor((Date.now() / 1000 - activity.timestamp) / 86400);
+          const type = activity.type === 'mint' ? 'mint' : 'sale';
+          
+          logger.info(`   📈 Found historical ${type}: ${priceDecimal} ${currencySymbol}, ${daysAgo} days ago`);
+          
+          return {
+            type,
+            priceEth: priceDecimal.toFixed(2),
+            priceUsd: activity.price.amount.usd?.toFixed(2) || '',
+            timestamp: activity.timestamp,
+            daysAgo,
+            currencySymbol,
+            currencyContract: currencyContract || '',
+            priceDecimal
+          };
+        } else {
+          logger.debug(`   🔽 Historical event below threshold: ${thresholdPrice} ETH-equivalent < ${thresholdEth} ETH`);
+          return null; // Hard cutoff - don't look for older events
+        }
+      }
+      
+      logger.debug(`   📭 No historical data found meeting threshold`);
+      return null;
+      
+    } catch (error: any) {
+      logger.warn(`   ⚠️  Error getting historical data: ${error.message}`);
+      return null;
     }
   }
 

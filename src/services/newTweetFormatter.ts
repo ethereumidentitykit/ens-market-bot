@@ -285,13 +285,13 @@ export class NewTweetFormatter {
    * Get historical context for sales and registrations
    */
   private async getHistoricalContext(
-    contractAddress: string, 
-    tokenId: string, 
+    contractAddress: string,
+    tokenId: string,
     ensName: string,
     currentTxHash?: string
   ): Promise<string | null> {
-    if (!this.magicEdenService) {
-      logger.debug('[NewTweetFormatter] Magic Eden service not available for historical context');
+    if (!this.magicEdenV4Service) {
+      logger.debug('[NewTweetFormatter] Magic Eden V4 service not available for historical context');
       return null;
     }
 
@@ -336,8 +336,8 @@ export class NewTweetFormatter {
       }
 
 
-      // Try primary lookup first
-      const primaryResult = await this.magicEdenService.getLastSaleOrRegistration(
+      // Try primary lookup first (V4 API)
+      const primaryResult = await this.magicEdenV4Service.getLastSaleOrRegistration(
         primaryContract, 
         primaryTokenId,
         currentTxHash
@@ -348,10 +348,10 @@ export class NewTweetFormatter {
         return TimeUtils.formatHistoricalEvent(Number(primaryResult.priceEth), primaryResult.timestamp, primaryResult.type, primaryResult.currencySymbol);
       }
 
-      // Try fallback lookup if configured
+      // Try fallback lookup if configured (V4 API)
       if (fallbackContract && fallbackTokenId) {
         logger.info(`🔄 Trying fallback lookup: ${fallbackContract}:${fallbackTokenId}`);
-        const fallbackResult = await this.magicEdenService.getLastSaleOrRegistration(
+        const fallbackResult = await this.magicEdenV4Service.getLastSaleOrRegistration(
           fallbackContract,
           fallbackTokenId,
           currentTxHash
