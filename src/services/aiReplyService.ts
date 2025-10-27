@@ -119,7 +119,7 @@ export class AIReplyService {
         contextData.tokenActivities,
         contextData.buyerActivities,
         contextData.sellerActivities,
-        this.magicEdenService,
+        this.magicEdenV4Service,
         this.ensWorkerService,
         {
           tokenDataIncomplete: contextData.tokenDataIncomplete,

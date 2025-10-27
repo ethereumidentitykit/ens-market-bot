@@ -601,7 +601,7 @@ async function startApplication(): Promise<void> {
           tokenActivities,
           buyerActivities,
           sellerActivities,
-          magicEdenService,  // Pass for on-demand proxy resolution
+          magicEdenV4Service,  // Pass V4 service for on-demand proxy resolution
           ensWorkerService   // Pass for ENS name resolution
         );
 
