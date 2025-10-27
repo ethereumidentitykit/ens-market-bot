@@ -16,7 +16,7 @@ import { IDatabaseService, ProcessedSale, ENSRegistration } from '../types';
 import { OpenAIService } from './openaiService';
 import { TwitterService } from './twitterService';
 import { DataProcessingService } from './dataProcessingService';
-import { MagicEdenService, TokenActivity } from './magicEdenService';
+import { MagicEdenV4Service, TokenActivity } from './magicEdenV4Service';
 import { OpenSeaService } from './openSeaService';
 import { ENSWorkerService } from './ensWorkerService';
 import { APIToggleService } from './apiToggleService';
@@ -26,7 +26,7 @@ export class AIReplyService {
   private databaseService: IDatabaseService;
   private twitterService: TwitterService;
   private dataProcessingService: DataProcessingService;
-  private magicEdenService: MagicEdenService;
+  private magicEdenV4Service: MagicEdenV4Service;
   private openSeaService: OpenSeaService;
   private ensWorkerService: ENSWorkerService;
   private apiToggleService: APIToggleService;
@@ -41,7 +41,7 @@ export class AIReplyService {
     databaseService: IDatabaseService,
     twitterService: TwitterService,
     dataProcessingService: DataProcessingService,
-    magicEdenService: MagicEdenService,
+    magicEdenV4Service: MagicEdenV4Service,
     openSeaService: OpenSeaService,
     ensWorkerService: ENSWorkerService
   ) {
@@ -49,7 +49,7 @@ export class AIReplyService {
     this.databaseService = databaseService;
     this.twitterService = twitterService;
     this.dataProcessingService = dataProcessingService;
-    this.magicEdenService = magicEdenService;
+    this.magicEdenV4Service = magicEdenV4Service;
     this.openSeaService = openSeaService;
     this.ensWorkerService = ensWorkerService;
     this.apiToggleService = APIToggleService.getInstance();
@@ -115,7 +115,7 @@ export class AIReplyService {
         contextData.tokenActivities,
         contextData.buyerActivities,
         contextData.sellerActivities,
-        this.magicEdenService,
+        this.magicEdenV4Service,
         this.ensWorkerService,
         {
           tokenDataIncomplete: contextData.tokenDataIncomplete,
@@ -477,26 +477,43 @@ export class AIReplyService {
 
     // Execute all API calls in parallel
     const [tokenResult, buyerResult, sellerResult, buyerHoldings, sellerHoldings, nameResearch] = await Promise.all([
-      // Token activity history
-      this.magicEdenService.getTokenActivityHistory(
+      // Token activity history (V4 API)
+      this.magicEdenV4Service.getTokenActivityHistory(
         transaction.contractAddress,
-        transaction.tokenId
-      ).catch((error: any) => {
+        transaction.tokenId,
+        { limit: 10, maxPages: 120 } // 2x V3 pages to compensate for lower limit (120x10 = 1200 items)
+      ).then(result => ({
+        activities: this.magicEdenV4Service.transformV4ToV3Activities(result.activities),
+        incomplete: result.incomplete,
+        pagesFetched: result.pagesFetched
+      })).catch((error: any) => {
         logger.error('      Token activity fetch failed:', error.message);
         return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0 };
       }),
       
-      // Buyer activity history
-      this.magicEdenService.getUserActivityHistory(
-        eventData.buyerAddress
-      ).catch((error: any) => {
+      // Buyer activity history (V4 API)
+      this.magicEdenV4Service.getUserActivityHistory(
+        eventData.buyerAddress,
+        { types: ['TRADE', 'MINT', 'TRANSFER'], maxPages: 60 }
+      ).then(result => ({
+        activities: this.magicEdenV4Service.transformV4ToV3Activities(result.activities),
+        incomplete: result.incomplete,
+        pagesFetched: result.pagesFetched
+      })).catch((error: any) => {
         logger.error('      Buyer activity fetch failed:', error.message);
         return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0 };
       }),
       
-      // Seller activity history (if applicable)
+      // Seller activity history (if applicable) (V4 API)
       eventData.sellerAddress
-        ? this.magicEdenService.getUserActivityHistory(eventData.sellerAddress).catch((error: any) => {
+        ? this.magicEdenV4Service.getUserActivityHistory(
+            eventData.sellerAddress,
+            { types: ['TRADE', 'MINT', 'TRANSFER'], maxPages: 60 }
+          ).then(result => ({
+            activities: this.magicEdenV4Service.transformV4ToV3Activities(result.activities),
+            incomplete: result.incomplete,
+            pagesFetched: result.pagesFetched
+          })).catch((error: any) => {
             logger.error('      Seller activity fetch failed:', error.message);
             return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0 };
           })

@@ -1,5 +1,5 @@
 import { logger } from '../utils/logger';
-import { TokenActivity } from './magicEdenService';
+import { TokenActivity } from './magicEdenV4Service';
 import { ENSWorkerService } from './ensWorkerService';
 import { ClubService } from './clubService';
 import { CurrencyUtils } from '../utils/currencyUtils';
@@ -167,23 +167,26 @@ export class DataProcessingService {
    * Only called when a proxy is detected in user activity
    * 
    * @param activity - Sale/mint activity with proxy address
-   * @param magicEdenService - MagicEdenService instance for fetching token data
+   * @param magicEdenV4Service - MagicEdenV4Service instance for fetching token data
    * @returns Resolved buyer and seller addresses
    */
   private async resolveProxyForActivity(
     activity: TokenActivity,
-    magicEdenService: any
+    magicEdenV4Service: any
   ): Promise<{
     resolvedBuyer: string;
     resolvedSeller: string;
   }> {
     try {
-      // Fetch just this token's activity (including transfers) - limit to recent activity
-      const tokenActivities = await magicEdenService.getTokenActivityHistory(
+      // Fetch just this token's activity (including transfers) - limit to recent activity (V4 API)
+      const result = await magicEdenV4Service.getTokenActivityHistory(
         activity.contract,
         activity.token.tokenId,
-        { types: ['sale', 'mint', 'transfer'], maxPages: 2 }  // Only fetch recent pages
+        { types: ['TRADE', 'MINT', 'TRANSFER'], maxPages: 2 }  // Only fetch recent pages
       );
+      
+      // Transform V4 activities to V3 format for compatibility
+      const tokenActivities = magicEdenV4Service.transformV4ToV3Activities(result.activities);
       
       // Find transfers matching this transaction
       const transfers = tokenActivities.filter((a: TokenActivity) => 
@@ -474,14 +477,14 @@ export class DataProcessingService {
    * @param activities - User activity history from Magic Eden (sales, mints only)
    * @param userAddress - The address of the user we're analyzing (already resolved from DB)
    * @param role - Whether this user is the buyer or seller in current event
-   * @param magicEdenService - MagicEdenService instance for on-demand token data fetching
+   * @param magicEdenV4Service - MagicEdenV4Service instance for on-demand token data fetching
    * @returns User trading statistics
    */
   async processUserActivity(
     activities: TokenActivity[],
     userAddress: string,
     role: 'buyer' | 'seller',
-    magicEdenService?: any,
+    magicEdenV4Service?: any,
     currentHoldings?: { names: string[]; incomplete: boolean } | null
   ): Promise<UserStats> {
     logger.debug(`👤 Processing user activity: ${activities.length} activities for ${userAddress.slice(0, 8)}... (${role})`);
@@ -506,15 +509,15 @@ export class DataProcessingService {
       logger.debug(`   ⚠️  Detected ${activitiesWithProxies.length} activities with proxies - will resolve on-demand`);
     }
     
-    // Process each activity - resolve proxies on-demand if magicEdenService is provided
+    // Process each activity - resolve proxies on-demand if magicEdenV4Service is provided
     const resolvedActivities = await Promise.all(
       salesAndMints.map(async (activity) => {
         // Check if this activity has a proxy
         const hasProxy = this.isKnownProxy(activity.fromAddress) || this.isKnownProxy(activity.toAddress);
         
-        if (hasProxy && magicEdenService) {
-          // Lazy-fetch token transfers for this specific transaction
-          const resolved = await this.resolveProxyForActivity(activity, magicEdenService);
+        if (hasProxy && magicEdenV4Service) {
+          // Lazy-fetch token transfers for this specific transaction (V4 API)
+          const resolved = await this.resolveProxyForActivity(activity, magicEdenV4Service);
           return {
             ...activity,
             ...resolved
@@ -530,7 +533,7 @@ export class DataProcessingService {
       })
     );
     
-    const proxiesResolved = magicEdenService ? activitiesWithProxies.length : 0;
+    const proxiesResolved = magicEdenV4Service ? activitiesWithProxies.length : 0;
     logger.debug(`   Processed ${resolvedActivities.length} activities (${proxiesResolved} proxies resolved)`);
     
     // Separate buys vs sells using RESOLVED addresses
@@ -670,7 +673,7 @@ export class DataProcessingService {
     tokenActivities: TokenActivity[],
     buyerActivities: TokenActivity[],
     sellerActivities: TokenActivity[] | null,
-    magicEdenService?: any,
+    magicEdenV4Service?: any,
     ensWorkerService?: ENSWorkerService,
     fetchStatus?: {
       tokenDataIncomplete: boolean;
@@ -729,7 +732,7 @@ export class DataProcessingService {
       buyerActivities,
       eventData.buyerAddress,
       'buyer',
-      magicEdenService,
+      magicEdenV4Service,
       holdingsData?.buyerHoldings || null
     );
     
@@ -741,7 +744,7 @@ export class DataProcessingService {
         sellerActivities,
         eventData.sellerAddress,
         'seller',
-        magicEdenService,
+        magicEdenV4Service,
         holdingsData?.sellerHoldings || null
       );
     } else {

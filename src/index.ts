@@ -15,7 +15,7 @@ import { DatabaseService } from './services/databaseService';
 import { IDatabaseService, ENSRegistration, ProcessedSale } from './types';
 import { SalesProcessingService } from './services/salesProcessingService';
 import { BidsProcessingService } from './services/bidsProcessingService';
-import { MagicEdenService, TokenActivity } from './services/magicEdenService';
+import { MagicEdenV4Service, TokenActivity } from './services/magicEdenV4Service';
 import { SchedulerService } from './services/schedulerService';
 import { TwitterService } from './services/twitterService';
 import { NewTweetFormatter } from './services/newTweetFormatter';
@@ -63,10 +63,13 @@ async function startApplication(): Promise<void> {
     const databaseService: IDatabaseService = new DatabaseService();
     
     const salesProcessingService = new SalesProcessingService(moralisService, databaseService);
-    const magicEdenService = new MagicEdenService();
-    const bidsProcessingService = new BidsProcessingService(magicEdenService, databaseService, alchemyService);
+    
+    // Magic Eden V4 Service (V3 removed - fully migrated)
+    const magicEdenV4Service = new MagicEdenV4Service();
+    
+    const bidsProcessingService = new BidsProcessingService(magicEdenV4Service, databaseService, alchemyService);
     const twitterService = new TwitterService();
-    const newTweetFormatter = new NewTweetFormatter(databaseService, alchemyService, openSeaService, ensMetadataService, magicEdenService);
+    const newTweetFormatter = new NewTweetFormatter(databaseService, alchemyService, openSeaService, ensMetadataService, magicEdenV4Service);
     const rateLimitService = new RateLimitService(databaseService);
     const ethIdentityService = new ENSWorkerService();
     const worldTimeService = new WorldTimeService();
@@ -88,7 +91,7 @@ async function startApplication(): Promise<void> {
       databaseService,
       twitterService,
       dataProcessingService,
-      magicEdenService,
+      magicEdenV4Service,
       openSeaService,
       ethIdentityService
     );
@@ -559,30 +562,30 @@ async function startApplication(): Promise<void> {
           txHash: transaction.transactionHash
         };
 
-        // Step 3: Fetch Magic Eden data (use defaults: 20 pages, 30s timeout)
-        logger.debug('   Fetching token activity from Magic Eden...');
-        const tokenResult = await magicEdenService.getTokenActivityHistory(
+        // Step 3: Fetch Magic Eden data (use V4 API for all activity)
+        logger.debug('   Fetching token activity from Magic Eden V4...');
+        const tokenResultV4 = await magicEdenV4Service.getTokenActivityHistory(
           transaction.contractAddress,
-          transaction.tokenId
-          // No options = use service defaults (maxPages: 20, timeout: 30s)
+          transaction.tokenId,
+          { limit: 10, maxPages: 120 } // 2x V3 pages to compensate for lower limit (120x10 = 1200 items)
         );
-        const tokenActivities = tokenResult.activities;
+        const tokenActivities = magicEdenV4Service.transformV4ToV3Activities(tokenResultV4.activities);
 
-        logger.debug('   Fetching buyer activity from Magic Eden...');
-        const buyerResult = await magicEdenService.getUserActivityHistory(
-          eventData.buyerAddress
-          // No options = use service defaults (maxPages: 20, timeout: 30s)
+        logger.debug('   Fetching buyer activity from Magic Eden V4...');
+        const buyerResultV4 = await magicEdenV4Service.getUserActivityHistory(
+          eventData.buyerAddress,
+          { types: ['TRADE', 'MINT', 'TRANSFER'], maxPages: 60 }
         );
-        const buyerActivities = buyerResult.activities;
+        const buyerActivities = magicEdenV4Service.transformV4ToV3Activities(buyerResultV4.activities);
 
         let sellerActivities: TokenActivity[] | null = null;
         if (eventData.sellerAddress) {
-          logger.debug('   Fetching seller activity from Magic Eden...');
-          const sellerResult = await magicEdenService.getUserActivityHistory(
-            eventData.sellerAddress
-            // No options = use service defaults (maxPages: 20, timeout: 30s)
+          logger.debug('   Fetching seller activity from Magic Eden V4...');
+          const sellerResultV4 = await magicEdenV4Service.getUserActivityHistory(
+            eventData.sellerAddress,
+            { types: ['TRADE', 'MINT', 'TRANSFER'], maxPages: 60 }
           );
-          sellerActivities = sellerResult.activities;
+          sellerActivities = magicEdenV4Service.transformV4ToV3Activities(sellerResultV4.activities);
         }
 
         // Step 4: Build LLM context using DataProcessingService
@@ -594,7 +597,7 @@ async function startApplication(): Promise<void> {
           tokenActivities,
           buyerActivities,
           sellerActivities,
-          magicEdenService,  // Pass for on-demand proxy resolution
+          magicEdenV4Service,  // Pass V4 service for on-demand proxy resolution
           ensWorkerService   // Pass for ENS name resolution
         );
 
@@ -718,7 +721,7 @@ async function startApplication(): Promise<void> {
           databaseService,
           twitterService,
           dataProcessingService,
-          magicEdenService,
+          magicEdenV4Service,
           openSeaService,
           ensWorkerService
         );

@@ -9,7 +9,7 @@ import { AlchemyService } from './alchemyService';
 import { OpenSeaService } from './openSeaService';
 import { ENSMetadataService } from './ensMetadataService';
 import { ClubService } from './clubService';
-import { MagicEdenService, HistoricalEvent, ListingPrice } from './magicEdenService';
+import { MagicEdenV4Service } from './magicEdenV4Service';
 import { ENSTokenUtils } from './ensTokenUtils';
 import { TimeUtils } from '../utils/timeUtils';
 
@@ -41,7 +41,7 @@ export class NewTweetFormatter {
     private alchemyService?: AlchemyService,
     private openSeaService?: OpenSeaService,
     private ensMetadataService?: ENSMetadataService,
-    private magicEdenService?: MagicEdenService
+    private magicEdenV4Service?: MagicEdenV4Service
   ) {
     logger.info('[NewTweetFormatter] Constructor called - ClubService should be initialized');
     // Add a small delay to let ClubService initialize, then check status
@@ -283,13 +283,13 @@ export class NewTweetFormatter {
    * Get historical context for sales and registrations
    */
   private async getHistoricalContext(
-    contractAddress: string, 
-    tokenId: string, 
+    contractAddress: string,
+    tokenId: string,
     ensName: string,
     currentTxHash?: string
   ): Promise<string | null> {
-    if (!this.magicEdenService) {
-      logger.debug('[NewTweetFormatter] Magic Eden service not available for historical context');
+    if (!this.magicEdenV4Service) {
+      logger.debug('[NewTweetFormatter] Magic Eden V4 service not available for historical context');
       return null;
     }
 
@@ -334,8 +334,8 @@ export class NewTweetFormatter {
       }
 
 
-      // Try primary lookup first
-      const primaryResult = await this.magicEdenService.getLastSaleOrRegistration(
+      // Try primary lookup first (V4 API)
+      const primaryResult = await this.magicEdenV4Service.getLastSaleOrRegistration(
         primaryContract, 
         primaryTokenId,
         currentTxHash
@@ -346,10 +346,10 @@ export class NewTweetFormatter {
         return TimeUtils.formatHistoricalEvent(Number(primaryResult.priceEth), primaryResult.timestamp, primaryResult.type, primaryResult.currencySymbol);
       }
 
-      // Try fallback lookup if configured
+      // Try fallback lookup if configured (V4 API)
       if (fallbackContract && fallbackTokenId) {
         logger.info(`🔄 Trying fallback lookup: ${fallbackContract}:${fallbackTokenId}`);
-        const fallbackResult = await this.magicEdenService.getLastSaleOrRegistration(
+        const fallbackResult = await this.magicEdenV4Service.getLastSaleOrRegistration(
           fallbackContract,
           fallbackTokenId,
           currentTxHash
@@ -372,32 +372,37 @@ export class NewTweetFormatter {
 
   /**
    * Get current listing price context for bids
+   * Uses V4 /asks endpoint which only returns active, valid listings
    */
   private async getListingContext(
     contractAddress: string,
     tokenId: string,
     bidAmountEth: number
   ): Promise<string | null> {
-    if (!this.magicEdenService) {
-      logger.debug('[NewTweetFormatter] Magic Eden service not available for listing context');
+    if (!this.magicEdenV4Service) {
+      logger.debug('[NewTweetFormatter] Magic Eden V4 service not available for listing context');
       return null;
     }
 
     try {
       logger.info(`🔍 Fetching listing context for ${contractAddress}:${tokenId}`);
 
-      const listingData = await this.magicEdenService.getCurrentListingPrice(
-        contractAddress,
-        tokenId,
-        bidAmountEth
-      );
+      const asks = await this.magicEdenV4Service.getActiveAsks(contractAddress, tokenId);
 
-      if (listingData) {
-        logger.info(`✅ Found active listing: ${listingData.priceEth} ETH`);
-        return `List Price: ${Number(listingData.priceEth).toFixed(2)} ETH`;
+      if (asks.length > 0) {
+        // Use lowest ask (already sorted by API with sortDir=asc)
+        const lowestAsk = asks[0];
+        const priceEth = parseFloat(lowestAsk.priceV2.amount.native);
+        const currencySymbol = lowestAsk.priceV2.currency.symbol;
+        
+        logger.info(`✅ Found active listing: ${priceEth} ${currencySymbol}`);
+        
+        // Format with currency symbol (usually ETH)
+        const displaySymbol = currencySymbol === 'ETH' ? 'ETH' : currencySymbol;
+        return `List Price: ${priceEth.toFixed(2)} ${displaySymbol}`;
       }
 
-      logger.info('ℹ️ No active listing found or bid not within proximity threshold');
+      logger.info('ℹ️ No active listing found');
       return null;
 
     } catch (error: any) {
