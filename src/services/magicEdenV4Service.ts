@@ -203,16 +203,18 @@ export class MagicEdenV4Service {
   }
 
   /**
-   * Get activities by type from the V4 API with retry logic
-   * Generic method that can fetch any activity type
+   * Get activities from a single collection (helper method)
+   * Private method used by getActivities to fetch from one contract
    * 
-   * @param activityTypes - Activity types to fetch (BID_CREATED, ASK_CREATED, TRADE, etc.)
-   * @param cursor - Optional cursor timestamp for pagination (ISO 8601)
-   * @param limit - Number of activities to fetch (default: 100)
-   * @param retryCount - Current retry attempt (internal use only)
+   * @param collectionId - Single collection contract address
+   * @param activityTypes - Activity types to fetch
+   * @param cursor - Optional cursor for pagination
+   * @param limit - Number of activities to fetch
+   * @param retryCount - Current retry attempt
    * @returns Activities and next cursor
    */
-  async getActivities(
+  private async getActivitiesForCollection(
+    collectionId: string,
     activityTypes: MagicEdenV4ActivityType[],
     cursor?: string,
     limit: number = 100,
@@ -222,15 +224,11 @@ export class MagicEdenV4Service {
     const isTimeout = (error: any) => 
       error.code === 'ECONNABORTED' || 
       error.message?.includes('timeout');
+    
     try {
-      logger.info(`🔍 Fetching ENS activities from Magic Eden V4 API`);
-      logger.info(`📊 Types: ${activityTypes.join(', ')}, Cursor: ${cursor || 'none'}, Limit: ${limit}`);
-
-      // API only accepts ONE collectionId per request, so fetch from primary ENS contract
-      // (0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85 - the main one with most activity)
       const params = new URLSearchParams({
         chain: 'ethereum',
-        collectionId: this.ensContracts[0], // Singular, not array
+        collectionId: collectionId,
         limit: limit.toString(),
         sortBy: 'timestamp',
         sortDir: 'desc'
@@ -260,12 +258,6 @@ export class MagicEdenV4Service {
 
       const activities = response.data.activities || [];
       const nextCursor = response.data.pagination?.cursorTimestamp;
-      
-      logger.info(`✅ Magic Eden V4 API: Retrieved ${activities.length} activities`);
-      
-      if (nextCursor) {
-        logger.debug(`📄 Next cursor: ${nextCursor}`);
-      }
 
       return {
         activities,
@@ -301,7 +293,7 @@ export class MagicEdenV4Service {
         await new Promise(resolve => setTimeout(resolve, waitTime));
         
         // Recursive retry with potentially reduced limit
-        return this.getActivities(activityTypes, cursor, newLimit, retryCount + 1);
+        return this.getActivitiesForCollection(collectionId, activityTypes, cursor, newLimit, retryCount + 1);
       }
 
       // Max retries exceeded - return empty result
@@ -314,27 +306,110 @@ export class MagicEdenV4Service {
   }
 
   /**
+   * Get activities by type from the V4 API (both ENS contracts)
+   * Fetches from both contracts and merges results, sorted by timestamp
+   * 
+   * @param activityTypes - Activity types to fetch (BID_CREATED, ASK_CREATED, TRADE, etc.)
+   * @param cursor - Optional cursor timestamp for pagination (ISO 8601)
+   * @param limit - Number of activities to fetch per contract (default: 100)
+   * @returns Activities from both contracts and next cursor
+   */
+  async getActivities(
+    activityTypes: MagicEdenV4ActivityType[],
+    cursor?: string,
+    limit: number = 100
+  ): Promise<{ activities: MagicEdenV4Activity[]; continuation?: string }> {
+    logger.info(`🔍 Fetching ENS activities from Magic Eden V4 API (both contracts)`);
+    logger.info(`📊 Types: ${activityTypes.join(', ')}, Cursor: ${cursor || 'none'}, Limit: ${limit}`);
+
+    try {
+      // Fetch from both ENS contracts in parallel
+      const [contract1Result, contract2Result] = await Promise.all([
+        this.getActivitiesForCollection(this.ensContracts[0], activityTypes, cursor, limit),
+        this.getActivitiesForCollection(this.ensContracts[1], activityTypes, cursor, limit)
+      ]);
+
+      // Merge activities from both contracts
+      const allActivities = [...contract1Result.activities, ...contract2Result.activities];
+
+      // Sort by timestamp (newest first) - API returns ISO strings
+      allActivities.sort((a, b) => {
+        const timeA = new Date(a.timestamp).getTime();
+        const timeB = new Date(b.timestamp).getTime();
+        return timeB - timeA; // Descending (newest first)
+      });
+
+      // Use the oldest cursor from both results for pagination consistency
+      const continuation = contract1Result.continuation && contract2Result.continuation
+        ? (contract1Result.continuation < contract2Result.continuation 
+            ? contract1Result.continuation 
+            : contract2Result.continuation)
+        : (contract1Result.continuation || contract2Result.continuation);
+
+      logger.info(`✅ Magic Eden V4 API: Retrieved ${allActivities.length} activities (${contract1Result.activities.length} + ${contract2Result.activities.length})`);
+      
+      if (continuation) {
+        logger.debug(`📄 Next cursor: ${continuation}`);
+      }
+
+      return {
+        activities: allActivities,
+        continuation
+      };
+
+    } catch (error: any) {
+      logger.error(`❌ Failed to fetch activities from Magic Eden V4: ${error.message}`);
+      return {
+        activities: [],
+        continuation: undefined
+      };
+    }
+  }
+
+  /**
    * Get active bids using the new activity endpoint
-   * Filters for BID_CREATED activities on ENS collections
+   * Fetches both BID_CREATED and BID_CANCELLED to filter out cancelled bids
    * 
    * @param cursor - Optional cursor timestamp for pagination (ISO 8601)
    * @param limit - Number of activities to fetch (default: 100)
-   * @returns Bid activities and next cursor
+   * @returns Bid activities and next cursor (only active, non-cancelled bids)
    */
   async getActiveBids(
     cursor?: string,
     limit: number = 100
   ): Promise<{ bids: MagicEdenBid[]; continuation?: string }> {
     try {
-      // Use generic getActivities method
-      const { activities, continuation } = await this.getActivities(['BID_CREATED'], cursor, limit);
+      // Fetch both BID_CREATED and BID_CANCELLED events to filter out cancelled bids
+      const { activities, continuation } = await this.getActivities(['BID_CREATED', 'BID_CANCELLED'], cursor, limit);
       
-      // Transform V4 activities to internal MagicEdenBid format
+      // Build a set of cancelled bid IDs for quick lookup
+      const cancelledBidIds = new Set<string>();
+      activities
+        .filter(activity => activity.activityType === 'BID_CANCELLED')
+        .forEach(activity => {
+          if (activity.bid?.id) {
+            cancelledBidIds.add(activity.bid.id);
+          }
+        });
+
+      logger.debug(`   Found ${cancelledBidIds.size} cancelled bids to filter out`);
+      
+      // Transform V4 activities to internal MagicEdenBid format, excluding cancelled bids
       const transformedBids = activities
-        .filter(activity => activity.activityType === 'BID_CREATED')
+        .filter(activity => {
+          if (activity.activityType !== 'BID_CREATED') return false;
+          
+          // Exclude if this bid was cancelled
+          if (activity.bid?.id && cancelledBidIds.has(activity.bid.id)) {
+            logger.debug(`   Filtering out cancelled bid: ${activity.bid.id}`);
+            return false;
+          }
+          
+          return true;
+        })
         .map(activity => this.transformV4ActivityToBid(activity));
 
-      logger.info(`🎯 Transformed ${transformedBids.length} bids to internal format`);
+      logger.info(`🎯 Transformed ${transformedBids.length} active bids (${activities.filter(a => a.activityType === 'BID_CREATED').length} created, ${cancelledBidIds.size} cancelled)`);
 
       return {
         bids: transformedBids,
