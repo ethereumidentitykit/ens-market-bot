@@ -1,4 +1,5 @@
 import { logger } from '../utils/logger';
+import { getBestEnsName, isTokenIdHash } from '../utils/nameUtils';
 import { ProcessedSale, IDatabaseService } from '../types';
 import { OpenSeaService } from './openSeaService';
 import { ENSMetadataService } from './ensMetadataService';
@@ -413,13 +414,20 @@ export class QuickNodeSalesService {
         }
       }
 
-      // 4. Require essential metadata for storage
+      // 4. Validate name quality (detect token ID hashes)
+      if (nftName && isTokenIdHash(nftName)) {
+        logger.error(`❌ Metadata returned token ID hash instead of name: "${nftName.substring(0, 30)}..." - cannot post sale without valid name`);
+        logger.warn(`⚠️ Skipping sale ${saleData.transactionHash} due to invalid metadata`);
+        return null;
+      }
+
+      // 5. Require essential metadata for storage
       if (!nftName) {
         logger.error(`❌ No NFT name found for ${saleData.tokenId} - cannot store without metadata`);
         return null;
       }
 
-      // 5. Log enrichment summary
+      // 6. Log enrichment summary
       const enrichmentSource = openSeaSuccess ? 'OpenSea' : 'ENS Metadata (fallback)';
       logger.info(`📋 Enrichment complete for ${nftName}: metadata=${enrichmentSource}, hasImage=${!!nftImage}, priceUSD=$${priceUsd} (Alchemy)`);
 

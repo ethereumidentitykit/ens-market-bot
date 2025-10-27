@@ -1,6 +1,7 @@
 import { MagicEdenV4Service } from './magicEdenV4Service';
 import { IDatabaseService, ENSBid, BidProcessingStats, MagicEdenBid } from '../types';
 import { logger } from '../utils/logger';
+import { isTokenIdHash } from '../utils/nameUtils';
 import { AlchemyService } from './alchemyService';
 import { ClubService } from './clubService';
 import axios from 'axios';
@@ -376,6 +377,12 @@ export class BidsProcessingService {
       // Use Magic Eden name if available (80-90% of cases)
       let ensName = bid.ensName || '';
       
+      // Check if Magic Eden provided a token ID hash instead of a name
+      if (ensName && isTokenIdHash(ensName)) {
+        logger.warn(`⚠️ Magic Eden provided token ID hash instead of name: "${ensName.substring(0, 30)}..." - fetching from ENS metadata`);
+        ensName = ''; // Clear it so we fetch the real name
+      }
+      
       if (ensName) {
         logger.debug(`🚀 Using Magic Eden name for filtering: "${ensName}" (no API call needed)`);
       }
@@ -391,6 +398,13 @@ export class BidsProcessingService {
           if (response.ok) {
             const metadata = await response.json();
             ensName = metadata.name || '';
+            
+            // Check if ENS metadata also returned a hash
+            if (ensName && isTokenIdHash(ensName)) {
+              logger.error(`❌ ENS metadata also returned token ID hash: "${ensName.substring(0, 30)}..." - rejecting bid`);
+              return 999; // Impossibly high threshold = always reject
+            }
+            
             logger.debug(`✅ ENS name resolved: ${ensName}`);
           }
         } catch (error) {

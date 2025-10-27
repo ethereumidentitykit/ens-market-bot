@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { logger } from '../utils/logger';
+import { getBestEnsName, isTokenIdHash } from '../utils/nameUtils';
 import { IDatabaseService, ENSRegistration } from '../types';
 import { OpenSeaService } from './openSeaService';
 import { ENSMetadataService } from './ensMetadataService';
@@ -104,8 +105,13 @@ export class QuickNodeRegistrationService {
       // Create block timestamp from current time (QuickNode events don't include timestamp)
       const blockTimestamp = new Date().toISOString();
       
-      // Build fullName using same logic as existing webhook
-      const fullName = enrichedData.name || `${event.name}.eth`;
+      // Build fullName with hash detection and fallback
+      // Priority: webhook name (event.name) > metadata name (if not a hash)
+      const fullName = getBestEnsName(
+        event.name,           // Webhook name (most reliable)
+        enrichedData.name,    // Metadata name (might be a hash)
+        event.name            // Fallback to webhook
+      );
 
       // Prepare registration data for database (matches existing schema)
       const registrationData: Omit<ENSRegistration, 'id'> = {
@@ -236,6 +242,12 @@ export class QuickNodeRegistrationService {
     // 4. Log enrichment results (matching existing webhook)
     if (ensMetadata) {
       const enrichmentSource = openSeaSuccess ? 'OpenSea' : 'ENS Metadata (fallback)';
+      
+      // Detect and warn about token ID hashes
+      if (ensMetadata.name && isTokenIdHash(ensMetadata.name)) {
+        logger.warn(`⚠️ Metadata returned token ID hash instead of name: "${ensMetadata.name.substring(0, 30)}..." (will use webhook name as fallback)`);
+      }
+      
       logger.info(`📋 Registration enrichment complete for ${ensMetadata.name}: metadata=${enrichmentSource}, hasImage=${!!ensMetadata.image}, hasDescription=${!!ensMetadata.description}`);
       logger.info('🖼️ ENS metadata fetched:', {
         name: ensMetadata.name,
