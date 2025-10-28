@@ -4,6 +4,7 @@ import { logger } from '../utils/logger';
 import { isTokenIdHash } from '../utils/nameUtils';
 import { AlchemyService } from './alchemyService';
 import { ClubService } from './clubService';
+import { ensSubgraphService } from './ensSubgraphService';
 import axios from 'axios';
 
 interface ENSMetadata {
@@ -74,8 +75,6 @@ export class BidsProcessingService {
     const version = (magicEdenService as any).constructor.name;
     logger.info(`🔧 BidsProcessingService initialized with ${version}`);
   }
-
-
 
   /**
    * Process new ENS bids using timestamp-based pagination
@@ -387,40 +386,55 @@ export class BidsProcessingService {
         logger.debug(`🚀 Using Magic Eden name for filtering: "${ensName}" (no API call needed)`);
       }
       
-      // Only call ENS service if Magic Eden didn't provide the name
+      // Only lookup ENS name if Magic Eden didn't provide it
       if (!ensName && bid.tokenId) {
         try {
-          // Use the actual contract from the bid (handles both registry and wrapper)
-          const ensContract = bid.contractAddress || '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
-          logger.debug(`🔍 Fetching ENS name for filtering (Magic Eden didn't provide): ${bid.tokenId} from contract ${ensContract}`);
-          const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
+          logger.debug(`🔍 Fetching ENS name for filtering (Magic Eden didn't provide): ${bid.tokenId.slice(-10)}`);
           
-          // Create abort controller for 3s timeout
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 3000);
+          // PRIMARY: Try in-house ENS subgraph first (fast, reliable)
+          // Pass contract address to support both registry (labelhash) and wrapper (namehash) names
+          const subgraphStart = Date.now();
+          ensName = await ensSubgraphService.getNameByTokenId(bid.tokenId, bid.contractAddress);
+          const subgraphTime = Date.now() - subgraphStart;
           
-          try {
-            const fetchStart = Date.now();
-            const response = await fetch(metadataUrl, { signal: controller.signal });
-            clearTimeout(timeoutId);
-            const fetchTime = Date.now() - fetchStart;
+          if (ensName) {
+            logger.debug(`✅ ENS name resolved via subgraph in ${subgraphTime}ms: ${ensName}`);
+          }
+          
+          // FALLBACK: If subgraph fails, try public ENS metadata API
+          if (!ensName) {
+            logger.debug(`⚠️ Subgraph failed (${subgraphTime}ms), falling back to ENS metadata API`);
             
-            if (response.ok) {
-              const metadata = await response.json();
-              ensName = metadata.name || '';
+            const ensContract = bid.contractAddress || '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
+            const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
+            
+            // Create abort controller for 3s timeout
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3000);
+            
+            try {
+              const fetchStart = Date.now();
+              const response = await fetch(metadataUrl, { signal: controller.signal });
+              clearTimeout(timeoutId);
+              const fetchTime = Date.now() - fetchStart;
               
-              // Check if ENS metadata also returned a hash
-              if (ensName && isTokenIdHash(ensName)) {
-                logger.error(`❌ ENS metadata also returned token ID hash: "${ensName.substring(0, 30)}..." - rejecting bid`);
-                return 999; // Impossibly high threshold = always reject
+              if (response.ok) {
+                const metadata = await response.json();
+                ensName = metadata.name || '';
+                
+                // Check if ENS metadata also returned a hash
+                if (ensName && isTokenIdHash(ensName)) {
+                  logger.error(`❌ ENS metadata also returned token ID hash: "${ensName.substring(0, 30)}..." - rejecting bid`);
+                  return 999; // Impossibly high threshold = always reject
+                }
+                
+                logger.debug(`✅ ENS name resolved via metadata API in ${fetchTime}ms: ${ensName}`);
+              } else {
+                logger.warn(`⚠️ ENS metadata API returned ${response.status} for ${ensContract}:${bid.tokenId.slice(-10)} (${fetchTime}ms)`);
               }
-              
-              logger.debug(`✅ ENS name resolved in ${fetchTime}ms: ${ensName}`);
-            } else {
-              logger.warn(`⚠️ ENS metadata API returned ${response.status} for ${ensContract}:${bid.tokenId.slice(-10)} (${fetchTime}ms)`);
+            } finally {
+              clearTimeout(timeoutId);
             }
-          } finally {
-            clearTimeout(timeoutId);
           }
         } catch (error: any) {
           const errorMsg = error.name === 'AbortError' ? 'timeout after 3s' : error.message;
