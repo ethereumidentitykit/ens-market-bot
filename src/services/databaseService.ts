@@ -393,6 +393,29 @@ export class DatabaseService implements IDatabaseService {
         CREATE INDEX IF NOT EXISTS idx_ai_replies_created_at ON ai_replies(created_at);
       `);
 
+      // Create token_prices table for caching token USD prices (1 hour TTL)
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS token_prices (
+          id SERIAL PRIMARY KEY,
+          network VARCHAR(50) NOT NULL,           -- 'eth-mainnet', 'base-mainnet', etc.
+          token_address VARCHAR(42),              -- NULL for native tokens (ETH)
+          symbol VARCHAR(20),                     -- 'USDC', 'WETH', 'ETH', etc.
+          decimals INTEGER,                       -- Token decimals (18 for ETH)
+          price_usd DECIMAL(20,10) NOT NULL,      -- USD price
+          last_updated_at TIMESTAMP NOT NULL,     -- When price was fetched from Alchemy
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          
+          -- Composite unique constraint for network + token_address
+          CONSTRAINT unique_token_network UNIQUE (network, token_address)
+        );
+      `);
+
+      // Create indexes for token_prices
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_token_prices_lookup ON token_prices(network, token_address);
+        CREATE INDEX IF NOT EXISTS idx_token_prices_expiry ON token_prices(last_updated_at);
+      `);
+
       logger.info('PostgreSQL tables created successfully');
     } catch (error: any) {
       logger.error('Failed to create PostgreSQL tables:', error.message);
@@ -1761,6 +1784,142 @@ export class DatabaseService implements IDatabaseService {
     } catch (error: any) {
       logger.error('Failed to update name research:', error.message);
       throw error;
+    }
+  }
+
+  /**
+   * Get cached token price (if not expired - 1 hour TTL)
+   * @returns null if not found or expired
+   */
+  async getTokenPrice(
+    network: string,
+    tokenAddress: string | null
+  ): Promise<{ priceUsd: number; symbol: string; decimals: number; lastUpdatedAt: Date } | null> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        SELECT price_usd as "priceUsd", symbol, decimals, last_updated_at as "lastUpdatedAt"
+        FROM token_prices
+        WHERE network = $1 AND (token_address = $2 OR (token_address IS NULL AND $2 IS NULL))
+          AND last_updated_at > NOW() - INTERVAL '1 hour'
+      `, [network, tokenAddress]);
+
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      const row = result.rows[0];
+      return {
+        priceUsd: parseFloat(row.priceUsd),
+        symbol: row.symbol,
+        decimals: row.decimals,
+        lastUpdatedAt: row.lastUpdatedAt
+      };
+    } catch (error: any) {
+      logger.error('Failed to get token price from cache:', error.message);
+      return null; // Graceful degradation - return null on error
+    }
+  }
+
+  /**
+   * Set/update token price in cache
+   * Uses INSERT ... ON CONFLICT to upsert
+   */
+  async setTokenPrice(
+    network: string,
+    tokenAddress: string | null,
+    symbol: string,
+    decimals: number,
+    priceUsd: number
+  ): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      await this.pool.query(`
+        INSERT INTO token_prices (network, token_address, symbol, decimals, price_usd, last_updated_at)
+        VALUES ($1, $2, $3, $4, $5, NOW())
+        ON CONFLICT (network, token_address)
+        DO UPDATE SET
+          symbol = $3,
+          decimals = $4,
+          price_usd = $5,
+          last_updated_at = NOW()
+      `, [network, tokenAddress, symbol, decimals, priceUsd]);
+
+      logger.debug(`Cached price for ${symbol} on ${network}: $${priceUsd}`);
+    } catch (error: any) {
+      logger.error('Failed to set token price in cache:', error.message);
+      // Don't throw - caching failure shouldn't break the flow
+    }
+  }
+
+  /**
+   * Batch set multiple token prices (more efficient)
+   */
+  async setTokenPricesBatch(
+    prices: Array<{
+      network: string;
+      tokenAddress: string | null;
+      symbol: string;
+      decimals: number;
+      priceUsd: number;
+    }>
+  ): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+    if (prices.length === 0) return;
+
+    try {
+      // Build VALUES clause for batch insert
+      const values: any[] = [];
+      const placeholders: string[] = [];
+      
+      prices.forEach((price, idx) => {
+        const offset = idx * 5;
+        placeholders.push(`($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, NOW())`);
+        values.push(price.network, price.tokenAddress, price.symbol, price.decimals, price.priceUsd);
+      });
+
+      await this.pool.query(`
+        INSERT INTO token_prices (network, token_address, symbol, decimals, price_usd, last_updated_at)
+        VALUES ${placeholders.join(', ')}
+        ON CONFLICT (network, token_address)
+        DO UPDATE SET
+          symbol = EXCLUDED.symbol,
+          decimals = EXCLUDED.decimals,
+          price_usd = EXCLUDED.price_usd,
+          last_updated_at = NOW()
+      `, values);
+
+      logger.debug(`Cached ${prices.length} token prices in batch`);
+    } catch (error: any) {
+      logger.error('Failed to batch set token prices:', error.message);
+      // Don't throw - caching failure shouldn't break the flow
+    }
+  }
+
+  /**
+   * Cleanup expired token price cache entries (optional maintenance)
+   * @param olderThanHours Delete entries older than X hours (default: 24)
+   * @returns Number of entries deleted
+   */
+  async cleanupExpiredTokenPrices(olderThanHours: number = 24): Promise<number> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        DELETE FROM token_prices
+        WHERE last_updated_at < NOW() - INTERVAL '${olderThanHours} hours'
+      `);
+
+      const deleted = result.rowCount || 0;
+      if (deleted > 0) {
+        logger.info(`Cleaned up ${deleted} expired token price entries`);
+      }
+      return deleted;
+    } catch (error: any) {
+      logger.error('Failed to cleanup expired token prices:', error.message);
+      return 0;
     }
   }
 

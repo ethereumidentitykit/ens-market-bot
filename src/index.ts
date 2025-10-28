@@ -53,14 +53,14 @@ async function startApplication(): Promise<void> {
     validateConfig();
     logger.info('Configuration validated successfully');
 
+    // Initialize PostgreSQL database service
+    const databaseService = new DatabaseService();
+    
     // Initialize services
     const moralisService = new MoralisService();
-    const alchemyService = new AlchemyService();
+    const alchemyService = new AlchemyService(databaseService);
     const openSeaService = new OpenSeaService();
     const ensMetadataService = new ENSMetadataService();
-    
-    // Initialize PostgreSQL database service
-    const databaseService: IDatabaseService = new DatabaseService();
     
     const salesProcessingService = new SalesProcessingService(moralisService, databaseService);
     
