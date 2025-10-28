@@ -358,6 +358,26 @@ export class DatabaseService implements IDatabaseService {
           ) THEN
             ALTER TABLE ai_replies ADD COLUMN name_research_id INTEGER REFERENCES name_research(id);
           END IF;
+          
+          -- Make transaction_hash nullable (for bids that don't have txHash yet)
+          ALTER TABLE ai_replies ALTER COLUMN transaction_hash DROP NOT NULL;
+          
+          -- Drop old check constraint if it exists
+          ALTER TABLE ai_replies DROP CONSTRAINT IF EXISTS ai_replies_transaction_type_check;
+          
+          -- Add updated check constraint for transaction_type to include 'bid'
+          ALTER TABLE ai_replies ADD CONSTRAINT ai_replies_transaction_type_check 
+            CHECK (transaction_type IN ('sale', 'registration', 'bid'));
+          
+          -- Drop old transaction reference constraint if it exists
+          ALTER TABLE ai_replies DROP CONSTRAINT IF EXISTS check_transaction_ref;
+          
+          -- Add updated transaction reference constraint to include bid_id
+          ALTER TABLE ai_replies ADD CONSTRAINT check_transaction_ref CHECK (
+            (sale_id IS NOT NULL AND registration_id IS NULL AND bid_id IS NULL) OR
+            (sale_id IS NULL AND registration_id IS NOT NULL AND bid_id IS NULL) OR
+            (sale_id IS NULL AND registration_id IS NULL AND bid_id IS NOT NULL)
+          );
         END $$;
       `);
 
