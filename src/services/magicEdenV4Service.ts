@@ -1272,12 +1272,13 @@ export class MagicEdenV4Service {
       while (pageCount < maxPages) {
         pageCount++;
         
-        // Fetch single page using primitive method
+        // Fetch single page using primitive method with ENS contract filtering
         const response = await this.getUserActivityPage(
           address,
           types,
           continuation,
-          limit
+          limit,
+          this.ensContracts // Filter by ENS contracts only
         );
 
         // Break if no activities returned
@@ -1288,7 +1289,7 @@ export class MagicEdenV4Service {
 
         // Add activities to aggregated array
         allActivities.push(...response.activities);
-        logger.debug(`   Page ${pageCount}: Fetched ${response.activities.length} ENS activities (total: ${allActivities.length})`);
+        logger.debug(`   Page ${pageCount}: Fetched ${response.activities.length} activities (total: ${allActivities.length})`);
 
         // Check for continuation cursor
         continuation = response.continuation;
@@ -1346,6 +1347,7 @@ export class MagicEdenV4Service {
     activityTypes?: MagicEdenV4ActivityType[],
     cursor?: string,
     limit: number = 20,
+    contracts?: string[], // Optional contract addresses to filter by
     retryCount: number = 0
   ): Promise<{ activities: MagicEdenV4Activity[]; continuation?: string }> {
     const maxRetries = 3;
@@ -1374,6 +1376,14 @@ export class MagicEdenV4Service {
         activityTypes.forEach(type => params.append('activityTypes[]', type));
       }
 
+      // Add contract filtering (collectionIds[]) - server-side filtering
+      if (contracts && contracts.length > 0) {
+        contracts.forEach(contract => {
+          params.append('collectionIds[]', `ethereum:${contract.toLowerCase()}`);
+        });
+        logger.debug(`   Filtering by contracts: ${contracts.join(', ')}`);
+      }
+
       // Add cursor for pagination if provided
       if (cursor) {
         params.append('cursorTimestamp', cursor);
@@ -1390,23 +1400,17 @@ export class MagicEdenV4Service {
         }
       );
 
-      const allActivities = response.data.activities || [];
+      const activities = response.data.activities || [];
       const nextCursor = response.data.pagination?.cursorTimestamp;
       
-      // Filter to only ENS contracts (local filtering until API adds this feature)
-      const ensActivities = allActivities.filter(activity => {
-        const contractAddress = activity.asset?.contractAddress?.toLowerCase();
-        return this.ensContracts.includes(contractAddress || '');
-      });
-      
-      logger.info(`✅ Magic Eden V4 API: Retrieved ${allActivities.length} activities, ${ensActivities.length} ENS activities`);
+      logger.info(`✅ Magic Eden V4 API: Retrieved ${activities.length} activities`);
       
       if (nextCursor) {
         logger.debug(`📄 Next cursor: ${nextCursor}`);
       }
 
       return {
-        activities: ensActivities,
+        activities,
         continuation: nextCursor
       };
 
@@ -1437,7 +1441,7 @@ export class MagicEdenV4Service {
         await new Promise(resolve => setTimeout(resolve, waitTime));
         
         // Recursive retry with potentially reduced limit
-        return this.getUserActivityPage(walletAddress, activityTypes, cursor, newLimit, retryCount + 1);
+        return this.getUserActivityPage(walletAddress, activityTypes, cursor, newLimit, contracts, retryCount + 1);
       }
 
       // Max retries exceeded - return empty result
