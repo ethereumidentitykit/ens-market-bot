@@ -12,7 +12,7 @@
  */
 
 import { logger } from '../utils/logger';
-import { IDatabaseService, ProcessedSale, ENSRegistration } from '../types';
+import { IDatabaseService, ProcessedSale, ENSRegistration, ENSBid } from '../types';
 import { OpenAIService } from './openaiService';
 import { TwitterService } from './twitterService';
 import { DataProcessingService } from './dataProcessingService';
@@ -20,6 +20,7 @@ import { MagicEdenV4Service, TokenActivity } from './magicEdenV4Service';
 import { OpenSeaService } from './openSeaService';
 import { ENSWorkerService } from './ensWorkerService';
 import { APIToggleService } from './apiToggleService';
+import { AlchemyService } from './alchemyService';
 
 export class AIReplyService {
   private openaiService: OpenAIService;
@@ -28,6 +29,7 @@ export class AIReplyService {
   private dataProcessingService: DataProcessingService;
   private magicEdenV4Service: MagicEdenV4Service;
   private openSeaService: OpenSeaService;
+  private alchemyService: AlchemyService;
   private ensWorkerService: ENSWorkerService;
   private apiToggleService: APIToggleService;
 
@@ -43,6 +45,7 @@ export class AIReplyService {
     dataProcessingService: DataProcessingService,
     magicEdenV4Service: MagicEdenV4Service,
     openSeaService: OpenSeaService,
+    alchemyService: AlchemyService,
     ensWorkerService: ENSWorkerService
   ) {
     this.openaiService = openaiService;
@@ -51,6 +54,7 @@ export class AIReplyService {
     this.dataProcessingService = dataProcessingService;
     this.magicEdenV4Service = magicEdenV4Service;
     this.openSeaService = openSeaService;
+    this.alchemyService = alchemyService;
     this.ensWorkerService = ensWorkerService;
     this.apiToggleService = APIToggleService.getInstance();
   }
@@ -73,7 +77,7 @@ export class AIReplyService {
    * @returns The ID of the generated reply
    */
   async generateReply(
-    type: 'sale' | 'registration',
+    type: 'sale' | 'registration' | 'bid',
     recordId: number
   ): Promise<number> {
     const startTime = Date.now();
@@ -93,7 +97,7 @@ export class AIReplyService {
 
       // Step 2: Prepare event data
       logger.debug(`   [AI Reply] Step 2: Preparing event data...`);
-      const eventData = this.prepareEventData(type, transaction);
+      const eventData = await this.prepareEventData(type, transaction);
 
       // Validate buyer ≠ seller (data error check)
       if (eventData.sellerAddress && 
@@ -228,7 +232,7 @@ export class AIReplyService {
    * This is a thin wrapper that calls generateReply() then postReply()
    */
   async generateAndPostAIReply(
-    type: 'sale' | 'registration',
+    type: 'sale' | 'registration' | 'bid',
     recordId: number
   ): Promise<void> {
     const startTime = Date.now();
@@ -279,13 +283,13 @@ export class AIReplyService {
    * @param requireAutoPostChecks If true, validates auto-posting is enabled (for automatic flow)
    */
   private async validateReplyConditions(
-    type: 'sale' | 'registration',
+    type: 'sale' | 'registration' | 'bid',
     recordId: number,
     requireAutoPostChecks: boolean = true
   ): Promise<{
     valid: boolean;
     reason?: string;
-    transaction?: ProcessedSale | ENSRegistration;
+    transaction?: ProcessedSale | ENSRegistration | ENSBid;
     existingReply?: any;
   }> {
     // Check if AI replies are enabled
@@ -316,7 +320,9 @@ export class AIReplyService {
     // Fetch transaction
     const transaction = type === 'sale'
       ? await this.databaseService.getSaleById(recordId)
-      : await this.databaseService.getRegistrationById(recordId);
+      : type === 'registration'
+      ? await this.databaseService.getRegistrationById(recordId)
+      : await this.databaseService.getBidById(recordId);
 
     if (!transaction) {
       return {
@@ -336,7 +342,9 @@ export class AIReplyService {
     // Check if reply already exists and is posted
     const existingReply = type === 'sale'
       ? await this.databaseService.getAIReplyBySaleId(recordId)
-      : await this.databaseService.getAIReplyByRegistrationId(recordId);
+      : type === 'registration'
+      ? await this.databaseService.getAIReplyByRegistrationId(recordId)
+      : await this.databaseService.getAIReplyByBidId(recordId);
 
     if (existingReply && existingReply.status === 'posted' && existingReply.replyTweetId) {
       return {
@@ -356,11 +364,11 @@ export class AIReplyService {
   /**
    * Helper: Prepare event data from transaction
    */
-  private prepareEventData(
-    type: 'sale' | 'registration',
-    transaction: ProcessedSale | ENSRegistration
-  ): {
-    type: 'sale' | 'registration';
+  private async prepareEventData(
+    type: 'sale' | 'registration' | 'bid',
+    transaction: ProcessedSale | ENSRegistration | ENSBid
+  ): Promise<{
+    type: 'sale' | 'registration' | 'bid';
     tokenName: string;
     price: number;
     priceUsd: number;
@@ -368,25 +376,85 @@ export class AIReplyService {
     timestamp: number;
     buyerAddress: string;
     sellerAddress?: string;
-    txHash: string;
-  } {
+    txHash?: string;
+  }> {
     const isSale = type === 'sale';
+    const isRegistration = type === 'registration';
+    const isBid = type === 'bid';
+    
     const sale = isSale ? transaction as ProcessedSale : null;
-    const registration = !isSale ? transaction as ENSRegistration : null;
+    const registration = isRegistration ? transaction as ENSRegistration : null;
+    const bid = isBid ? transaction as ENSBid : null;
 
-    const tokenName = isSale ? (sale!.nftName || 'Unknown') : registration!.fullName;
+    const tokenName = isSale 
+      ? (sale!.nftName || 'Unknown') 
+      : isRegistration 
+      ? registration!.fullName 
+      : (bid!.ensName || 'Unknown');
+
+    // For bids, resolve the current owner address
+    let sellerAddress: string | undefined = undefined;
+    if (isBid && bid) {
+      sellerAddress = await this.getOwnerAddress(bid);
+    } else if (isSale) {
+      sellerAddress = sale!.sellerAddress;
+    }
 
     return {
       type,
       tokenName,
-      price: parseFloat(isSale ? sale!.priceEth : (registration!.costEth || '0')),
-      priceUsd: parseFloat(isSale ? (sale!.priceUsd || '0') : (registration!.costUsd || '0')),
+      price: parseFloat(isSale ? sale!.priceEth : isRegistration ? (registration!.costEth || '0') : bid!.priceDecimal),
+      priceUsd: parseFloat(isSale ? (sale!.priceUsd || '0') : isRegistration ? (registration!.costUsd || '0') : (bid!.priceUsd || '0')),
       currency: 'ETH',
-      timestamp: new Date(transaction.blockTimestamp).getTime() / 1000,
-      buyerAddress: isSale ? sale!.buyerAddress : registration!.ownerAddress,
-      sellerAddress: isSale ? sale!.sellerAddress : undefined,
-      txHash: transaction.transactionHash
+      timestamp: isBid 
+        ? new Date(bid!.createdAtApi).getTime() / 1000 
+        : new Date((sale || registration)!.blockTimestamp).getTime() / 1000,
+      buyerAddress: isSale ? sale!.buyerAddress : isRegistration ? registration!.ownerAddress : bid!.makerAddress,
+      sellerAddress,
+      txHash: isBid ? undefined : (sale || registration)!.transactionHash
     };
+  }
+
+  /**
+   * Helper: Get current owner address for a bid's token
+   */
+  private async getOwnerAddress(bid: ENSBid): Promise<string | undefined> {
+    if (!bid.tokenId || !bid.contractAddress) {
+      logger.warn(`Bid ${bid.id} missing tokenId or contractAddress for owner resolution`);
+      return undefined;
+    }
+    
+    try {
+      // Try OpenSea first
+      logger.debug(`Resolving owner for token ${bid.tokenId} via OpenSea...`);
+      const ownerAddress = await this.openSeaService.getTokenOwner(
+        bid.contractAddress,
+        bid.tokenId
+      );
+      
+      if (ownerAddress) {
+        logger.debug(`Found owner via OpenSea: ${ownerAddress}`);
+        return ownerAddress;
+      }
+      
+      // Fallback to Alchemy
+      logger.debug(`Falling back to Alchemy for owner lookup of token ${bid.tokenId}...`);
+      const owners = await this.alchemyService.getOwnersForToken(
+        bid.contractAddress,
+        bid.tokenId
+      );
+      
+      if (owners.length > 0) {
+        logger.debug(`Found owner via Alchemy: ${owners[0]}`);
+        return owners[0];
+      }
+      
+      logger.warn(`No owner found for token ${bid.tokenId}`);
+      return undefined;
+    } catch (error: any) {
+      logger.error(`Failed to resolve owner for bid ${bid.id}:`, error.message);
+      return undefined;
+    }
   }
 
   /**
@@ -460,7 +528,7 @@ export class AIReplyService {
    * Helper: Fetch all context data in parallel (Magic Eden, OpenSea, name research)
    */
   private async fetchContextData(
-    transaction: ProcessedSale | ENSRegistration,
+    transaction: ProcessedSale | ENSRegistration | ENSBid,
     eventData: any
   ): Promise<{
     tokenActivities: TokenActivity[];
@@ -480,7 +548,7 @@ export class AIReplyService {
       // Token activity history (V4 API)
       this.magicEdenV4Service.getTokenActivityHistory(
         transaction.contractAddress,
-        transaction.tokenId,
+        transaction.tokenId || '',
         { limit: 10, maxPages: 120 } // 2x V3 pages to compensate for lower limit (120x10 = 1200 items)
       ).then(result => ({
         activities: this.magicEdenV4Service.transformV4ToV3Activities(result.activities),
@@ -593,15 +661,17 @@ export class AIReplyService {
    * Helper: Insert new reply record
    */
   private async insertNewReply(
-    type: 'sale' | 'registration',
+    type: 'sale' | 'registration' | 'bid',
     transactionId: number,
-    transaction: ProcessedSale | ENSRegistration,
+    transaction: ProcessedSale | ENSRegistration | ENSBid,
     replyTweetId: string,
     generatedReply: any,
     nameResearch?: string
   ): Promise<void> {
     // Get name research ID from database
-    const tokenName = ('nftName' in transaction) ? transaction.nftName : ('ensName' in transaction ? transaction.ensName : null);
+    const tokenName = ('nftName' in transaction) 
+      ? transaction.nftName 
+      : ('fullName' in transaction ? transaction.fullName : ('ensName' in transaction ? transaction.ensName : null));
     // Normalize name to always include .eth suffix for consistency
     const normalizedName = tokenName && tokenName.toLowerCase().endsWith('.eth') ? tokenName : (tokenName ? `${tokenName}.eth` : null);
     const nameResearchRecord = normalizedName ? await this.databaseService.getNameResearch(normalizedName) : null;
@@ -609,10 +679,11 @@ export class AIReplyService {
     await this.databaseService.insertAIReply({
       saleId: type === 'sale' ? transactionId : undefined,
       registrationId: type === 'registration' ? transactionId : undefined,
+      bidId: type === 'bid' ? transactionId : undefined,
       originalTweetId: transaction.tweetId!,
       replyTweetId: replyTweetId,
       transactionType: type,
-      transactionHash: transaction.transactionHash,
+      transactionHash: 'transactionHash' in transaction ? transaction.transactionHash : undefined,
       modelUsed: generatedReply.modelUsed,
       promptTokens: generatedReply.promptTokens,
       completionTokens: generatedReply.completionTokens,
@@ -632,14 +703,16 @@ export class AIReplyService {
    * Helper: Insert new reply record as 'pending' (NOT posted to Twitter yet)
    */
   private async insertNewReplyAsPending(
-    type: 'sale' | 'registration',
+    type: 'sale' | 'registration' | 'bid',
     transactionId: number,
-    transaction: ProcessedSale | ENSRegistration,
+    transaction: ProcessedSale | ENSRegistration | ENSBid,
     generatedReply: any,
     nameResearch?: string
   ): Promise<number> {
     // Get name research ID from database
-    const tokenName = ('nftName' in transaction) ? transaction.nftName : ('ensName' in transaction ? transaction.ensName : null);
+    const tokenName = ('nftName' in transaction) 
+      ? transaction.nftName 
+      : ('fullName' in transaction ? transaction.fullName : ('ensName' in transaction ? transaction.ensName : null));
     // Normalize name to always include .eth suffix for consistency
     const normalizedName = tokenName && tokenName.toLowerCase().endsWith('.eth') ? tokenName : (tokenName ? `${tokenName}.eth` : null);
     const nameResearchRecord = normalizedName ? await this.databaseService.getNameResearch(normalizedName) : null;
@@ -647,10 +720,11 @@ export class AIReplyService {
     const replyId = await this.databaseService.insertAIReply({
       saleId: type === 'sale' ? transactionId : undefined,
       registrationId: type === 'registration' ? transactionId : undefined,
+      bidId: type === 'bid' ? transactionId : undefined,
       originalTweetId: transaction.tweetId!,
       replyTweetId: undefined, // Not posted yet
       transactionType: type,
-      transactionHash: transaction.transactionHash,
+      transactionHash: 'transactionHash' in transaction ? transaction.transactionHash : undefined,
       modelUsed: generatedReply.modelUsed,
       promptTokens: generatedReply.promptTokens,
       completionTokens: generatedReply.completionTokens,

@@ -306,37 +306,57 @@ export class DatabaseService implements IDatabaseService {
           id SERIAL PRIMARY KEY,
           sale_id INTEGER REFERENCES processed_sales(id),
           registration_id INTEGER REFERENCES ens_registrations(id),
+          bid_id INTEGER REFERENCES ens_bids(id),
           original_tweet_id VARCHAR(255) NOT NULL,
           reply_tweet_id VARCHAR(255),
-          transaction_type VARCHAR(20) NOT NULL CHECK (transaction_type IN ('sale', 'registration')),
-          transaction_hash VARCHAR(66) NOT NULL,
+          transaction_type VARCHAR(20) NOT NULL CHECK (transaction_type IN ('sale', 'registration', 'bid')),
+          transaction_hash VARCHAR(66),
           model_used VARCHAR(50) NOT NULL,
           prompt_tokens INTEGER NOT NULL,
           completion_tokens INTEGER NOT NULL,
           total_tokens INTEGER NOT NULL,
           cost_usd DECIMAL(10,6) NOT NULL,
           reply_text TEXT NOT NULL,
+          name_research_id INTEGER REFERENCES name_research(id),
           name_research TEXT,
           status VARCHAR(20) NOT NULL CHECK (status IN ('pending', 'posted', 'failed', 'skipped')) DEFAULT 'pending',
           error_message TEXT,
           created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
           posted_at TIMESTAMP,
           CONSTRAINT check_transaction_ref CHECK (
-            (sale_id IS NOT NULL AND registration_id IS NULL) OR
-            (sale_id IS NULL AND registration_id IS NOT NULL)
+            (sale_id IS NOT NULL AND registration_id IS NULL AND bid_id IS NULL) OR
+            (sale_id IS NULL AND registration_id IS NOT NULL AND bid_id IS NULL) OR
+            (sale_id IS NULL AND registration_id IS NULL AND bid_id IS NOT NULL)
           )
         )
       `);
 
-      // Add name_research column if it doesn't exist (migration for existing databases)
+      // Migrations for existing databases
       await this.pool.query(`
         DO $$ 
         BEGIN
+          -- Add name_research column if it doesn't exist
           IF NOT EXISTS (
             SELECT 1 FROM information_schema.columns 
             WHERE table_name = 'ai_replies' AND column_name = 'name_research'
           ) THEN
             ALTER TABLE ai_replies ADD COLUMN name_research TEXT;
+          END IF;
+          
+          -- Add bid_id column if it doesn't exist
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'ai_replies' AND column_name = 'bid_id'
+          ) THEN
+            ALTER TABLE ai_replies ADD COLUMN bid_id INTEGER REFERENCES ens_bids(id);
+          END IF;
+          
+          -- Add name_research_id column if it doesn't exist
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'ai_replies' AND column_name = 'name_research_id'
+          ) THEN
+            ALTER TABLE ai_replies ADD COLUMN name_research_id INTEGER REFERENCES name_research(id);
           END IF;
         END $$;
       `);
@@ -345,6 +365,8 @@ export class DatabaseService implements IDatabaseService {
       await this.pool.query(`
         CREATE INDEX IF NOT EXISTS idx_ai_replies_sale_id ON ai_replies(sale_id);
         CREATE INDEX IF NOT EXISTS idx_ai_replies_registration_id ON ai_replies(registration_id);
+        CREATE INDEX IF NOT EXISTS idx_ai_replies_bid_id ON ai_replies(bid_id);
+        CREATE INDEX IF NOT EXISTS idx_ai_replies_name_research_id ON ai_replies(name_research_id);
         CREATE INDEX IF NOT EXISTS idx_ai_replies_original_tweet ON ai_replies(original_tweet_id);
         CREATE INDEX IF NOT EXISTS idx_ai_replies_reply_tweet ON ai_replies(reply_tweet_id);
         CREATE INDEX IF NOT EXISTS idx_ai_replies_status ON ai_replies(status);
@@ -1731,19 +1753,20 @@ export class DatabaseService implements IDatabaseService {
     try {
       const result = await this.pool.query(`
         INSERT INTO ai_replies (
-          sale_id, registration_id, original_tweet_id, reply_tweet_id,
+          sale_id, registration_id, bid_id, original_tweet_id, reply_tweet_id,
           transaction_type, transaction_hash, model_used,
           prompt_tokens, completion_tokens, total_tokens, cost_usd,
           reply_text, name_research_id, name_research, status, error_message
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
         RETURNING id
       `, [
         reply.saleId || null,
         reply.registrationId || null,
+        reply.bidId || null,
         reply.originalTweetId,
         reply.replyTweetId || null,
         reply.transactionType,
-        reply.transactionHash,
+        reply.transactionHash || null,
         reply.modelUsed,
         reply.promptTokens,
         reply.completionTokens,
@@ -1773,7 +1796,7 @@ export class DatabaseService implements IDatabaseService {
     try {
       const result = await this.pool.query(`
         SELECT 
-          id, sale_id as "saleId", registration_id as "registrationId",
+          id, sale_id as "saleId", registration_id as "registrationId", bid_id as "bidId",
           original_tweet_id as "originalTweetId", reply_tweet_id as "replyTweetId",
           transaction_type as "transactionType", transaction_hash as "transactionHash",
           model_used as "modelUsed", prompt_tokens as "promptTokens",
@@ -1801,7 +1824,7 @@ export class DatabaseService implements IDatabaseService {
     try {
       const result = await this.pool.query(`
         SELECT 
-          id, sale_id as "saleId", registration_id as "registrationId",
+          id, sale_id as "saleId", registration_id as "registrationId", bid_id as "bidId",
           original_tweet_id as "originalTweetId", reply_tweet_id as "replyTweetId",
           transaction_type as "transactionType", transaction_hash as "transactionHash",
           model_used as "modelUsed", prompt_tokens as "promptTokens",
@@ -1821,6 +1844,34 @@ export class DatabaseService implements IDatabaseService {
   }
 
   /**
+   * Get AI reply by bid ID
+   */
+  async getAIReplyByBidId(bidId: number): Promise<AIReply | null> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        SELECT 
+          id, sale_id as "saleId", registration_id as "registrationId", bid_id as "bidId",
+          original_tweet_id as "originalTweetId", reply_tweet_id as "replyTweetId",
+          transaction_type as "transactionType", transaction_hash as "transactionHash",
+          model_used as "modelUsed", prompt_tokens as "promptTokens",
+          completion_tokens as "completionTokens", total_tokens as "totalTokens",
+          cost_usd as "costUsd", reply_text as "replyText", name_research as "nameResearch", status,
+          error_message as "errorMessage", created_at as "createdAt",
+          posted_at as "postedAt"
+        FROM ai_replies
+        WHERE bid_id = $1
+      `, [bidId]);
+
+      return result.rows.length > 0 ? result.rows[0] : null;
+    } catch (error: any) {
+      logger.error('Failed to get AI reply by bid ID:', error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Get AI reply by ID
    */
   async getAIReplyById(replyId: number): Promise<AIReply | null> {
@@ -1829,7 +1880,7 @@ export class DatabaseService implements IDatabaseService {
     try {
       const result = await this.pool.query(`
         SELECT 
-          id, sale_id as "saleId", registration_id as "registrationId",
+          id, sale_id as "saleId", registration_id as "registrationId", bid_id as "bidId",
           original_tweet_id as "originalTweetId", reply_tweet_id as "replyTweetId",
           transaction_type as "transactionType", transaction_hash as "transactionHash",
           model_used as "modelUsed", prompt_tokens as "promptTokens",
@@ -2232,6 +2283,45 @@ export class DatabaseService implements IDatabaseService {
 
       await this.pool.query(createRegistrationTriggerQuery);
       logger.info('✅ Created posted_registration_trigger on ens_registrations table');
+
+      // ===== BID TRIGGER =====
+      
+      // Step 3a: Create the bid trigger function
+      const createBidFunctionQuery = `
+        CREATE OR REPLACE FUNCTION notify_posted_bid() 
+        RETURNS TRIGGER AS $$
+        BEGIN
+          -- Only notify when a bid is successfully posted to Twitter
+          -- posted changes FALSE → TRUE and tweet_id exists
+          IF NEW.posted = TRUE AND NEW.tweet_id IS NOT NULL THEN
+            PERFORM pg_notify('posted_bid', NEW.id::text);
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+      `;
+
+      await this.pool.query(createBidFunctionQuery);
+      logger.info('✅ Created notify_posted_bid() trigger function');
+
+      // Step 3b: Create the bid trigger (UPDATE only, with WHEN condition)
+      const createBidTriggerQuery = `
+        DO $$
+        BEGIN
+          -- Drop old trigger if it exists
+          DROP TRIGGER IF EXISTS posted_bid_trigger ON ens_bids;
+          
+          -- Create new trigger with WHEN condition
+          CREATE TRIGGER posted_bid_trigger 
+            AFTER UPDATE ON ens_bids 
+            FOR EACH ROW 
+            WHEN (OLD.posted = FALSE AND NEW.posted = TRUE)
+            EXECUTE FUNCTION notify_posted_bid();
+        END $$;
+      `;
+
+      await this.pool.query(createBidTriggerQuery);
+      logger.info('✅ Created posted_bid_trigger on ens_bids table');
 
       logger.info('🎯 AI Reply notification triggers setup complete - ready for automatic AI reply generation!');
 

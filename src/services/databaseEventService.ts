@@ -5,7 +5,7 @@ import { IDatabaseService } from '../types';
 
 // Forward declaration - will be created in Phase 3.3
 export interface IAIReplyService {
-  generateAndPostAIReply(type: 'sale' | 'registration', recordId: number): Promise<void>;
+  generateAndPostAIReply(type: 'sale' | 'registration' | 'bid', recordId: number): Promise<void>;
 }
 
 export class DatabaseEventService {
@@ -30,9 +30,10 @@ export class DatabaseEventService {
   private isProcessingRegistrations = false;
   private isProcessingBids = false;
 
-  // AI Reply queues (Phase 3.2)
+  // AI Reply queues (Phase 3.2 + Phase 4.6)
   private aiReplySaleQueue: number[] = [];
   private aiReplyRegistrationQueue: number[] = [];
+  private aiReplyBidQueue: number[] = [];
   private isProcessingAIReplies = false;
   private aiReplyDelayMs = 30000; // 30 seconds between AI reply posts
   private lastAIReplyTime = 0;
@@ -144,14 +145,15 @@ export class DatabaseEventService {
       await this.client.query('LISTEN new_registration');
       await this.client.query('LISTEN new_bid');
       
-      // Phase 3.2: Listen for AI reply triggers (posted sales/registrations)
+      // Phase 3.2 + 4.6: Listen for AI reply triggers (posted sales/registrations/bids)
       await this.client.query('LISTEN posted_sale');
       await this.client.query('LISTEN posted_registration');
+      await this.client.query('LISTEN posted_bid');
       
       this.isListening = true;
       this.reconnectAttempts = 0; // Reset on successful connection
       
-      logger.info('✅ Database listener connected and listening for new_sale, new_registration, new_bid, posted_sale, and posted_registration notifications');
+      logger.info('✅ Database listener connected and listening for new_sale, new_registration, new_bid, posted_sale, posted_registration, and posted_bid notifications');
 
     } catch (error: any) {
       this.isListening = false;
@@ -221,6 +223,18 @@ export class DatabaseEventService {
 
         logger.info(`🤖 POSTED REGISTRATION AI REPLY TRIGGER: ID ${registrationId} - adding to AI reply queue`);
         this.addRegistrationToAIReplyQueue(registrationId);
+
+      } else if (msg.channel === 'posted_bid' && msg.payload) {
+        // Phase 4.6: AI Reply trigger for posted bid
+        const bidId = parseInt(msg.payload);
+        
+        if (isNaN(bidId)) {
+          logger.warn(`Invalid bid ID in posted_bid notification: ${msg.payload}`);
+          return;
+        }
+
+        logger.info(`🤖 POSTED BID AI REPLY TRIGGER: ID ${bidId} - adding to AI reply queue`);
+        this.addBidToAIReplyQueue(bidId);
       }
     } catch (error: any) {
       logger.error('Error handling notification:', error.message);
@@ -320,6 +334,28 @@ export class DatabaseEventService {
   }
 
   /**
+   * Add bid to AI reply queue (Phase 4.6)
+   */
+  private addBidToAIReplyQueue(bidId: number): void {
+    // Check if AI reply service is available
+    if (!this.aiReplyService) {
+      logger.debug(`AI Reply Service not initialized, skipping AI reply for bid ${bidId}`);
+      return;
+    }
+
+    // Avoid duplicates in queue
+    if (!this.aiReplyBidQueue.includes(bidId)) {
+      this.aiReplyBidQueue.push(bidId);
+      logger.info(`🤖 Added bid ${bidId} to AI reply queue (queue length: ${this.aiReplyBidQueue.length})`);
+    }
+
+    // Start processing if not already running
+    if (!this.isProcessingAIReplies) {
+      this.processAIReplyQueue();
+    }
+  }
+
+  /**
    * Process the sales notification queue with proper rate limiting
    */
   private async processSalesQueue(): Promise<void> {
@@ -403,15 +439,15 @@ export class DatabaseEventService {
       return;
     }
 
-    const totalQueueLength = this.aiReplySaleQueue.length + this.aiReplyRegistrationQueue.length;
+    const totalQueueLength = this.aiReplySaleQueue.length + this.aiReplyRegistrationQueue.length + this.aiReplyBidQueue.length;
     if (totalQueueLength === 0) {
       return;
     }
 
     this.isProcessingAIReplies = true;
-    logger.info(`🤖 Starting AI reply queue processing (${this.aiReplySaleQueue.length} sales, ${this.aiReplyRegistrationQueue.length} registrations)`);
+    logger.info(`🤖 Starting AI reply queue processing (${this.aiReplySaleQueue.length} sales, ${this.aiReplyRegistrationQueue.length} registrations, ${this.aiReplyBidQueue.length} bids)`);
 
-    while ((this.aiReplySaleQueue.length > 0 || this.aiReplyRegistrationQueue.length > 0) && !this.isShuttingDown) {
+    while ((this.aiReplySaleQueue.length > 0 || this.aiReplyRegistrationQueue.length > 0 || this.aiReplyBidQueue.length > 0) && !this.isShuttingDown) {
       // Rate limiting: Check if enough time has passed since last AI reply
       const now = Date.now();
       const timeSinceLastReply = now - this.lastAIReplyTime;
@@ -422,7 +458,7 @@ export class DatabaseEventService {
         await this.sleep(waitTime);
       }
 
-      // Process sales first (FIFO within each type)
+      // Process sales first, then registrations, then bids (FIFO within each type)
       if (this.aiReplySaleQueue.length > 0) {
         const saleId = this.aiReplySaleQueue.shift()!;
         
@@ -443,6 +479,16 @@ export class DatabaseEventService {
           logger.error(`Failed to process AI reply for registration ${registrationId}:`, error.message);
           // Don't update lastAIReplyTime on error - we didn't actually post
         }
+      } else if (this.aiReplyBidQueue.length > 0) {
+        const bidId = this.aiReplyBidQueue.shift()!;
+        
+        try {
+          await this.processSingleAIReply('bid', bidId);
+          this.lastAIReplyTime = Date.now();
+        } catch (error: any) {
+          logger.error(`Failed to process AI reply for bid ${bidId}:`, error.message);
+          // Don't update lastAIReplyTime on error - we didn't actually post
+        }
       }
     }
 
@@ -453,7 +499,7 @@ export class DatabaseEventService {
   /**
    * Phase 3.2: Process a single AI reply (sale or registration)
    */
-  private async processSingleAIReply(type: 'sale' | 'registration', recordId: number): Promise<void> {
+  private async processSingleAIReply(type: 'sale' | 'registration' | 'bid', recordId: number): Promise<void> {
     if (!this.aiReplyService) {
       logger.warn(`AI Reply Service not available for ${type} ${recordId}`);
       return;
@@ -779,6 +825,7 @@ export class DatabaseEventService {
     reconnectAttempts: number;
     aiReplySalesQueueLength: number;
     aiReplyRegistrationsQueueLength: number;
+    aiReplyBidsQueueLength: number;
     isProcessingAIReplies: boolean;
     aiReplyServiceAvailable: boolean;
   } {
@@ -791,6 +838,7 @@ export class DatabaseEventService {
       reconnectAttempts: this.reconnectAttempts,
       aiReplySalesQueueLength: this.aiReplySaleQueue.length,
       aiReplyRegistrationsQueueLength: this.aiReplyRegistrationQueue.length,
+      aiReplyBidsQueueLength: this.aiReplyBidQueue.length,
       isProcessingAIReplies: this.isProcessingAIReplies,
       aiReplyServiceAvailable: this.aiReplyService !== null,
     };

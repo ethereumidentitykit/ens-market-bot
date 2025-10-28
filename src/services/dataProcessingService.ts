@@ -77,7 +77,7 @@ export interface UserStats {
 export interface LLMPromptContext {
   // Current event details (FROM DATABASE - master source of truth)
   event: {
-    type: 'sale' | 'registration';
+    type: 'sale' | 'registration' | 'bid';
     tokenName: string;
     price: number;
     priceUsd: number;
@@ -89,7 +89,7 @@ export interface LLMPromptContext {
     sellerAddress?: string; // Not present for registrations
     sellerEnsName?: string | null; // Resolved ENS name for seller (if applicable)
     sellerTwitter?: string | null; // Twitter handle from ENS records (if applicable)
-    txHash: string; // Transaction hash from DB
+    txHash?: string; // Transaction hash from DB (optional for bids)
   };
   
   // Token historical context (FROM MAGIC EDEN API)
@@ -660,7 +660,7 @@ export class DataProcessingService {
    */
   async buildLLMContext(
     eventData: {
-      type: 'sale' | 'registration';
+      type: 'sale' | 'registration' | 'bid';
       tokenName: string;
       price: number;
       priceUsd: number;
@@ -668,7 +668,7 @@ export class DataProcessingService {
       timestamp: number;
       buyerAddress: string;
       sellerAddress?: string;
-      txHash: string; // Required for filtering Magic Eden historical data
+      txHash?: string; // Optional: bids don't have txHash yet
     },
     tokenActivities: TokenActivity[],
     buyerActivities: TokenActivity[],
@@ -686,7 +686,7 @@ export class DataProcessingService {
     }
   ): Promise<LLMPromptContext> {
     logger.info(`🧠 Building LLM context for ${eventData.type}: ${eventData.tokenName}`);
-    logger.debug(`   Event from DB: ${eventData.price} ETH ($${eventData.priceUsd}), txHash: ${eventData.txHash.slice(0, 10)}...`);
+    logger.debug(`   Event from DB: ${eventData.price} ETH ($${eventData.priceUsd})${eventData.txHash ? `, txHash: ${eventData.txHash.slice(0, 10)}...` : ''}`);
     logger.debug(`   Raw data: ${tokenActivities.length} token activities, ${buyerActivities.length} buyer activities, ${sellerActivities?.length || 0} seller activities`);
     
     const startTime = Date.now();
