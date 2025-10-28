@@ -390,25 +390,41 @@ export class BidsProcessingService {
       // Only call ENS service if Magic Eden didn't provide the name
       if (!ensName && bid.tokenId) {
         try {
-          logger.debug(`🔍 Fetching ENS name for filtering (Magic Eden didn't provide): ${bid.tokenId}`);
-          const ensContract = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
+          // Use the actual contract from the bid (handles both registry and wrapper)
+          const ensContract = bid.contractAddress || '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
+          logger.debug(`🔍 Fetching ENS name for filtering (Magic Eden didn't provide): ${bid.tokenId} from contract ${ensContract}`);
           const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
           
-          const response = await fetch(metadataUrl);
-          if (response.ok) {
-            const metadata = await response.json();
-            ensName = metadata.name || '';
+          // Create abort controller for 3s timeout
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 3000);
+          
+          try {
+            const fetchStart = Date.now();
+            const response = await fetch(metadataUrl, { signal: controller.signal });
+            clearTimeout(timeoutId);
+            const fetchTime = Date.now() - fetchStart;
             
-            // Check if ENS metadata also returned a hash
-            if (ensName && isTokenIdHash(ensName)) {
-              logger.error(`❌ ENS metadata also returned token ID hash: "${ensName.substring(0, 30)}..." - rejecting bid`);
-              return 999; // Impossibly high threshold = always reject
+            if (response.ok) {
+              const metadata = await response.json();
+              ensName = metadata.name || '';
+              
+              // Check if ENS metadata also returned a hash
+              if (ensName && isTokenIdHash(ensName)) {
+                logger.error(`❌ ENS metadata also returned token ID hash: "${ensName.substring(0, 30)}..." - rejecting bid`);
+                return 999; // Impossibly high threshold = always reject
+              }
+              
+              logger.debug(`✅ ENS name resolved in ${fetchTime}ms: ${ensName}`);
+            } else {
+              logger.warn(`⚠️ ENS metadata API returned ${response.status} for ${ensContract}:${bid.tokenId.slice(-10)} (${fetchTime}ms)`);
             }
-            
-            logger.debug(`✅ ENS name resolved: ${ensName}`);
+          } finally {
+            clearTimeout(timeoutId);
           }
-        } catch (error) {
-          logger.debug(`🚫 ENS name resolution failed, rejecting bid without proper name`);
+        } catch (error: any) {
+          const errorMsg = error.name === 'AbortError' ? 'timeout after 3s' : error.message;
+          logger.debug(`🚫 ENS name resolution failed (${errorMsg}), rejecting bid without proper name`);
           return 999; // Impossibly high threshold = always reject
         }
       }
