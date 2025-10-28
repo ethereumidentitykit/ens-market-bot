@@ -17,6 +17,39 @@ const SUPPORTED_NETWORKS = [
 
 export type AlchemyNetwork = typeof SUPPORTED_NETWORKS[number];
 
+// Whitelisted tokens to track (major stablecoins, WETH, etc.)
+// TODO: Populate with actual addresses per chain
+const WHITELISTED_TOKENS: Record<string, string[]> = {
+  'eth-mainnet': [
+    // Will be populated with: USDC, USDT, WETH, DAI, etc.
+  ],
+  'base-mainnet': [
+    // Will be populated
+  ],
+  'opt-mainnet': [
+    // Will be populated
+  ],
+  'arb-mainnet': [
+    // Will be populated
+  ],
+  'zksync-mainnet': [
+    // Will be populated
+  ],
+  'polygon-mainnet': [
+    // Will be populated
+  ],
+  'linea-mainnet': [
+    // Will be populated
+  ]
+};
+
+// Token metadata for known tokens (symbol, decimals)
+// TODO: Populate with metadata for whitelisted tokens
+const TOKEN_METADATA: Record<string, { symbol: string; decimals: number }> = {
+  // Format: 'network:address' -> { symbol, decimals }
+  // Example: 'eth-mainnet:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48' -> { symbol: 'USDC', decimals: 6 }
+};
+
 // Token balance response from Alchemy
 interface AlchemyTokenBalanceResponse {
   data: {
@@ -433,17 +466,54 @@ export class AlchemyService {
   }
 
   /**
+   * Get whitelisted token addresses for specific networks
+   * @param networks Networks to get tokens for
+   * @returns Array of {network, tokenAddress} pairs for whitelisted tokens
+   */
+  private getWhitelistedTokens(networks: AlchemyNetwork[]): Array<{ network: string; tokenAddress: string }> {
+    const tokens: Array<{ network: string; tokenAddress: string }> = [];
+    
+    networks.forEach(network => {
+      const networkTokens = WHITELISTED_TOKENS[network] || [];
+      networkTokens.forEach(tokenAddress => {
+        tokens.push({ network, tokenAddress });
+      });
+    });
+    
+    return tokens;
+  }
+
+  /**
+   * Get token metadata (symbol, decimals) for a token
+   * @param network Network name
+   * @param tokenAddress Token address (null for native)
+   * @returns Metadata or undefined if not found
+   */
+  private getTokenMetadata(network: string, tokenAddress: string | null): { symbol: string; decimals: number } | undefined {
+    if (tokenAddress === null) {
+      return { symbol: 'ETH', decimals: 18 };
+    }
+    
+    const key = `${network}:${tokenAddress.toLowerCase()}`;
+    return TOKEN_METADATA[key];
+  }
+
+  /**
    * Get token balances for an address across multiple chains
+   * Only fetches whitelisted tokens (major stablecoins, WETH, etc.)
    * @param address Ethereum address
    * @param networks Array of networks to check (defaults to all supported)
-   * @returns Array of token balances
+   * @returns Array of token balances (only whitelisted tokens)
    */
   async getTokenBalances(
     address: string,
     networks: AlchemyNetwork[] = [...SUPPORTED_NETWORKS]
   ): Promise<TokenBalance[]> {
     try {
-      logger.info(`🔍 Fetching token balances for ${address.slice(0, 10)}... across ${networks.length} networks`);
+      // Get whitelisted tokens for the requested networks
+      const whitelistedTokens = this.getWhitelistedTokens(networks);
+      
+      logger.info(`🔍 Fetching balances for ${address.slice(0, 10)}... (${whitelistedTokens.length} whitelisted tokens across ${networks.length} networks)`);
 
       const url = `https://api.g.alchemy.com/data/v1/${this.apiKey}/assets/tokens/balances/by-address`;
       
@@ -463,20 +533,33 @@ export class AlchemyService {
         timeout: 30000
       });
 
-      const tokens = response.data.data.tokens;
-      logger.info(`✅ Found ${tokens.length} token balances across ${networks.length} networks`);
+      const allTokens = response.data.data.tokens;
+      
+      // Filter to only whitelisted tokens + native tokens
+      const whitelistSet = new Set(whitelistedTokens.map(t => `${t.network}:${t.tokenAddress.toLowerCase()}`));
+      const filteredTokens = allTokens.filter(token => {
+        if (token.tokenAddress === null) {
+          return true; // Always include native tokens (ETH)
+        }
+        const key = `${token.network}:${token.tokenAddress.toLowerCase()}`;
+        return whitelistSet.has(key);
+      });
+      
+      logger.info(`✅ Found ${filteredTokens.length} whitelisted tokens (filtered from ${allTokens.length} total)`);
 
-      // Parse hex balances to decimal
-      const balances: TokenBalance[] = tokens.map(token => {
+      // Parse hex balances to decimal and attach metadata
+      const balances: TokenBalance[] = filteredTokens.map(token => {
         const balanceHex = token.tokenBalance;
         const balanceBigInt = BigInt(balanceHex);
+        const metadata = this.getTokenMetadata(token.network, token.tokenAddress);
         
-        // Convert to decimal string (will apply decimals later when we have token metadata)
         return {
           network: token.network,
           tokenAddress: token.tokenAddress,
           balance: balanceBigInt.toString(),
-          balanceRaw: balanceHex
+          balanceRaw: balanceHex,
+          symbol: metadata?.symbol,
+          decimals: metadata?.decimals
         };
       });
 
@@ -687,19 +770,16 @@ export class AlchemyService {
     try {
       logger.info(`📊 Building portfolio for ${address.slice(0, 10)}... across ${networks.length} networks`);
 
-      // Get token balances
+      // Get token balances (only whitelisted tokens)
       const balances = await this.getTokenBalances(address, networks);
 
-      // Filter out zero balances and limit to top 20 tokens by balance
+      // Filter out zero balances
       const nonZeroBalances = balances.filter(b => BigInt(b.balance) > 0n);
       
-      // For now, take top 20 by raw balance (will be more accurate after we have prices)
-      const limitedBalances = nonZeroBalances.slice(0, 20);
-      
-      logger.debug(`   ${nonZeroBalances.length} non-zero balances, processing top ${limitedBalances.length}`);
+      logger.debug(`   ${nonZeroBalances.length} non-zero whitelisted balances found`);
 
       // Prepare tokens for price lookup
-      const tokensForPricing = limitedBalances.map(b => ({
+      const tokensForPricing = nonZeroBalances.map(b => ({
         network: b.network,
         address: b.tokenAddress
       }));
@@ -720,7 +800,7 @@ export class AlchemyService {
       let totalValueUsd = 0;
       let tokensWithoutPrices = 0;
 
-      for (const balance of limitedBalances) {
+      for (const balance of nonZeroBalances) {
         const key = `${balance.network}:${balance.tokenAddress || 'native'}`;
         const price = priceMap.get(key);
 
