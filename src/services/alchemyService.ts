@@ -527,76 +527,141 @@ export class AlchemyService {
 
       logger.debug(`   Cache: ${prices.length} hits, ${tokensToFetch.length} misses`);
 
-      // Fetch missing prices from API
-      if (tokensToFetch.length > 0) {
+      // Handle native ETH tokens separately - use ETH price
+      const nativeTokens = tokensToFetch.filter(t => t.address === null);
+      const erc20Tokens = tokensToFetch.filter(t => t.address !== null);
+      
+      if (nativeTokens.length > 0) {
+        // Get ETH price
+        const ethPrice = await this.getETHPriceUSD();
+        
+        if (ethPrice && ethPrice > 0) {
+          // Add ETH price for all native tokens
+          nativeTokens.forEach(token => {
+            prices.push({
+              network: token.network,
+              tokenAddress: null,
+              symbol: 'ETH',
+              decimals: 18,
+              priceUsd: ethPrice,
+              lastUpdatedAt: new Date(),
+              source: 'api'
+            });
+          });
+          logger.debug(`   Added ETH price ($${ethPrice}) for ${nativeTokens.length} native tokens`);
+        }
+      }
+
+      // Fetch missing prices from API for ERC20 tokens
+      // Note: Alchemy limits to 3 distinct networks per request, so we need to batch
+      if (erc20Tokens.length > 0) {
         const url = `https://api.g.alchemy.com/prices/v1/${this.apiKey}/tokens/by-address`;
         
-        const requestBody = {
-          addresses: tokensToFetch.map(t => ({
-            network: t.network,
-            address: t.address || '0x0000000000000000000000000000000000000000' // Native token
-          }))
-        };
-
-        const response: AxiosResponse<AlchemyTokenPriceResponse> = await axios.post(url, requestBody, {
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          timeout: 30000
+        // Group tokens by network
+        const tokensByNetwork = new Map<string, Array<{ network: string; address: string | null }>>();
+        erc20Tokens.forEach(token => {
+          if (!tokensByNetwork.has(token.network)) {
+            tokensByNetwork.set(token.network, []);
+          }
+          tokensByNetwork.get(token.network)!.push(token);
         });
-
-        // Parse response and cache prices
-        const pricesToCache: Array<{
-          network: string;
-          tokenAddress: string | null;
-          symbol: string;
-          decimals: number;
-          priceUsd: number;
-        }> = [];
-
-        for (const priceData of response.data.data) {
-          if (priceData.error) {
-            logger.debug(`   No price for ${priceData.network}:${priceData.address} - ${priceData.error.message}`);
-            continue;
+        
+        // Process in batches of 3 networks max
+        const networks = Array.from(tokensByNetwork.keys());
+        const batches: Array<Array<{ network: string; address: string | null }>> = [];
+        
+        for (let i = 0; i < networks.length; i += 3) {
+          const batchNetworks = networks.slice(i, i + 3);
+          const batchTokens: Array<{ network: string; address: string | null }> = [];
+          batchNetworks.forEach(net => {
+            batchTokens.push(...tokensByNetwork.get(net)!);
+          });
+          batches.push(batchTokens);
+        }
+        
+        logger.debug(`   Batching ${erc20Tokens.length} ERC20 tokens across ${batches.length} API requests (3 networks max per request)`);
+        
+        // Fetch all batches
+        for (const batch of batches) {
+          const requestBody = {
+            addresses: batch
+              .filter(t => t.address !== null) // Skip native tokens - they don't have prices in this API
+              .map(t => ({
+                network: t.network,
+                address: t.address!
+              }))
+          };
+          
+          if (requestBody.addresses.length === 0) {
+            continue; // Skip if only native tokens in this batch
           }
 
-          if (priceData.prices.length > 0) {
-            const usdPrice = priceData.prices.find(p => p.currency === 'usd');
-            if (usdPrice) {
-              const tokenAddress = priceData.address === '0x0000000000000000000000000000000000000000' ? null : priceData.address;
-              const priceUsd = parseFloat(usdPrice.value);
-              
-              // Price API doesn't return symbol/decimals - only set for native tokens
-              const symbol = tokenAddress === null ? 'ETH' : tokenAddress.slice(0, 8) + '...'; // Use address prefix for ERC20
-              const decimals = 18; // Default to 18 for all tokens
+          const response = await axios.post(url, requestBody, {
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            timeout: 30000
+          }).catch((error: any) => {
+            logger.error(`Price API batch request failed:`, error.response?.data || error.message);
+            return null;
+          }) as AxiosResponse<AlchemyTokenPriceResponse> | null;
+          
+          if (!response) continue;
 
-              prices.push({
-                network: priceData.network,
-                tokenAddress,
-                symbol,
-                decimals,
-                priceUsd,
-                lastUpdatedAt: new Date(usdPrice.lastUpdatedAt),
-                source: 'api'
-              });
+          // Parse response and cache prices
+          const pricesToCache: Array<{
+            network: string;
+            tokenAddress: string | null;
+            symbol: string;
+            decimals: number;
+            priceUsd: number;
+          }> = [];
 
-              pricesToCache.push({
-                network: priceData.network,
-                tokenAddress,
-                symbol,
-                decimals,
-                priceUsd
-              });
+          for (const priceData of response.data.data) {
+            if (priceData.error) {
+              logger.debug(`   No price for ${priceData.network}:${priceData.address} - ${priceData.error.message}`);
+              continue;
+            }
+
+            if (priceData.prices.length > 0) {
+              const usdPrice = priceData.prices.find(p => p.currency === 'usd');
+              if (usdPrice) {
+                const tokenAddress = priceData.address;
+                const priceUsd = parseFloat(usdPrice.value);
+                
+                // Price API doesn't return symbol/decimals - use address prefix for ERC20
+                const symbol = tokenAddress.slice(0, 8) + '...';
+                const decimals = 18; // Default to 18 for all tokens
+
+                prices.push({
+                  network: priceData.network,
+                  tokenAddress,
+                  symbol,
+                  decimals,
+                  priceUsd,
+                  lastUpdatedAt: new Date(usdPrice.lastUpdatedAt),
+                  source: 'api'
+                });
+
+                pricesToCache.push({
+                  network: priceData.network,
+                  tokenAddress,
+                  symbol,
+                  decimals,
+                  priceUsd
+                });
+              }
             }
           }
-        }
 
-        // Cache the fetched prices
-        if (pricesToCache.length > 0) {
-          await this.databaseService.setTokenPricesBatch(pricesToCache);
+          // Cache the fetched prices
+          if (pricesToCache.length > 0) {
+            await this.databaseService.setTokenPricesBatch(pricesToCache);
+            logger.debug(`   Cached ${pricesToCache.length} prices from batch`);
+          }
         }
-
-        logger.info(`✅ Fetched ${pricesToCache.length} prices from API, cached for 1 hour`);
+        
+        logger.info(`✅ Fetched ${prices.filter(p => p.source === 'api').length} prices from API, cached for 1 hour`);
       }
 
       return prices;
