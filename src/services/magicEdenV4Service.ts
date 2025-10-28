@@ -233,6 +233,85 @@ export interface MagicEdenV4AsksResponse {
 }
 
 /**
+ * Bid from V4 /bids endpoint (simplified, direct bid data)
+ */
+export interface MagicEdenV4Bid {
+  id: string; // Order ID
+  status: 'active' | 'cancelled' | 'filled' | 'expired';
+  maker: string; // Bidder address
+  price: {
+    currency: {
+      symbol: string;
+      decimals: number;
+      displayName: string;
+      address: string;
+      assetId: string;
+      fiatConversion?: {
+        usd: number;
+      };
+    };
+    noFeesRaw: string;
+    withRequiredFeesRaw: string;
+  };
+  priceV2: {
+    amount: {
+      raw: string; // Wei
+      native: string; // Decimal (e.g., "0.250000000000000000")
+      fiat?: {
+        usd?: string;
+      };
+    };
+    currency: {
+      contract: string;
+      symbol: string;
+      decimals: number;
+      displayName: string;
+      fiatConversion?: {
+        usd: number;
+      };
+    };
+  };
+  quantity: {
+    filled: string;
+    remaining: string;
+  };
+  expiry: {
+    validFrom: string; // ISO timestamp
+    validUntil: string; // ISO timestamp
+  };
+  source: string; // "OPENSEA", "BLUR", etc.
+  maxFees: {
+    royaltyBp: number;
+    makerMarketplaceBp: number;
+    takerMarketplaceBp: number;
+    lpFeeBp: number;
+  };
+  createdAt: string; // ISO timestamp
+  updatedAt: string; // ISO timestamp
+  kind: 'BID';
+  criteria: {
+    type: 'ASSET' | 'COLLECTION';
+    assetId: string; // "contract:tokenId"
+  };
+  chain: string;
+  protocol: string; // "ERC721"
+  contract: string;
+  contractData: {
+    orderContractKind: string;
+  };
+}
+
+export interface MagicEdenV4BidsResponse {
+  data: Array<{
+    bid: MagicEdenV4Bid;
+  }>;
+  pagination: {
+    limit: number;
+    offset: number;
+  };
+}
+
+/**
  * V3 Token Activity Format (Legacy)
  * V4 API transforms to this format for backward compatibility
  * This is the shared format used by data processing services
@@ -499,97 +578,105 @@ export class MagicEdenV4Service {
   }
 
   /**
-   * Get active bids using the new activity endpoint
-   * Fetches both BID_CREATED and BID_CANCELLED to filter out cancelled bids
+   * Get active bids using the new /v4/bids endpoint
+   * Direct endpoint for bids - simpler than activity-based approach
    * 
-   * @param cursors - Optional cursor timestamps for pagination (ISO 8601) - one per contract
-   * @param limit - Number of activities to fetch (default: 100)
-   * @returns Bid activities and next cursors (only active, non-cancelled bids)
+   * @param offset - Starting offset for pagination (default: 0)
+   * @param limit - Number of bids to fetch (default: 50, max: 100)
+   * @returns Bid data and pagination info
    */
   async getActiveBids(
-    cursors?: { contract1?: string; contract2?: string },
-    limit: number = 100
-  ): Promise<{ bids: MagicEdenBid[]; continuation?: { contract1?: string; contract2?: string } }> {
+    offset: number = 0,
+    limit: number = 50
+  ): Promise<{ bids: MagicEdenBid[]; nextOffset?: number }> {
     try {
-      // Fetch both BID_CREATED and BID_CANCELLED events to filter out cancelled bids
-      const { activities, continuation } = await this.getActivities(['BID_CREATED', 'BID_CANCELLED'], cursors, limit);
+      const params = new URLSearchParams();
       
-      // Build a set of cancelled bid IDs for quick lookup
-      const cancelledBidIds = new Set<string>();
-      activities
-        .filter(activity => activity.activityType === 'BID_CANCELLED')
-        .forEach(activity => {
-          if (activity.bid?.id) {
-            cancelledBidIds.add(activity.bid.id);
-          }
-        });
-
-      logger.debug(`   Found ${cancelledBidIds.size} cancelled bids to filter out`);
+      // Both ENS contracts in a single query
+      this.ensContracts.forEach(contract => {
+        params.append('collectionIds[]', `ethereum:${contract}`);
+      });
       
-      // Transform V4 activities to internal MagicEdenBid format, excluding cancelled bids
-      const transformedBids = activities
-        .filter(activity => {
-          if (activity.activityType !== 'BID_CREATED') return false;
-          
-          // Exclude if this bid was cancelled
-          if (activity.bid?.id && cancelledBidIds.has(activity.bid.id)) {
-            logger.debug(`   Filtering out cancelled bid: ${activity.bid.id}`);
-            return false;
-          }
-          
-          return true;
-        })
-        .map(activity => this.transformV4ActivityToBid(activity));
-
-      logger.info(`🎯 Transformed ${transformedBids.length} active bids (${activities.filter(a => a.activityType === 'BID_CREATED').length} created, ${cancelledBidIds.size} cancelled)`);
-
+      params.append('sortBy', 'createdAt');
+      params.append('sortDir', 'desc');
+      params.append('limit', Math.min(limit, 100).toString()); // API max is 100
+      params.append('offset', offset.toString());
+      
+      const url = `${this.baseUrl}/bids?${params.toString()}`;
+      
+      logger.debug(`🔍 Fetching bids from: ${url}`);
+      
+      const response: AxiosResponse<MagicEdenV4BidsResponse> = await this.axiosInstance.get(url);
+      
+      const bidsData = response.data.data || [];
+      const pagination = response.data.pagination;
+      
+      logger.info(`✅ Magic Eden V4 /bids API: Retrieved ${bidsData.length} bids (offset: ${offset})`);
+      
+      // Transform to internal format
+      const transformedBids = bidsData
+        .filter(item => item.bid.status === 'active') // Only active bids
+        .map(item => this.transformV4BidToBid(item.bid));
+      
+      logger.debug(`   ${transformedBids.length} active bids after filtering`);
+      
+      // Calculate next offset for pagination (with 5-item overlap)
+      const nextOffset = bidsData.length >= limit ? (offset + limit - 5) : undefined;
+      
       return {
         bids: transformedBids,
-        continuation
+        nextOffset
       };
 
     } catch (error: any) {
-      logger.error('❌ Magic Eden V4 API Error (getActiveBids):', error.message);
+      logger.error('❌ Magic Eden V4 /bids API Error:', error.message);
 
       // Return empty result on error rather than throwing
       return {
         bids: [],
-        continuation: undefined
+        nextOffset: undefined
       };
     }
   }
 
   /**
-   * Get all new bids by cursoring until we hit the boundary timestamp
-   * Uses timestamp-based pagination for reliable recovery after downtime
+   * Get all new bids using offset-based pagination until we hit the boundary timestamp
+   * Uses 5-item overlap between pages to handle concurrent bid creation
    * 
    * @param boundaryTimestamp - Unix timestamp in milliseconds
    * @returns Object with bids and the newest timestamp seen from API (for safe bookmark updates)
    */
   async getNewBidsSince(boundaryTimestamp: number): Promise<{ bids: MagicEdenBid[]; newestTimestampSeen: number | null }> {
-    logger.info(`📈 Cursoring for bids newer than: ${boundaryTimestamp} (${new Date(boundaryTimestamp).toISOString()})`);
+    logger.info(`📈 Paginating for bids newer than: ${boundaryTimestamp} (${new Date(boundaryTimestamp).toISOString()})`);
     
     const startTime = Date.now();
-    let cursors: { contract1?: string; contract2?: string } | undefined;
-    let allNewBids: MagicEdenBid[] = [];
+    let currentOffset = 0;
+    const allNewBids: MagicEdenBid[] = [];
+    const seenBidIds = new Set<string>(); // Deduplicate overlapping bids
     let newestTimestampSeen: number | null = null; // Track newest timestamp from API
     let totalPages = 0;
-    const maxPages = 10; // Safety limit (1000 bids max)
+    const maxPages = 20; // Safety limit (20 pages × 50 bids = 1000 bids max)
     let consecutiveEmptyPages = 0;
     const maxConsecutiveEmpty = 3; // Stop if 3 pages in a row have 0 new bids
     
-    do {
+    while (true) {
       totalPages++;
-      const { bids, continuation } = await this.getActiveBids(cursors);
+      const { bids, nextOffset } = await this.getActiveBids(currentOffset);
       
       if (bids.length === 0) break;
       
-      // Filter bids to only those newer than our boundary AND with >30min validity remaining
-      // V4 API uses ISO timestamps, need to convert for comparison
+      // Filter bids to only those newer than our boundary AND with >15min validity remaining
       let tooOld = 0;
       let expiringSoon = 0;
+      let duplicates = 0;
       
       const newBids = bids.filter(bid => {
+        // Deduplicate (due to 5-item overlap)
+        if (seenBidIds.has(bid.id)) {
+          duplicates++;
+          return false;
+        }
+        
         const bidTimestamp = new Date(bid.createdAt).getTime();
         const validUntil = bid.validUntil * 1000; // Convert Unix seconds to milliseconds
         const now = Date.now();
@@ -609,12 +696,17 @@ export class MagicEdenV4Service {
         return isNewerThanBoundary && hasValidityRemaining;
       });
       
-      if (tooOld > 0 || expiringSoon > 0) {
-        logger.debug(`🔍 Filtered: ${tooOld} too old, ${expiringSoon} expiring soon (<15min remaining)`);
+      // Add new bids to collection and track their IDs
+      newBids.forEach(bid => {
+        seenBidIds.add(bid.id);
+        allNewBids.push(bid);
+      });
+      
+      if (tooOld > 0 || expiringSoon > 0 || duplicates > 0) {
+        logger.debug(`🔍 Filtered: ${tooOld} too old, ${expiringSoon} expiring soon, ${duplicates} duplicates`);
       }
       
-      allNewBids.push(...newBids);
-      logger.debug(`📄 Page ${totalPages}/${maxPages}: ${bids.length} total, ${newBids.length} new, ${allNewBids.length} collected`);
+      logger.debug(`📄 Page ${totalPages}/${maxPages} (offset ${currentOffset}): ${bids.length} total, ${newBids.length} new, ${allNewBids.length} collected`);
       
       // Track consecutive empty pages for early exit
       if (newBids.length === 0) {
@@ -628,34 +720,39 @@ export class MagicEdenV4Service {
       }
       
       // Check if oldest bid in this batch is older than boundary - if so, we're done
-      const oldestInBatch = Math.min(...bids.map(bid => new Date(bid.createdAt).getTime()));
-      const boundaryDate = new Date(boundaryTimestamp).toISOString();
-      const oldestDate = new Date(oldestInBatch).toISOString();
+      if (bids.length > 0) {
+        const oldestInBatch = Math.min(...bids.map(bid => new Date(bid.createdAt).getTime()));
+        const boundaryDate = new Date(boundaryTimestamp).toISOString();
+        const oldestDate = new Date(oldestInBatch).toISOString();
+        
+        logger.debug(`🕒 Oldest bid in batch: ${oldestDate}, Boundary: ${boundaryDate}`);
+        
+        if (oldestInBatch <= boundaryTimestamp) {
+          logger.info(`🎯 Hit boundary timestamp, stopping pagination`);
+          break;
+        }
+      }
       
-      logger.debug(`🕒 Oldest bid in batch: ${oldestDate}, Boundary: ${boundaryDate}`);
-      
-      if (oldestInBatch <= boundaryTimestamp) {
-        logger.info(`🎯 Hit boundary timestamp, stopping cursor`);
+      // Check if there are more pages
+      if (!nextOffset) {
+        logger.info(`📭 No more pages available (reached end of data)`);
         break;
       }
       
-      cursors = continuation;
-      
-      // Safety limit to prevent runaway cursoring
+      // Safety limit to prevent runaway pagination
       if (totalPages >= maxPages) {
-        logger.warn(`⚠️  Hit max pages limit (${maxPages}), stopping cursor`);
+        logger.warn(`⚠️  Hit max pages limit (${maxPages}), stopping pagination`);
         break;
       }
+      
+      currentOffset = nextOffset;
       
       // Rate limiting: 1 call per second
-      if (cursors) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-      
-    } while (cursors && (cursors.contract1 || cursors.contract2));
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
     
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
-    logger.info(`✅ Cursored ${totalPages} pages in ${totalTime}s, found ${allNewBids.length} new bids`);
+    logger.info(`✅ Paginated ${totalPages} pages in ${totalTime}s, found ${allNewBids.length} new bids`);
     
     if (totalPages > 1) {
       const avgTimePerPage = (parseFloat(totalTime) / totalPages).toFixed(1);
@@ -673,6 +770,96 @@ export class MagicEdenV4Service {
   }
 
   /**
+   * Transform V4 /bids endpoint response to internal MagicEdenBid format
+   * NOTE: This endpoint doesn't provide ENS name/image - they'll be looked up via fallback
+   * 
+   * @param v4Bid - Bid from /v4/bids endpoint
+   * @returns Internal MagicEdenBid format
+   */
+  private transformV4BidToBid(v4Bid: MagicEdenV4Bid): MagicEdenBid {
+    // Parse timestamps - V4 uses ISO strings, we need Unix timestamps (seconds)
+    const validFrom = Math.floor(new Date(v4Bid.expiry.validFrom).getTime() / 1000);
+    const validUntil = Math.floor(new Date(v4Bid.expiry.validUntil).getTime() / 1000);
+    
+    // Extract marketplace fee (sum of all fees)
+    const totalFeeBps = 
+      v4Bid.maxFees.royaltyBp +
+      v4Bid.maxFees.makerMarketplaceBp +
+      v4Bid.maxFees.takerMarketplaceBp +
+      v4Bid.maxFees.lpFeeBp;
+
+    // Extract token ID from assetId (format: "contract:tokenId")
+    const tokenId = v4Bid.criteria.assetId.split(':')[1] || v4Bid.criteria.assetId;
+
+    return {
+      id: v4Bid.id,
+      kind: v4Bid.kind,
+      side: 'buy', // Bids are always buy side
+      status: v4Bid.status,
+      tokenSetId: v4Bid.criteria.assetId, // Use assetId as tokenSetId for compatibility
+      tokenSetSchemaHash: '', // Not provided in V4, not critical
+      contract: v4Bid.contract,
+      maker: v4Bid.maker,
+      taker: '0x0000000000000000000000000000000000000000', // Not provided in V4, use zero address
+      
+      price: {
+        currency: {
+          contract: v4Bid.priceV2.currency.contract,
+          name: v4Bid.priceV2.currency.displayName,
+          symbol: v4Bid.priceV2.currency.symbol,
+          decimals: v4Bid.priceV2.currency.decimals,
+        },
+        amount: {
+          raw: v4Bid.priceV2.amount.raw,
+          decimal: parseFloat(v4Bid.priceV2.amount.native),
+          usd: parseFloat(v4Bid.priceV2.amount.fiat?.usd || '0'),
+          native: parseFloat(v4Bid.priceV2.amount.native),
+        },
+      },
+      
+      validFrom: validFrom,
+      validUntil: validUntil,
+      quantityFilled: v4Bid.quantity.filled,
+      quantityRemaining: v4Bid.quantity.remaining,
+      
+      // ⚠️ Note: /v4/bids endpoint doesn't provide ENS name/image
+      // These will be undefined and looked up via enrichBidWithMetadata() fallback
+      criteria: {
+        kind: 'token',
+        data: {
+          token: {
+            tokenId: tokenId,
+            name: undefined, // Not provided by /v4/bids - will be looked up
+            image: undefined, // Not provided by /v4/bids - will be looked up
+          },
+        },
+      },
+      
+      source: {
+        id: v4Bid.source.toLowerCase(),
+        domain: `${v4Bid.source.toLowerCase()}.io`, // Approximate domain
+        name: v4Bid.source,
+        icon: '', // Not provided in V4
+        url: '', // Not provided in V4
+      },
+      
+      feeBps: totalFeeBps,
+      feeBreakdown: [
+        {
+          kind: 'marketplace',
+          recipient: '', // Not provided in V4
+          bps: totalFeeBps,
+        },
+      ],
+      
+      expiration: validUntil,
+      isReservoir: v4Bid.source === 'RESERVOIR', // V4 is powered by Reservoir
+      createdAt: v4Bid.createdAt,
+      updatedAt: v4Bid.updatedAt,
+    };
+  }
+
+  /**
    * Transform V4 activity to internal MagicEdenBid format
    * Maintains compatibility with existing BidsProcessingService
    * 
@@ -682,6 +869,8 @@ export class MagicEdenV4Service {
    * - activity.asset.tokenId -> Token ID (no extraction needed! 🎉)
    * - activity.bid.priceV2.amount.native -> Decimal price
    * - activity.bid.expiry -> validFrom/validUntil
+   * 
+   * @deprecated This is now only used by old activity-based methods
    */
   private transformV4ActivityToBid(activity: MagicEdenV4Activity): MagicEdenBid {
     // This method should only be called for BID_CREATED activities
@@ -1531,7 +1720,7 @@ export class MagicEdenV4Service {
    */
   async healthCheck(): Promise<boolean> {
     try {
-      await this.getActiveBids(undefined, 1);
+      await this.getActiveBids(0, 1);
       return true;
     } catch (error) {
       logger.error('❌ Magic Eden V4 API health check failed:', error);
