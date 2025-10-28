@@ -132,6 +132,27 @@ export class AIReplyService {
         }
       );
 
+      // Step 4.5: Enrich with portfolio data (wallet financial analysis)
+      logger.debug(`   [AI Reply] Step 4.5: Enriching with portfolio data...`);
+      try {
+        // Enrich buyer stats with portfolio
+        await this.dataProcessingService.enrichWithPortfolioData(
+          llmContext.buyerStats,
+          this.alchemyService
+        );
+        
+        // Enrich seller stats with portfolio (if applicable)
+        if (llmContext.sellerStats) {
+          await this.dataProcessingService.enrichWithPortfolioData(
+            llmContext.sellerStats,
+            this.alchemyService
+          );
+        }
+      } catch (error: any) {
+        // Portfolio enrichment is optional - log error but continue
+        logger.warn(`   Portfolio enrichment failed: ${error.message}`);
+      }
+
       // Step 5: Generate AI reply (5-minute timeout)
       logger.debug(`   [AI Reply] Step 5: Generating AI reply with OpenAI...`);
       const generatedReply = await this.withTimeout(

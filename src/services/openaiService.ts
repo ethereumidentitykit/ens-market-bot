@@ -403,14 +403,23 @@ you can keep a couple numerical data points, but don't make it the main focus.
 **FOR BIDS SPECIFICALLY**:
 - The "buyer" is the bidder (person making the offer)
 - The "seller" (if present) is the current owner of the name
-- Focus on: Why this bid is interesting, the bidder's collecting patterns, whether the owner typically accepts offers or holds long-term
+- Focus on: Why this bid is interesting, the bidder's collecting patterns, whether the owner typically sells around these prices, or never does.
 - Interesting angles: Strategic bidding (bidder's portfolio suggests they value this name), owner's selling behavior (do they flip or hold?), bid relative to recent sales
+
+**PORTFOLIO INSIGHTS (when available)**:
+- Small portfolio + recent activity = Fresh capital deployment (exciting new collector)
+- Large portfolio + small bids/purchases = Strategic nibbling (patient whale)
+- Lots of WETH/stablecoins = Ready to deploy capital, conviction play
+- Multi-chain presence = Sophisticated user who operates across ecosystems
+- Low balance relative to purchase/bid = Aggressive move showing conviction
+- Very large portfolio ($1M+) = Whale making moves (signals market confidence)
+- DON'T just list numbers - explain what it reveals about strategy and financial standing
 
 NOTE: Your response will be prefixed with "AI insight:" automatically, so don't include that in your text.
 
 STRUCTURE (IMPORTANT):
 Your response MUST have TWO parts:
-1. **First paragraph (TL;DR)**: A concise 1-2 sentence summary of the most interesting insight
+1. **First paragraph (TL;DR)**: A concise 2 sentence summary of the most interesting insight
 2. **Remaining paragraphs**: Detailed explanation and context
 
 The TL;DR should capture the main story in 100-150 characters. Then expand with supporting details.
@@ -694,6 +703,28 @@ TERMINOLOGY:
         }
       }
     }
+    
+    // Add portfolio information if available
+    if (buyerStats.portfolio) {
+      const p = buyerStats.portfolio;
+      prompt += `\nPORTFOLIO (${buyerLabel}):\n`;
+      prompt += `- Total value: $${p.totalValueUsd.toLocaleString()}\n`;
+      prompt += `- ETH: ${p.ethBalance.toFixed(4)} ETH ($${p.ethValueUsd.toLocaleString()})\n`;
+      
+      if (p.majorHoldings.length > 0) {
+        prompt += `- Major holdings:\n`;
+        for (const holding of p.majorHoldings) {
+          prompt += `  • ${holding.symbol}: ${holding.balance.toFixed(2)} ($${holding.valueUsd.toLocaleString()}) on ${holding.network}\n`;
+        }
+      }
+      
+      const activeChains = Object.entries(p.crossChainPresence)
+        .filter(([_, active]) => active)
+        .map(([chain, _]) => chain);
+      if (activeChains.length > 1) {
+        prompt += `- Multi-chain: Active on ${activeChains.join(', ')}\n`;
+      }
+    }
 
     // Format seller/owner stats (if sale or bid with owner data)
     if (sellerStats) {
@@ -710,6 +741,28 @@ TERMINOLOGY:
         
         if (ss.bidPatterns.commonThemes.length > 0) {
           prompt += `- Bid patterns: ${ss.bidPatterns.commonThemes.join(', ')} (e.g., ${ss.bidPatterns.exampleNames.slice(0, 3).join(', ')})\n`;
+        }
+      }
+      
+      // Add portfolio information if available
+      if (sellerStats.portfolio) {
+        const p = sellerStats.portfolio;
+        prompt += `\nPORTFOLIO (${sellerLabel}):\n`;
+        prompt += `- Total value: $${p.totalValueUsd.toLocaleString()}\n`;
+        prompt += `- ETH: ${p.ethBalance.toFixed(4)} ETH ($${p.ethValueUsd.toLocaleString()})\n`;
+        
+        if (p.majorHoldings.length > 0) {
+          prompt += `- Major holdings:\n`;
+          for (const holding of p.majorHoldings) {
+            prompt += `  • ${holding.symbol}: ${holding.balance.toFixed(2)} ($${holding.valueUsd.toLocaleString()}) on ${holding.network}\n`;
+          }
+        }
+        
+        const activeChains = Object.entries(p.crossChainPresence)
+          .filter(([_, active]) => active)
+          .map(([chain, _]) => chain);
+        if (activeChains.length > 1) {
+          prompt += `- Multi-chain: Active on ${activeChains.join(', ')}\n`;
         }
       }
     }

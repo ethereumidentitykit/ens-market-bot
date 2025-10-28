@@ -71,6 +71,32 @@ export interface UserStats {
   
   // Bidding behavior (optional - only if bid activities found)
   biddingStats?: BiddingStats;
+  
+  // Portfolio analysis (optional - financial standing across chains)
+  portfolio?: {
+    totalValueUsd: number;
+    ethBalance: number; // ETH on mainnet
+    ethValueUsd: number;
+    
+    majorHoldings: Array<{
+      symbol: string;
+      balance: number;
+      valueUsd: number;
+      network: string;
+    }>; // Top 5 non-native tokens by value
+    
+    crossChainPresence: {
+      mainnet: boolean;
+      base: boolean;
+      optimism: boolean;
+      arbitrum: boolean;
+      zksync: boolean;
+      polygon: boolean;
+      linea: boolean;
+    };
+    
+    incomplete: boolean; // True if data fetch failed
+  };
 }
 
 /**
@@ -790,6 +816,81 @@ export class DataProcessingService {
       commonThemes: themes,
       exampleNames
     };
+  }
+
+  /**
+   * Enrich user stats with portfolio data (multi-chain token balances + values)
+   * @param stats UserStats object to enrich
+   * @param alchemyService AlchemyService instance for fetching portfolio
+   */
+  async enrichWithPortfolioData(
+    stats: UserStats,
+    alchemyService: any // Using any to avoid circular dependency
+  ): Promise<void> {
+    try {
+      logger.debug(`   📊 Enriching portfolio data for ${stats.address.slice(0, 10)}...`);
+      
+      // Fetch portfolio from Alchemy
+      const portfolio = await alchemyService.getWalletPortfolio(stats.address);
+      
+      // Extract mainnet ETH balance
+      const ethBalance = portfolio.nativeTokens.find((t: any) => t.network === 'eth-mainnet')?.balance || 0;
+      const ethValueUsd = portfolio.nativeTokens.find((t: any) => t.network === 'eth-mainnet')?.valueUsd || 0;
+      
+      // Extract top 5 ERC20 holdings
+      const majorHoldings = portfolio.erc20Tokens
+        .slice(0, 5)
+        .map((token: any) => ({
+          symbol: token.symbol,
+          balance: token.balance,
+          valueUsd: token.valueUsd,
+          network: token.network
+        }));
+      
+      // Determine cross-chain presence
+      type ChainKey = 'mainnet' | 'base' | 'optimism' | 'arbitrum' | 'zksync' | 'polygon' | 'linea';
+      const networkMap: Record<string, ChainKey | undefined> = {
+        'eth-mainnet': 'mainnet',
+        'base-mainnet': 'base',
+        'opt-mainnet': 'optimism',
+        'arb-mainnet': 'arbitrum',
+        'zksync-mainnet': 'zksync',
+        'polygon-mainnet': 'polygon',
+        'linea-mainnet': 'linea'
+      };
+      
+      const crossChainPresence: Record<ChainKey, boolean> = {
+        mainnet: false,
+        base: false,
+        optimism: false,
+        arbitrum: false,
+        zksync: false,
+        polygon: false,
+        linea: false
+      };
+      
+      portfolio.networksAnalyzed.forEach((network: string) => {
+        const key = networkMap[network];
+        if (key) {
+          crossChainPresence[key] = true;
+        }
+      });
+      
+      // Attach to stats
+      stats.portfolio = {
+        totalValueUsd: portfolio.totalValueUsd,
+        ethBalance,
+        ethValueUsd,
+        majorHoldings,
+        crossChainPresence,
+        incomplete: portfolio.incomplete
+      };
+      
+      logger.debug(`   ✅ Portfolio: $${portfolio.totalValueUsd.toLocaleString()} (${portfolio.nativeTokens.length + portfolio.erc20Tokens.length} tokens)`);
+    } catch (error: any) {
+      logger.error(`   ❌ Failed to enrich portfolio data: ${error.message}`);
+      // Don't set portfolio field on error - leave it undefined
+    }
   }
 
   /**
