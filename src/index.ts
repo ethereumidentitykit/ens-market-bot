@@ -2631,6 +2631,94 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    app.get('/api/database/bids', requireAuth, async (req, res) => {
+      try {
+        const page = parseInt(req.query.page as string) || 1;
+        const limit = parseInt(req.query.limit as string) || 50;
+        const offset = (page - 1) * limit;
+        const search = req.query.search as string || '';
+        const sortBy = req.query.sortBy as string || 'createdAtApi';
+        const sortOrder = req.query.sortOrder as string || 'desc';
+
+        // Get all bids for proper pagination and filtering
+        const allBids = await databaseService.getRecentBids(1000);
+        
+        // Apply search filter if provided
+        let filteredBids = allBids;
+        if (search) {
+          const searchLower = search.toLowerCase();
+          filteredBids = allBids.filter(bid => 
+            (bid.ensName && bid.ensName.toLowerCase().includes(searchLower)) ||
+            bid.bidId.toLowerCase().includes(searchLower) ||
+            bid.makerAddress.toLowerCase().includes(searchLower) ||
+            (bid.tokenId && bid.tokenId.includes(search)) ||
+            bid.priceDecimal.includes(search)
+          );
+        }
+
+        // Apply sorting
+        filteredBids.sort((a, b) => {
+          let aVal: any = a[sortBy as keyof typeof a];
+          let bVal: any = b[sortBy as keyof typeof b];
+
+          // Handle date sorting
+          if (sortBy === 'createdAtApi' || sortBy === 'updatedAtApi') {
+            aVal = new Date(aVal).getTime();
+            bVal = new Date(bVal).getTime();
+          }
+
+          // Handle numeric sorting
+          if (sortBy === 'priceDecimal' || sortBy === 'priceUsd') {
+            aVal = parseFloat(aVal || '0');
+            bVal = parseFloat(bVal || '0');
+          }
+
+          if (sortOrder === 'asc') {
+            return aVal > bVal ? 1 : -1;
+          } else {
+            return aVal < bVal ? 1 : -1;
+          }
+        });
+
+        // Apply pagination
+        const paginatedBids = filteredBids.slice(offset, offset + limit);
+        const totalFiltered = filteredBids.length;
+        
+        // Calculate stats
+        const totalBids = allBids.length;
+        const pendingTweets = allBids.filter(b => !b.posted).length;
+        const totalValue = allBids.reduce((sum, b) => sum + parseFloat(b.priceDecimal || '0'), 0);
+
+        res.json({
+          success: true,
+          data: {
+            bids: paginatedBids,
+            pagination: {
+              page,
+              limit,
+              total: totalFiltered,
+              totalPages: Math.ceil(totalFiltered / limit),
+              hasNext: page * limit < totalFiltered,
+              hasPrev: page > 1
+            },
+            stats: {
+              totalBids: totalBids,
+              pendingTweets: pendingTweets,
+              totalValue: totalValue.toFixed(4),
+              filteredResults: totalFiltered,
+              searchTerm: search
+            }
+          }
+        });
+      } catch (error: any) {
+        logger.error('Database bids fetch error:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     app.get('/api/admin/bids', requireAuth, async (req, res) => {
       try {
         const page = parseInt(req.query.page as string) || 1;
