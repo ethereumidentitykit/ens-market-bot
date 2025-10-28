@@ -394,11 +394,17 @@ Research: ${sanitizedLabel}`;
    * Defines the AI's role, tone, and constraints
    */
   private buildSystemPrompt(): string {
-    return `You are a market analyst writing about ENS domain sales and registrations. Pick out what's interesting and explain it clearly.
+    return `You are a market analyst writing about ENS domain sales, registrations, and bids. Pick out what's interesting and explain it clearly.
 
 YOUR TASK:
-Look at all the data provided (name meaning, buyer/seller activity, transaction history) and decide what's actually interesting to market watchers. Don't just list everything. Tell the story that matters.
+Look at all the data provided (name meaning, buyer/seller/bidder/owner activity, transaction history) and decide what's actually interesting to market watchers. Don't just list everything. Tell the story that matters.
 you can keep a couple numerical data points, but don't make it the main focus.
+
+**FOR BIDS SPECIFICALLY**:
+- The "buyer" is the bidder (person making the offer)
+- The "seller" (if present) is the current owner of the name
+- Focus on: Why this bid is interesting, the bidder's collecting patterns, whether the owner typically accepts offers or holds long-term
+- Interesting angles: Strategic bidding (bidder's portfolio suggests they value this name), owner's selling behavior (do they flip or hold?), bid relative to recent sales
 
 NOTE: Your response will be prefixed with "AI insight:" automatically, so don't include that in your text.
 
@@ -624,10 +630,17 @@ TERMINOLOGY:
     prompt += `- Type: ${event.type}\n`;
     prompt += `- Name: ${sanitizedTokenName}\n`;
     prompt += `- Price: ${event.price} ETH ($${event.priceUsd.toLocaleString()})\n`;
-    prompt += `- Buyer: ${buyerHandle}\n`;
     
-    if (event.type === 'sale' && sellerHandle) {
-      prompt += `- Seller: ${sellerHandle}\n`;
+    if (event.type === 'bid') {
+      prompt += `- Bidder: ${buyerHandle}\n`;
+      if (sellerHandle) {
+        prompt += `- Current Owner: ${sellerHandle}\n`;
+      }
+    } else {
+      prompt += `- Buyer: ${buyerHandle}\n`;
+      if (event.type === 'sale' && sellerHandle) {
+        prompt += `- Seller: ${sellerHandle}\n`;
+      }
     }
     
     // Include club membership if available (sanitized)
@@ -658,15 +671,17 @@ TERMINOLOGY:
       prompt += `- Seller ${tokenInsights.sellerAcquisitionType === 'mint' ? 'minted' : 'bought'} for ${tokenInsights.sellerBuyPrice?.toFixed(4)} ETH, PNL: ${profitSign}${tokenInsights.sellerPnl.toFixed(4)} ETH (${profitSign}$${tokenInsights.sellerPnlUsd?.toFixed(0)})\n`;
     }
 
-    // Format buyer stats
-    prompt += `\nBUYER STATS (${buyerStats.ensName || 'address ' + buyerStats.address.slice(0, 10) + '...'}):\n`;
+    // Format buyer/bidder stats
+    const buyerLabel = event.type === 'bid' ? 'BIDDER STATS' : 'BUYER STATS';
+    prompt += `\n${buyerLabel} (${buyerStats.ensName || 'address ' + buyerStats.address.slice(0, 10) + '...'}):\n`;
     prompt += `- Buys: ${buyerStats.buysCount} (${buyerStats.buysVolume.toFixed(4)} ETH / $${buyerStats.buysVolumeUsd.toLocaleString()})\n`;
     prompt += `- Sells: ${buyerStats.sellsCount} (${buyerStats.sellsVolume.toFixed(4)} ETH / $${buyerStats.sellsVolumeUsd.toLocaleString()})\n`;
     prompt += `- Activity: ${buyerStats.transactionsPerMonth.toFixed(1)} txns/month\n`;
 
-    // Format seller stats (if sale)
+    // Format seller/owner stats (if sale or bid with owner data)
     if (sellerStats) {
-      prompt += `\nSELLER STATS (${sellerStats.ensName || 'address ' + sellerStats.address.slice(0, 10) + '...'}):\n`;
+      const sellerLabel = event.type === 'bid' ? 'CURRENT OWNER STATS' : 'SELLER STATS';
+      prompt += `\n${sellerLabel} (${sellerStats.ensName || 'address ' + sellerStats.address.slice(0, 10) + '...'}):\n`;
       prompt += `- Buys: ${sellerStats.buysCount} (${sellerStats.buysVolume.toFixed(4)} ETH / $${sellerStats.buysVolumeUsd.toLocaleString()})\n`;
       prompt += `- Sells: ${sellerStats.sellsCount} (${sellerStats.sellsVolume.toFixed(4)} ETH / $${sellerStats.sellsVolumeUsd.toLocaleString()})\n`;
       prompt += `- Activity: ${sellerStats.transactionsPerMonth.toFixed(1)} txns/month\n`;
