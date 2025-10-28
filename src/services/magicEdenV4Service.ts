@@ -1157,15 +1157,15 @@ export class MagicEdenV4Service {
     contract: string,
     tokenId: string,
     options: {
-      limit?: number;  // Items per request (default: 10, API timeouts with higher values)
+      limit?: number;  // Items per request (default: 100, API updated to support higher limits)
       types?: MagicEdenV4ActivityType[];  // Activity types to filter
-      maxPages?: number;  // Maximum pages to fetch (default: 120)
+      maxPages?: number;  // Maximum pages to fetch (default: 25)
     } = {}
   ): Promise<{ activities: MagicEdenV4Activity[]; incomplete: boolean; pagesFetched: number }> {
     // Set defaults
-    const limit = options.limit || 10;  // Conservative default due to timeout issues
+    const limit = options.limit || 100;  // API now supports 100 items per page
     const types = options.types || ['TRADE', 'MINT', 'TRANSFER'];  // Match V3 default: sale, mint, transfer
-    const maxPages = options.maxPages || 120;  // 2x V3 to compensate for lower limit (120x10 = 1200 items)
+    const maxPages = options.maxPages || 25;  // 25 pages * 100 items = 2500 items max
 
     logger.info(`📚 Fetching token activity history for ${contract}:${tokenId} (V4 API)`);
     logger.debug(`   Settings: limit=${limit}, types=[${types.join(',')}], maxPages=${maxPages}`);
@@ -1249,15 +1249,15 @@ export class MagicEdenV4Service {
   async getUserActivityHistory(
     address: string,
     options: {
-      limit?: number;  // Items per request (note: API currently returns 20 regardless)
+      limit?: number;  // Items per request (default: 100, API updated to support higher limits)
       types?: MagicEdenV4ActivityType[];  // Activity types to filter
-      maxPages?: number;  // Maximum pages to fetch (default: 60)
+      maxPages?: number;  // Maximum pages to fetch (default: 25)
     } = {}
   ): Promise<{ activities: MagicEdenV4Activity[]; incomplete: boolean; pagesFetched: number }> {
-    // Set defaults to match V3 behavior
-    const limit = options.limit || 20;  // Note: API currently ignores this
+    // Set defaults
+    const limit = options.limit || 100;  // API now supports 100 items per page
     const types = options.types || ['TRADE', 'TRANSFER'];  // Default to sales and transfers
-    const maxPages = options.maxPages || 60;  // Match V3 default
+    const maxPages = options.maxPages || 25;  // 25 pages * 100 items = 2500 items max
 
     logger.info(`👤 Fetching user activity history for ${address} (V4 API)`);
     logger.debug(`   Settings: limit=${limit}, types=[${types.join(',')}], maxPages=${maxPages}`);
@@ -1637,7 +1637,7 @@ export class MagicEdenV4Service {
       const result = await this.getTokenActivityHistory(
         contract,
         tokenId,
-        { types: ['TRADE', 'MINT'], maxPages: 10 } // Limit to 10 pages for performance
+        { limit: 100, types: ['TRADE', 'MINT'], maxPages: 10 } // Limit to 10 pages for performance
       );
       
       const activities = this.transformV4ToV3Activities(result.activities);

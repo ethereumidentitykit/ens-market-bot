@@ -677,6 +677,23 @@ TERMINOLOGY:
     prompt += `- Buys: ${buyerStats.buysCount} (${buyerStats.buysVolume.toFixed(4)} ETH / $${buyerStats.buysVolumeUsd.toLocaleString()})\n`;
     prompt += `- Sells: ${buyerStats.sellsCount} (${buyerStats.sellsVolume.toFixed(4)} ETH / $${buyerStats.sellsVolumeUsd.toLocaleString()})\n`;
     prompt += `- Activity: ${buyerStats.transactionsPerMonth.toFixed(1)} txns/month\n`;
+    
+    // Add bidding behavior if available
+    if (buyerStats.biddingStats) {
+      const bs = buyerStats.biddingStats;
+      prompt += `- Bidding activity: ${bs.totalBids} bids placed, ${bs.totalBidVolume.toFixed(4)} ETH total (avg ${bs.averageBidAmount.toFixed(4)} ETH per bid)\n`;
+      
+      if (bs.bidPatterns.commonThemes.length > 0) {
+        prompt += `- Bid patterns: ${bs.bidPatterns.commonThemes.join(', ')} (e.g., ${bs.bidPatterns.exampleNames.slice(0, 3).join(', ')})\n`;
+      }
+      
+      if (bs.recentBids.length > 0) {
+        prompt += `- Recent bids (${Math.min(bs.recentBids.length, 5)}):\n`;
+        for (const bid of bs.recentBids.slice(0, 5)) {
+          prompt += `  • ${bid.name}: ${bid.amount.toFixed(4)} ETH, ${bid.daysAgo}d ago\n`;
+        }
+      }
+    }
 
     // Format seller/owner stats (if sale or bid with owner data)
     if (sellerStats) {
@@ -685,6 +702,16 @@ TERMINOLOGY:
       prompt += `- Buys: ${sellerStats.buysCount} (${sellerStats.buysVolume.toFixed(4)} ETH / $${sellerStats.buysVolumeUsd.toLocaleString()})\n`;
       prompt += `- Sells: ${sellerStats.sellsCount} (${sellerStats.sellsVolume.toFixed(4)} ETH / $${sellerStats.sellsVolumeUsd.toLocaleString()})\n`;
       prompt += `- Activity: ${sellerStats.transactionsPerMonth.toFixed(1)} txns/month\n`;
+      
+      // Add owner's bidding behavior if available (useful for bids - does owner make bids too?)
+      if (sellerStats.biddingStats) {
+        const ss = sellerStats.biddingStats;
+        prompt += `- Bidding activity: ${ss.totalBids} bids placed, ${ss.totalBidVolume.toFixed(4)} ETH total (avg ${ss.averageBidAmount.toFixed(4)} ETH per bid)\n`;
+        
+        if (ss.bidPatterns.commonThemes.length > 0) {
+          prompt += `- Bid patterns: ${ss.bidPatterns.commonThemes.join(', ')} (e.g., ${ss.bidPatterns.exampleNames.slice(0, 3).join(', ')})\n`;
+        }
+      }
     }
 
     // Format buyer activity history (condensed for pattern detection)

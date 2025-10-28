@@ -549,7 +549,7 @@ export class AIReplyService {
       this.magicEdenV4Service.getTokenActivityHistory(
         transaction.contractAddress,
         transaction.tokenId || '',
-        { limit: 10, maxPages: 120 } // 2x V3 pages to compensate for lower limit (120x10 = 1200 items)
+        { limit: 100, maxPages: 25 } // Updated API: 100 items/page, 25 pages = 2500 items max
       ).then(result => ({
         activities: this.magicEdenV4Service.transformV4ToV3Activities(result.activities),
         incomplete: result.incomplete,
@@ -559,10 +559,10 @@ export class AIReplyService {
         return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0 };
       }),
       
-      // Buyer activity history (V4 API)
+      // Buyer activity history (V4 API) - include BID_CREATED to track bidding behavior
       this.magicEdenV4Service.getUserActivityHistory(
         eventData.buyerAddress,
-        { types: ['TRADE', 'MINT', 'TRANSFER'], maxPages: 60 }
+        { limit: 100, types: ['TRADE', 'MINT', 'TRANSFER', 'BID_CREATED'], maxPages: 25 }
       ).then(result => ({
         activities: this.magicEdenV4Service.transformV4ToV3Activities(result.activities),
         incomplete: result.incomplete,
@@ -576,7 +576,7 @@ export class AIReplyService {
       eventData.sellerAddress
         ? this.magicEdenV4Service.getUserActivityHistory(
             eventData.sellerAddress,
-            { types: ['TRADE', 'MINT', 'TRANSFER'], maxPages: 60 }
+            { limit: 100, types: ['TRADE', 'MINT', 'TRANSFER', 'BID_CREATED'], maxPages: 25 }
           ).then(result => ({
             activities: this.magicEdenV4Service.transformV4ToV3Activities(result.activities),
             incomplete: result.incomplete,
