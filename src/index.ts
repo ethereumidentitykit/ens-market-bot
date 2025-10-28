@@ -660,10 +660,10 @@ async function startApplication(): Promise<void> {
           });
         }
 
-        if (type !== 'sale' && type !== 'registration') {
+        if (type !== 'sale' && type !== 'registration' && type !== 'bid') {
           return res.status(400).json({
             success: false,
-            error: 'Invalid type. Must be "sale" or "registration"'
+            error: 'Invalid type. Must be "sale", "registration", or "bid"'
           });
         }
 
