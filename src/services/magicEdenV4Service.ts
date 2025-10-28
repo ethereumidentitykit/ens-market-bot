@@ -443,23 +443,23 @@ export class MagicEdenV4Service {
    * Fetches from both contracts and merges results, sorted by timestamp
    * 
    * @param activityTypes - Activity types to fetch (BID_CREATED, ASK_CREATED, TRADE, etc.)
-   * @param cursor - Optional cursor timestamp for pagination (ISO 8601)
+   * @param cursors - Optional cursor timestamps for pagination (ISO 8601) - one per contract
    * @param limit - Number of activities to fetch per contract (default: 100)
-   * @returns Activities from both contracts and next cursor
+   * @returns Activities from both contracts and next cursors
    */
   async getActivities(
     activityTypes: MagicEdenV4ActivityType[],
-    cursor?: string,
+    cursors?: { contract1?: string; contract2?: string },
     limit: number = 100
-  ): Promise<{ activities: MagicEdenV4Activity[]; continuation?: string }> {
+  ): Promise<{ activities: MagicEdenV4Activity[]; continuation?: { contract1?: string; contract2?: string } }> {
     logger.info(`🔍 Fetching ENS activities from Magic Eden V4 API (both contracts)`);
-    logger.info(`📊 Types: ${activityTypes.join(', ')}, Cursor: ${cursor || 'none'}, Limit: ${limit}`);
+    logger.info(`📊 Types: ${activityTypes.join(', ')}, Cursors: C1=${cursors?.contract1 || 'none'}, C2=${cursors?.contract2 || 'none'}, Limit: ${limit}`);
 
     try {
-      // Fetch from both ENS contracts in parallel
+      // Fetch from both ENS contracts in parallel with SEPARATE cursors
       const [contract1Result, contract2Result] = await Promise.all([
-        this.getActivitiesForCollection(this.ensContracts[0], activityTypes, cursor, limit),
-        this.getActivitiesForCollection(this.ensContracts[1], activityTypes, cursor, limit)
+        this.getActivitiesForCollection(this.ensContracts[0], activityTypes, cursors?.contract1, limit),
+        this.getActivitiesForCollection(this.ensContracts[1], activityTypes, cursors?.contract2, limit)
       ]);
 
       // Merge activities from both contracts
@@ -472,17 +472,16 @@ export class MagicEdenV4Service {
         return timeB - timeA; // Descending (newest first)
       });
 
-      // Use the oldest cursor from both results for pagination consistency
-      const continuation = contract1Result.continuation && contract2Result.continuation
-        ? (contract1Result.continuation < contract2Result.continuation 
-            ? contract1Result.continuation 
-            : contract2Result.continuation)
-        : (contract1Result.continuation || contract2Result.continuation);
+      // Return SEPARATE cursors for each contract
+      const continuation = (contract1Result.continuation || contract2Result.continuation) ? {
+        contract1: contract1Result.continuation,
+        contract2: contract2Result.continuation
+      } : undefined;
 
       logger.info(`✅ Magic Eden V4 API: Retrieved ${allActivities.length} activities (${contract1Result.activities.length} + ${contract2Result.activities.length})`);
       
       if (continuation) {
-        logger.debug(`📄 Next cursor: ${continuation}`);
+        logger.debug(`📄 Next cursors: C1=${continuation.contract1 || 'done'}, C2=${continuation.contract2 || 'done'}`);
       }
 
       return {
@@ -503,17 +502,17 @@ export class MagicEdenV4Service {
    * Get active bids using the new activity endpoint
    * Fetches both BID_CREATED and BID_CANCELLED to filter out cancelled bids
    * 
-   * @param cursor - Optional cursor timestamp for pagination (ISO 8601)
+   * @param cursors - Optional cursor timestamps for pagination (ISO 8601) - one per contract
    * @param limit - Number of activities to fetch (default: 100)
-   * @returns Bid activities and next cursor (only active, non-cancelled bids)
+   * @returns Bid activities and next cursors (only active, non-cancelled bids)
    */
   async getActiveBids(
-    cursor?: string,
+    cursors?: { contract1?: string; contract2?: string },
     limit: number = 100
-  ): Promise<{ bids: MagicEdenBid[]; continuation?: string }> {
+  ): Promise<{ bids: MagicEdenBid[]; continuation?: { contract1?: string; contract2?: string } }> {
     try {
       // Fetch both BID_CREATED and BID_CANCELLED events to filter out cancelled bids
-      const { activities, continuation } = await this.getActivities(['BID_CREATED', 'BID_CANCELLED'], cursor, limit);
+      const { activities, continuation } = await this.getActivities(['BID_CREATED', 'BID_CANCELLED'], cursors, limit);
       
       // Build a set of cancelled bid IDs for quick lookup
       const cancelledBidIds = new Set<string>();
@@ -571,7 +570,7 @@ export class MagicEdenV4Service {
     logger.info(`📈 Cursoring for bids newer than: ${boundaryTimestamp} (${new Date(boundaryTimestamp).toISOString()})`);
     
     const startTime = Date.now();
-    let cursor: string | undefined;
+    let cursors: { contract1?: string; contract2?: string } | undefined;
     let allNewBids: MagicEdenBid[] = [];
     let newestTimestampSeen: number | null = null; // Track newest timestamp from API
     let totalPages = 0;
@@ -581,7 +580,7 @@ export class MagicEdenV4Service {
     
     do {
       totalPages++;
-      const { bids, continuation } = await this.getActiveBids(cursor);
+      const { bids, continuation } = await this.getActiveBids(cursors);
       
       if (bids.length === 0) break;
       
@@ -640,7 +639,7 @@ export class MagicEdenV4Service {
         break;
       }
       
-      cursor = continuation;
+      cursors = continuation;
       
       // Safety limit to prevent runaway cursoring
       if (totalPages >= maxPages) {
@@ -649,11 +648,11 @@ export class MagicEdenV4Service {
       }
       
       // Rate limiting: 1 call per second
-      if (cursor) {
+      if (cursors) {
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
       
-    } while (cursor);
+    } while (cursors && (cursors.contract1 || cursors.contract2));
     
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
     logger.info(`✅ Cursored ${totalPages} pages in ${totalTime}s, found ${allNewBids.length} new bids`);
@@ -1298,50 +1297,50 @@ export class MagicEdenV4Service {
    * Get recent sales (TRADE activities)
    * Useful for AI reply context and market analysis
    * 
-   * @param cursor - Optional cursor for pagination
+   * @param cursors - Optional cursors for pagination
    * @param limit - Number of sales to fetch
-   * @returns Trade activities and next cursor
+   * @returns Trade activities and next cursors
    */
   async getRecentSales(
-    cursor?: string,
+    cursors?: { contract1?: string; contract2?: string },
     limit: number = 100
-  ): Promise<{ activities: MagicEdenV4Activity[]; continuation?: string }> {
+  ): Promise<{ activities: MagicEdenV4Activity[]; continuation?: { contract1?: string; contract2?: string } }> {
     logger.info(`📊 Fetching recent ENS sales from V4 API`);
-    return this.getActivities(['TRADE'], cursor, limit);
+    return this.getActivities(['TRADE'], cursors, limit);
   }
 
   /**
    * Get active listings (ASK_CREATED activities)
    * Useful for showing what's available for sale
    * 
-   * @param cursor - Optional cursor for pagination
+   * @param cursors - Optional cursors for pagination
    * @param limit - Number of listings to fetch
-   * @returns Ask activities and next cursor
+   * @returns Ask activities and next cursors
    */
   async getActiveListings(
-    cursor?: string,
+    cursors?: { contract1?: string; contract2?: string },
     limit: number = 100
-  ): Promise<{ activities: MagicEdenV4Activity[]; continuation?: string }> {
+  ): Promise<{ activities: MagicEdenV4Activity[]; continuation?: { contract1?: string; contract2?: string } }> {
     logger.info(`📋 Fetching active ENS listings from V4 API`);
-    return this.getActivities(['ASK_CREATED'], cursor, limit);
+    return this.getActivities(['ASK_CREATED'], cursors, limit);
   }
 
   /**
    * Get complete token activity history (all types)
    * Useful for comprehensive market analysis
    * 
-   * @param cursor - Optional cursor for pagination
+   * @param cursors - Optional cursors for pagination
    * @param limit - Number of activities to fetch
-   * @returns All activities and next cursor
+   * @returns All activities and next cursors
    */
   async getAllActivities(
-    cursor?: string,
+    cursors?: { contract1?: string; contract2?: string },
     limit: number = 100
-  ): Promise<{ activities: MagicEdenV4Activity[]; continuation?: string }> {
+  ): Promise<{ activities: MagicEdenV4Activity[]; continuation?: { contract1?: string; contract2?: string } }> {
     logger.info(`📈 Fetching all ENS activities from V4 API`);
     return this.getActivities(
       ['ASK_CREATED', 'ASK_CANCELLED', 'BID_CREATED', 'BID_CANCELLED', 'BURN', 'MINT', 'TRANSFER', 'TRADE'],
-      cursor,
+      cursors,
       limit
     );
   }
@@ -1350,16 +1349,16 @@ export class MagicEdenV4Service {
    * Get bid cancellations
    * Useful for tracking expired/cancelled bids
    * 
-   * @param cursor - Optional cursor for pagination
+   * @param cursors - Optional cursors for pagination
    * @param limit - Number of cancellations to fetch
    * @returns Bid cancellation activities
    */
   async getBidCancellations(
-    cursor?: string,
+    cursors?: { contract1?: string; contract2?: string },
     limit: number = 100
-  ): Promise<{ activities: MagicEdenV4Activity[]; continuation?: string }> {
+  ): Promise<{ activities: MagicEdenV4Activity[]; continuation?: { contract1?: string; contract2?: string } }> {
     logger.info(`❌ Fetching bid cancellations from V4 API`);
-    return this.getActivities(['BID_CANCELLED'], cursor, limit);
+    return this.getActivities(['BID_CANCELLED'], cursors, limit);
   }
 
   /**
