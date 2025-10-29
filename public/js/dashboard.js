@@ -142,10 +142,11 @@ function dashboard() {
         aiRepliesEnabled: false,
         openaiConfigured: false,
         aiRepliesGenerated: 0,
-        aiReplyType: 'sale', // 'sale' or 'registration'
+        aiReplyType: 'sale', // 'sale', 'registration', or 'bid'
         aiReplyTransactionId: '',
         postedSales: [],
         postedRegistrations: [],
+        postedBids: [],
         generatedAIReply: null,
         aiReplyGenerating: false,
         aiReplySending: false,
@@ -2130,6 +2131,18 @@ Issued At: ${issuedAt}`;
                     console.log('📊 Registrations with tweetId:', registrations.filter(r => r.tweetId).length);
                     this.postedRegistrations = registrations.filter(reg => reg.tweetId);
                     console.log('✅ Posted registrations:', this.postedRegistrations.length);
+                }
+
+                // Load posted bids (those with tweet_id)
+                const bidsResponse = await this.fetch('/api/database/bids?limit=500&page=1');
+                if (bidsResponse.ok) {
+                    const bidsData = await bidsResponse.json();
+                    const bids = bidsData.data?.bids || [];
+                    console.log('📊 Total bids fetched:', bids.length);
+                    console.log('📊 Sample bid object:', bids[0]);
+                    console.log('📊 Bids with tweetId:', bids.filter(b => b.tweetId).length);
+                    this.postedBids = bids.filter(bid => bid.tweetId);
+                    console.log('✅ Posted bids:', this.postedBids.length);
                 }
             } catch (error) {
                 console.error('Failed to refresh posted transactions:', error);

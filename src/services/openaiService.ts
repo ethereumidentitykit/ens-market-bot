@@ -214,10 +214,11 @@ FOCUS AREAS:
    - Web3 brands, wallets, or crypto infrastructure using this name?
    - **FOR TOKENS: CHECK COINGECKO OR COINMARKETCAP**
      - Look up the token's market cap and ranking
-     - Only consider tokens with market cap ABOVE $5 million as notable
-     - Tokens under $5M market cap (typically ranked 2000+ on CoinGecko) are too small to mention
+     - Only consider tokens with market cap ABOVE $25 million as notable
+     - Tokens under $25M market cap are too small to mention
      - Example: A token at $60k market cap, rank 8500 = NOT notable, skip it
-   - Even obscure-looking names may have specific crypto meanings - check thoroughly
+     - **CRITICAL: Name must be EXACT 1:1 match** - if the ENS name is "verify.eth", only report on a token called exactly "verify" or "VERIFY", not "zkverify" or "verifyDAO" or similar
+     - Partial matches or names containing the search term are NOT relevant
 
 3. Name Popularity & Usage
    - If it's a person name, check forebears.io or other sources for usage statistics (how common is it globally?)
@@ -394,17 +395,50 @@ Research: ${sanitizedLabel}`;
    * Defines the AI's role, tone, and constraints
    */
   private buildSystemPrompt(): string {
-    return `You are a market analyst writing about ENS domain sales and registrations. Pick out what's interesting and explain it clearly.
+    return `You are a market analyst writing about ENS domain sales, registrations, and bids. Pick out what's interesting and explain it clearly.
 
 YOUR TASK:
-Look at all the data provided (name meaning, buyer/seller activity, transaction history) and decide what's actually interesting to market watchers. Don't just list everything. Tell the story that matters.
+Look at all the data provided (name meaning, buyer/seller/bidder/owner activity, transaction history) and decide what's actually interesting to market watchers. Don't just list everything. Tell the story that matters.
 you can keep a couple numerical data points, but don't make it the main focus.
+
+**FOR BIDS SPECIFICALLY**:
+- The "buyer" is the bidder (person making the offer)
+- The "seller" (if present) is the current owner of the name
+- Focus on: Why this bid is interesting, the bidder's collecting patterns, whether the owner typically sells around these prices, or never does.
+- Key bid insights:
+  • Is this their only bid or do they bid on many names?
+  • Are they bidding a large % of their wallet's WETH?
+  • Recent bidding frequency/patterns
+  • **Many bids at similar prices = "spray and pray"** - bidder is hunting for someone who needs liquidity, placing lowball offers across many names hoping someone accepts
+  • Owner's selling behavior (have they sold around this price point recently?)
+  • Bid relative to recent sales for this name
+- **DO NOT analyze for wash trading on bids** - it's much harder to detect and rarely applies to open bids
+
+**PORTFOLIO INSIGHTS (when available)**:
+1. Interesting examples derived from $ portfolio value:
+For bids:
+- Bidder has 5 WETH in their wallet, and is bidding with all of it.
+- Owner of the name has $1m+ in their wallet, so this bid is insignificant relative to their portfolio. No incentive to accept a lowball.
+- large portfolio owner has never accepted a bid, owns many names.
+
+2. For sales and registrations:
+- buyer has a lot of dry powder, one of their first purchases.
+- the seller needed the cash, they had low cash in their wallet before this sale.
+
+3. general porfolio ideas:
+- Lots of WETH/stablecoins + bids = hunter
+- Multi-chain presence = likely not wash activity. established individual users.
+- Low balance relative to purchase or bid - really likes the name.
+- Very large portfolio ($1M+) = Whale making moves (signals market confidence)
+- You can list numbers, but dont leave them freestanding.
+- overall portfolio value is interesting, especially relative to the purchase or bid price.
+
 
 NOTE: Your response will be prefixed with "AI insight:" automatically, so don't include that in your text.
 
 STRUCTURE (IMPORTANT):
 Your response MUST have TWO parts:
-1. **First paragraph (TL;DR)**: A concise 1-2 sentence summary of the most interesting insight
+1. **First paragraph (TL;DR)**: A concise 2 sentence summary of the most interesting insight
 2. **Remaining paragraphs**: Detailed explanation and context
 
 The TL;DR should capture the main story in 100-150 characters. Then expand with supporting details.
@@ -422,31 +456,34 @@ FORMATTING:
 - Write in short paragraphs
 
 WHAT TO FOCUS ON:
-1. **Crypto/Web3 connections (HIGHEST PRIORITY)**:
+1. **FOR BIDS: Prioritize bidding behavior over token context**
+   - If you have bidding stats (number of bids, patterns, conviction signals), focus on THOSE first
+   - Bidding behavior (wallet commitment, bid patterns) is interesting.
+   
+2. **Crypto/Web3 connections (HIGH PRIORITY for sales/registrations)**:
    - If the name research found SIGNIFICANT crypto/web3 connections, mention them, especially if very recent news (within days)
    - Token tickers, protocol names, recent crypto announcements, DeFi platforms, stablecoins, etc.
    - This is often the MOST interesting insight for obscure-looking names
    - Example: If research finds it's a new stablecoin ticker or protocol name, lead with that
-   - **TOKEN MARKET CAP THRESHOLD**: Only mention tokens with market cap ABOVE $5 million. Tokens under $5M (typically ranked 2000+ on CoinGecko) are NOT significant. Example: $60k market cap at rank 8500 = skip entirely
+   - **TOKEN MARKET CAP THRESHOLD**: Only mention tokens with market cap ABOVE $25 million. Tokens under $25M are NOT significant enough to mention.
+   - **EXACT NAME MATCH REQUIRED**: Token name must be 1:1 exact match. "verify.eth" only matches "verify" or "VERIFY" token, NOT "zkverify" or "verifyDAO"
    - **IMPORTANT**: Only mention if it's a real, notable use case. Skip "small crypto ticker activity" or minor/obscure projects
    - **CRITICAL**: If the crypto connection isn't major/significant, don't mention crypto AT ALL. NEVER say "not tied to a major protocol", "not a major token", "though not associated with", etc. Either highlight a significant crypto use or skip crypto entirely
 
-2. **Name meaning & popularity**: 
+3. **Name meaning & popularity**: 
    - Only explain if it's unusual or unclear. Skip obvious ones like "students" or "coffee", "angel" etc.
    - If it's a common name, mention usage statistics (e.g., "Common surname, ~50k people globally")
    - Explain obscure names, non-English words, or technical terms, acrynms, romanised foriegn languages, etc.
    - **Username/Gamertag value**: If the name is highly suited as a username or gamertag (demon, killer, anon, legend, chad, ghost, etc), mention it. These are valuable for personal branding in gaming/crypto communities.
 
-3. **Club membership**: If the name belongs to a club (e.g., "999 Club #1,234 @ENS999club"):
-   - this means it's part of a "club" or "category" of ens names, that are generally considered to be of higher value or quality due to their discoverability.
-   - Mention it if it adds context (e.g., "This is #1,234 in the 999 Club")
-   - If it's a special one, perhaps a rare or most well known in that club, highlight it.
-   - If its a a special pattern in a club, eg 0101 for 10k club, or 101 for 999 club, highlight it.
-   - 999 club and 10k clubs do not need much explination. their value is self-evident by the frequent trades, and high floor prices.
-   - if its a low number for names, get the forebears data for it eg sam is 101st most popular name in the world, mostly in US and UK.
-   - if its a prepunk club, can be interesting. there are almost 80k of them, just means they are OG ens names. sub 10k, sub 1k, sub 100 are increasingly valuable. a sub 100 name could sell for thousands even if it has no linguistic value. 
+4. **Club membership**: If the name belongs to a club (e.g., "999 Club #1,234 @ENS999club"):
+   - Just mention the club and rank if relevant (e.g., "#1,234 in 999 Club")
+   - Highlight special patterns (0101 for 10k, 101 for 999, palindromes, etc.)
+   - 999 and 10k clubs are self-evident - no need to explain
+   - For name clubs, include Forebears data if available (e.g., "sam: 101st most popular globally, mainly US/UK")
+   - Prepunk: Only mention if sub-10k (increasingly rare), sub-1k (very rare), or sub-100 (extremely valuable even without meaning) 
 
-4. **Trading patterns** based on the user tx history and current holdings provided: Only mention if unusual
+5. **Trading patterns** based on the user tx history and current holdings provided: Only mention if unusual
    - name buying frequency
    - buyer and seller total volumes (NOTE: High ETH volume + low USD volume = OG buyer from early days when ETH was cheaper)
    - Quick flips or unusual timing
@@ -462,8 +499,9 @@ WHAT TO FOCUS ON:
    - Keep it to 1-2 example names max - only if they're relevant
    - **CRITICAL**: When describing patterns, ONLY say what they ARE doing. NEVER add "rather than", "instead of", or "as opposed to" phrases.
    
-   🚩 **WASH TRADING DETECTION** (critical - don't downplay):
-   - Fresh buyer wallet (no/little history) + serial mint-flipper seller = LIKELY wash trade
+   🚩 **WASH TRADING DETECTION (for sales/registrations ONLY, NOT bids)**:
+   - **DO NOT analyze for wash trading on bids** - it's not applicable
+   - For sales: Fresh buyer wallet (no/little history) + serial mint-flipper seller = LIKELY wash trade
    - mint and then sold it on the same day, or within a few days. 90% chance its a wash trade.
    - Multiple red flags together = suspicious, not "ordinary market churn"
    - Red flags: fresh wallets, rapid mint-flips for profit, repeated pattern.
@@ -471,7 +509,7 @@ WHAT TO FOCUS ON:
    - however for 10k and 999 clubs, be far more lenient, wash trading doesn't really exist for these clubs, as they are highly liquid and heavily traded.
    - **IMPORTANT**: If there are NO red flags, do not mention wash trading at all. Only report suspicious activity if it exists.
 
-5. **Market context**: anything interesting about this transaction?
+6. **Market context**: anything interesting about this transaction?
    - Notable buyer or seller behavior?
 
 CRITICAL RULES:
@@ -624,10 +662,17 @@ TERMINOLOGY:
     prompt += `- Type: ${event.type}\n`;
     prompt += `- Name: ${sanitizedTokenName}\n`;
     prompt += `- Price: ${event.price} ETH ($${event.priceUsd.toLocaleString()})\n`;
-    prompt += `- Buyer: ${buyerHandle}\n`;
     
-    if (event.type === 'sale' && sellerHandle) {
-      prompt += `- Seller: ${sellerHandle}\n`;
+    if (event.type === 'bid') {
+      prompt += `- Bidder: ${buyerHandle}\n`;
+      if (sellerHandle) {
+        prompt += `- Current Owner: ${sellerHandle}\n`;
+      }
+    } else {
+      prompt += `- Buyer: ${buyerHandle}\n`;
+      if (event.type === 'sale' && sellerHandle) {
+        prompt += `- Seller: ${sellerHandle}\n`;
+      }
     }
     
     // Include club membership if available (sanitized)
@@ -658,18 +703,91 @@ TERMINOLOGY:
       prompt += `- Seller ${tokenInsights.sellerAcquisitionType === 'mint' ? 'minted' : 'bought'} for ${tokenInsights.sellerBuyPrice?.toFixed(4)} ETH, PNL: ${profitSign}${tokenInsights.sellerPnl.toFixed(4)} ETH (${profitSign}$${tokenInsights.sellerPnlUsd?.toFixed(0)})\n`;
     }
 
-    // Format buyer stats
-    prompt += `\nBUYER STATS (${buyerStats.ensName || 'address ' + buyerStats.address.slice(0, 10) + '...'}):\n`;
+    // Format buyer/bidder stats
+    const buyerLabel = event.type === 'bid' ? 'BIDDER STATS' : 'BUYER STATS';
+    prompt += `\n${buyerLabel} (${buyerStats.ensName || 'address ' + buyerStats.address.slice(0, 10) + '...'}):\n`;
     prompt += `- Buys: ${buyerStats.buysCount} (${buyerStats.buysVolume.toFixed(4)} ETH / $${buyerStats.buysVolumeUsd.toLocaleString()})\n`;
     prompt += `- Sells: ${buyerStats.sellsCount} (${buyerStats.sellsVolume.toFixed(4)} ETH / $${buyerStats.sellsVolumeUsd.toLocaleString()})\n`;
     prompt += `- Activity: ${buyerStats.transactionsPerMonth.toFixed(1)} txns/month\n`;
+    
+    // Add bidding behavior if available
+    if (buyerStats.biddingStats) {
+      const bs = buyerStats.biddingStats;
+      prompt += `- Bidding activity: ${bs.totalBids} bids placed, ${bs.totalBidVolume.toFixed(4)} ETH total (avg ${bs.averageBidAmount.toFixed(4)} ETH per bid)\n`;
+      
+      if (bs.bidPatterns.commonThemes.length > 0) {
+        prompt += `- Bid patterns: ${bs.bidPatterns.commonThemes.join(', ')} (e.g., ${bs.bidPatterns.exampleNames.slice(0, 3).join(', ')})\n`;
+      }
+      
+      if (bs.recentBids.length > 0) {
+        prompt += `- Recent bids (${Math.min(bs.recentBids.length, 5)}):\n`;
+        for (const bid of bs.recentBids.slice(0, 5)) {
+          prompt += `  • ${bid.name}: ${bid.amount.toFixed(4)} ETH, ${bid.daysAgo}d ago\n`;
+        }
+      }
+    }
+    
+    // Add portfolio information if available
+    if (buyerStats.portfolio) {
+      const p = buyerStats.portfolio;
+      prompt += `\nPORTFOLIO (${buyerLabel}):\n`;
+      prompt += `- Total value: $${p.totalValueUsd.toLocaleString()}\n`;
+      prompt += `- ETH: ${p.ethBalance.toFixed(4)} ETH ($${p.ethValueUsd.toLocaleString()})\n`;
+      
+      if (p.majorHoldings.length > 0) {
+        prompt += `- Major holdings:\n`;
+        for (const holding of p.majorHoldings) {
+          prompt += `  • ${holding.symbol}: ${holding.balance.toFixed(2)} ($${holding.valueUsd.toLocaleString()}) on ${holding.network}\n`;
+        }
+      }
+      
+      const activeChains = Object.entries(p.crossChainPresence)
+        .filter(([_, active]) => active)
+        .map(([chain, _]) => chain);
+      if (activeChains.length > 1) {
+        prompt += `- Multi-chain: Active on ${activeChains.join(', ')}\n`;
+      }
+    }
 
-    // Format seller stats (if sale)
+    // Format seller/owner stats (if sale or bid with owner data)
     if (sellerStats) {
-      prompt += `\nSELLER STATS (${sellerStats.ensName || 'address ' + sellerStats.address.slice(0, 10) + '...'}):\n`;
+      const sellerLabel = event.type === 'bid' ? 'CURRENT OWNER STATS' : 'SELLER STATS';
+      prompt += `\n${sellerLabel} (${sellerStats.ensName || 'address ' + sellerStats.address.slice(0, 10) + '...'}):\n`;
       prompt += `- Buys: ${sellerStats.buysCount} (${sellerStats.buysVolume.toFixed(4)} ETH / $${sellerStats.buysVolumeUsd.toLocaleString()})\n`;
       prompt += `- Sells: ${sellerStats.sellsCount} (${sellerStats.sellsVolume.toFixed(4)} ETH / $${sellerStats.sellsVolumeUsd.toLocaleString()})\n`;
       prompt += `- Activity: ${sellerStats.transactionsPerMonth.toFixed(1)} txns/month\n`;
+      
+      // Add owner's bidding behavior if available (useful for bids - does owner make bids too?)
+      if (sellerStats.biddingStats) {
+        const ss = sellerStats.biddingStats;
+        prompt += `- Bidding activity: ${ss.totalBids} bids placed, ${ss.totalBidVolume.toFixed(4)} ETH total (avg ${ss.averageBidAmount.toFixed(4)} ETH per bid)\n`;
+        
+        if (ss.bidPatterns.commonThemes.length > 0) {
+          prompt += `- Bid patterns: ${ss.bidPatterns.commonThemes.join(', ')} (e.g., ${ss.bidPatterns.exampleNames.slice(0, 3).join(', ')})\n`;
+        }
+      }
+      
+      // Add portfolio information if available
+      if (sellerStats.portfolio) {
+        const p = sellerStats.portfolio;
+        prompt += `\nPORTFOLIO (${sellerLabel}):\n`;
+        prompt += `- Total value: $${p.totalValueUsd.toLocaleString()}\n`;
+        prompt += `- ETH: ${p.ethBalance.toFixed(4)} ETH ($${p.ethValueUsd.toLocaleString()})\n`;
+        
+        if (p.majorHoldings.length > 0) {
+          prompt += `- Major holdings:\n`;
+          for (const holding of p.majorHoldings) {
+            prompt += `  • ${holding.symbol}: ${holding.balance.toFixed(2)} ($${holding.valueUsd.toLocaleString()}) on ${holding.network}\n`;
+          }
+        }
+        
+        const activeChains = Object.entries(p.crossChainPresence)
+          .filter(([_, active]) => active)
+          .map(([chain, _]) => chain);
+        if (activeChains.length > 1) {
+          prompt += `- Multi-chain: Active on ${activeChains.join(', ')}\n`;
+        }
+      }
     }
 
     // Format buyer activity history (condensed for pattern detection)

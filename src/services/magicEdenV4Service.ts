@@ -2,6 +2,7 @@ import axios, { AxiosResponse, AxiosInstance } from 'axios';
 import { logger } from '../utils/logger';
 import { MagicEdenBid, BidProcessingStats } from '../types';
 import { APIToggleService } from './apiToggleService';
+import { ensSubgraphService } from './ensSubgraphService';
 
 /**
  * Magic Eden V4 API Response Types
@@ -812,7 +813,9 @@ export class MagicEdenV4Service {
         amount: {
           raw: v4Bid.priceV2.amount.raw,
           decimal: parseFloat(v4Bid.priceV2.amount.native),
-          usd: parseFloat(v4Bid.priceV2.amount.fiat?.usd || '0'),
+          usd: v4Bid.priceV2.currency.fiatConversion?.usd 
+            ? parseFloat(v4Bid.priceV2.amount.native) * v4Bid.priceV2.currency.fiatConversion.usd
+            : parseFloat(v4Bid.priceV2.amount.fiat?.usd || '0'),
           native: parseFloat(v4Bid.priceV2.amount.native),
         },
       },
@@ -910,7 +913,9 @@ export class MagicEdenV4Service {
         amount: {
           raw: activity.bid.priceV2.amount.raw,
           decimal: parseFloat(activity.bid.priceV2.amount.native),
-          usd: parseFloat(activity.bid.priceV2.amount.fiat?.usd || '0'),
+          usd: activity.bid.priceV2.currency.fiatConversion?.usd
+            ? parseFloat(activity.bid.priceV2.amount.native) * activity.bid.priceV2.currency.fiatConversion.usd
+            : parseFloat(activity.bid.priceV2.amount.fiat?.usd || '0'),
           native: parseFloat(activity.bid.priceV2.amount.native), // V4 provides this directly
         },
       },
@@ -1157,15 +1162,15 @@ export class MagicEdenV4Service {
     contract: string,
     tokenId: string,
     options: {
-      limit?: number;  // Items per request (default: 10, API timeouts with higher values)
+      limit?: number;  // Items per request (default: 100, API updated to support higher limits)
       types?: MagicEdenV4ActivityType[];  // Activity types to filter
-      maxPages?: number;  // Maximum pages to fetch (default: 120)
+      maxPages?: number;  // Maximum pages to fetch (default: 25)
     } = {}
   ): Promise<{ activities: MagicEdenV4Activity[]; incomplete: boolean; pagesFetched: number }> {
     // Set defaults
-    const limit = options.limit || 10;  // Conservative default due to timeout issues
+    const limit = options.limit || 100;  // API now supports 100 items per page
     const types = options.types || ['TRADE', 'MINT', 'TRANSFER'];  // Match V3 default: sale, mint, transfer
-    const maxPages = options.maxPages || 120;  // 2x V3 to compensate for lower limit (120x10 = 1200 items)
+    const maxPages = options.maxPages || 25;  // 25 pages * 100 items = 2500 items max
 
     logger.info(`📚 Fetching token activity history for ${contract}:${tokenId} (V4 API)`);
     logger.debug(`   Settings: limit=${limit}, types=[${types.join(',')}], maxPages=${maxPages}`);
@@ -1221,8 +1226,11 @@ export class MagicEdenV4Service {
 
       logger.info(`✅ Token activity history complete: ${allActivities.length} activities from ${pageCount} pages${incomplete ? ' (incomplete)' : ''}`);
 
+      // Enrich token IDs for high-value transactions (over $500)
+      const enrichedActivities = await this.enrichTokenIds(allActivities);
+
       return {
-        activities: allActivities,
+        activities: enrichedActivities,
         incomplete,
         pagesFetched: pageCount
       };
@@ -1249,18 +1257,20 @@ export class MagicEdenV4Service {
   async getUserActivityHistory(
     address: string,
     options: {
-      limit?: number;  // Items per request (note: API currently returns 20 regardless)
+      limit?: number;  // Items per request (default: 100, API updated to support higher limits)
       types?: MagicEdenV4ActivityType[];  // Activity types to filter
-      maxPages?: number;  // Maximum pages to fetch (default: 60)
+      maxPages?: number;  // Maximum pages to fetch (default: 25)
+      contracts?: string[];  // Optional: Filter by specific contracts (e.g., ENS contracts)
     } = {}
   ): Promise<{ activities: MagicEdenV4Activity[]; incomplete: boolean; pagesFetched: number }> {
-    // Set defaults to match V3 behavior
-    const limit = options.limit || 20;  // Note: API currently ignores this
+    // Set defaults
+    const limit = options.limit || 100;  // API now supports 100 items per page
     const types = options.types || ['TRADE', 'TRANSFER'];  // Default to sales and transfers
-    const maxPages = options.maxPages || 60;  // Match V3 default
+    const maxPages = options.maxPages || 25;  // 25 pages * 100 items = 2500 items max
+    const contracts = options.contracts;  // Optional contract filter
 
     logger.info(`👤 Fetching user activity history for ${address} (V4 API)`);
-    logger.debug(`   Settings: limit=${limit}, types=[${types.join(',')}], maxPages=${maxPages}`);
+    logger.debug(`   Settings: limit=${limit}, types=[${types.join(',')}], maxPages=${maxPages}${contracts ? `, contracts=[${contracts.join(',')}]` : ''}`);
 
     const allActivities: MagicEdenV4Activity[] = [];
     let continuation: string | undefined;
@@ -1272,12 +1282,13 @@ export class MagicEdenV4Service {
       while (pageCount < maxPages) {
         pageCount++;
         
-        // Fetch single page using primitive method
+        // Fetch single page using primitive method with contract filtering
         const response = await this.getUserActivityPage(
           address,
           types,
           continuation,
-          limit
+          limit,
+          contracts || this.ensContracts // Use provided contracts or default to ENS contracts
         );
 
         // Break if no activities returned
@@ -1288,7 +1299,7 @@ export class MagicEdenV4Service {
 
         // Add activities to aggregated array
         allActivities.push(...response.activities);
-        logger.debug(`   Page ${pageCount}: Fetched ${response.activities.length} ENS activities (total: ${allActivities.length})`);
+        logger.debug(`   Page ${pageCount}: Fetched ${response.activities.length} activities (total: ${allActivities.length})`);
 
         // Check for continuation cursor
         continuation = response.continuation;
@@ -1312,8 +1323,11 @@ export class MagicEdenV4Service {
 
       logger.info(`✅ User activity history complete: ${allActivities.length} activities from ${pageCount} pages${incomplete ? ' (incomplete)' : ''}`);
 
+      // Enrich token IDs for high-value transactions (over $500)
+      const enrichedActivities = await this.enrichTokenIds(allActivities);
+
       return {
-        activities: allActivities,
+        activities: enrichedActivities,
         incomplete,
         pagesFetched: pageCount
       };
@@ -1346,6 +1360,7 @@ export class MagicEdenV4Service {
     activityTypes?: MagicEdenV4ActivityType[],
     cursor?: string,
     limit: number = 20,
+    contracts?: string[], // Optional contract addresses to filter by
     retryCount: number = 0
   ): Promise<{ activities: MagicEdenV4Activity[]; continuation?: string }> {
     const maxRetries = 3;
@@ -1374,6 +1389,14 @@ export class MagicEdenV4Service {
         activityTypes.forEach(type => params.append('activityTypes[]', type));
       }
 
+      // Add contract filtering (collectionIds[]) - server-side filtering
+      if (contracts && contracts.length > 0) {
+        contracts.forEach(contract => {
+          params.append('collectionIds[]', `ethereum:${contract.toLowerCase()}`);
+        });
+        logger.debug(`   Filtering by contracts: ${contracts.join(', ')}`);
+      }
+
       // Add cursor for pagination if provided
       if (cursor) {
         params.append('cursorTimestamp', cursor);
@@ -1390,23 +1413,33 @@ export class MagicEdenV4Service {
         }
       );
 
-      const allActivities = response.data.activities || [];
+      const activities = response.data.activities || [];
       const nextCursor = response.data.pagination?.cursorTimestamp;
       
-      // Filter to only ENS contracts (local filtering until API adds this feature)
-      const ensActivities = allActivities.filter(activity => {
-        const contractAddress = activity.asset?.contractAddress?.toLowerCase();
-        return this.ensContracts.includes(contractAddress || '');
-      });
+      logger.info(`✅ Magic Eden V4 API: Retrieved ${activities.length} activities (before filtering)`);
       
-      logger.info(`✅ Magic Eden V4 API: Retrieved ${allActivities.length} activities, ${ensActivities.length} ENS activities`);
+      // Client-side filtering as backup (API filter doesn't seem to work reliably)
+      let filteredActivities = activities;
+      if (contracts && contracts.length > 0) {
+        const contractSet = new Set(contracts.map(c => c.toLowerCase()));
+        filteredActivities = activities.filter(activity => {
+          const activityContract = activity.collection?.id?.toLowerCase() || 
+                                   activity.asset?.contractAddress?.toLowerCase() || 
+                                   '';
+          return contractSet.has(activityContract);
+        });
+        
+        if (filteredActivities.length < activities.length) {
+          logger.info(`   Filtered to ${filteredActivities.length} ENS activities (removed ${activities.length - filteredActivities.length} non-ENS)`);
+        }
+      }
       
       if (nextCursor) {
         logger.debug(`📄 Next cursor: ${nextCursor}`);
       }
 
       return {
-        activities: ensActivities,
+        activities: filteredActivities,
         continuation: nextCursor
       };
 
@@ -1437,7 +1470,7 @@ export class MagicEdenV4Service {
         await new Promise(resolve => setTimeout(resolve, waitTime));
         
         // Recursive retry with potentially reduced limit
-        return this.getUserActivityPage(walletAddress, activityTypes, cursor, newLimit, retryCount + 1);
+        return this.getUserActivityPage(walletAddress, activityTypes, cursor, newLimit, contracts, retryCount + 1);
       }
 
       // Max retries exceeded - return empty result
@@ -1637,7 +1670,7 @@ export class MagicEdenV4Service {
       const result = await this.getTokenActivityHistory(
         contract,
         tokenId,
-        { types: ['TRADE', 'MINT'], maxPages: 10 } // Limit to 10 pages for performance
+        { limit: 100, types: ['TRADE', 'MINT'], maxPages: 10 } // Limit to 10 pages for performance
       );
       
       const activities = this.transformV4ToV3Activities(result.activities);
@@ -1758,7 +1791,7 @@ export class MagicEdenV4Service {
     const currencySymbol = v4Activity.unitPrice?.currency.symbol || 'ETH';
     const currencyDecimals = v4Activity.unitPrice?.currency.decimals || 18;
     
-    // Fix USD conversion for stablecoins (USDC, USDT, DAI)
+    // Calculate USD value
     let priceUsd = 0;
     if (v4Activity.unitPrice) {
       const isStablecoin = ['USDC', 'USDT', 'DAI'].includes(currencySymbol);
@@ -1766,8 +1799,15 @@ export class MagicEdenV4Service {
         // For stablecoins, the native value IS the USD value (1 USDC = $1)
         priceUsd = priceDecimal;
       } else {
-        // For ETH/WETH, use the V4 API's USD conversion
-        priceUsd = parseFloat(v4Activity.unitPrice.amount.fiat?.usd || '0');
+        // For ETH/WETH, calculate: native amount × fiatConversion rate
+        // This is more reliable than amount.fiat.usd (which is sometimes in micro-dollars)
+        const fiatConversionRate = v4Activity.unitPrice.currency.fiatConversion?.usd;
+        if (fiatConversionRate) {
+          priceUsd = priceDecimal * fiatConversionRate;
+        } else {
+          // Fallback to pre-calculated fiat.usd if fiatConversion is missing
+          priceUsd = parseFloat(v4Activity.unitPrice.amount.fiat?.usd || '0');
+        }
       }
     }
 
@@ -1837,6 +1877,68 @@ export class MagicEdenV4Service {
    */
   transformV4ToV3Activities(v4Activities: MagicEdenV4Activity[]): TokenActivity[] {
     return v4Activities.map(activity => this.transformV4ToV3Activity(activity));
+  }
+
+  /**
+   * Enrich token IDs in activities with ENS names for high-value transactions
+   * Resolves token IDs (starting with #) to ENS names if USD value > $500
+   * 
+   * @param activities - Array of V4 activities to enrich
+   * @returns Array of enriched activities
+   */
+  async enrichTokenIds(activities: MagicEdenV4Activity[]): Promise<MagicEdenV4Activity[]> {
+    const MIN_USD_VALUE = 500;
+    const enrichedActivities = [...activities];
+    let enrichedCount = 0;
+
+    for (let i = 0; i < enrichedActivities.length; i++) {
+      const activity = enrichedActivities[i];
+      const tokenName = activity.asset.name;
+      
+      // Check if name is a token ID (starts with #)
+      if (!tokenName || !tokenName.startsWith('#')) {
+        continue;
+      }
+
+      // Extract numeric token ID (remove # prefix)
+      const tokenId = tokenName.slice(1);
+      
+      // Check USD value
+      const usdValue = activity.unitPrice?.currency.fiatConversion?.usd
+        ? parseFloat(activity.unitPrice.amount.native) * activity.unitPrice.currency.fiatConversion.usd
+        : 0;
+
+      if (usdValue < MIN_USD_VALUE) {
+        continue;
+      }
+
+      // Resolve ENS name using subgraph
+      try {
+        const contractAddress = activity.asset.contractAddress;
+        const ensName = await ensSubgraphService.getNameByTokenId(tokenId, contractAddress);
+        
+        if (ensName) {
+          // Update activity with resolved name
+          enrichedActivities[i] = {
+            ...activity,
+            asset: {
+              ...activity.asset,
+              name: ensName
+            }
+          };
+          enrichedCount++;
+          logger.debug(`   ✅ Enriched ${tokenName} → ${ensName} ($${usdValue.toFixed(2)})`);
+        }
+      } catch (error: any) {
+        logger.debug(`   ⚠️ Failed to resolve ${tokenName}: ${error.message}`);
+      }
+    }
+
+    if (enrichedCount > 0) {
+      logger.info(`📝 Enriched ${enrichedCount} token IDs to ENS names`);
+    }
+
+    return enrichedActivities;
   }
 }
 

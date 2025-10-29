@@ -306,38 +306,78 @@ export class DatabaseService implements IDatabaseService {
           id SERIAL PRIMARY KEY,
           sale_id INTEGER REFERENCES processed_sales(id),
           registration_id INTEGER REFERENCES ens_registrations(id),
+          bid_id INTEGER REFERENCES ens_bids(id),
           original_tweet_id VARCHAR(255) NOT NULL,
           reply_tweet_id VARCHAR(255),
-          transaction_type VARCHAR(20) NOT NULL CHECK (transaction_type IN ('sale', 'registration')),
-          transaction_hash VARCHAR(66) NOT NULL,
+          transaction_type VARCHAR(20) NOT NULL CHECK (transaction_type IN ('sale', 'registration', 'bid')),
+          transaction_hash VARCHAR(66),
           model_used VARCHAR(50) NOT NULL,
           prompt_tokens INTEGER NOT NULL,
           completion_tokens INTEGER NOT NULL,
           total_tokens INTEGER NOT NULL,
           cost_usd DECIMAL(10,6) NOT NULL,
           reply_text TEXT NOT NULL,
+          name_research_id INTEGER REFERENCES name_research(id),
           name_research TEXT,
           status VARCHAR(20) NOT NULL CHECK (status IN ('pending', 'posted', 'failed', 'skipped')) DEFAULT 'pending',
           error_message TEXT,
           created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
           posted_at TIMESTAMP,
           CONSTRAINT check_transaction_ref CHECK (
-            (sale_id IS NOT NULL AND registration_id IS NULL) OR
-            (sale_id IS NULL AND registration_id IS NOT NULL)
+            (sale_id IS NOT NULL AND registration_id IS NULL AND bid_id IS NULL) OR
+            (sale_id IS NULL AND registration_id IS NOT NULL AND bid_id IS NULL) OR
+            (sale_id IS NULL AND registration_id IS NULL AND bid_id IS NOT NULL)
           )
         )
       `);
 
-      // Add name_research column if it doesn't exist (migration for existing databases)
+      // Migrations for existing databases
       await this.pool.query(`
         DO $$ 
         BEGIN
+          -- Add name_research column if it doesn't exist
           IF NOT EXISTS (
             SELECT 1 FROM information_schema.columns 
             WHERE table_name = 'ai_replies' AND column_name = 'name_research'
           ) THEN
             ALTER TABLE ai_replies ADD COLUMN name_research TEXT;
           END IF;
+          
+          -- Add bid_id column if it doesn't exist
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'ai_replies' AND column_name = 'bid_id'
+          ) THEN
+            ALTER TABLE ai_replies ADD COLUMN bid_id INTEGER REFERENCES ens_bids(id);
+          END IF;
+          
+          -- Add name_research_id column if it doesn't exist
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'ai_replies' AND column_name = 'name_research_id'
+          ) THEN
+            ALTER TABLE ai_replies ADD COLUMN name_research_id INTEGER REFERENCES name_research(id);
+          END IF;
+          
+          -- Make transaction_hash nullable (for bids that don't have txHash yet)
+          ALTER TABLE ai_replies ALTER COLUMN transaction_hash DROP NOT NULL;
+          
+          -- Drop old check constraint if it exists
+          ALTER TABLE ai_replies DROP CONSTRAINT IF EXISTS ai_replies_transaction_type_check;
+          
+          -- Add updated check constraint for transaction_type to include 'bid'
+          ALTER TABLE ai_replies ADD CONSTRAINT ai_replies_transaction_type_check 
+            CHECK (transaction_type IN ('sale', 'registration', 'bid'));
+          
+          -- Drop old transaction reference constraint if it exists
+          ALTER TABLE ai_replies DROP CONSTRAINT IF EXISTS check_transaction_ref;
+          
+          -- Add updated transaction reference constraint to include bid_id
+          ALTER TABLE ai_replies ADD CONSTRAINT check_transaction_ref CHECK (
+            (sale_id IS NOT NULL AND registration_id IS NULL AND bid_id IS NULL) OR
+            (sale_id IS NULL AND registration_id IS NOT NULL AND bid_id IS NULL) OR
+            (sale_id IS NULL AND registration_id IS NULL AND bid_id IS NOT NULL)
+          );
         END $$;
       `);
 
@@ -345,10 +385,35 @@ export class DatabaseService implements IDatabaseService {
       await this.pool.query(`
         CREATE INDEX IF NOT EXISTS idx_ai_replies_sale_id ON ai_replies(sale_id);
         CREATE INDEX IF NOT EXISTS idx_ai_replies_registration_id ON ai_replies(registration_id);
+        CREATE INDEX IF NOT EXISTS idx_ai_replies_bid_id ON ai_replies(bid_id);
+        CREATE INDEX IF NOT EXISTS idx_ai_replies_name_research_id ON ai_replies(name_research_id);
         CREATE INDEX IF NOT EXISTS idx_ai_replies_original_tweet ON ai_replies(original_tweet_id);
         CREATE INDEX IF NOT EXISTS idx_ai_replies_reply_tweet ON ai_replies(reply_tweet_id);
         CREATE INDEX IF NOT EXISTS idx_ai_replies_status ON ai_replies(status);
         CREATE INDEX IF NOT EXISTS idx_ai_replies_created_at ON ai_replies(created_at);
+      `);
+
+      // Create token_prices table for caching token USD prices (1 hour TTL)
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS token_prices (
+          id SERIAL PRIMARY KEY,
+          network VARCHAR(50) NOT NULL,           -- 'eth-mainnet', 'base-mainnet', etc.
+          token_address VARCHAR(42),              -- NULL for native tokens (ETH)
+          symbol VARCHAR(20),                     -- 'USDC', 'WETH', 'ETH', etc.
+          decimals INTEGER,                       -- Token decimals (18 for ETH)
+          price_usd DECIMAL(20,10) NOT NULL,      -- USD price
+          last_updated_at TIMESTAMP NOT NULL,     -- When price was fetched from Alchemy
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          
+          -- Composite unique constraint for network + token_address
+          CONSTRAINT unique_token_network UNIQUE (network, token_address)
+        );
+      `);
+
+      // Create indexes for token_prices
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_token_prices_lookup ON token_prices(network, token_address);
+        CREATE INDEX IF NOT EXISTS idx_token_prices_expiry ON token_prices(last_updated_at);
       `);
 
       logger.info('PostgreSQL tables created successfully');
@@ -1723,6 +1788,142 @@ export class DatabaseService implements IDatabaseService {
   }
 
   /**
+   * Get cached token price (if not expired - 1 hour TTL)
+   * @returns null if not found or expired
+   */
+  async getTokenPrice(
+    network: string,
+    tokenAddress: string | null
+  ): Promise<{ priceUsd: number; symbol: string; decimals: number; lastUpdatedAt: Date } | null> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        SELECT price_usd as "priceUsd", symbol, decimals, last_updated_at as "lastUpdatedAt"
+        FROM token_prices
+        WHERE network = $1 AND (token_address = $2 OR (token_address IS NULL AND $2 IS NULL))
+          AND last_updated_at > NOW() - INTERVAL '1 hour'
+      `, [network, tokenAddress]);
+
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      const row = result.rows[0];
+      return {
+        priceUsd: parseFloat(row.priceUsd),
+        symbol: row.symbol,
+        decimals: row.decimals,
+        lastUpdatedAt: row.lastUpdatedAt
+      };
+    } catch (error: any) {
+      logger.error('Failed to get token price from cache:', error.message);
+      return null; // Graceful degradation - return null on error
+    }
+  }
+
+  /**
+   * Set/update token price in cache
+   * Uses INSERT ... ON CONFLICT to upsert
+   */
+  async setTokenPrice(
+    network: string,
+    tokenAddress: string | null,
+    symbol: string,
+    decimals: number,
+    priceUsd: number
+  ): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      await this.pool.query(`
+        INSERT INTO token_prices (network, token_address, symbol, decimals, price_usd, last_updated_at)
+        VALUES ($1, $2, $3, $4, $5, NOW())
+        ON CONFLICT (network, token_address)
+        DO UPDATE SET
+          symbol = $3,
+          decimals = $4,
+          price_usd = $5,
+          last_updated_at = NOW()
+      `, [network, tokenAddress, symbol, decimals, priceUsd]);
+
+      logger.debug(`Cached price for ${symbol} on ${network}: $${priceUsd}`);
+    } catch (error: any) {
+      logger.error('Failed to set token price in cache:', error.message);
+      // Don't throw - caching failure shouldn't break the flow
+    }
+  }
+
+  /**
+   * Batch set multiple token prices (more efficient)
+   */
+  async setTokenPricesBatch(
+    prices: Array<{
+      network: string;
+      tokenAddress: string | null;
+      symbol: string;
+      decimals: number;
+      priceUsd: number;
+    }>
+  ): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+    if (prices.length === 0) return;
+
+    try {
+      // Build VALUES clause for batch insert
+      const values: any[] = [];
+      const placeholders: string[] = [];
+      
+      prices.forEach((price, idx) => {
+        const offset = idx * 5;
+        placeholders.push(`($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, NOW())`);
+        values.push(price.network, price.tokenAddress, price.symbol, price.decimals, price.priceUsd);
+      });
+
+      await this.pool.query(`
+        INSERT INTO token_prices (network, token_address, symbol, decimals, price_usd, last_updated_at)
+        VALUES ${placeholders.join(', ')}
+        ON CONFLICT (network, token_address)
+        DO UPDATE SET
+          symbol = EXCLUDED.symbol,
+          decimals = EXCLUDED.decimals,
+          price_usd = EXCLUDED.price_usd,
+          last_updated_at = NOW()
+      `, values);
+
+      logger.debug(`Cached ${prices.length} token prices in batch`);
+    } catch (error: any) {
+      logger.error('Failed to batch set token prices:', error.message);
+      // Don't throw - caching failure shouldn't break the flow
+    }
+  }
+
+  /**
+   * Cleanup expired token price cache entries (optional maintenance)
+   * @param olderThanHours Delete entries older than X hours (default: 24)
+   * @returns Number of entries deleted
+   */
+  async cleanupExpiredTokenPrices(olderThanHours: number = 24): Promise<number> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        DELETE FROM token_prices
+        WHERE last_updated_at < NOW() - INTERVAL '${olderThanHours} hours'
+      `);
+
+      const deleted = result.rowCount || 0;
+      if (deleted > 0) {
+        logger.info(`Cleaned up ${deleted} expired token price entries`);
+      }
+      return deleted;
+    } catch (error: any) {
+      logger.error('Failed to cleanup expired token prices:', error.message);
+      return 0;
+    }
+  }
+
+  /**
    * Insert a new AI reply record
    */
   async insertAIReply(reply: Omit<AIReply, 'id' | 'createdAt' | 'postedAt'>): Promise<number> {
@@ -1731,19 +1932,20 @@ export class DatabaseService implements IDatabaseService {
     try {
       const result = await this.pool.query(`
         INSERT INTO ai_replies (
-          sale_id, registration_id, original_tweet_id, reply_tweet_id,
+          sale_id, registration_id, bid_id, original_tweet_id, reply_tweet_id,
           transaction_type, transaction_hash, model_used,
           prompt_tokens, completion_tokens, total_tokens, cost_usd,
           reply_text, name_research_id, name_research, status, error_message
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
         RETURNING id
       `, [
         reply.saleId || null,
         reply.registrationId || null,
+        reply.bidId || null,
         reply.originalTweetId,
         reply.replyTweetId || null,
         reply.transactionType,
-        reply.transactionHash,
+        reply.transactionHash || null,
         reply.modelUsed,
         reply.promptTokens,
         reply.completionTokens,
@@ -1773,7 +1975,7 @@ export class DatabaseService implements IDatabaseService {
     try {
       const result = await this.pool.query(`
         SELECT 
-          id, sale_id as "saleId", registration_id as "registrationId",
+          id, sale_id as "saleId", registration_id as "registrationId", bid_id as "bidId",
           original_tweet_id as "originalTweetId", reply_tweet_id as "replyTweetId",
           transaction_type as "transactionType", transaction_hash as "transactionHash",
           model_used as "modelUsed", prompt_tokens as "promptTokens",
@@ -1801,7 +2003,7 @@ export class DatabaseService implements IDatabaseService {
     try {
       const result = await this.pool.query(`
         SELECT 
-          id, sale_id as "saleId", registration_id as "registrationId",
+          id, sale_id as "saleId", registration_id as "registrationId", bid_id as "bidId",
           original_tweet_id as "originalTweetId", reply_tweet_id as "replyTweetId",
           transaction_type as "transactionType", transaction_hash as "transactionHash",
           model_used as "modelUsed", prompt_tokens as "promptTokens",
@@ -1821,6 +2023,34 @@ export class DatabaseService implements IDatabaseService {
   }
 
   /**
+   * Get AI reply by bid ID
+   */
+  async getAIReplyByBidId(bidId: number): Promise<AIReply | null> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        SELECT 
+          id, sale_id as "saleId", registration_id as "registrationId", bid_id as "bidId",
+          original_tweet_id as "originalTweetId", reply_tweet_id as "replyTweetId",
+          transaction_type as "transactionType", transaction_hash as "transactionHash",
+          model_used as "modelUsed", prompt_tokens as "promptTokens",
+          completion_tokens as "completionTokens", total_tokens as "totalTokens",
+          cost_usd as "costUsd", reply_text as "replyText", name_research as "nameResearch", status,
+          error_message as "errorMessage", created_at as "createdAt",
+          posted_at as "postedAt"
+        FROM ai_replies
+        WHERE bid_id = $1
+      `, [bidId]);
+
+      return result.rows.length > 0 ? result.rows[0] : null;
+    } catch (error: any) {
+      logger.error('Failed to get AI reply by bid ID:', error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Get AI reply by ID
    */
   async getAIReplyById(replyId: number): Promise<AIReply | null> {
@@ -1829,7 +2059,7 @@ export class DatabaseService implements IDatabaseService {
     try {
       const result = await this.pool.query(`
         SELECT 
-          id, sale_id as "saleId", registration_id as "registrationId",
+          id, sale_id as "saleId", registration_id as "registrationId", bid_id as "bidId",
           original_tweet_id as "originalTweetId", reply_tweet_id as "replyTweetId",
           transaction_type as "transactionType", transaction_hash as "transactionHash",
           model_used as "modelUsed", prompt_tokens as "promptTokens",
@@ -2232,6 +2462,45 @@ export class DatabaseService implements IDatabaseService {
 
       await this.pool.query(createRegistrationTriggerQuery);
       logger.info('✅ Created posted_registration_trigger on ens_registrations table');
+
+      // ===== BID TRIGGER =====
+      
+      // Step 3a: Create the bid trigger function
+      const createBidFunctionQuery = `
+        CREATE OR REPLACE FUNCTION notify_posted_bid() 
+        RETURNS TRIGGER AS $$
+        BEGIN
+          -- Only notify when a bid is successfully posted to Twitter
+          -- posted changes FALSE → TRUE and tweet_id exists
+          IF NEW.posted = TRUE AND NEW.tweet_id IS NOT NULL THEN
+            PERFORM pg_notify('posted_bid', NEW.id::text);
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+      `;
+
+      await this.pool.query(createBidFunctionQuery);
+      logger.info('✅ Created notify_posted_bid() trigger function');
+
+      // Step 3b: Create the bid trigger (UPDATE only, with WHEN condition)
+      const createBidTriggerQuery = `
+        DO $$
+        BEGIN
+          -- Drop old trigger if it exists
+          DROP TRIGGER IF EXISTS posted_bid_trigger ON ens_bids;
+          
+          -- Create new trigger with WHEN condition
+          CREATE TRIGGER posted_bid_trigger 
+            AFTER UPDATE ON ens_bids 
+            FOR EACH ROW 
+            WHEN (OLD.posted = FALSE AND NEW.posted = TRUE)
+            EXECUTE FUNCTION notify_posted_bid();
+        END $$;
+      `;
+
+      await this.pool.query(createBidTriggerQuery);
+      logger.info('✅ Created posted_bid_trigger on ens_bids table');
 
       logger.info('🎯 AI Reply notification triggers setup complete - ready for automatic AI reply generation!');
 

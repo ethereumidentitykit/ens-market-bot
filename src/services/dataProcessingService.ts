@@ -68,6 +68,66 @@ export interface UserStats {
   // Current ENS holdings (from OpenSea)
   currentHoldings: string[] | null; // Array of ENS names they currently hold
   holdingsIncomplete: boolean; // True if holdings fetch was incomplete
+  
+  // Bidding behavior (optional - only if bid activities found)
+  biddingStats?: BiddingStats;
+  
+  // Portfolio analysis (optional - financial standing across chains)
+  portfolio?: {
+    totalValueUsd: number;
+    ethBalance: number; // ETH on mainnet
+    ethValueUsd: number;
+    
+    majorHoldings: Array<{
+      symbol: string;
+      balance: number;
+      valueUsd: number;
+      network: string;
+    }>; // Top 5 non-native tokens by value
+    
+    crossChainPresence: {
+      mainnet: boolean;
+      base: boolean;
+      optimism: boolean;
+      arbitrum: boolean;
+      zksync: boolean;
+      polygon: boolean;
+      linea: boolean;
+    };
+    
+    incomplete: boolean; // True if data fetch failed
+  };
+}
+
+/**
+ * Bidding behavior statistics
+ */
+export interface BiddingStats {
+  totalBids: number; // Total number of bids made
+  activeBids: number; // Currently active bids
+  filledBids: number; // Bids that were accepted/filled
+  cancelledBids: number; // Bids that were cancelled
+  expiredBids: number; // Bids that expired
+  
+  totalBidVolume: number; // Total ETH bid across all bids
+  totalBidVolumeUsd: number; // Total USD value of bids
+  averageBidAmount: number; // Average bid amount in ETH
+  
+  recentBids: Array<{
+    name: string; // ENS name bid on
+    amount: number; // Bid amount in ETH
+    amountUsd: number; // USD value
+    status: string; // active, filled, cancelled, expired
+    timestamp: number; // Unix timestamp
+    daysAgo: number; // Days since bid
+  }>;
+  
+  // Pattern analysis
+  bidPatterns: {
+    namesSimilar: boolean; // Are the names they're bidding on similar?
+    commonThemes: string[]; // Detected themes (e.g., "3-letter", "animals", "numbers")
+    exampleNames: string[]; // Up to 3 example names from recent bids
+  };
 }
 
 /**
@@ -77,7 +137,7 @@ export interface UserStats {
 export interface LLMPromptContext {
   // Current event details (FROM DATABASE - master source of truth)
   event: {
-    type: 'sale' | 'registration';
+    type: 'sale' | 'registration' | 'bid';
     tokenName: string;
     price: number;
     priceUsd: number;
@@ -89,7 +149,7 @@ export interface LLMPromptContext {
     sellerAddress?: string; // Not present for registrations
     sellerEnsName?: string | null; // Resolved ENS name for seller (if applicable)
     sellerTwitter?: string | null; // Twitter handle from ENS records (if applicable)
-    txHash: string; // Transaction hash from DB
+    txHash?: string; // Transaction hash from DB (optional for bids)
   };
   
   // Token historical context (FROM MAGIC EDEN API)
@@ -182,7 +242,7 @@ export class DataProcessingService {
       const result = await magicEdenV4Service.getTokenActivityHistory(
         activity.contract,
         activity.token.tokenId,
-        { types: ['TRADE', 'MINT', 'TRANSFER'], maxPages: 2 }  // Only fetch recent pages
+        { limit: 100, types: ['TRADE', 'MINT', 'TRANSFER'], maxPages: 2 }  // Only fetch recent pages
       );
       
       // Transform V4 activities to V3 format for compatibility
@@ -637,7 +697,200 @@ export class DataProcessingService {
       logger.debug(`      Current holdings: ${currentHoldings.names.length} names${currentHoldings.incomplete ? ' (incomplete)' : ''}`);
     }
     
+    // Process bidding behavior if any BID activities found
+    const biddingStats = this.processBiddingStats(activities, normalizedAddress);
+    if (biddingStats) {
+      stats.biddingStats = biddingStats;
+      logger.debug(`      Bidding: ${biddingStats.totalBids} bids placed, ${biddingStats.totalBidVolume.toFixed(4)} ETH total, avg ${biddingStats.averageBidAmount.toFixed(4)} ETH`);
+    }
+    
     return stats;
+  }
+
+  /**
+   * Process bidding behavior from user activities
+   * Extracts bid statistics and patterns from BID_CREATED activities
+   * Note: We only fetch BID_CREATED, not BID_CANCELLED, so we can't accurately track status
+   */
+  private processBiddingStats(activities: TokenActivity[], userAddress: string): BiddingStats | null {
+    // Filter for bid activities where user is the maker (bidder)
+    const bidActivities = activities.filter(a => 
+      a.type === 'bid' && 
+      a.fromAddress.toLowerCase() === userAddress
+    );
+    
+    if (bidActivities.length === 0) {
+      return null;
+    }
+    
+    logger.debug(`   🤝 Processing ${bidActivities.length} bid creation activities...`);
+    
+    // Calculate volume
+    let totalBidVolume = 0;
+    let totalBidVolumeUsd = 0;
+    
+    bidActivities.forEach(bid => {
+      if (bid.price?.amount?.decimal) {
+        totalBidVolume += bid.price.amount.decimal;
+        if (bid.price.amount.usd) {
+          totalBidVolumeUsd += bid.price.amount.usd;
+        }
+      }
+    });
+    
+    const averageBidAmount = bidActivities.length > 0 ? totalBidVolume / bidActivities.length : 0;
+    
+    // Get recent bids (last 10, sorted by most recent)
+    const sortedBids = [...bidActivities].sort((a, b) => b.timestamp - a.timestamp).slice(0, 10);
+    const now = Math.floor(Date.now() / 1000);
+    
+    const recentBids = sortedBids.map(bid => ({
+      name: bid.token?.tokenName || 'Unknown',
+      amount: bid.price?.amount?.decimal || 0,
+      amountUsd: bid.price?.amount?.usd || 0,
+      status: 'created', // We only know they created the bid
+      timestamp: bid.timestamp,
+      daysAgo: Math.floor((now - bid.timestamp) / (60 * 60 * 24))
+    }));
+    
+    // Analyze patterns in bid names
+    const bidNames = recentBids.map(b => b.name.replace(/\.eth$/i, '').toLowerCase());
+    const bidPatterns = this.analyzeBidPatterns(bidNames);
+    
+    return {
+      totalBids: bidActivities.length,
+      activeBids: 0, // Unknown - would need to fetch current bid status
+      filledBids: 0, // Unknown - would need BID_CANCELLED or trade data
+      cancelledBids: 0, // Unknown - would need BID_CANCELLED activities
+      expiredBids: 0, // Unknown - would need to check expiry timestamps
+      totalBidVolume,
+      totalBidVolumeUsd,
+      averageBidAmount,
+      recentBids,
+      bidPatterns
+    };
+  }
+
+  /**
+   * Analyze patterns in bid names to detect themes
+   */
+  private analyzeBidPatterns(names: string[]): {
+    namesSimilar: boolean;
+    commonThemes: string[];
+    exampleNames: string[];
+  } {
+    if (names.length === 0) {
+      return { namesSimilar: false, commonThemes: [], exampleNames: [] };
+    }
+    
+    const themes: string[] = [];
+    
+    // Check for numeric patterns
+    const allNumeric = names.filter(n => /^\d+$/.test(n));
+    if (allNumeric.length >= 3) themes.push('numbers');
+    
+    // Check for length patterns
+    const threeChar = names.filter(n => n.length === 3);
+    const fourChar = names.filter(n => n.length === 4);
+    const fiveChar = names.filter(n => n.length === 5);
+    if (threeChar.length >= 3) themes.push('3-letter');
+    if (fourChar.length >= 3) themes.push('4-letter');
+    if (fiveChar.length >= 3) themes.push('5-letter');
+    
+    // Check for 999 Club pattern (3 digits)
+    const club999 = names.filter(n => /^\d{3}$/.test(n));
+    if (club999.length >= 2) themes.push('999 Club');
+    
+    // Check for 10k Club pattern (4 digits)
+    const club10k = names.filter(n => /^\d{4}$/.test(n));
+    if (club10k.length >= 2) themes.push('10k Club');
+    
+    // Example names (up to 3)
+    const exampleNames = names.slice(0, 3);
+    
+    // Consider similar if we found themes or more than 50% have similar characteristics
+    const namesSimilar = themes.length > 0;
+    
+    return {
+      namesSimilar,
+      commonThemes: themes,
+      exampleNames
+    };
+  }
+
+  /**
+   * Enrich user stats with portfolio data (multi-chain token balances + values)
+   * @param stats UserStats object to enrich
+   * @param alchemyService AlchemyService instance for fetching portfolio
+   */
+  async enrichWithPortfolioData(
+    stats: UserStats,
+    alchemyService: any // Using any to avoid circular dependency
+  ): Promise<void> {
+    try {
+      logger.debug(`   📊 Enriching portfolio data for ${stats.address.slice(0, 10)}...`);
+      
+      // Fetch portfolio from Alchemy
+      const portfolio = await alchemyService.getWalletPortfolio(stats.address);
+      
+      // Extract mainnet ETH balance
+      const ethBalance = portfolio.nativeTokens.find((t: any) => t.network === 'eth-mainnet')?.balance || 0;
+      const ethValueUsd = portfolio.nativeTokens.find((t: any) => t.network === 'eth-mainnet')?.valueUsd || 0;
+      
+      // Extract top 5 ERC20 holdings
+      const majorHoldings = portfolio.erc20Tokens
+        .slice(0, 5)
+        .map((token: any) => ({
+          symbol: token.symbol,
+          balance: token.balance,
+          valueUsd: token.valueUsd,
+          network: token.network
+        }));
+      
+      // Determine cross-chain presence
+      type ChainKey = 'mainnet' | 'base' | 'optimism' | 'arbitrum' | 'zksync' | 'polygon' | 'linea';
+      const networkMap: Record<string, ChainKey | undefined> = {
+        'eth-mainnet': 'mainnet',
+        'base-mainnet': 'base',
+        'opt-mainnet': 'optimism',
+        'arb-mainnet': 'arbitrum',
+        'zksync-mainnet': 'zksync',
+        'polygon-mainnet': 'polygon',
+        'linea-mainnet': 'linea'
+      };
+      
+      const crossChainPresence: Record<ChainKey, boolean> = {
+        mainnet: false,
+        base: false,
+        optimism: false,
+        arbitrum: false,
+        zksync: false,
+        polygon: false,
+        linea: false
+      };
+      
+      portfolio.networksAnalyzed.forEach((network: string) => {
+        const key = networkMap[network];
+        if (key) {
+          crossChainPresence[key] = true;
+        }
+      });
+      
+      // Attach to stats
+      stats.portfolio = {
+        totalValueUsd: portfolio.totalValueUsd,
+        ethBalance,
+        ethValueUsd,
+        majorHoldings,
+        crossChainPresence,
+        incomplete: portfolio.incomplete
+      };
+      
+      logger.debug(`   ✅ Portfolio: $${portfolio.totalValueUsd.toLocaleString()} (${portfolio.nativeTokens.length + portfolio.erc20Tokens.length} tokens)`);
+    } catch (error: any) {
+      logger.error(`   ❌ Failed to enrich portfolio data: ${error.message}`);
+      // Don't set portfolio field on error - leave it undefined
+    }
   }
 
   /**
@@ -660,7 +913,7 @@ export class DataProcessingService {
    */
   async buildLLMContext(
     eventData: {
-      type: 'sale' | 'registration';
+      type: 'sale' | 'registration' | 'bid';
       tokenName: string;
       price: number;
       priceUsd: number;
@@ -668,7 +921,7 @@ export class DataProcessingService {
       timestamp: number;
       buyerAddress: string;
       sellerAddress?: string;
-      txHash: string; // Required for filtering Magic Eden historical data
+      txHash?: string; // Optional: bids don't have txHash yet
     },
     tokenActivities: TokenActivity[],
     buyerActivities: TokenActivity[],
@@ -686,7 +939,7 @@ export class DataProcessingService {
     }
   ): Promise<LLMPromptContext> {
     logger.info(`🧠 Building LLM context for ${eventData.type}: ${eventData.tokenName}`);
-    logger.debug(`   Event from DB: ${eventData.price} ETH ($${eventData.priceUsd}), txHash: ${eventData.txHash.slice(0, 10)}...`);
+    logger.debug(`   Event from DB: ${eventData.price} ETH ($${eventData.priceUsd})${eventData.txHash ? `, txHash: ${eventData.txHash.slice(0, 10)}...` : ''}`);
     logger.debug(`   Raw data: ${tokenActivities.length} token activities, ${buyerActivities.length} buyer activities, ${sellerActivities?.length || 0} seller activities`);
     
     const startTime = Date.now();

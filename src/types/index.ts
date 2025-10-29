@@ -135,10 +135,11 @@ export interface AIReply {
   id?: number;
   saleId?: number;                    // Reference to processed_sales
   registrationId?: number;            // Reference to ens_registrations
+  bidId?: number;                     // Reference to ens_bids
   originalTweetId: string;            // The tweet we're replying to
   replyTweetId?: string;              // The AI-generated reply tweet ID
-  transactionType: 'sale' | 'registration';
-  transactionHash: string;
+  transactionType: 'sale' | 'registration' | 'bid';
+  transactionHash?: string;           // Optional: bids don't have txHash until accepted
   modelUsed: string;                  // e.g., "gpt-4o", "gpt-4o-mini"
   promptTokens: number;
   completionTokens: number;
@@ -293,6 +294,7 @@ export interface IDatabaseService {
   insertAIReply(reply: Omit<AIReply, 'id' | 'createdAt' | 'postedAt'>): Promise<number>;
   getAIReplyBySaleId(saleId: number): Promise<AIReply | null>;
   getAIReplyByRegistrationId(registrationId: number): Promise<AIReply | null>;
+  getAIReplyByBidId(bidId: number): Promise<AIReply | null>;
   getAIReplyById(replyId: number): Promise<AIReply | null>;
   getRecentAIReplies(limit?: number): Promise<AIReply[]>;
   updateAIReplyTweetId(id: number, replyTweetId: string): Promise<void>;

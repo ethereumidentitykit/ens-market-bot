@@ -12,7 +12,7 @@ import { MONITORED_CONTRACTS } from './config/contracts';
 import { MoralisService } from './services/moralisService';
 import { AlchemyService } from './services/alchemyService';
 import { DatabaseService } from './services/databaseService';
-import { IDatabaseService, ENSRegistration, ProcessedSale } from './types';
+import { IDatabaseService, ENSRegistration, ProcessedSale, ENSBid } from './types';
 import { SalesProcessingService } from './services/salesProcessingService';
 import { BidsProcessingService } from './services/bidsProcessingService';
 import { MagicEdenV4Service, TokenActivity } from './services/magicEdenV4Service';
@@ -53,14 +53,14 @@ async function startApplication(): Promise<void> {
     validateConfig();
     logger.info('Configuration validated successfully');
 
+    // Initialize PostgreSQL database service
+    const databaseService = new DatabaseService();
+    
     // Initialize services
     const moralisService = new MoralisService();
-    const alchemyService = new AlchemyService();
+    const alchemyService = new AlchemyService(databaseService);
     const openSeaService = new OpenSeaService();
     const ensMetadataService = new ENSMetadataService();
-    
-    // Initialize PostgreSQL database service
-    const databaseService: IDatabaseService = new DatabaseService();
     
     const salesProcessingService = new SalesProcessingService(moralisService, databaseService);
     
@@ -93,6 +93,7 @@ async function startApplication(): Promise<void> {
       dataProcessingService,
       magicEdenV4Service,
       openSeaService,
+      alchemyService,
       ethIdentityService
     );
     
@@ -511,10 +512,10 @@ async function startApplication(): Promise<void> {
           });
         }
 
-        if (type !== 'sale' && type !== 'registration') {
+        if (type !== 'sale' && type !== 'registration' && type !== 'bid') {
           return res.status(400).json({
             success: false,
-            error: 'Invalid type. Must be "sale" or "registration"'
+            error: 'Invalid type. Must be "sale", "registration", or "bid"'
           });
         }
 
@@ -532,7 +533,9 @@ async function startApplication(): Promise<void> {
         logger.debug('   Fetching transaction from database...');
         const transaction = type === 'sale'
           ? await databaseService.getSaleById(transactionId)
-          : await databaseService.getRegistrationById(transactionId);
+          : type === 'registration'
+          ? await databaseService.getRegistrationById(transactionId)
+          : await databaseService.getBidById(transactionId);
 
         if (!transaction) {
           return res.status(404).json({
@@ -543,30 +546,40 @@ async function startApplication(): Promise<void> {
 
         // Step 2: Type-safe access to transaction properties
         const isSale = type === 'sale';
+        const isRegistration = type === 'registration';
+        const isBid = type === 'bid';
+        
         const sale = isSale ? transaction as ProcessedSale : null;
-        const registration = !isSale ? transaction as ENSRegistration : null;
+        const registration = isRegistration ? transaction as ENSRegistration : null;
+        const bid = isBid ? transaction as ENSBid : null;
 
-        const tokenName = isSale ? (sale!.nftName || 'Unknown') : registration!.fullName;
+        const tokenName = isSale 
+          ? (sale!.nftName || 'Unknown') 
+          : isRegistration 
+          ? registration!.fullName 
+          : (bid!.ensName || 'Unknown');
         logger.debug(`   Found transaction: ${tokenName}`);
 
         // Step 3: Prepare event data for context building
         const eventData = {
-          type: type as 'sale' | 'registration',
+          type: type as 'sale' | 'registration' | 'bid',
           tokenName,
-          price: parseFloat(isSale ? sale!.priceEth : (registration!.costEth || '0')),
-          priceUsd: parseFloat(isSale ? (sale!.priceUsd || '0') : (registration!.costUsd || '0')),
+          price: parseFloat(isSale ? sale!.priceEth : isRegistration ? (registration!.costEth || '0') : bid!.priceDecimal),
+          priceUsd: parseFloat(isSale ? (sale!.priceUsd || '0') : isRegistration ? (registration!.costUsd || '0') : (bid!.priceUsd || '0')),
           currency: 'ETH',
-          timestamp: new Date(transaction.blockTimestamp).getTime() / 1000,
-          buyerAddress: isSale ? sale!.buyerAddress : registration!.ownerAddress,
+          timestamp: isBid 
+            ? new Date(bid!.createdAtApi).getTime() / 1000 
+            : new Date((sale || registration)!.blockTimestamp).getTime() / 1000,
+          buyerAddress: isSale ? sale!.buyerAddress : isRegistration ? registration!.ownerAddress : bid!.makerAddress,
           sellerAddress: isSale ? sale!.sellerAddress : undefined,
-          txHash: transaction.transactionHash
+          txHash: isBid ? undefined : (sale || registration)!.transactionHash
         };
 
         // Step 3: Fetch Magic Eden data (use V4 API for all activity)
         logger.debug('   Fetching token activity from Magic Eden V4...');
         const tokenResultV4 = await magicEdenV4Service.getTokenActivityHistory(
           transaction.contractAddress,
-          transaction.tokenId,
+          transaction.tokenId || '',
           { limit: 10, maxPages: 120 } // 2x V3 pages to compensate for lower limit (120x10 = 1200 items)
         );
         const tokenActivities = magicEdenV4Service.transformV4ToV3Activities(tokenResultV4.activities);
@@ -614,7 +627,7 @@ async function startApplication(): Promise<void> {
               price: eventData.price,
               priceUsd: eventData.priceUsd,
               txHash: eventData.txHash,
-              blockTimestamp: transaction.blockTimestamp
+              blockTimestamp: isBid ? bid!.createdAtApi : (sale || registration)!.blockTimestamp
             },
             dataFetched: {
               tokenActivities: tokenActivities.length,
@@ -647,10 +660,10 @@ async function startApplication(): Promise<void> {
           });
         }
 
-        if (type !== 'sale' && type !== 'registration') {
+        if (type !== 'sale' && type !== 'registration' && type !== 'bid') {
           return res.status(400).json({
             success: false,
-            error: 'Invalid type. Must be "sale" or "registration"'
+            error: 'Invalid type. Must be "sale", "registration", or "bid"'
           });
         }
 
@@ -676,7 +689,9 @@ async function startApplication(): Promise<void> {
         // Check if reply already exists
         const existingReply = type === 'sale'
           ? await databaseService.getAIReplyBySaleId(transactionId)
-          : await databaseService.getAIReplyByRegistrationId(transactionId);
+          : type === 'registration'
+          ? await databaseService.getAIReplyByRegistrationId(transactionId)
+          : await databaseService.getAIReplyByBidId(transactionId);
 
         if (existingReply && !forceRegenerate) {
           logger.info(`   Reply already exists (ID: ${existingReply.id})`);
@@ -723,12 +738,13 @@ async function startApplication(): Promise<void> {
           dataProcessingService,
           magicEdenV4Service,
           openSeaService,
+          alchemyService,
           ensWorkerService
         );
 
         // Generate reply (stores as 'pending', does NOT auto-post)
         const replyId = await aiReplyService.generateReply(
-          type as 'sale' | 'registration',
+          type as 'sale' | 'registration' | 'bid',
           transactionId
         );
 
@@ -2608,6 +2624,94 @@ async function startApplication(): Promise<void> {
           }
         });
       } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.get('/api/database/bids', requireAuth, async (req, res) => {
+      try {
+        const page = parseInt(req.query.page as string) || 1;
+        const limit = parseInt(req.query.limit as string) || 50;
+        const offset = (page - 1) * limit;
+        const search = req.query.search as string || '';
+        const sortBy = req.query.sortBy as string || 'createdAtApi';
+        const sortOrder = req.query.sortOrder as string || 'desc';
+
+        // Get all bids for proper pagination and filtering
+        const allBids = await databaseService.getRecentBids(1000);
+        
+        // Apply search filter if provided
+        let filteredBids = allBids;
+        if (search) {
+          const searchLower = search.toLowerCase();
+          filteredBids = allBids.filter(bid => 
+            (bid.ensName && bid.ensName.toLowerCase().includes(searchLower)) ||
+            bid.bidId.toLowerCase().includes(searchLower) ||
+            bid.makerAddress.toLowerCase().includes(searchLower) ||
+            (bid.tokenId && bid.tokenId.includes(search)) ||
+            bid.priceDecimal.includes(search)
+          );
+        }
+
+        // Apply sorting
+        filteredBids.sort((a, b) => {
+          let aVal: any = a[sortBy as keyof typeof a];
+          let bVal: any = b[sortBy as keyof typeof b];
+
+          // Handle date sorting
+          if (sortBy === 'createdAtApi' || sortBy === 'updatedAtApi') {
+            aVal = new Date(aVal).getTime();
+            bVal = new Date(bVal).getTime();
+          }
+
+          // Handle numeric sorting
+          if (sortBy === 'priceDecimal' || sortBy === 'priceUsd') {
+            aVal = parseFloat(aVal || '0');
+            bVal = parseFloat(bVal || '0');
+          }
+
+          if (sortOrder === 'asc') {
+            return aVal > bVal ? 1 : -1;
+          } else {
+            return aVal < bVal ? 1 : -1;
+          }
+        });
+
+        // Apply pagination
+        const paginatedBids = filteredBids.slice(offset, offset + limit);
+        const totalFiltered = filteredBids.length;
+        
+        // Calculate stats
+        const totalBids = allBids.length;
+        const pendingTweets = allBids.filter(b => !b.posted).length;
+        const totalValue = allBids.reduce((sum, b) => sum + parseFloat(b.priceDecimal || '0'), 0);
+
+        res.json({
+          success: true,
+          data: {
+            bids: paginatedBids,
+            pagination: {
+              page,
+              limit,
+              total: totalFiltered,
+              totalPages: Math.ceil(totalFiltered / limit),
+              hasNext: page * limit < totalFiltered,
+              hasPrev: page > 1
+            },
+            stats: {
+              totalBids: totalBids,
+              pendingTweets: pendingTweets,
+              totalValue: totalValue.toFixed(4),
+              filteredResults: totalFiltered,
+              searchTerm: search
+            }
+          }
+        });
+      } catch (error: any) {
+        logger.error('Database bids fetch error:', error.message);
         res.status(500).json({
           success: false,
           error: error.message
