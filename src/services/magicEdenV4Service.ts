@@ -1256,15 +1256,17 @@ export class MagicEdenV4Service {
       limit?: number;  // Items per request (default: 100, API updated to support higher limits)
       types?: MagicEdenV4ActivityType[];  // Activity types to filter
       maxPages?: number;  // Maximum pages to fetch (default: 25)
+      contracts?: string[];  // Optional: Filter by specific contracts (e.g., ENS contracts)
     } = {}
   ): Promise<{ activities: MagicEdenV4Activity[]; incomplete: boolean; pagesFetched: number }> {
     // Set defaults
     const limit = options.limit || 100;  // API now supports 100 items per page
     const types = options.types || ['TRADE', 'TRANSFER'];  // Default to sales and transfers
     const maxPages = options.maxPages || 25;  // 25 pages * 100 items = 2500 items max
+    const contracts = options.contracts;  // Optional contract filter
 
     logger.info(`👤 Fetching user activity history for ${address} (V4 API)`);
-    logger.debug(`   Settings: limit=${limit}, types=[${types.join(',')}], maxPages=${maxPages}`);
+    logger.debug(`   Settings: limit=${limit}, types=[${types.join(',')}], maxPages=${maxPages}${contracts ? `, contracts=[${contracts.join(',')}]` : ''}`);
 
     const allActivities: MagicEdenV4Activity[] = [];
     let continuation: string | undefined;
@@ -1276,13 +1278,13 @@ export class MagicEdenV4Service {
       while (pageCount < maxPages) {
         pageCount++;
         
-        // Fetch single page using primitive method with ENS contract filtering
+        // Fetch single page using primitive method with contract filtering
         const response = await this.getUserActivityPage(
           address,
           types,
           continuation,
           limit,
-          this.ensContracts // Filter by ENS contracts only
+          contracts || this.ensContracts // Use provided contracts or default to ENS contracts
         );
 
         // Break if no activities returned
@@ -1407,14 +1409,30 @@ export class MagicEdenV4Service {
       const activities = response.data.activities || [];
       const nextCursor = response.data.pagination?.cursorTimestamp;
       
-      logger.info(`✅ Magic Eden V4 API: Retrieved ${activities.length} activities`);
+      logger.info(`✅ Magic Eden V4 API: Retrieved ${activities.length} activities (before filtering)`);
+      
+      // Client-side filtering as backup (API filter doesn't seem to work reliably)
+      let filteredActivities = activities;
+      if (contracts && contracts.length > 0) {
+        const contractSet = new Set(contracts.map(c => c.toLowerCase()));
+        filteredActivities = activities.filter(activity => {
+          const activityContract = activity.collection?.id?.toLowerCase() || 
+                                   activity.asset?.contractAddress?.toLowerCase() || 
+                                   '';
+          return contractSet.has(activityContract);
+        });
+        
+        if (filteredActivities.length < activities.length) {
+          logger.info(`   Filtered to ${filteredActivities.length} ENS activities (removed ${activities.length - filteredActivities.length} non-ENS)`);
+        }
+      }
       
       if (nextCursor) {
         logger.debug(`📄 Next cursor: ${nextCursor}`);
       }
 
       return {
-        activities,
+        activities: filteredActivities,
         continuation: nextCursor
       };
 

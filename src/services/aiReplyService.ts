@@ -581,9 +581,18 @@ export class AIReplyService {
       }),
       
       // Buyer activity history (V4 API) - include BID_CREATED to track bidding behavior
+      // Filter by ENS contracts to avoid non-ENS activities (Pudgy Penguins, etc.)
       this.magicEdenV4Service.getUserActivityHistory(
         eventData.buyerAddress,
-        { limit: 100, types: ['TRADE', 'MINT', 'TRANSFER', 'BID_CREATED'], maxPages: 25 }
+        { 
+          limit: 100, 
+          types: ['TRADE', 'MINT', 'TRANSFER', 'BID_CREATED'], 
+          maxPages: 25,
+          contracts: [
+            '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85', // ENS Base Registrar
+            '0xd4416b13d2b3a9abae7acd5d6c2bbdbe25686401'  // ENS Names
+          ]
+        }
       ).then(result => ({
         activities: this.magicEdenV4Service.transformV4ToV3Activities(result.activities),
         incomplete: result.incomplete,
@@ -594,10 +603,19 @@ export class AIReplyService {
       }),
       
       // Seller activity history (if applicable) (V4 API)
+      // Filter by ENS contracts to avoid non-ENS activities
       eventData.sellerAddress
         ? this.magicEdenV4Service.getUserActivityHistory(
             eventData.sellerAddress,
-            { limit: 100, types: ['TRADE', 'MINT', 'TRANSFER', 'BID_CREATED'], maxPages: 25 }
+            { 
+              limit: 100, 
+              types: ['TRADE', 'MINT', 'TRANSFER', 'BID_CREATED'], 
+              maxPages: 25,
+              contracts: [
+                '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85', // ENS Base Registrar
+                '0xd4416b13d2b3a9abae7acd5d6c2bbdbe25686401'  // ENS Names
+              ]
+            }
           ).then(result => ({
             activities: this.magicEdenV4Service.transformV4ToV3Activities(result.activities),
             incomplete: result.incomplete,
