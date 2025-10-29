@@ -2,6 +2,7 @@ import axios, { AxiosResponse, AxiosInstance } from 'axios';
 import { logger } from '../utils/logger';
 import { MagicEdenBid, BidProcessingStats } from '../types';
 import { APIToggleService } from './apiToggleService';
+import { ensSubgraphService } from './ensSubgraphService';
 
 /**
  * Magic Eden V4 API Response Types
@@ -1225,8 +1226,11 @@ export class MagicEdenV4Service {
 
       logger.info(`✅ Token activity history complete: ${allActivities.length} activities from ${pageCount} pages${incomplete ? ' (incomplete)' : ''}`);
 
+      // Enrich token IDs for high-value transactions (over $500)
+      const enrichedActivities = await this.enrichTokenIds(allActivities);
+
       return {
-        activities: allActivities,
+        activities: enrichedActivities,
         incomplete,
         pagesFetched: pageCount
       };
@@ -1319,8 +1323,11 @@ export class MagicEdenV4Service {
 
       logger.info(`✅ User activity history complete: ${allActivities.length} activities from ${pageCount} pages${incomplete ? ' (incomplete)' : ''}`);
 
+      // Enrich token IDs for high-value transactions (over $500)
+      const enrichedActivities = await this.enrichTokenIds(allActivities);
+
       return {
-        activities: allActivities,
+        activities: enrichedActivities,
         incomplete,
         pagesFetched: pageCount
       };
@@ -1870,6 +1877,68 @@ export class MagicEdenV4Service {
    */
   transformV4ToV3Activities(v4Activities: MagicEdenV4Activity[]): TokenActivity[] {
     return v4Activities.map(activity => this.transformV4ToV3Activity(activity));
+  }
+
+  /**
+   * Enrich token IDs in activities with ENS names for high-value transactions
+   * Resolves token IDs (starting with #) to ENS names if USD value > $500
+   * 
+   * @param activities - Array of V4 activities to enrich
+   * @returns Array of enriched activities
+   */
+  async enrichTokenIds(activities: MagicEdenV4Activity[]): Promise<MagicEdenV4Activity[]> {
+    const MIN_USD_VALUE = 500;
+    const enrichedActivities = [...activities];
+    let enrichedCount = 0;
+
+    for (let i = 0; i < enrichedActivities.length; i++) {
+      const activity = enrichedActivities[i];
+      const tokenName = activity.asset.name;
+      
+      // Check if name is a token ID (starts with #)
+      if (!tokenName || !tokenName.startsWith('#')) {
+        continue;
+      }
+
+      // Extract numeric token ID (remove # prefix)
+      const tokenId = tokenName.slice(1);
+      
+      // Check USD value
+      const usdValue = activity.unitPrice?.currency.fiatConversion?.usd
+        ? parseFloat(activity.unitPrice.amount.native) * activity.unitPrice.currency.fiatConversion.usd
+        : 0;
+
+      if (usdValue < MIN_USD_VALUE) {
+        continue;
+      }
+
+      // Resolve ENS name using subgraph
+      try {
+        const contractAddress = activity.asset.contractAddress;
+        const ensName = await ensSubgraphService.getNameByTokenId(tokenId, contractAddress);
+        
+        if (ensName) {
+          // Update activity with resolved name
+          enrichedActivities[i] = {
+            ...activity,
+            asset: {
+              ...activity.asset,
+              name: ensName
+            }
+          };
+          enrichedCount++;
+          logger.debug(`   ✅ Enriched ${tokenName} → ${ensName} ($${usdValue.toFixed(2)})`);
+        }
+      } catch (error: any) {
+        logger.debug(`   ⚠️ Failed to resolve ${tokenName}: ${error.message}`);
+      }
+    }
+
+    if (enrichedCount > 0) {
+      logger.info(`📝 Enriched ${enrichedCount} token IDs to ENS names`);
+    }
+
+    return enrichedActivities;
   }
 }
 
