@@ -812,7 +812,9 @@ export class MagicEdenV4Service {
         amount: {
           raw: v4Bid.priceV2.amount.raw,
           decimal: parseFloat(v4Bid.priceV2.amount.native),
-          usd: parseFloat(v4Bid.priceV2.amount.fiat?.usd || '0'),
+          usd: v4Bid.priceV2.currency.fiatConversion?.usd 
+            ? parseFloat(v4Bid.priceV2.amount.native) * v4Bid.priceV2.currency.fiatConversion.usd
+            : parseFloat(v4Bid.priceV2.amount.fiat?.usd || '0'),
           native: parseFloat(v4Bid.priceV2.amount.native),
         },
       },
@@ -910,7 +912,9 @@ export class MagicEdenV4Service {
         amount: {
           raw: activity.bid.priceV2.amount.raw,
           decimal: parseFloat(activity.bid.priceV2.amount.native),
-          usd: parseFloat(activity.bid.priceV2.amount.fiat?.usd || '0'),
+          usd: activity.bid.priceV2.currency.fiatConversion?.usd
+            ? parseFloat(activity.bid.priceV2.amount.native) * activity.bid.priceV2.currency.fiatConversion.usd
+            : parseFloat(activity.bid.priceV2.amount.fiat?.usd || '0'),
           native: parseFloat(activity.bid.priceV2.amount.native), // V4 provides this directly
         },
       },
@@ -1762,7 +1766,7 @@ export class MagicEdenV4Service {
     const currencySymbol = v4Activity.unitPrice?.currency.symbol || 'ETH';
     const currencyDecimals = v4Activity.unitPrice?.currency.decimals || 18;
     
-    // Fix USD conversion for stablecoins (USDC, USDT, DAI)
+    // Calculate USD value
     let priceUsd = 0;
     if (v4Activity.unitPrice) {
       const isStablecoin = ['USDC', 'USDT', 'DAI'].includes(currencySymbol);
@@ -1770,8 +1774,15 @@ export class MagicEdenV4Service {
         // For stablecoins, the native value IS the USD value (1 USDC = $1)
         priceUsd = priceDecimal;
       } else {
-        // For ETH/WETH, use the V4 API's USD conversion
-        priceUsd = parseFloat(v4Activity.unitPrice.amount.fiat?.usd || '0');
+        // For ETH/WETH, calculate: native amount × fiatConversion rate
+        // This is more reliable than amount.fiat.usd (which is sometimes in micro-dollars)
+        const fiatConversionRate = v4Activity.unitPrice.currency.fiatConversion?.usd;
+        if (fiatConversionRate) {
+          priceUsd = priceDecimal * fiatConversionRate;
+        } else {
+          // Fallback to pre-calculated fiat.usd if fiatConversion is missing
+          priceUsd = parseFloat(v4Activity.unitPrice.amount.fiat?.usd || '0');
+        }
       }
     }
 
