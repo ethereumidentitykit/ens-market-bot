@@ -421,23 +421,28 @@ you can keep a couple numerical data points, but don't make it the main focus.
 - **CRITICAL**: If this is a SALE or REGISTRATION, completely ignore all bid-specific guidance above
 
 **PORTFOLIO INSIGHTS (when available)**:
+When mentioning portfolio value, ONLY report the total USD value. DO NOT separately mention ETH balance or individual token amounts. The USD value already includes everything.
+
 1. Interesting examples derived from $ portfolio value:
 For bids:
-- Bidder has 5 WETH in their wallet, and is bidding with all of it.
-- Owner of the name has $1m+ in their wallet, so this bid is insignificant relative to their portfolio. No incentive to accept a lowball.
-- large portfolio owner has never accepted a bid, owns many names.
+- Bidder has ~$150 portfolio, bidding their entire wallet
+- Owner has $1M+ portfolio, so this bid is insignificant. No incentive to accept a lowball.
+- Large portfolio owner has never accepted a bid, owns many names.
 
 2. For sales and registrations:
 - buyer has a lot of dry powder, one of their first purchases.
 - the seller needed the cash, they had low cash in their wallet before this sale.
 
-3. general porfolio ideas:
-- Lots of WETH/stablecoins + bids = hunter
-- Multi-chain presence = likely not wash activity. established individual users.
-- Low balance relative to purchase or bid - really likes the name.
+3. General portfolio ideas:
+- Lots of WETH/stablecoins + many bids = hunter
+- Multi-chain presence = likely not wash activity. Established users.
+- Low portfolio relative to purchase/bid = really likes the name.
 - Very large portfolio ($1M+) = Whale making moves (signals market confidence)
-- You can list numbers, but dont leave them freestanding.
-- overall portfolio value is interesting, especially relative to the purchase or bid price.
+- Overall portfolio value is interesting, especially relative to the purchase or bid price.
+
+TERMINOLOGY:
+- Use "onchain" not "on-chain"
+- Use "multichain" not "multi-chain"
 
 
 NOTE: Your response will be prefixed with "AI insight:" automatically, so don't include that in your text.
@@ -742,7 +747,6 @@ TERMINOLOGY:
       const p = buyerStats.portfolio;
       prompt += `\nPORTFOLIO (${buyerLabel}):\n`;
       prompt += `- Total value: $${p.totalValueUsd.toLocaleString()}\n`;
-      prompt += `- ETH: ${p.ethBalance.toFixed(4)} ETH ($${p.ethValueUsd.toLocaleString()})\n`;
       
       if (p.majorHoldings.length > 0) {
         prompt += `- Major holdings:\n`;
@@ -755,7 +759,7 @@ TERMINOLOGY:
         .filter(([_, active]) => active)
         .map(([chain, _]) => chain);
       if (activeChains.length > 1) {
-        prompt += `- Multi-chain: Active on ${activeChains.join(', ')}\n`;
+        prompt += `- Multichain: Active on ${activeChains.join(', ')}\n`;
       }
     }
 
@@ -782,7 +786,6 @@ TERMINOLOGY:
         const p = sellerStats.portfolio;
         prompt += `\nPORTFOLIO (${sellerLabel}):\n`;
         prompt += `- Total value: $${p.totalValueUsd.toLocaleString()}\n`;
-        prompt += `- ETH: ${p.ethBalance.toFixed(4)} ETH ($${p.ethValueUsd.toLocaleString()})\n`;
         
         if (p.majorHoldings.length > 0) {
           prompt += `- Major holdings:\n`;
@@ -795,7 +798,7 @@ TERMINOLOGY:
           .filter(([_, active]) => active)
           .map(([chain, _]) => chain);
         if (activeChains.length > 1) {
-          prompt += `- Multi-chain: Active on ${activeChains.join(', ')}\n`;
+          prompt += `- Multichain: Active on ${activeChains.join(', ')}\n`;
         }
       }
     }
