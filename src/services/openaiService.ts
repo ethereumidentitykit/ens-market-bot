@@ -401,7 +401,12 @@ YOUR TASK:
 Look at all the data provided (name meaning, buyer/seller/bidder/owner activity, transaction history) and decide what's actually interesting to market watchers. Don't just list everything. Tell the story that matters.
 you can keep a couple numerical data points, but don't make it the main focus.
 
-**FOR BIDS SPECIFICALLY**:
+**CRITICAL PRIORITIES**:
+- Trading behavior and portfolio insights are usually MORE interesting than name research
+- Name research should be 1-2 sentences MAX, and ONLY if truly noteworthy
+- Skip research entirely if the name is obvious or if trading patterns are the real story
+
+**FOR BIDS ONLY** (⚠️ IGNORE ALL OF THIS FOR SALES AND REGISTRATIONS):
 - The "buyer" is the bidder (person making the offer)
 - The "seller" (if present) is the current owner of the name
 - Focus on: Why this bid is interesting, the bidder's collecting patterns, whether the owner typically sells around these prices, or never does.
@@ -413,6 +418,7 @@ you can keep a couple numerical data points, but don't make it the main focus.
   • Owner's selling behavior (have they sold around this price point recently?)
   • Bid relative to recent sales for this name
 - **DO NOT analyze for wash trading on bids** - it's much harder to detect and rarely applies to open bids
+- **CRITICAL**: If this is a SALE or REGISTRATION, completely ignore all bid-specific guidance above
 
 **PORTFOLIO INSIGHTS (when available)**:
 1. Interesting examples derived from $ portfolio value:
@@ -460,16 +466,20 @@ WHAT TO FOCUS ON:
    - If you have bidding stats (number of bids, patterns, conviction signals), focus on THOSE first
    - Bidding behavior (wallet commitment, bid patterns) is interesting.
    
-2. **Crypto/Web3 connections (HIGH PRIORITY for sales/registrations)**:
-   - If the name research found SIGNIFICANT crypto/web3 connections, mention them, especially if very recent news (within days)
-   - Token tickers, protocol names, recent crypto announcements, DeFi platforms, stablecoins, etc.
-   - This is often the MOST interesting insight for obscure-looking names
-   - Example: If research finds it's a new stablecoin ticker or protocol name, lead with that
-   - **TOKEN MARKET CAP THRESHOLD**: Only mention tokens with market cap ABOVE $25 million. Tokens under $25M are NOT significant enough to mention.
-   - **EXACT NAME MATCH REQUIRED**: Token name must be 1:1 exact match. "verify.eth" only matches "verify" or "VERIFY" token, NOT "zkverify" or "verifyDAO"
-   - **IMPORTANT**: Only mention if it's a real, notable use case. Skip "small crypto ticker activity" or minor/obscure projects
-   - **CRITICAL**: If the crypto connection isn't major/significant, don't mention crypto AT ALL. NEVER say "not tied to a major protocol", "not a major token", "though not associated with", etc. Either highlight a significant crypto use or skip crypto entirely
-
+2. **Name research (be selective and brief)**:
+   - **Research text should be 1-2 sentences MAX** - don't regurgitate everything
+   - Only mention the SINGLE MOST interesting/relevant point from the research
+   - Skip research entirely if nothing is truly noteworthy or if trading patterns are more interesting
+   - Examples of when to include research:
+     • Major crypto/web3 connection (token $25M+, protocol, DeFi platform)
+     • Very recent news (within days) that's market-relevant
+     • Unusual or non-obvious meaning that adds context
+   - Examples of when to SKIP research:
+     • Name is obvious/common (e.g., "students", "coffee", "verify")
+     • Crypto connections are minor or not exact matches
+     • Trading behavior is more interesting
+     • Research is generic or doesn't significant value.
+   
 3. **Name meaning & popularity**: 
    - Only explain if it's unusual or unclear. Skip obvious ones like "students" or "coffee", "angel" etc.
    - If it's a common name, mention usage statistics (e.g., "Common surname, ~50k people globally")
