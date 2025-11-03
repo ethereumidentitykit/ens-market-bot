@@ -1427,8 +1427,8 @@ export class MagicEdenV4Service {
                                    activity.asset?.contractAddress?.toLowerCase() || 
                                    '';
           return contractSet.has(activityContract);
-        });
-        
+      });
+      
         if (filteredActivities.length < activities.length) {
           logger.info(`   Filtered to ${filteredActivities.length} ENS activities (removed ${activities.length - filteredActivities.length} non-ENS)`);
         }
@@ -1806,7 +1806,7 @@ export class MagicEdenV4Service {
           priceUsd = priceDecimal * fiatConversionRate;
         } else {
           // Fallback to pre-calculated fiat.usd if fiatConversion is missing
-          priceUsd = parseFloat(v4Activity.unitPrice.amount.fiat?.usd || '0');
+        priceUsd = parseFloat(v4Activity.unitPrice.amount.fiat?.usd || '0');
         }
       }
     }

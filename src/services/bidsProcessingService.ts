@@ -415,8 +415,8 @@ export class BidsProcessingService {
             logger.debug(`⚠️ Subgraph failed (${subgraphTime}ms), falling back to ENS metadata API`);
             
             const ensContract = bid.contractAddress || '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
-            const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
-            
+          const metadataUrl = `https://metadata.ens.domains/mainnet/${ensContract}/${bid.tokenId}`;
+          
             // Create abort controller for 3s timeout
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 3000);
@@ -427,9 +427,9 @@ export class BidsProcessingService {
               clearTimeout(timeoutId);
               const fetchTime = Date.now() - fetchStart;
               
-              if (response.ok) {
-                const metadata = await response.json();
-                ensName = metadata.name || '';
+          if (response.ok) {
+            const metadata = await response.json();
+            ensName = metadata.name || '';
                 
                 // Check if ENS metadata also returned a hash
                 if (ensName && isTokenIdHash(ensName)) {

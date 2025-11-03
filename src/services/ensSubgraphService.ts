@@ -39,10 +39,10 @@ export class EnsSubgraphService {
     
     logger.debug(`🔍 Querying ENS subgraph: tokenId ${tokenId}, contract ${contractAddress}, hex: ${hexHash}, type: ${hashType}`);
       
-    // For wrapper names, query by ID (namehash)
+      // For wrapper names, query by ID (namehash)
     // For registry names, query by labelhash AND filter by parent="eth" to exclude subdomains
     // Parent filter ensures we only get 2nd-level .eth domains (e.g., 648.eth) not subdomains (e.g., 648.terabits.eth)
-    const query = isWrapper
+      const query = isWrapper
         ? `
           query GetDomainByNamehash($id: String!) {
             domains(where: { id: $id }, first: 1) {
@@ -73,9 +73,9 @@ export class EnsSubgraphService {
           }
         `;
 
-    const variables = isWrapper 
-      ? { id: hexHash }
-      : { labelhash: hexHash };
+      const variables = isWrapper 
+        ? { id: hexHash }
+        : { labelhash: hexHash };
 
     // Try primary endpoint first, then backup
     const endpoints = [this.primaryUrl, this.backupUrl];
@@ -90,22 +90,22 @@ export class EnsSubgraphService {
         // LOG THE FULL QUERY AND VARIABLES
         logger.info(`📋 GRAPHQL QUERY:\n${query}`);
         logger.info(`📋 GRAPHQL VARIABLES: ${JSON.stringify(variables, null, 2)}`);
-        
-        const response = await axios.post(
+
+      const response = await axios.post(
           endpoint,
-          { query, variables },
-          {
+        { query, variables },
+        {
             timeout: 10000, // 10s timeout
-            headers: {
-              'Content-Type': 'application/json',
-            }
+          headers: {
+            'Content-Type': 'application/json',
           }
-        );
+        }
+      );
 
         // LOG THE FULL RESPONSE
         logger.info(`📋 GRAPHQL RESPONSE: ${JSON.stringify(response.data, null, 2)}`);
 
-        const domains = response.data?.data?.domains;
+      const domains = response.data?.data?.domains;
       
       if (domains && domains.length > 0) {
         const domain = domains[0];
@@ -194,19 +194,19 @@ export class EnsSubgraphService {
       const isPrimary = i === 0;
       
       try {
-        const response = await axios.post(
+      const response = await axios.post(
           endpoint,
-          {
-            query,
-            variables: { labelhash: normalizedLabelhash }
-          },
-          {
+        {
+          query,
+          variables: { labelhash: normalizedLabelhash }
+        },
+        {
             timeout: 10000, // 10s timeout
-            headers: {
-              'Content-Type': 'application/json',
-            }
+          headers: {
+            'Content-Type': 'application/json',
           }
-        );
+        }
+      );
 
       const domains = response.data?.data?.domains;
       
