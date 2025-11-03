@@ -255,7 +255,7 @@ export class BidsProcessingService {
       
       logger.debug(`🔗 Using contract ${ensContract} for metadata lookup`);
       
-      const response = await axios.get(metadataUrl, { timeout: 3000 }); // Reduced from 10s to 3s
+      const response = await axios.get(metadataUrl, { timeout: 10000 }); // 10s timeout
       const metadata: ENSMetadata = response.data;
       
       const metadataTime = Date.now() - metadataStartTime;

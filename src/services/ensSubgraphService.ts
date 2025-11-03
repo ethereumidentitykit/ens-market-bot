@@ -84,7 +84,7 @@ export class EnsSubgraphService {
           endpoint,
           { query, variables },
           {
-            timeout: 2000, // 2s timeout
+            timeout: 10000, // 10s timeout
             headers: {
               'Content-Type': 'application/json',
             }
@@ -183,19 +183,19 @@ export class EnsSubgraphService {
       const isPrimary = i === 0;
       
       try {
-      const response = await axios.post(
+        const response = await axios.post(
           endpoint,
-        {
-          query,
-          variables: { labelhash: normalizedLabelhash }
-        },
-        {
-          timeout: 2000,
-          headers: {
-            'Content-Type': 'application/json',
+          {
+            query,
+            variables: { labelhash: normalizedLabelhash }
+          },
+          {
+            timeout: 10000, // 10s timeout
+            headers: {
+              'Content-Type': 'application/json',
+            }
           }
-        }
-      );
+        );
 
       const domains = response.data?.data?.domains;
       
@@ -253,7 +253,7 @@ export class EnsSubgraphService {
         this.primaryUrl,
         { query },
         {
-          timeout: 3000,
+          timeout: 10000, // 10s timeout
           headers: {
             'Content-Type': 'application/json',
           }
@@ -274,7 +274,7 @@ export class EnsSubgraphService {
         this.backupUrl,
         { query },
         {
-          timeout: 3000,
+          timeout: 10000, // 10s timeout
           headers: {
             'Content-Type': 'application/json',
           }
