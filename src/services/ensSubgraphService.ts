@@ -39,9 +39,10 @@ export class EnsSubgraphService {
     
     logger.debug(`🔍 Querying ENS subgraph: tokenId ${tokenId}, contract ${contractAddress}, hex: ${hexHash}, type: ${hashType}`);
       
-      // For wrapper names, query by ID (namehash)
-      // For registry names, query by labelhash
-      const query = isWrapper
+    // For wrapper names, query by ID (namehash)
+    // For registry names, query by labelhash AND filter by parent="eth" to exclude subdomains
+    // Parent filter ensures we only get 2nd-level .eth domains (e.g., 648.eth) not subdomains (e.g., 648.terabits.eth)
+    const query = isWrapper
         ? `
           query GetDomainByNamehash($id: String!) {
             domains(where: { id: $id }, first: 1) {
@@ -53,11 +54,21 @@ export class EnsSubgraphService {
         `
         : `
           query GetDomainByLabelhash($labelhash: String!) {
-            domains(where: { labelhash: $labelhash }, first: 1) {
+            domains(
+              where: { 
+                labelhash: $labelhash
+                parent: "0x93cdeb708b7545dc668eb9280176169d1c33cfd8ed6f04690a0bcc88a93fc4ae"
+              }
+              first: 1
+            ) {
               id
               name
               labelName
               labelhash
+              parent {
+                id
+                name
+              }
             }
           }
         `;
