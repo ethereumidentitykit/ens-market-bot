@@ -62,9 +62,9 @@ export class EnsSubgraphService {
           }
         `;
 
-      const variables = isWrapper 
-        ? { id: hexHash }
-        : { labelhash: hexHash };
+    const variables = isWrapper 
+      ? { id: hexHash }
+      : { labelhash: hexHash };
 
     // Try primary endpoint first, then backup
     const endpoints = [this.primaryUrl, this.backupUrl];
@@ -75,19 +75,26 @@ export class EnsSubgraphService {
       
       try {
         logger.debug(`   ${isPrimary ? '🎯' : '🔄'} Trying ${isPrimary ? 'primary' : 'backup'} endpoint: ${endpoint}`);
-
-      const response = await axios.post(
+        
+        // LOG THE FULL QUERY AND VARIABLES
+        logger.info(`📋 GRAPHQL QUERY:\n${query}`);
+        logger.info(`📋 GRAPHQL VARIABLES: ${JSON.stringify(variables, null, 2)}`);
+        
+        const response = await axios.post(
           endpoint,
-        { query, variables },
-        {
+          { query, variables },
+          {
             timeout: 2000, // 2s timeout
-          headers: {
-            'Content-Type': 'application/json',
+            headers: {
+              'Content-Type': 'application/json',
+            }
           }
-        }
-      );
+        );
 
-      const domains = response.data?.data?.domains;
+        // LOG THE FULL RESPONSE
+        logger.info(`📋 GRAPHQL RESPONSE: ${JSON.stringify(response.data, null, 2)}`);
+
+        const domains = response.data?.data?.domains;
       
       if (domains && domains.length > 0) {
         const domain = domains[0];
