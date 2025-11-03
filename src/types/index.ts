@@ -192,6 +192,9 @@ export interface Config {
   opensea?: {
     apiKey: string;
   };
+  ensSubgraph: {
+    primaryUrl: string;
+  };
 }
 
 // Twitter Post Record

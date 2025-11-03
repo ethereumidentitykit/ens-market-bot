@@ -50,7 +50,10 @@ export const config: Config = {
   },
   opensea: process.env.OPENSEA_API_KEY ? {
     apiKey: process.env.OPENSEA_API_KEY,
-  } : undefined
+  } : undefined,
+  ensSubgraph: {
+    primaryUrl: process.env.ENS_SUBGRAPH_URL || 'https://ensnode-api-production-500f.up.railway.app/subgraph',
+  }
 };
 
 // Validate required configuration

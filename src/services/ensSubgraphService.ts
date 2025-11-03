@@ -1,8 +1,8 @@
 import axios from 'axios';
 import { logger } from '../utils/logger';
 import { ENSTokenUtils } from './ensTokenUtils';
+import { config } from '../utils/config';
 
-const ENS_SUBGRAPH_URL_PRIMARY = 'https://ensnode-api-production-500f.up.railway.app/subgraph';
 const ENS_SUBGRAPH_URL_BACKUP = 'https://api.mainnet.ensnode.io/subgraph';
 
 /**
@@ -14,10 +14,10 @@ export class EnsSubgraphService {
   private primaryUrl: string;
   private backupUrl: string;
 
-  constructor(primaryUrl: string = ENS_SUBGRAPH_URL_PRIMARY, backupUrl: string = ENS_SUBGRAPH_URL_BACKUP) {
-    this.primaryUrl = primaryUrl;
+  constructor(primaryUrl?: string, backupUrl: string = ENS_SUBGRAPH_URL_BACKUP) {
+    this.primaryUrl = primaryUrl || config.ensSubgraph.primaryUrl;
     this.backupUrl = backupUrl;
-    logger.info(`🔧 EnsSubgraphService initialized with primary: ${primaryUrl}, backup: ${backupUrl}`);
+    logger.info(`🔧 EnsSubgraphService initialized with primary: ${this.primaryUrl}, backup: ${this.backupUrl}`);
   }
 
   /**
