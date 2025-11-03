@@ -720,7 +720,7 @@ export class DatabaseEventService {
     try {
       // Simple ping to check connection
       await this.client?.query('SELECT 1');
-      logger.debug('💓 Database listener health check passed');
+      // Health check passed (logging disabled to reduce noise)
     } catch (error: any) {
       logger.warn('💔 Database listener health check failed, reconnecting...', error.message);
       this.isListening = false;
