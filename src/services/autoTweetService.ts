@@ -601,7 +601,7 @@ export class AutoTweetService {
       };
     }
 
-    // Check for incremental bid spam (5% threshold within 12 hours)
+    // Check for incremental bid spam (5% threshold within 48 hours)
     const recentHighBid = bid.ensName ? await this.getHighestRecentBid(bid.ensName) : null;
     if (recentHighBid) {
       const threshold = recentHighBid * 1.05; // Require 5% higher
@@ -745,18 +745,18 @@ export class AutoTweetService {
   }
 
   /**
-   * Get highest recent bid for an ENS name within 12 hours (only posted bids)
+   * Get highest recent bid for an ENS name within 48 hours (only posted bids)
    */
   private async getHighestRecentBid(ensName: string): Promise<number | null> {
     try {
       if (!ensName) return null;
       
-      // Get recent posted bids for this ENS name in the last 12 hours
+      // Get recent posted bids for this ENS name in the last 48 hours
       const query = `
         SELECT MAX(CAST(price_decimal AS DECIMAL)) as highest_bid
         FROM ens_bids 
         WHERE ens_name = $1 
-          AND created_at_api >= NOW() - INTERVAL '12 hours'
+          AND created_at_api >= NOW() - INTERVAL '48 hours'
           AND (status = 'posted' OR (status IS NULL AND posted = TRUE))
       `;
       
