@@ -37,7 +37,7 @@ export class EnsSubgraphService {
       const isWrapper = contractAddress?.toLowerCase() === ENSTokenUtils.NAME_WRAPPER_CONTRACT.toLowerCase();
       const hashType = isWrapper ? 'namehash (wrapper)' : 'labelhash (registry)';
     
-    logger.debug(`🔍 Querying ENS subgraph: tokenId ${tokenId.slice(-10)}, contract ${contractAddress?.slice(0, 10)}, hex: ${hexHash.slice(0, 10)}..., type: ${hashType}`);
+    logger.debug(`🔍 Querying ENS subgraph: tokenId ${tokenId}, contract ${contractAddress}, hex: ${hexHash}, type: ${hashType}`);
       
       // For wrapper names, query by ID (namehash)
       // For registry names, query by labelhash
@@ -100,19 +100,19 @@ export class EnsSubgraphService {
         const domain = domains[0];
         
         if (domain.name) {
-            logger.debug(`✅ ENS subgraph resolved: ${domain.name} (${hashType}: ${hexHash.slice(0, 10)}...) via ${isPrimary ? 'primary' : 'backup'}`);
+            logger.debug(`✅ ENS subgraph resolved: ${domain.name} (${hashType}: ${hexHash}) via ${isPrimary ? 'primary' : 'backup'}`);
           return domain.name;
         }
         
         // Try labelName if name is not available
         if (domain.labelName) {
           const name = `${domain.labelName}.eth`;
-            logger.debug(`✅ ENS subgraph resolved via labelName: ${name} (${hashType}: ${hexHash.slice(0, 10)}...) via ${isPrimary ? 'primary' : 'backup'}`);
+            logger.debug(`✅ ENS subgraph resolved via labelName: ${name} (${hashType}: ${hexHash}) via ${isPrimary ? 'primary' : 'backup'}`);
           return name;
         }
       }
 
-        logger.debug(`⚠️ ENS subgraph: no name found for ${hashType} ${hexHash.slice(0, 10)}... at ${isPrimary ? 'primary' : 'backup'}`);
+        logger.debug(`⚠️ ENS subgraph: no name found for ${hashType} ${hexHash} at ${isPrimary ? 'primary' : 'backup'}`);
         
         // If we got a valid response but no data, don't try backup
       return null;

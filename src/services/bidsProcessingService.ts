@@ -398,7 +398,7 @@ export class BidsProcessingService {
       // Only lookup ENS name if Magic Eden didn't provide it
       if (!ensName && bid.tokenId) {
         try {
-          logger.debug(`🔍 Fetching ENS name for filtering (Magic Eden didn't provide): ${bid.tokenId.slice(-10)}`);
+          logger.debug(`🔍 Fetching ENS name for filtering (Magic Eden didn't provide): ${bid.tokenId}`);
           
           // PRIMARY: Try in-house ENS subgraph first (fast, reliable)
           // Pass contract address to support both registry (labelhash) and wrapper (namehash) names
@@ -439,7 +439,7 @@ export class BidsProcessingService {
                 
                 logger.debug(`✅ ENS name resolved via metadata API in ${fetchTime}ms: ${ensName}`);
               } else {
-                logger.warn(`⚠️ ENS metadata API returned ${response.status} for ${ensContract}:${bid.tokenId.slice(-10)} (${fetchTime}ms)`);
+                logger.warn(`⚠️ ENS metadata API returned ${response.status} for ${ensContract}:${bid.tokenId} (${fetchTime}ms)`);
               }
             } finally {
               clearTimeout(timeoutId);

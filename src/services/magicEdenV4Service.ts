@@ -1121,8 +1121,8 @@ export class MagicEdenV4Service {
         status: error.response?.status,
         code: error.code,
         isTimeout: isTimeoutError,
-        contract: contract.slice(0, 10) + '...',
-        tokenId: tokenId.slice(0, 20) + '...'
+        contract: contract,
+        tokenId: tokenId
       });
 
       if (retryCount < maxRetries) {
