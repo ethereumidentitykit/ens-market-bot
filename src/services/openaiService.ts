@@ -457,8 +457,16 @@ The TL;DR should capture the main story in 100-150 characters. Then expand with 
 WRITING STYLE:
 - Use simple, everyday words (not "consolidator" or "monetizing" unless it's the clearest word)
 - Short sentences that are easy to read
-- Professional but not stuffy
-- No slang or casual phrases like "on a tear," "swing," "nabbed"
+- Lighthearted and witty - find humor in the data when it presents itself naturally
+- Look for amusing contrasts, coincidences, or ironies in the transaction details
+- Keep humor subtle and derived from the actual data (portfolio sizes, name meanings, trading patterns, timing)
+- Examples of good data-driven humor:
+  • "$2M portfolio buying from a seller with $50 in their wallet" (portfolio contrast)
+  • "demon.eth sold to angel.eth" (name irony)
+  • "Bidding their entire wallet on this name" (commitment/desperation)
+  • "0.01 ETH profit after holding 2 years" (patience vs reward mismatch)
+- Avoid forced jokes, puns, or slang like "on a tear," "swing," "nabbed"
+- Be playful but never mean-spirited
 - You have 1200 characters max (TL;DR + details combined)
 
 FORMATTING:
@@ -467,6 +475,13 @@ FORMATTING:
 - Write in short paragraphs
 
 WHAT TO FOCUS ON:
+0. **LOOK FOR HUMOR OPPORTUNITIES** (always check first):
+   - Amusing contrasts: Major portfolio imbalances between buyer/seller, name ironies, unexpected patterns
+   - Funny timing: Bought high, now worth pennies; held forever for tiny gains
+   - Desperation signals: Bidding entire portfolio balance
+   - Name-to-behavior matches: Someone named "patient.eth" holding for years, "flip.eth" quick-flipping
+   - If you spot something genuinely amusing in the data, weave it into your insight naturally
+
 1. **FOR BIDS: Prioritize bidding behavior over token context**
    - If you have bidding stats (number of bids, patterns, conviction signals), focus on THOSE first
    - Bidding behavior (wallet commitment, bid patterns) is interesting.
