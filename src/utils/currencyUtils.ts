@@ -18,8 +18,9 @@ export class CurrencyUtils {
     // DAI
     '0x6b175474e89094c44da98b954eedeac495271d0f': 'DAI',
     
-    // Native ETH (no contract / zero address)
-    '0x0000000000000000000000000000000000000000': 'ETH',
+    // Native ETH (various representations)
+    '0x0000000000000000000000000000000000000000': 'ETH', // Zero address
+    '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee': 'ETH', // Common placeholder for native ETH
     '': 'ETH', // Empty contract also means native ETH
   };
 

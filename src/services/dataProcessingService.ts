@@ -416,7 +416,8 @@ export class DataProcessingService {
     const totalVolume = allTransactions.reduce((sum, tx) => {
       const currencyContract = tx.price.currency.contract;
       const isEth = CurrencyUtils.isETHEquivalent(currencyContract);
-      const ethValue = isEth ? tx.price.amount.decimal : (tx.price.amount.native || 0);
+      const rawValue = isEth ? tx.price.amount.decimal : (tx.price.amount.native || 0);
+      const ethValue = typeof rawValue === 'number' ? rawValue : parseFloat(rawValue) || 0;
       return sum + ethValue;
     }, 0);
     const totalVolumeUsd = allTransactions.reduce((sum, tx) => 
@@ -464,7 +465,8 @@ export class DataProcessingService {
         sellerAcquisitionType = sellerAcquisition.type === 'mint' ? 'mint' : 'sale';
         const currencyContract = sellerAcquisition.price.currency.contract;
         const isEth = CurrencyUtils.isETHEquivalent(currencyContract);
-        sellerBuyPrice = isEth ? sellerAcquisition.price.amount.decimal : (sellerAcquisition.price.amount.native || 0);
+        const rawBuyPrice = isEth ? sellerAcquisition.price.amount.decimal : (sellerAcquisition.price.amount.native || 0);
+        sellerBuyPrice = typeof rawBuyPrice === 'number' ? rawBuyPrice : parseFloat(rawBuyPrice) || 0;
         sellerBuyPriceUsd = sellerAcquisition.price.amount.usd || 0;
         
         // Calculate PNL using current sale price (if provided)
@@ -491,7 +493,8 @@ export class DataProcessingService {
     const getEthPrice = (tx: any) => {
       const currencyContract = tx.price.currency.contract;
       const isEth = CurrencyUtils.isETHEquivalent(currencyContract);
-      return isEth ? tx.price.amount.decimal : (tx.price.amount.native || 0);
+      const rawValue = isEth ? tx.price.amount.decimal : (tx.price.amount.native || 0);
+      return typeof rawValue === 'number' ? rawValue : parseFloat(rawValue) || 0;
     };
     
     const insights: TokenInsights = {
@@ -613,7 +616,8 @@ export class DataProcessingService {
     const buysVolume = buys.reduce((sum, activity) => {
       const currencyContract = activity.price.currency.contract;
       const isEth = CurrencyUtils.isETHEquivalent(currencyContract);
-      const ethValue = isEth ? activity.price.amount.decimal : (activity.price.amount.native || 0);
+      const rawValue = isEth ? activity.price.amount.decimal : (activity.price.amount.native || 0);
+      const ethValue = typeof rawValue === 'number' ? rawValue : parseFloat(rawValue) || 0;
       return sum + ethValue;
     }, 0);
     const buysVolumeUsd = buys.reduce((sum, activity) => 
@@ -626,7 +630,8 @@ export class DataProcessingService {
     const sellsVolume = sells.reduce((sum, activity) => {
       const currencyContract = activity.price.currency.contract;
       const isEth = CurrencyUtils.isETHEquivalent(currencyContract);
-      const ethValue = isEth ? activity.price.amount.decimal : (activity.price.amount.native || 0);
+      const rawValue = isEth ? activity.price.amount.decimal : (activity.price.amount.native || 0);
+      const ethValue = typeof rawValue === 'number' ? rawValue : parseFloat(rawValue) || 0;
       return sum + ethValue;
     }, 0);
     const sellsVolumeUsd = sells.reduce((sum, activity) => 
@@ -1022,7 +1027,8 @@ export class DataProcessingService {
         // Convert price to ETH: use 'decimal' for ETH (precise), 'native' for other currencies (converted)
         const currencyContract = a.price.currency.contract;
         const isEth = CurrencyUtils.isETHEquivalent(currencyContract);
-        const priceEth = isEth ? a.price.amount.decimal : (a.price.amount.native || 0);
+        const rawPrice = isEth ? a.price.amount.decimal : (a.price.amount.native || 0);
+        const priceEth = typeof rawPrice === 'number' ? rawPrice : parseFloat(rawPrice) || 0;
         return {
           type: a.type as 'mint' | 'sale',
           timestamp: a.timestamp,
@@ -1046,7 +1052,8 @@ export class DataProcessingService {
           // Convert price to ETH: use 'decimal' for ETH (precise), 'native' for other currencies (converted)
           const currencyContract = a.price.currency.contract;
           const isEth = CurrencyUtils.isETHEquivalent(currencyContract);
-          const priceEth = isEth ? a.price.amount.decimal : (a.price.amount.native || 0);
+          const rawPrice = isEth ? a.price.amount.decimal : (a.price.amount.native || 0);
+          const priceEth = typeof rawPrice === 'number' ? rawPrice : parseFloat(rawPrice) || 0;
           return {
             type: a.type as 'mint' | 'sale',
             timestamp: a.timestamp,
