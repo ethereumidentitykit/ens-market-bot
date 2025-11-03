@@ -373,6 +373,15 @@ export class BidsProcessingService {
       // DEBUG: Log the actual database values being used
       logger.debug(`🔍 BID THRESHOLDS: Default=${defaultMin}, 10k=${club10kMin}, 999=${club999Min}`);
       
+      // OPTIMIZATION: Check if bid is below ALL thresholds before doing any lookups
+      const bidAmount = parseFloat(bid.priceDecimal);
+      const lowestThreshold = Math.min(parseFloat(defaultMin), parseFloat(club10kMin), parseFloat(club999Min));
+      
+      if (bidAmount < lowestThreshold) {
+        logger.debug(`⚡ EARLY REJECT: ${bidAmount} ETH < ${lowestThreshold} ETH (lowest threshold) - skipping name lookup`);
+        return 999; // Impossibly high threshold = always reject
+      }
+      
       // Use Magic Eden name if available (80-90% of cases)
       let ensName = bid.ensName || '';
       

@@ -55,7 +55,7 @@ async function startApplication(): Promise<void> {
 
     // Initialize PostgreSQL database service
     const databaseService = new DatabaseService();
-    
+
     // Initialize services
     const moralisService = new MoralisService();
     const alchemyService = new AlchemyService(databaseService);

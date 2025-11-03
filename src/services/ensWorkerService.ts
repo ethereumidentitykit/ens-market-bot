@@ -336,7 +336,7 @@ export class ENSWorkerService {
 
       // Cache the successful result
       this.accountCache.set(normalizedAddress, { data: response.data, timestamp: Date.now() });
-      
+
       return response.data;
 
     } catch (error: any) {
