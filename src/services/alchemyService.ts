@@ -18,6 +18,17 @@ const SUPPORTED_NETWORKS = [
 
 export type AlchemyNetwork = typeof SUPPORTED_NETWORKS[number];
 
+// WETH contract addresses across all chains (lowercase for comparison)
+// WETH should always use ETH price (1:1 peg)
+const WETH_ADDRESSES = new Set([
+  '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', // ETH mainnet
+  '0x4200000000000000000000000000000000000006', // Base, Optimism
+  '0x82af49447d8a07e3bd95bd0d56f35241523fbab1', // Arbitrum
+  '0x5aea5775959fbc2557cc8789bc1bf90a239d9a91', // zkSync
+  '0x7ceb23fd6bc0add59e62ac25578270cff1b9f619', // Polygon
+  '0xe5d7c2a44ffddf6b295a15c148167daaaf5cf34f', // Linea
+]);
+
 // Token balance response from Alchemy
 interface AlchemyTokenBalanceResponse {
   data: {
@@ -27,6 +38,7 @@ interface AlchemyTokenBalanceResponse {
       tokenAddress: string | null; // null for native tokens (ETH)
       tokenBalance: string; // Hex string
     }>;
+    pageKey?: string; // For pagination when more than 100 tokens
   };
 }
 
@@ -64,7 +76,7 @@ export interface TokenPrice {
   decimals?: number;
   priceUsd: number;
   lastUpdatedAt: Date;
-  source: 'cache' | 'api';
+  source: 'cache' | 'api' | 'eth-price';
 }
 
 // Wallet portfolio summary
@@ -485,23 +497,44 @@ export class AlchemyService {
 
       const url = `https://api.g.alchemy.com/data/v1/${this.apiKey}/assets/tokens/balances/by-address`;
       
-      const response: AxiosResponse<AlchemyTokenBalanceResponse> = await axios.post(url, {
-        addresses: [
-          {
-            address: address,
-            networks: networks
-          }
-        ],
-        includeNativeTokens: true,
-        includeErc20Tokens: true
-      }, {
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        timeout: 30000
-      });
+      // Paginate through all results
+      let allTokens: any[] = [];
+      let pageKey: string | undefined = undefined;
+      let pageCount = 0;
 
-      const allTokens = response.data.data.tokens;
+      do {
+        const requestBody: any = {
+          addresses: [
+            {
+              address: address,
+              networks: networks
+            }
+          ],
+          includeNativeTokens: true,
+          includeErc20Tokens: true,
+          maxCount: 100 // Explicitly set max (API default)
+        };
+
+        if (pageKey) {
+          requestBody.pageKey = pageKey;
+        }
+
+        const response: AxiosResponse<AlchemyTokenBalanceResponse> = await axios.post(url, requestBody, {
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          timeout: 30000
+        });
+
+        const pageTokens = response.data.data.tokens;
+        allTokens = allTokens.concat(pageTokens);
+        pageKey = response.data.data.pageKey;
+        pageCount++;
+
+        logger.debug(`   📄 Page ${pageCount}: ${pageTokens.length} tokens, pageKey: ${pageKey ? 'yes' : 'no'}`);
+      } while (pageKey);
+
+      logger.info(`✅ Fetched ${allTokens.length} total tokens across ${pageCount} page(s)`);
       
       // Filter to only whitelisted tokens + native tokens
       const whitelistSet = new Set(whitelistedTokens.map(t => `${t.network}:${t.tokenAddress.toLowerCase()}`));
@@ -512,6 +545,18 @@ export class AlchemyService {
         const key = `${token.network}:${token.tokenAddress.toLowerCase()}`;
         return whitelistSet.has(key);
       });
+      
+      // Log WETH specifically for debugging
+      const wethMainnetKey = 'eth-mainnet:0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2';
+      const wethToken = filteredTokens.find(t => 
+        t.network === 'eth-mainnet' && 
+        t.tokenAddress?.toLowerCase() === '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'
+      );
+      if (wethToken) {
+        logger.debug(`   🔍 WETH on mainnet found: balance=${wethToken.tokenBalance} (${BigInt(wethToken.tokenBalance).toString()} wei)`);
+      } else {
+        logger.debug(`   ⚠️ WETH on mainnet NOT found in Alchemy response after ${pageCount} page(s)`);
+      }
       
       logger.info(`✅ Found ${filteredTokens.length} whitelisted tokens (filtered from ${allTokens.length} total)`);
 
@@ -578,16 +623,21 @@ export class AlchemyService {
 
       logger.debug(`   Cache: ${prices.length} hits, ${tokensToFetch.length} misses`);
 
-      // Handle native ETH tokens separately - use ETH price
+      // Separate tokens by type
       const nativeTokens = tokensToFetch.filter(t => t.address === null);
-      const erc20Tokens = tokensToFetch.filter(t => t.address !== null);
+      const wethTokens = tokensToFetch.filter(t => 
+        t.address !== null && WETH_ADDRESSES.has(t.address.toLowerCase())
+      );
+      const otherErc20Tokens = tokensToFetch.filter(t => 
+        t.address !== null && !WETH_ADDRESSES.has(t.address.toLowerCase())
+      );
       
-      if (nativeTokens.length > 0) {
-        // Get ETH price
+      // Get ETH price once for both native ETH and WETH
+      if (nativeTokens.length > 0 || wethTokens.length > 0) {
         const ethPrice = await this.getETHPriceUSD();
         
         if (ethPrice && ethPrice > 0) {
-          // Add ETH price for all native tokens
+          // Add ETH price for native tokens
           nativeTokens.forEach(token => {
             prices.push({
               network: token.network,
@@ -599,18 +649,54 @@ export class AlchemyService {
               source: 'api'
             });
           });
-          logger.debug(`   Added ETH price ($${ethPrice}) for ${nativeTokens.length} native tokens`);
+          
+          // Add ETH price for WETH tokens (1:1 peg with ETH)
+          const wethPricesToCache: Array<{
+            network: string;
+            tokenAddress: string | null;
+            symbol: string;
+            decimals: number;
+            priceUsd: number;
+          }> = [];
+          
+          wethTokens.forEach(token => {
+            prices.push({
+              network: token.network,
+              tokenAddress: token.address,
+              symbol: 'WETH',
+              decimals: 18,
+              priceUsd: ethPrice,
+              lastUpdatedAt: new Date(),
+              source: 'eth-price'
+            });
+            
+            // Cache WETH price
+            wethPricesToCache.push({
+              network: token.network,
+              tokenAddress: token.address,
+              symbol: 'WETH',
+              decimals: 18,
+              priceUsd: ethPrice
+            });
+          });
+          
+          // Cache WETH prices
+          if (wethPricesToCache.length > 0) {
+            await this.databaseService.setTokenPricesBatch(wethPricesToCache);
+          }
+          
+          logger.debug(`   Added ETH price ($${ethPrice}) for ${nativeTokens.length} native + ${wethTokens.length} WETH tokens`);
         }
       }
 
-      // Fetch missing prices from API for ERC20 tokens
+      // Fetch missing prices from API for other ERC20 tokens (non-WETH)
       // Note: Alchemy limits to 3 distinct networks per request, so we need to batch
-      if (erc20Tokens.length > 0) {
+      if (otherErc20Tokens.length > 0) {
         const url = `https://api.g.alchemy.com/prices/v1/${this.apiKey}/tokens/by-address`;
         
         // Group tokens by network
         const tokensByNetwork = new Map<string, Array<{ network: string; address: string | null }>>();
-        erc20Tokens.forEach(token => {
+        otherErc20Tokens.forEach(token => {
           if (!tokensByNetwork.has(token.network)) {
             tokensByNetwork.set(token.network, []);
           }
@@ -630,7 +716,7 @@ export class AlchemyService {
           batches.push(batchTokens);
         }
         
-        logger.debug(`   Batching ${erc20Tokens.length} ERC20 tokens across ${batches.length} API requests (3 networks max per request)`);
+        logger.debug(`   Batching ${otherErc20Tokens.length} ERC20 tokens across ${batches.length} API requests (3 networks max per request)`);
         
         // Fetch all batches
         for (const batch of batches) {
