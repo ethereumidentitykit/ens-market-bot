@@ -415,8 +415,12 @@ you can keep a couple numerical data points, but don't make it the main focus.
   • Are they bidding a large % of their wallet's WETH?
   • Recent bidding frequency/patterns
   • **Many bids at similar prices = "spray and pray"** - bidder is hunting for someone who needs liquidity, placing lowball offers across many names hoping someone accepts
-  • Owner's selling behavior (have they sold around this price point recently?)
+  • **Owner's selling behavior (IMPORTANT)**:
+    - If owner has many names and has NEVER accepted bids or sold around this price range: "No onchain precedent they accept offers like this"
+    - If owner HAS sold at or near this price point: "Owner has accepted similar offers before" (especially powerful if for comparable quality names)
+    - Example: "Bid is 10 ETH on angel.eth, owner sold demigod.eth last week for 5 ETH" - shows owner's pricing expectations
   • Bid relative to recent sales for this name
+- **PORTFOLIO DATA CAVEAT FOR BIDS (CRITICAL)**: If reported portfolio value is LOWER than the bid price, the data is incomplete (bidder must have WETH not tracked). **DO NOT MENTION THE PORTFOLIO AT ALL** in this case. Skip all portfolio insights. The data is incomplete and misleading. Only mention portfolio if portfolio value > bid price.
 - **DO NOT analyze for wash trading on bids** - it's much harder to detect and rarely applies to open bids
 - **CRITICAL**: If this is a SALE or REGISTRATION, completely ignore all bid-specific guidance above
 
@@ -425,9 +429,11 @@ When mentioning portfolio value, ONLY report the total USD value. DO NOT separat
 
 1. Interesting examples derived from $ portfolio value:
 For bids:
-- Bidder has ~$150 portfolio, bidding their entire wallet
+- **WHEN TO SKIP**: Bidder portfolio is $293, bid is 3 ETH (~$10k) → DO NOT MENTION PORTFOLIO (incomplete data)
+- **WHEN TO USE**: Bidder has ~$15k portfolio, bid is $10k → "bidding a large portion of their wallet"
 - Owner has $1M+ portfolio, so this bid is insignificant. No incentive to accept a lowball.
-- Large portfolio owner has never accepted a bid, owns many names.
+- Large portfolio owner has never accepted a bid in this range, owns many names - no precedent they'll sell.
+- Owner sold similar names at this price point before - they might accept.
 
 2. For sales and registrations:
 - buyer has a lot of dry powder, one of their first purchases.
@@ -478,7 +484,7 @@ WHAT TO FOCUS ON:
 0. **LOOK FOR HUMOR OPPORTUNITIES** (always check first):
    - Amusing contrasts: Major portfolio imbalances between buyer/seller, name ironies, unexpected patterns
    - Funny timing: Bought high, now worth pennies; held forever for tiny gains
-   - Desperation signals: Bidding entire portfolio balance
+   - Desperation signals: Bidding most/all of their portfolio (only when portfolio > bid - otherwise data is incomplete)
    - Name-to-behavior matches: Someone named "patient.eth" holding for years, "flip.eth" quick-flipping
    - If you spot something genuinely amusing in the data, weave it into your insight naturally
 
