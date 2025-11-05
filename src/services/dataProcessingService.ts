@@ -161,19 +161,19 @@ export interface LLMPromptContext {
   
   // Full user activity histories for pattern detection (condensed)
   buyerActivityHistory: Array<{
-    type: 'mint' | 'sale';
+    type: 'mint' | 'sale' | 'bid';
     timestamp: number;
     tokenName?: string;  // Name of token traded (if available)
-    role: 'buyer' | 'seller'; // Was this user buying or selling?
+    role: 'buyer' | 'seller' | 'bidder'; // Was this user buying, selling, or bidding?
     price: number;       // ETH
     priceUsd: number;    // USD
     txHash: string;
   }>;
   sellerActivityHistory: Array<{
-    type: 'mint' | 'sale';
+    type: 'mint' | 'sale' | 'bid';
     timestamp: number;
     tokenName?: string;  // Name of token traded (if available)
-    role: 'buyer' | 'seller'; // Was this user buying or selling?
+    role: 'buyer' | 'seller' | 'bidder'; // Was this user buying, selling, or bidding?
     price: number;       // ETH
     priceUsd: number;    // USD
     txHash: string;
@@ -189,6 +189,11 @@ export interface LLMPromptContext {
     tokenDataIncomplete: boolean;
     buyerDataIncomplete: boolean;
     sellerDataIncomplete: boolean;
+    // Bid truncation tracking (bids limited to prevent token overflow)
+    buyerBidsTruncated: boolean;
+    buyerBidsTruncatedCount: number;
+    sellerBidsTruncated: boolean;
+    sellerBidsTruncatedCount: number;
   };
   
   // Club membership info (if name belongs to any clubs)
@@ -1018,58 +1023,123 @@ export class DataProcessingService {
     // Step 3.5: Build condensed user activity histories for pattern detection
     logger.debug(`   📜 Building condensed user activity histories...`);
     
-    // Buyer's full trading history
-    const buyerActivityHistory = buyerActivities
-      .filter(a => (a.type === 'mint' || a.type === 'sale') && a.price?.amount?.decimal !== undefined)
+    // Buyer's full trading history (including bids, limited to prevent token overflow)
+    const MAX_BIDS_FOR_LLM = 500;
+    
+    // Process all activities first
+    const allBuyerActivities = buyerActivities
+      .filter(a => (a.type === 'mint' || a.type === 'sale' || a.type === 'bid') && a.price?.amount?.decimal !== undefined)
       .map(a => {
         const normalizedBuyerAddress = eventData.buyerAddress.toLowerCase();
-        const role = a.toAddress.toLowerCase() === normalizedBuyerAddress ? 'buyer' : 'seller';
+        
+        // Determine role based on activity type
+        let role: 'buyer' | 'seller' | 'bidder';
+        if (a.type === 'bid') {
+          // For bids, user is always the bidder
+          role = 'bidder';
+        } else {
+          // For sales/mints, check if user was buyer or seller
+          role = a.toAddress.toLowerCase() === normalizedBuyerAddress ? 'buyer' : 'seller';
+        }
+        
         // Convert price to ETH: use 'decimal' for ETH (precise), 'native' for other currencies (converted)
         const currencyContract = a.price.currency.contract;
         const isEth = CurrencyUtils.isETHEquivalent(currencyContract);
         const rawPrice = isEth ? a.price.amount.decimal : (a.price.amount.native || 0);
         const priceEth = typeof rawPrice === 'number' ? rawPrice : parseFloat(rawPrice) || 0;
+        
         return {
-          type: a.type as 'mint' | 'sale',
+          type: a.type as 'mint' | 'sale' | 'bid',
           timestamp: a.timestamp,
           tokenName: a.token?.tokenName ?? undefined,
-          role: role as 'buyer' | 'seller',
+          role,
           price: priceEth,
           priceUsd: a.price.amount.usd || 0,
           txHash: a.txHash
         };
-      })
+      });
+    
+    // Separate bids from sales/mints
+    const buyerBids = allBuyerActivities.filter(a => a.type === 'bid');
+    const buyerSalesMints = allBuyerActivities.filter(a => a.type !== 'bid');
+    
+    // Limit bids to most recent 500 (sorted newest first, then take first 500)
+    const buyerBidsLimited = buyerBids
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, MAX_BIDS_FOR_LLM);
+    
+    const buyerBidsTruncated = buyerBids.length > MAX_BIDS_FOR_LLM;
+    const buyerBidsTruncatedCount = buyerBids.length - buyerBidsLimited.length;
+    
+    // Combine and sort chronologically
+    const buyerActivityHistory = [...buyerSalesMints, ...buyerBidsLimited]
       .sort((a, b) => a.timestamp - b.timestamp); // Chronological order
     
-    // Seller's full trading history (if applicable)
+    // Seller's full trading history (if applicable, including bids, limited to prevent token overflow)
     let sellerActivityHistory: typeof buyerActivityHistory | null = null;
+    let sellerBidsTruncated = false;
+    let sellerBidsTruncatedCount = 0;
+    
     if (sellerActivities && eventData.sellerAddress) {
-      sellerActivityHistory = sellerActivities
-        .filter(a => (a.type === 'mint' || a.type === 'sale') && a.price?.amount?.decimal !== undefined)
+      // Process all activities first
+      const allSellerActivities = sellerActivities
+        .filter(a => (a.type === 'mint' || a.type === 'sale' || a.type === 'bid') && a.price?.amount?.decimal !== undefined)
         .map(a => {
           const normalizedSellerAddress = eventData.sellerAddress!.toLowerCase();
-          const role = a.toAddress.toLowerCase() === normalizedSellerAddress ? 'buyer' : 'seller';
+          
+          // Determine role based on activity type
+          let role: 'buyer' | 'seller' | 'bidder';
+          if (a.type === 'bid') {
+            // For bids, user is always the bidder
+            role = 'bidder';
+          } else {
+            // For sales/mints, check if user was buyer or seller
+            role = a.toAddress.toLowerCase() === normalizedSellerAddress ? 'buyer' : 'seller';
+          }
+          
           // Convert price to ETH: use 'decimal' for ETH (precise), 'native' for other currencies (converted)
           const currencyContract = a.price.currency.contract;
           const isEth = CurrencyUtils.isETHEquivalent(currencyContract);
           const rawPrice = isEth ? a.price.amount.decimal : (a.price.amount.native || 0);
           const priceEth = typeof rawPrice === 'number' ? rawPrice : parseFloat(rawPrice) || 0;
+          
           return {
-            type: a.type as 'mint' | 'sale',
+            type: a.type as 'mint' | 'sale' | 'bid',
             timestamp: a.timestamp,
             tokenName: a.token?.tokenName ?? undefined,
-            role: role as 'buyer' | 'seller',
+            role,
             price: priceEth,
             priceUsd: a.price.amount.usd || 0,
             txHash: a.txHash
           };
-        })
+        });
+      
+      // Separate bids from sales/mints
+      const sellerBids = allSellerActivities.filter(a => a.type === 'bid');
+      const sellerSalesMints = allSellerActivities.filter(a => a.type !== 'bid');
+      
+      // Limit bids to most recent 500
+      const sellerBidsLimited = sellerBids
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, MAX_BIDS_FOR_LLM);
+      
+      sellerBidsTruncated = sellerBids.length > MAX_BIDS_FOR_LLM;
+      sellerBidsTruncatedCount = sellerBids.length - sellerBidsLimited.length;
+      
+      // Combine and sort chronologically
+      sellerActivityHistory = [...sellerSalesMints, ...sellerBidsLimited]
         .sort((a, b) => a.timestamp - b.timestamp); // Chronological order
     }
     
     logger.debug(`   ✅ Buyer activity history: ${buyerActivityHistory.length} entries`);
+    if (buyerBidsTruncated) {
+      logger.info(`   ⚠️ Buyer bids truncated: showing ${buyerBidsLimited.length}, hiding ${buyerBidsTruncatedCount} older bids`);
+    }
     if (sellerActivityHistory) {
       logger.debug(`   ✅ Seller activity history: ${sellerActivityHistory.length} entries`);
+      if (sellerBidsTruncated) {
+        logger.info(`   ⚠️ Seller bids truncated: showing latest 500, hiding ${sellerBidsTruncatedCount} older bids`);
+      }
     }
     
     // Step 3.75: Check club membership
@@ -1110,7 +1180,11 @@ export class DataProcessingService {
         sellerActivityCount: sellerActivities?.length || 0,
         tokenDataIncomplete: fetchStatus?.tokenDataIncomplete || false,
         buyerDataIncomplete: fetchStatus?.buyerDataIncomplete || false,
-        sellerDataIncomplete: fetchStatus?.sellerDataIncomplete || false
+        sellerDataIncomplete: fetchStatus?.sellerDataIncomplete || false,
+        buyerBidsTruncated,
+        buyerBidsTruncatedCount,
+        sellerBidsTruncated,
+        sellerBidsTruncatedCount
       },
       clubInfo
     };

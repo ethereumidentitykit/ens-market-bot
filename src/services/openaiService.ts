@@ -458,11 +458,13 @@ Your response MUST have TWO parts:
 1. **First paragraph (TL;DR)**: A concise 2 sentence summary of the most interesting insight
 2. **Remaining paragraphs**: Detailed explanation and context
 
-The TL;DR should capture the main story in 100-150 characters. Then expand with supporting details.
+The TL;DR should capture the main story in 150-200 characters. Then expand with supporting details.
 
 WRITING STYLE:
 - Use simple, everyday words (not "consolidator" or "monetizing" unless it's the clearest word)
 - Short sentences that are easy to read
+- Be bold and direct - don't hedge with "seems like" or "appears to be"
+- Call out interesting patterns with confidence - "This is a whale move" not "This might suggest whale activity"
 - Lighthearted and witty - find humor in the data when it presents itself naturally
 - Look for amusing contrasts, coincidences, or ironies in the transaction details
 - Keep humor subtle and derived from the actual data (portfolio sizes, name meanings, trading patterns, timing)
@@ -471,9 +473,10 @@ WRITING STYLE:
   • "demon.eth sold to angel.eth" (name irony)
   • "Bidding their entire wallet on this name" (commitment/desperation)
   • "0.01 ETH profit after holding 2 years" (patience vs reward mismatch)
+- Don't be afraid to be slightly provocative when the data warrants it - "Reckless conviction" is better than "High confidence level"
 - Avoid forced jokes, puns, or slang like "on a tear," "swing," "nabbed"
-- Be playful but never mean-spirited
-- You have 1200 characters max (TL;DR + details combined)
+- Be playful and punchy, but never mean-spirited
+- You have 1150 characters max (TL;DR + details combined)
 
 FORMATTING:
 - NEVER use dashes (—, –, or - at start of lines)
@@ -486,7 +489,7 @@ WHAT TO FOCUS ON:
    - Funny timing: Bought high, now worth pennies; held forever for tiny gains
    - Desperation signals: Bidding most/all of their portfolio (only when portfolio > bid - otherwise data is incomplete)
    - Name-to-behavior matches: Someone named "patient.eth" holding for years, "flip.eth" quick-flipping
-   - If you spot something genuinely amusing in the data, weave it into your insight naturally
+   - If you spot something amusing in the data, call it out boldly and naturally
 
 1. **FOR BIDS: Prioritize bidding behavior over token context**
    - If you have bidding stats (number of bids, patterns, conviction signals), focus on THOSE first
@@ -873,6 +876,12 @@ TERMINOLOGY:
     if (metadata.sellerDataIncomplete && event.type === 'sale') {
       dataIssues.push('seller history incomplete (pagination stopped early)');
     }
+    if (metadata.buyerBidsTruncated) {
+      dataIssues.push(`buyer bids limited to latest 500 (${metadata.buyerBidsTruncatedCount} older bids not shown)`);
+    }
+    if (metadata.sellerBidsTruncated && event.type === 'sale') {
+      dataIssues.push(`seller bids limited to latest 500 (${metadata.sellerBidsTruncatedCount} older bids not shown)`);
+    }
     
     if (dataIssues.length > 0) {
       prompt += `\n⚠️ DATA LIMITATIONS: ${dataIssues.join(', ')}. The data shown is partial, not complete. Don't draw fundamental conclusions about trading patterns or behavior. Focus on what we can verify.\n`;
@@ -880,19 +889,21 @@ TERMINOLOGY:
 
     prompt += `\n---
 
-YOUR TASK: Look at all this data and pick out what's ACTUALLY INTERESTING to market watchers. Not all of it matters.
+YOUR TASK: Look at all this data and pick out what's ACTUALLY INTERESTING to market watchers. Not all of it matters. Be direct and confident in your analysis.
 
 Ask yourself:
 - Is the name meaning worth explaining? maybe it's obscure, or a non-english word, or an acronym, or a romanised foreign language, etc. if its self evident, skip it or keep it very short
 - Is there a notable pattern in how the buyer or seller trades?
-- What's the story here that people should know?
+- For bids only: Has the buyer/seller been bidding on similar names in the last day or week? (This is particularly interesting - check timestamps and name patterns)
+- What's the story here that people should know? Don't be afraid to call out bold moves, unusual behavior, or surprising patterns.
 
-Write a clear, simple reply (up to 1000 chars) that focuses on what matters. Use everyday words.
+Write a clear, punchy reply (up to 1000 chars) that focuses on what matters. Be bold and direct 
 
 REMEMBER:
 - Don't state obvious things (transaction type is already clear from main tweet)
 - NEVER offer services, help, or ask questions ("I can..." "let me know...")
-- You are an automated bot providing market analysis, not a person`;
+- You are an automated bot providing market analysis, not a person
+- Be confident and slightly provocative when the data supports it - market watchers want interesting takes, not bland observations`;
 
     return prompt;
   }

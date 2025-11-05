@@ -1783,30 +1783,56 @@ export class MagicEdenV4Service {
 
     const v3Type = typeMap[v4Activity.activityType] || 'transfer';
     
-    // Extract price data (TRADE and MINT activities have unitPrice, others default to 0)
-    const hasPrice = !!v4Activity.unitPrice;
-    const priceRaw = v4Activity.unitPrice?.amount.raw || '0';
-    const priceDecimal = v4Activity.unitPrice ? parseFloat(v4Activity.unitPrice.amount.native) : 0;
-    const currencyContract = v4Activity.unitPrice?.currency.contract || '0x0000000000000000000000000000000000000000';
-    const currencySymbol = v4Activity.unitPrice?.currency.symbol || 'ETH';
-    const currencyDecimals = v4Activity.unitPrice?.currency.decimals || 18;
-    
-    // Calculate USD value
+    // Extract price data:
+    // - TRADE and MINT activities have unitPrice
+    // - BID_CREATED activities have bid.priceV2
+    // - Others default to 0
+    let hasPrice = false;
+    let priceRaw = '0';
+    let priceDecimal = 0;
+    let currencyContract = '0x0000000000000000000000000000000000000000';
+    let currencySymbol = 'ETH';
+    let currencyDecimals = 18;
     let priceUsd = 0;
+    
     if (v4Activity.unitPrice) {
+      // TRADE and MINT activities
+      hasPrice = true;
+      priceRaw = v4Activity.unitPrice.amount.raw;
+      priceDecimal = parseFloat(v4Activity.unitPrice.amount.native);
+      currencyContract = v4Activity.unitPrice.currency.contract;
+      currencySymbol = v4Activity.unitPrice.currency.symbol;
+      currencyDecimals = v4Activity.unitPrice.currency.decimals;
+      
       const isStablecoin = ['USDC', 'USDT', 'DAI'].includes(currencySymbol);
       if (isStablecoin) {
-        // For stablecoins, the native value IS the USD value (1 USDC = $1)
         priceUsd = priceDecimal;
       } else {
-        // For ETH/WETH, calculate: native amount × fiatConversion rate
-        // This is more reliable than amount.fiat.usd (which is sometimes in micro-dollars)
         const fiatConversionRate = v4Activity.unitPrice.currency.fiatConversion?.usd;
         if (fiatConversionRate) {
           priceUsd = priceDecimal * fiatConversionRate;
         } else {
-          // Fallback to pre-calculated fiat.usd if fiatConversion is missing
-        priceUsd = parseFloat(v4Activity.unitPrice.amount.fiat?.usd || '0');
+          priceUsd = parseFloat(v4Activity.unitPrice.amount.fiat?.usd || '0');
+        }
+      }
+    } else if (v4Activity.bid && v4Activity.activityType === 'BID_CREATED') {
+      // BID_CREATED activities
+      hasPrice = true;
+      priceRaw = v4Activity.bid.priceV2.amount.raw;
+      priceDecimal = parseFloat(v4Activity.bid.priceV2.amount.native);
+      currencyContract = v4Activity.bid.priceV2.currency.contract;
+      currencySymbol = v4Activity.bid.priceV2.currency.symbol;
+      currencyDecimals = v4Activity.bid.priceV2.currency.decimals;
+      
+      const isStablecoin = ['USDC', 'USDT', 'DAI'].includes(currencySymbol);
+      if (isStablecoin) {
+        priceUsd = priceDecimal;
+      } else {
+        const fiatConversionRate = v4Activity.bid.priceV2.currency.fiatConversion?.usd;
+        if (fiatConversionRate) {
+          priceUsd = priceDecimal * fiatConversionRate;
+        } else {
+          priceUsd = parseFloat(v4Activity.bid.priceV2.amount.fiat?.usd || '0');
         }
       }
     }
@@ -1814,19 +1840,31 @@ export class MagicEdenV4Service {
     // Convert ISO timestamp to Unix timestamp
     const timestamp = Math.floor(new Date(v4Activity.timestamp).getTime() / 1000);
     
-    // Debug logging for TRADE activities
-    if (v4Activity.activityType === 'TRADE' || v4Activity.activityType === 'MINT') {
+    // Extract fromAddress and toAddress
+    // For BID_CREATED, use bid.maker as fromAddress (bidder)
+    let fromAddress = v4Activity.fromAddress || '0x0000000000000000000000000000000000000000';
+    let toAddress = v4Activity.toAddress || '0x0000000000000000000000000000000000000000';
+    
+    if (v4Activity.activityType === 'BID_CREATED' && v4Activity.bid) {
+      fromAddress = v4Activity.bid.maker; // Bidder address
+      toAddress = '0x0000000000000000000000000000000000000000'; // No recipient for bids
+    }
+    
+    // Debug logging for TRADE, MINT, and BID activities
+    if (v4Activity.activityType === 'TRADE' || v4Activity.activityType === 'MINT' || v4Activity.activityType === 'BID_CREATED') {
       logger.debug(`   🔄 Transforming ${v4Activity.activityType}: ${v4Activity.asset.name}, price: ${priceDecimal} ${currencySymbol} ($${priceUsd})`);
     }
 
     return {
       type: v3Type as any,
-      fromAddress: v4Activity.fromAddress || '0x0000000000000000000000000000000000000000',
-      toAddress: v4Activity.toAddress || '0x0000000000000000000000000000000000000000',
+      fromAddress,
+      toAddress,
       price: {
         currency: {
           contract: currencyContract,
-          name: hasPrice ? v4Activity.unitPrice!.currency.displayName : 'Ether',
+          name: hasPrice 
+            ? (v4Activity.unitPrice?.currency.displayName || v4Activity.bid?.priceV2.currency.displayName || 'Ether')
+            : 'Ether',
           symbol: currencySymbol,
           decimals: currencyDecimals
         },
