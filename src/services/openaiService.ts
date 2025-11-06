@@ -427,6 +427,10 @@ you can keep a couple numerical data points, but don't make it the main focus.
 **PORTFOLIO INSIGHTS (when available)**:
 When mentioning portfolio value, ONLY report the total USD value. DO NOT separately mention ETH balance or individual token amounts. The USD value already includes everything.
 
+**CRITICAL - PORTFOLIO TIMING**:
+- **FOR BIDS**: Portfolio data is from the same time as the bid.
+- **FOR SALES/REGISTRATIONS**: Portfolio data is from AFTER the purchase (money already spent). If buyer spent $500 and now has $200, they had $700 before. the portfolio already reflects post the purchase totals.
+
 1. Interesting examples derived from $ portfolio value:
 For bids:
 - **WHEN TO SKIP**: Bidder portfolio is $293, bid is 3 ETH (~$10k) → DO NOT MENTION PORTFOLIO (incomplete data)
@@ -436,15 +440,17 @@ For bids:
 - Owner sold similar names at this price point before - they might accept.
 
 2. For sales and registrations:
-- buyer has a lot of dry powder, one of their first purchases.
-- the seller needed the cash, they had low cash in their wallet before this sale.
+- Buyer has $50k portfolio after $500 purchase → comfortable financial position, one of many purchases
+- Buyer has $300 portfolio after $500 purchase → all-in on this name, strong conviction
+- Seller has $550 portfolio after $500 sale (they just had $50 before the sale)→ needed the cash, likely cashing out
+- Seller has $2M portfolio after $500 sale → fair sale, not liquidity motivated
 
 3. General portfolio ideas:
 - Lots of WETH/stablecoins + many bids = hunter
 - Multi-chain presence = likely not wash activity. Established users.
-- Low portfolio relative to purchase/bid = really likes the name.
+- Low portfolio relative to purchase/bid = really likes the name (remember: for sales/regs, portfolio is AFTER spending)
 - Very large portfolio ($1M+) = Whale making moves (signals market confidence)
-- Overall portfolio value is interesting, especially relative to the purchase or bid price.
+- Overall portfolio value is interesting, especially relative to the purchase or bid price (account for timing difference)
 
 TERMINOLOGY:
 - Use "onchain" not "on-chain"
