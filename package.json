@@ -1,7 +1,7 @@
 {
-  "name": "twitterbot",
+  "name": "ens-market-bot",
   "version": "1.0.0",
-  "description": "",
+  "description": "Automated Twitter bot for ENS domain market analysis with AI-generated insights",
   "main": "index.js",
   "scripts": {
     "build": "tsc",
@@ -13,9 +13,9 @@
     "test": "echo \"No tests specified - skipping\"",
     "vercel-build": "npm run build"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": ["ens", "ethereum", "twitter-bot", "nft", "web3", "ai", "openai"],
+  "author": "ENS Market Bot Contributors",
+  "license": "MIT",
   "devDependencies": {
     "@types/connect-pg-simple": "^7.0.3",
     "@types/cors": "^2.8.19",
