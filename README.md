@@ -22,7 +22,7 @@ An automated Twitter bot that monitors and tweets about Ethereum Name Service (E
 - **TwitterService**: Handles tweet posting and formatting
 - **AlchemyService**: Provides portfolio and token balance data
 - **OpenSeaService**: Fetches ENS holdings and metadata
-- **ENSSubgraphService**: In-house ENS subgraph for fast name resolution
+- **ENSSubgraphService**: ENS subgraph powered by ENSNode for fast name resolution
 - **DatabaseService**: PostgreSQL integration for state management
 - **QuickNodeSales/RegistrationService**: Webhook handlers for real-time events
 - **BidsProcessingService**: Monitors and processes new bids
@@ -42,8 +42,7 @@ An automated Twitter bot that monitors and tweets about Ethereum Name Service (E
 - PostgreSQL database
 - Twitter API credentials (Premium+ for 1200 char replies)
 - OpenAI API key (GPT-5-mini)
-- Magic Eden API key
-- QuickNode account with webhook support
+- QuickNode account with streaminging API
 - Alchemy API key
 - Ethereum RPC provider
 
@@ -95,7 +94,7 @@ MAGIC_EDEN_API_KEY=your_magic_eden_api_key
 QUICKNODE_SECRET_SALES=your_quicknode_sales_secret
 QUICKNODE_SECRET_REGISTRATIONS=your_quicknode_registration_secret
 
-# Alchemy (Optional - for portfolio data)
+# Alchemy (Required - for portfolio data and price lookups)
 ALCHEMY_API_KEY=your_alchemy_api_key
 
 # SIWE Authentication (Required for dashboard)
@@ -103,7 +102,7 @@ ADMIN_WHITELIST=0xYourAddress1,0xYourAddress2
 SESSION_SECRET=your_secure_random_session_secret
 SIWE_DOMAIN=your-domain.com
 
-# In-house ENS Subgraph (Optional)
+# In-house ENS Subgraph (Optional - falls back to public endpoint)
 ENS_SUBGRAPH_PRIMARY_URL=https://your-subgraph-endpoint.com/subgraph
 
 # Timezone (Recommended)
@@ -197,38 +196,6 @@ The bot uses a sophisticated AI pipeline to generate insights:
 - Handles portfolio timing correctly (pre-bid vs post-purchase)
 - Uses portfolio context for wash trading detection and conviction signals
 
-### ENS Subgraph Integration
-
-- In-house subgraph for fast ENS name resolution
-- Supports both Registry (labelhash) and Name Wrapper (namehash) contracts
-- Automatic failover to backup endpoints
-- 2-10x faster than public metadata APIs
-
-## Deployment
-
-### Vercel
-
-```bash
-# Deploy to Vercel
-vercel
-
-# Set environment variables in Vercel dashboard
-vercel env add POSTGRES_URL
-vercel env add TWITTER_API_KEY
-# ... etc
-```
-
-### Docker (Optional)
-
-```dockerfile
-FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --production
-COPY . .
-RUN npm run build
-CMD ["npm", "start"]
-```
 
 ## Rate Limiting
 
