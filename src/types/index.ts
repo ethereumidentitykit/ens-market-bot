@@ -331,8 +331,8 @@ export interface ENSBid {
   currencySymbol: string;  // WETH, USDC, etc.
   
   // Marketplace
-  sourceDomain?: string;   // e.g., "opensea.io"
-  sourceName?: string;     // e.g., "OpenSea"
+  sourceDomain?: string;   // e.g., "grails.app"
+  sourceName?: string;     // e.g., "Grails"
   marketplaceFee?: number; // Fee basis points
   
   // Timestamps & Duration
