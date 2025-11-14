@@ -470,7 +470,7 @@ export class NewTweetFormatter {
     const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
     
     // OpenSea link
-    const openSeaUrl = await this.buildOpenSeaUrl(ensName, registration.contractAddress, registration.tokenId);
+    const marketplaceUrl = this.buildMarketplaceUrl(ensName);
     
     // Combine all lines
     let tweet = `${header}\n\n${priceLine}\n${ownerLine}`;
@@ -480,8 +480,8 @@ export class NewTweetFormatter {
     if (clubLine) {
       tweet += `\n${clubLine}`;
     }
-    if (openSeaUrl) {
-      tweet += `\n\n${openSeaUrl}`;
+    if (marketplaceUrl) {
+      tweet += `\n\n${marketplaceUrl}`;
     }
     
     return tweet;
@@ -646,8 +646,8 @@ export class NewTweetFormatter {
     const formattedClubString = this.clubService.getFormattedClubString(ensName);
     const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
     
-    // OpenSea link
-    const openSeaUrl = await this.buildOpenSeaUrl(ensName, bid.contractAddress, bid.tokenId);
+    // Marketplace link
+    const marketplaceUrl = this.buildMarketplaceUrl(ensName);
     
     // Combine all lines
     let tweet = `${header}\n\n${priceLine}\n${bidderLine}\n\n${currentOwnerLine}`;
@@ -660,8 +660,8 @@ export class NewTweetFormatter {
     if (clubLine) {
       tweet += `\n${clubLine}`;
     }
-    if (openSeaUrl) {
-      tweet += `\n\n${openSeaUrl}`;
+    if (marketplaceUrl) {
+      tweet += `\n\n${marketplaceUrl}`;
     }
     
     return tweet;
@@ -751,7 +751,7 @@ export class NewTweetFormatter {
     logger.info(`[NewTweetFormatter] Sale club line result: "${clubLine}"`);
     
     // OpenSea link
-    const openSeaUrl = await this.buildOpenSeaUrl(ensName, sale.contractAddress, sale.tokenId);
+    const marketplaceUrl = this.buildMarketplaceUrl(ensName);
     
     // Combine all lines
     let tweet = `${header}\n\n${priceLine}\n${buyerLine}\n\n${sellerLine}`;
@@ -761,8 +761,8 @@ export class NewTweetFormatter {
     if (clubLine) {
       tweet += `\n${clubLine}`;
     }
-    if (openSeaUrl) {
-      tweet += `\n\n${openSeaUrl}`;
+    if (marketplaceUrl) {
+      tweet += `\n\n${marketplaceUrl}`;
     }
     
     return tweet;
@@ -804,13 +804,10 @@ export class NewTweetFormatter {
   }
 
   /**
-   * Build OpenSea marketplace URL for an ENS name
-   * Format: opensea.io/item/ethereum/{contract}/{tokenId}
-   * 
-   * Tries both Base Registrar and NameWrapper contracts to find the correct one
-   * Defaults to Base Registrar if both fail or timeout
+   * Build marketplace URL for an ENS name
+   * Format: grails.app/name.eth
    */
-  private async buildOpenSeaUrl(ensName: string, contractAddress?: string, tokenId?: string): Promise<string> {
+  private buildMarketplaceUrl(ensName: string): string {
     // Handle cases where ensName might be "Unknown ENS" or similar error states
     const cleanName = ensName.replace(/\.eth$/i, '').trim();
     if (!cleanName || 
@@ -820,57 +817,10 @@ export class NewTweetFormatter {
       return ''; // No link for problematic cases
     }
     
-    // Require tokenId for OpenSea URL
-    if (!tokenId) {
-      logger.warn(`⚠️ Missing tokenId for OpenSea URL: ${ensName}`);
-      return '';
-    }
-    
-    const ENS_BASE_REGISTRAR = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
-    const ENS_NAME_WRAPPER = '0xd4416b13d2b3a9abae7acd5d6c2bbdbe25686401';
-    const TIMEOUT_MS = 3000; // 3 second timeout per attempt
-    
-    // Helper to check if NFT exists on OpenSea with timeout
-    const checkExists = async (contract: string, tid: string): Promise<boolean> => {
-      if (!this.openSeaService) return false;
-      
-      try {
-        const timeoutPromise = new Promise<null>((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout')), TIMEOUT_MS)
-        );
-        
-        const metadataPromise = this.openSeaService.getSimplifiedMetadata(contract, tid);
-        const result = await Promise.race([metadataPromise, timeoutPromise]);
-        
-        return result !== null;
-      } catch (error: any) {
-        logger.debug(`OpenSea check failed for ${contract}/${tid}: ${error.message}`);
-        return false;
-      }
-    };
-    
-    // 1. Try Base Registrar with provided tokenId (labelhash)
-    logger.debug(`🔍 Checking OpenSea for Base Registrar: ${ensName}`);
-    const baseExists = await checkExists(ENS_BASE_REGISTRAR, tokenId);
-    if (baseExists) {
-      logger.debug(`✅ Found on Base Registrar: ${ensName}`);
-      return `https://opensea.io/item/ethereum/${ENS_BASE_REGISTRAR}/${tokenId}`;
-    }
-    
-    // 2. Try NameWrapper with calculated namehash
+    // Ensure .eth suffix
     const fullEnsName = ensName.endsWith('.eth') ? ensName : `${ensName}.eth`;
-    const namehashTokenId = BigInt(ENSTokenUtils.getTokenIdForContract(ENS_NAME_WRAPPER, fullEnsName)).toString();
     
-    logger.debug(`🔍 Checking OpenSea for NameWrapper: ${ensName}`);
-    const wrapperExists = await checkExists(ENS_NAME_WRAPPER, namehashTokenId);
-    if (wrapperExists) {
-      logger.debug(`✅ Found on NameWrapper: ${ensName}`);
-      return `https://opensea.io/item/ethereum/${ENS_NAME_WRAPPER}/${namehashTokenId}`;
-    }
-    
-    // 3. Default to Base Registrar if both failed/timeout
-    logger.debug(`⚠️ Neither contract verified for ${ensName}, defaulting to Base Registrar`);
-    return `https://opensea.io/item/ethereum/${ENS_BASE_REGISTRAR}/${tokenId}`;
+    return `grails.app/${fullEnsName}`;
   }
 
   /**
@@ -1263,14 +1213,14 @@ export class NewTweetFormatter {
       errors.push('Registration tweet should include "Minter:" label');
     }
 
-    // OpenSea link is optional - only check if ENS name is valid (not "unknown" etc.)
+    // Marketplace link is optional - only check if ENS name is valid (not "unknown" etc.)
     const ensName = content.match(/(\w+)\.eth/)?.[0] || '';
     const shouldHaveLink = ensName && 
                           !ensName.toLowerCase().includes('unknown') && 
                           ensName.toLowerCase() !== 'ens.eth';
     
-    if (shouldHaveLink && !content.includes('opensea.io')) {
-      errors.push('Registration tweet should include OpenSea link');
+    if (shouldHaveLink && !content.includes('grails.app')) {
+      errors.push('Registration tweet should include marketplace link');
     }
 
     return {
@@ -1309,14 +1259,14 @@ export class NewTweetFormatter {
     }
 
 
-    // OpenSea link is optional - only check if ENS name is valid (not "unknown" etc.)
+    // Marketplace link is optional - only check if ENS name is valid (not "unknown" etc.)
     const ensName = content.match(/(\w+)\.eth/)?.[0] || '';
     const shouldHaveLink = ensName && 
                           !ensName.toLowerCase().includes('unknown') && 
                           ensName.toLowerCase() !== 'ens.eth';
     
-    if (shouldHaveLink && !content.includes('opensea.io')) {
-      errors.push('Bid tweet should include OpenSea link');
+    if (shouldHaveLink && !content.includes('grails.app')) {
+      errors.push('Bid tweet should include marketplace link');
     }
 
     return {
@@ -1360,14 +1310,14 @@ export class NewTweetFormatter {
       errors.push('Tweet should include "Buyer:" label');
     }
 
-    // OpenSea link is optional - only check if ENS name is valid (not "unknown" etc.)
+    // Marketplace link is optional - only check if ENS name is valid (not "unknown" etc.)
     const ensName = content.match(/(\w+)\.eth/)?.[0] || '';
     const shouldHaveLink = ensName && 
                           !ensName.toLowerCase().includes('unknown') && 
                           ensName.toLowerCase() !== 'ens.eth';
     
-    if (shouldHaveLink && !content.includes('opensea.io')) {
-      errors.push('Tweet should include OpenSea link');
+    if (shouldHaveLink && !content.includes('grails.app')) {
+      errors.push('Tweet should include marketplace link');
     }
 
     return {
@@ -1388,7 +1338,7 @@ export class NewTweetFormatter {
       priceLine: string;
       sellerLine: string;
       buyerLine: string;
-      openSeaUrl: string;
+      marketplaceUrl: string;
       buyerHandle: string;
       sellerHandle: string;
     };
@@ -1424,7 +1374,7 @@ export class NewTweetFormatter {
       buyerLine: `Buyer: ${buyerHandle}`,
       sellerLine: `Seller: ${sellerHandle}`,
       clubLine: clubLine,
-      openSeaUrl: await this.buildOpenSeaUrl(ensName, sale.contractAddress, sale.tokenId),
+      marketplaceUrl: this.buildMarketplaceUrl(ensName),
       buyerHandle: buyerHandle,
       sellerHandle: sellerHandle
     };
@@ -1443,7 +1393,7 @@ export class NewTweetFormatter {
       ensName: string;
       priceLine: string;
       ownerLine: string;
-      openSeaUrl: string;
+      marketplaceUrl: string;
       ownerHandle: string;
     };
   }> {
@@ -1469,7 +1419,7 @@ export class NewTweetFormatter {
       priceLine: priceUsd ? `For: ${priceUsd.replace(/[()]/g, '')} (${priceEth} ETH)` : `For: ${priceEth} ETH`,
       ownerLine: `Minter: ${ownerHandle}`,
       clubLine: clubLine,
-      openSeaUrl: await this.buildOpenSeaUrl(ensName, registration.contractAddress, registration.tokenId),
+      marketplaceUrl: this.buildMarketplaceUrl(ensName),
       ownerHandle: ownerHandle
     };
 
@@ -1489,7 +1439,7 @@ export class NewTweetFormatter {
       bidderLine: string;
       currentOwnerLine: string;
       validLine: string;
-      openSeaUrl: string;
+      marketplaceUrl: string;
       bidderHandle: string;
       currentOwnerHandle: string;
     };
@@ -1573,7 +1523,7 @@ export class NewTweetFormatter {
     
     const bidderHandle = this.getDisplayHandle(bidderAccount, bid.makerAddress);
     const duration = this.calculateBidDuration(bid.validFrom, bid.validUntil);
-    const openSeaUrl = await this.buildOpenSeaUrl(ensName, bid.contractAddress, bid.tokenId);
+    const marketplaceUrl = this.buildMarketplaceUrl(ensName);
     
     // Fetch Owner for breakdown (using OpenSea first, Alchemy fallback)
     let currentOwnerHandle = 'Unknown';
@@ -1624,7 +1574,7 @@ export class NewTweetFormatter {
       bidderLine: `Bidder: ${bidderHandle}`,
       currentOwnerLine: `Owner: ${currentOwnerHandle}`,
       clubLine: clubLine,
-      openSeaUrl: openSeaUrl,
+      marketplaceUrl: marketplaceUrl,
       bidderHandle: bidderHandle,
       currentOwnerHandle: currentOwnerHandle
     };
