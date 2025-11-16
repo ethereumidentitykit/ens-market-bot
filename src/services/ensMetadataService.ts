@@ -5,6 +5,10 @@ export interface ENSMetadata {
   name: string;
   description?: string;
   image?: string;
+  image_url?: string; // ENS API provides both image and image_url
+  background_image?: string;
+  url?: string;
+  is_normalized?: boolean;
   attributes?: Array<{
     trait_type: string;
     value: any;
@@ -34,12 +38,31 @@ export class ENSMetadataService {
       const response: AxiosResponse<ENSMetadata> = await axios.get(url, {
         timeout: this.timeout,
         headers: {
-          'User-Agent': 'ENS-TwitterBot/1.0'
-        }
+          'User-Agent': 'ENS-TwitterBot/1.0',
+          'Accept': 'application/json'
+        },
+        responseType: 'json' // Explicitly parse as JSON
       });
       
-      logger.debug(`Successfully fetched ENS metadata: ${response.data.name}`);
-      return response.data;
+      // Debug: Log response details
+      logger.debug(`Response status: ${response.status}`);
+      logger.debug(`Response headers content-type: ${response.headers['content-type']}`);
+      logger.debug(`Response data type: ${typeof response.data}`);
+      logger.debug(`Response data is string: ${typeof response.data === 'string'}`);
+      
+      // If response.data is a string, parse it manually
+      let metadata: ENSMetadata;
+      if (typeof response.data === 'string') {
+        logger.warn(`⚠️ ENS API returned string instead of parsed JSON, parsing manually`);
+        metadata = JSON.parse(response.data);
+      } else {
+        metadata = response.data;
+      }
+      
+      logger.debug(`Successfully fetched ENS metadata: ${metadata.name}`);
+      logger.debug(`Full ENS metadata response:`, JSON.stringify(metadata, null, 2));
+      
+      return metadata;
       
     } catch (error: any) {
       if (error.code === 'ECONNABORTED') {

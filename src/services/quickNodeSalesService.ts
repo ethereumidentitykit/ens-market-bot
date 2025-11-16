@@ -399,7 +399,7 @@ export class QuickNodeSalesService {
             const beforeName = nftName;
             const beforeImage = nftImage;
             nftName = nftName || ensData.name;
-            nftImage = nftImage || ensData.image;
+            nftImage = nftImage || ensData.image || ensData.image_url; // Use image_url as fallback
             
             const fieldsFromEns = [];
             if (!beforeName && nftName) fieldsFromEns.push('name');
