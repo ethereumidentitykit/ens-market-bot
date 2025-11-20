@@ -303,13 +303,8 @@ export interface MagicEdenV4Bid {
 }
 
 export interface MagicEdenV4BidsResponse {
-  data: Array<{
-    bid: MagicEdenV4Bid;
-  }>;
-  pagination: {
-    limit: number;
-    offset: number;
-  };
+  bids: Array<MagicEdenV4Bid>;  // Changed from data to bids, and direct array instead of wrapped
+  continuation?: string;  // Changed from pagination to continuation
 }
 
 /**
@@ -617,7 +612,7 @@ export class MagicEdenV4Service {
         timeout: 30000 // 30 seconds
       });
       
-      const bidsData = response.data.data || [];
+      const bidsData = response.data.bids || [];  // Changed from data.data to data.bids
       
       logger.debug(`   Retrieved ${bidsData.length} bids from ${collectionId}`);
       
@@ -668,8 +663,8 @@ export class MagicEdenV4Service {
       
       // Transform to internal format and filter active only
       const transformedBids = allBidsData
-        .filter(item => item.bid?.status === 'active') // Only active bids
-        .map(item => this.transformV4BidToBid(item.bid));
+        .filter(item => item.status === 'active') // Only active bids - direct access now
+        .map(item => this.transformV4BidToBid(item));
       
       logger.debug(`   ${transformedBids.length} active bids after filtering`);
       
