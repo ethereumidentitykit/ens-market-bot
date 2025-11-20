@@ -389,7 +389,7 @@ export class MagicEdenV4Service {
   private readonly apiToggleService: APIToggleService;
   
   constructor() {
-    this.baseUrl = 'https://api-mainnet.magiceden.dev/v4';
+    this.baseUrl = 'https://api-mainnet.magiceden.dev/v4/evm-public';
     this.apiToggleService = APIToggleService.getInstance();
     
     // ENS Contract Addresses (lowercase for consistent matching)
@@ -412,7 +412,7 @@ export class MagicEdenV4Service {
       return config;
     });
     
-    logger.info('🆕 MagicEdenV4Service initialized (activity-based API)');
+    logger.info('🆕 MagicEdenV4Service initialized (evm-public API)');
   }
 
   /**
@@ -579,11 +579,73 @@ export class MagicEdenV4Service {
   }
 
   /**
-   * Get active bids using the new /v4/bids endpoint
-   * Direct endpoint for bids - simpler than activity-based approach
+   * Get active bids from a single collection
+   * Helper method for getActiveBids - fetches bids for ONE contract
+   * 
+   * @param collectionId - Single ENS contract address
+   * @param offset - Starting offset for pagination
+   * @param limit - Number of bids to fetch (max: 100)
+   * @returns Bid data from single contract
+   */
+  private async getBidsForCollection(
+    collectionId: string,
+    offset: number = 0,
+    limit: number = 50
+  ): Promise<{ bids: any[]; nextOffset?: number }> {
+    try {
+      const params = new URLSearchParams({
+        chain: 'ethereum',
+        collectionId: collectionId,
+        sortBy: 'createdAt',
+        sortDir: 'desc',
+        limit: Math.min(limit, 100).toString(),
+        offset: offset.toString()
+      });
+      
+      // Add bidTypes as array parameter (ASSET for individual token bids)
+      params.append('bidTypes[]', 'ASSET');
+      
+      const url = `/orders/bids?${params.toString()}`;
+      
+      logger.debug(`🔍 Fetching bids for ${collectionId}: ${this.baseUrl}${url}`);
+      
+      const response: AxiosResponse<MagicEdenV4BidsResponse> = await this.axiosInstance.get(url, {
+        headers: {
+          'Accept': '*/*',
+          'User-Agent': 'ENS-TwitterBot/2.0'
+        },
+        timeout: 30000 // 30 seconds
+      });
+      
+      const bidsData = response.data.data || [];
+      
+      logger.debug(`   Retrieved ${bidsData.length} bids from ${collectionId}`);
+      
+      return {
+        bids: bidsData,
+        nextOffset: bidsData.length >= limit ? (offset + limit) : undefined
+      };
+
+    } catch (error: any) {
+      logger.error(`❌ Magic Eden V4 /bids API Error for ${collectionId}:`, error.message);
+      if (error.response?.data) {
+        logger.debug(`   Error details:`, JSON.stringify(error.response.data, null, 2));
+      }
+
+      // Return empty result on error
+      return {
+        bids: [],
+        nextOffset: undefined
+      };
+    }
+  }
+
+  /**
+   * Get active bids using the new /v4/evm-public/orders/bids endpoint
+   * Makes TWO separate API calls (one per ENS contract) and merges results
    * 
    * @param offset - Starting offset for pagination (default: 0)
-   * @param limit - Number of bids to fetch (default: 50, max: 100)
+   * @param limit - Number of bids to fetch PER CONTRACT (default: 50, max: 100)
    * @returns Bid data and pagination info
    */
   async getActiveBids(
@@ -591,38 +653,36 @@ export class MagicEdenV4Service {
     limit: number = 50
   ): Promise<{ bids: MagicEdenBid[]; nextOffset?: number }> {
     try {
-      const params = new URLSearchParams();
+      logger.info(`🔍 Fetching ENS bids from Magic Eden V4 API (both contracts, offset: ${offset}, limit: ${limit})`);
       
-      // Both ENS contracts in a single query
-      this.ensContracts.forEach(contract => {
-        params.append('collectionIds[]', `ethereum:${contract}`);
-      });
+      // Fetch from BOTH ENS contracts in parallel
+      const [contract1Result, contract2Result] = await Promise.all([
+        this.getBidsForCollection(this.ensContracts[0], offset, limit),
+        this.getBidsForCollection(this.ensContracts[1], offset, limit)
+      ]);
       
-      params.append('sortBy', 'createdAt');
-      params.append('sortDir', 'desc');
-      params.append('limit', Math.min(limit, 100).toString()); // API max is 100
-      params.append('offset', offset.toString());
+      // Merge bids from both contracts
+      const allBidsData = [...contract1Result.bids, ...contract2Result.bids];
       
-      const url = `${this.baseUrl}/bids?${params.toString()}`;
+      logger.info(`✅ Magic Eden V4 /bids API: Retrieved ${allBidsData.length} total bids (${contract1Result.bids.length} + ${contract2Result.bids.length})`);
       
-      logger.debug(`🔍 Fetching bids from: ${url}`);
-      
-      const response: AxiosResponse<MagicEdenV4BidsResponse> = await this.axiosInstance.get(url);
-      
-      const bidsData = response.data.data || [];
-      const pagination = response.data.pagination;
-      
-      logger.info(`✅ Magic Eden V4 /bids API: Retrieved ${bidsData.length} bids (offset: ${offset})`);
-      
-      // Transform to internal format
-      const transformedBids = bidsData
-        .filter(item => item.bid.status === 'active') // Only active bids
+      // Transform to internal format and filter active only
+      const transformedBids = allBidsData
+        .filter(item => item.bid?.status === 'active') // Only active bids
         .map(item => this.transformV4BidToBid(item.bid));
       
       logger.debug(`   ${transformedBids.length} active bids after filtering`);
       
-      // Calculate next offset for pagination (with 5-item overlap)
-      const nextOffset = bidsData.length >= limit ? (offset + limit - 5) : undefined;
+      // Sort by creation date (newest first)
+      transformedBids.sort((a, b) => {
+        const timeA = new Date(a.createdAt).getTime();
+        const timeB = new Date(b.createdAt).getTime();
+        return timeB - timeA; // Descending
+      });
+      
+      // Calculate next offset (if either contract has more data)
+      const hasMoreData = contract1Result.nextOffset !== undefined || contract2Result.nextOffset !== undefined;
+      const nextOffset = hasMoreData ? (offset + limit) : undefined;
       
       return {
         bids: transformedBids,
