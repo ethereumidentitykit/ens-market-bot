@@ -775,18 +775,12 @@ export class MagicEdenV4Service {
         consecutiveEmptyPages = 0; // Reset on successful page
       }
       
-      // Check if oldest bid in this batch is older than boundary - if so, we're done
+      // Log oldest bid info for debugging (but don't stop based on it)
+      // With continuation tokens, ordering isn't guaranteed to be perfect chronological
       if (bids.length > 0) {
         const oldestInBatch = Math.min(...bids.map(bid => new Date(bid.createdAt).getTime()));
-        const boundaryDate = new Date(boundaryTimestamp).toISOString();
-        const oldestDate = new Date(oldestInBatch).toISOString();
-        
-        logger.debug(`🕒 Oldest bid in batch: ${oldestDate}, Boundary: ${boundaryDate}`);
-        
-        if (oldestInBatch <= boundaryTimestamp) {
-          logger.info(`🎯 Hit boundary timestamp, stopping pagination`);
-          break;
-        }
+        const newestInBatch = Math.max(...bids.map(bid => new Date(bid.createdAt).getTime()));
+        logger.debug(`🕒 Batch range: ${new Date(oldestInBatch).toISOString()} to ${new Date(newestInBatch).toISOString()}`);
       }
       
       // Check if there are more pages (either contract has continuation token)
