@@ -240,21 +240,7 @@ export interface MagicEdenV4Bid {
   id: string; // Order ID
   status: 'active' | 'cancelled' | 'filled' | 'expired';
   maker: string; // Bidder address
-  price: {
-    currency: {
-      symbol: string;
-      decimals: number;
-      displayName: string;
-      address: string;
-      assetId: string;
-      fiatConversion?: {
-        usd: number;
-      };
-    };
-    noFeesRaw: string;
-    withRequiredFeesRaw: string;
-  };
-  priceV2: {
+  price: {  // Changed from priceV2 to price
     amount: {
       raw: string; // Wei
       native: string; // Decimal (e.g., "0.250000000000000000")
@@ -281,18 +267,16 @@ export interface MagicEdenV4Bid {
     validUntil: string; // ISO timestamp
   };
   source: string; // "OPENSEA", "BLUR", etc.
-  maxFees: {
+  fees: {
     royaltyBp: number;
     makerMarketplaceBp: number;
     takerMarketplaceBp: number;
-    lpFeeBp: number;
   };
   createdAt: string; // ISO timestamp
   updatedAt: string; // ISO timestamp
-  kind: 'BID';
+  type: 'ASSET' | 'COLLECTION';  // Changed from kind: 'BID' to type
   criteria: {
-    type: 'ASSET' | 'COLLECTION';
-    assetId: string; // "contract:tokenId"
+    assetId: string; // "contract:tokenId" - removed type (it's at top level now)
   };
   chain: string;
   protocol: string; // "ERC721"
@@ -578,24 +562,28 @@ export class MagicEdenV4Service {
    * Helper method for getActiveBids - fetches bids for ONE contract
    * 
    * @param collectionId - Single ENS contract address
-   * @param offset - Starting offset for pagination
+   * @param continuation - Continuation token for pagination (optional)
    * @param limit - Number of bids to fetch (max: 100)
-   * @returns Bid data from single contract
+   * @returns Bid data and continuation token from single contract
    */
   private async getBidsForCollection(
     collectionId: string,
-    offset: number = 0,
+    continuation?: string,
     limit: number = 50
-  ): Promise<{ bids: any[]; nextOffset?: number }> {
+  ): Promise<{ bids: any[]; continuation?: string }> {
     try {
       const params = new URLSearchParams({
         chain: 'ethereum',
         collectionId: collectionId,
         sortBy: 'createdAt',
         sortDir: 'desc',
-        limit: Math.min(limit, 100).toString(),
-        offset: offset.toString()
+        limit: Math.min(limit, 100).toString()
       });
+      
+      // Add continuation token if provided (for pagination)
+      if (continuation) {
+        params.append('continuation', continuation);
+      }
       
       // Add bidTypes as array parameter (ASSET for individual token bids)
       params.append('bidTypes[]', 'ASSET');
@@ -603,6 +591,9 @@ export class MagicEdenV4Service {
       const url = `/orders/bids?${params.toString()}`;
       
       logger.debug(`🔍 Fetching bids for ${collectionId}: ${this.baseUrl}${url}`);
+      if (continuation) {
+        logger.debug(`   Using continuation token: ${continuation.substring(0, 20)}...`);
+      }
       
       const response: AxiosResponse<MagicEdenV4BidsResponse> = await this.axiosInstance.get(url, {
         headers: {
@@ -612,13 +603,14 @@ export class MagicEdenV4Service {
         timeout: 30000 // 30 seconds
       });
       
-      const bidsData = response.data.bids || [];  // Changed from data.data to data.bids
+      const bidsData = response.data.bids || [];
+      const nextContinuation = response.data.continuation;
       
-      logger.debug(`   Retrieved ${bidsData.length} bids from ${collectionId}`);
+      logger.debug(`   Retrieved ${bidsData.length} bids from ${collectionId}${nextContinuation ? ', has more pages' : ', last page'}`);
       
       return {
         bids: bidsData,
-        nextOffset: bidsData.length >= limit ? (offset + limit) : undefined
+        continuation: nextContinuation
       };
 
     } catch (error: any) {
@@ -630,7 +622,7 @@ export class MagicEdenV4Service {
       // Return empty result on error
       return {
         bids: [],
-        nextOffset: undefined
+        continuation: undefined
       };
     }
   }
@@ -639,21 +631,24 @@ export class MagicEdenV4Service {
    * Get active bids using the new /v4/evm-public/orders/bids endpoint
    * Makes TWO separate API calls (one per ENS contract) and merges results
    * 
-   * @param offset - Starting offset for pagination (default: 0)
+   * @param continuations - Continuation tokens for each contract (optional)
    * @param limit - Number of bids to fetch PER CONTRACT (default: 50, max: 100)
-   * @returns Bid data and pagination info
+   * @returns Bid data and continuation tokens for next page
    */
   async getActiveBids(
-    offset: number = 0,
+    continuations?: { contract1?: string; contract2?: string },
     limit: number = 50
-  ): Promise<{ bids: MagicEdenBid[]; nextOffset?: number }> {
+  ): Promise<{ bids: MagicEdenBid[]; continuations?: { contract1?: string; contract2?: string } }> {
     try {
-      logger.info(`🔍 Fetching ENS bids from Magic Eden V4 API (both contracts, offset: ${offset}, limit: ${limit})`);
+      logger.info(`🔍 Fetching ENS bids from Magic Eden V4 API (both contracts, limit: ${limit})`);
+      if (continuations?.contract1 || continuations?.contract2) {
+        logger.debug(`   Using continuations: C1=${continuations.contract1 ? 'yes' : 'no'}, C2=${continuations.contract2 ? 'yes' : 'no'}`);
+      }
       
-      // Fetch from BOTH ENS contracts in parallel
+      // Fetch from BOTH ENS contracts in parallel with separate continuation tokens
       const [contract1Result, contract2Result] = await Promise.all([
-        this.getBidsForCollection(this.ensContracts[0], offset, limit),
-        this.getBidsForCollection(this.ensContracts[1], offset, limit)
+        this.getBidsForCollection(this.ensContracts[0], continuations?.contract1, limit),
+        this.getBidsForCollection(this.ensContracts[1], continuations?.contract2, limit)
       ]);
       
       // Merge bids from both contracts
@@ -675,13 +670,19 @@ export class MagicEdenV4Service {
         return timeB - timeA; // Descending
       });
       
-      // Calculate next offset (if either contract has more data)
-      const hasMoreData = contract1Result.nextOffset !== undefined || contract2Result.nextOffset !== undefined;
-      const nextOffset = hasMoreData ? (offset + limit) : undefined;
+      // Return separate continuation tokens for each contract
+      const nextContinuations = (contract1Result.continuation || contract2Result.continuation) ? {
+        contract1: contract1Result.continuation,
+        contract2: contract2Result.continuation
+      } : undefined;
+      
+      if (nextContinuations) {
+        logger.debug(`   Next continuations: C1=${nextContinuations.contract1 ? 'yes' : 'done'}, C2=${nextContinuations.contract2 ? 'yes' : 'done'}`);
+      }
       
       return {
         bids: transformedBids,
-        nextOffset
+        continuations: nextContinuations
       };
 
     } catch (error: any) {
@@ -690,14 +691,13 @@ export class MagicEdenV4Service {
       // Return empty result on error rather than throwing
       return {
         bids: [],
-        nextOffset: undefined
+        continuations: undefined
       };
     }
   }
 
   /**
-   * Get all new bids using offset-based pagination until we hit the boundary timestamp
-   * Uses 5-item overlap between pages to handle concurrent bid creation
+   * Get all new bids using continuation token pagination until we hit the boundary timestamp
    * 
    * @param boundaryTimestamp - Unix timestamp in milliseconds
    * @returns Object with bids and the newest timestamp seen from API (for safe bookmark updates)
@@ -706,18 +706,18 @@ export class MagicEdenV4Service {
     logger.info(`📈 Paginating for bids newer than: ${boundaryTimestamp} (${new Date(boundaryTimestamp).toISOString()})`);
     
     const startTime = Date.now();
-    let currentOffset = 0;
+    let currentContinuations: { contract1?: string; contract2?: string } | undefined = undefined;
     const allNewBids: MagicEdenBid[] = [];
-    const seenBidIds = new Set<string>(); // Deduplicate overlapping bids
+    const seenBidIds = new Set<string>(); // Deduplicate bids
     let newestTimestampSeen: number | null = null; // Track newest timestamp from API
     let totalPages = 0;
-    const maxPages = 20; // Safety limit (20 pages × 50 bids = 1000 bids max)
+    const maxPages = 20; // Safety limit (20 pages = up to 2000 bids total)
     let consecutiveEmptyPages = 0;
     const maxConsecutiveEmpty = 3; // Stop if 3 pages in a row have 0 new bids
     
     while (true) {
       totalPages++;
-      const { bids, nextOffset } = await this.getActiveBids(currentOffset);
+      const { bids, continuations } = await this.getActiveBids(currentContinuations);
       
       if (bids.length === 0) break;
       
@@ -762,7 +762,7 @@ export class MagicEdenV4Service {
         logger.debug(`🔍 Filtered: ${tooOld} too old, ${expiringSoon} expiring soon, ${duplicates} duplicates`);
       }
       
-      logger.debug(`📄 Page ${totalPages}/${maxPages} (offset ${currentOffset}): ${bids.length} total, ${newBids.length} new, ${allNewBids.length} collected`);
+      logger.debug(`📄 Page ${totalPages}/${maxPages}: ${bids.length} total, ${newBids.length} new, ${allNewBids.length} collected`);
       
       // Track consecutive empty pages for early exit
       if (newBids.length === 0) {
@@ -789,8 +789,8 @@ export class MagicEdenV4Service {
         }
       }
       
-      // Check if there are more pages
-      if (!nextOffset) {
+      // Check if there are more pages (either contract has continuation token)
+      if (!continuations) {
         logger.info(`📭 No more pages available (reached end of data)`);
         break;
       }
@@ -801,7 +801,7 @@ export class MagicEdenV4Service {
         break;
       }
       
-      currentOffset = nextOffset;
+      currentContinuations = continuations;
       
       // Rate limiting: 1 call per second
       await new Promise(resolve => setTimeout(resolve, 1000));
@@ -839,17 +839,16 @@ export class MagicEdenV4Service {
     
     // Extract marketplace fee (sum of all fees)
     const totalFeeBps = 
-      v4Bid.maxFees.royaltyBp +
-      v4Bid.maxFees.makerMarketplaceBp +
-      v4Bid.maxFees.takerMarketplaceBp +
-      v4Bid.maxFees.lpFeeBp;
+      (v4Bid.fees?.royaltyBp || 0) +
+      (v4Bid.fees?.makerMarketplaceBp || 0) +
+      (v4Bid.fees?.takerMarketplaceBp || 0);
 
     // Extract token ID from assetId (format: "contract:tokenId")
     const tokenId = v4Bid.criteria.assetId.split(':')[1] || v4Bid.criteria.assetId;
 
     return {
       id: v4Bid.id,
-      kind: v4Bid.kind,
+      kind: 'token', // Changed from v4Bid.kind to hardcoded 'token' (API returns 'ASSET' in type field)
       side: 'buy', // Bids are always buy side
       status: v4Bid.status,
       tokenSetId: v4Bid.criteria.assetId, // Use assetId as tokenSetId for compatibility
@@ -860,18 +859,18 @@ export class MagicEdenV4Service {
       
       price: {
         currency: {
-          contract: v4Bid.priceV2.currency.contract,
-          name: v4Bid.priceV2.currency.displayName,
-          symbol: v4Bid.priceV2.currency.symbol,
-          decimals: v4Bid.priceV2.currency.decimals,
+          contract: v4Bid.price.currency.contract,  // Changed from priceV2 to price
+          name: v4Bid.price.currency.displayName,
+          symbol: v4Bid.price.currency.symbol,
+          decimals: v4Bid.price.currency.decimals,
         },
         amount: {
-          raw: v4Bid.priceV2.amount.raw,
-          decimal: parseFloat(v4Bid.priceV2.amount.native),
-          usd: v4Bid.priceV2.currency.fiatConversion?.usd 
-            ? parseFloat(v4Bid.priceV2.amount.native) * v4Bid.priceV2.currency.fiatConversion.usd
-            : parseFloat(v4Bid.priceV2.amount.fiat?.usd || '0'),
-          native: parseFloat(v4Bid.priceV2.amount.native),
+          raw: v4Bid.price.amount.raw,
+          decimal: parseFloat(v4Bid.price.amount.native),
+          usd: v4Bid.price.currency.fiatConversion?.usd 
+            ? parseFloat(v4Bid.price.amount.native) * v4Bid.price.currency.fiatConversion.usd
+            : parseFloat(v4Bid.price.amount.fiat?.usd || '0'),
+          native: parseFloat(v4Bid.price.amount.native),
         },
       },
       
@@ -1808,7 +1807,7 @@ export class MagicEdenV4Service {
    */
   async healthCheck(): Promise<boolean> {
     try {
-      await this.getActiveBids(0, 1);
+      await this.getActiveBids(undefined, 1);
       return true;
     } catch (error) {
       logger.error('❌ Magic Eden V4 API health check failed:', error);
