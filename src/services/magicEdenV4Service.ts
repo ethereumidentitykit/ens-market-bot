@@ -25,7 +25,6 @@ export type MagicEdenV4ActivityType =
 export interface MagicEdenV4Activity {
   activityType: MagicEdenV4ActivityType;
   activityId: string;
-  namespace: string;
   timestamp: string; // ISO 8601 timestamp
   
   collection: {
@@ -153,34 +152,17 @@ export interface MagicEdenV4Activity {
 
 export interface MagicEdenV4ActivityResponse {
   activities: MagicEdenV4Activity[];
-  pagination: {
-    limit: number;
-    cursorTimestamp?: string; // ISO timestamp for next page
-  };
+  continuation?: string; // Base64 encoded pagination token
 }
 
 /**
- * Active Ask (Listing) from V4 /asks endpoint
+ * Active Ask (Listing) from V4 /orders/asks endpoint
  */
 export interface MagicEdenV4Ask {
   id: string; // Order ID
   status: 'active' | 'cancelled' | 'filled' | 'expired';
   maker: string; // Seller address
-  price: {
-    currency: {
-      symbol: string;
-      decimals: number;
-      displayName: string;
-      address: string;
-      assetId: string;
-      fiatConversion?: {
-        usd: number;
-      };
-    };
-    noFeesRaw: string;
-    withRequiredFeesRaw: string;
-  };
-  priceV2: {
+  price: {  // Changed from priceV2 to price (API v4 evm-public change)
     amount: {
       raw: string; // Wei
       native: string; // Decimal (e.g., "0.019")
@@ -227,10 +209,7 @@ export interface MagicEdenV4Ask {
 
 export interface MagicEdenV4AsksResponse {
   asks: MagicEdenV4Ask[];
-  asksByAssetId: Array<{
-    assetId: string;
-    asks: MagicEdenV4Ask[];
-  }>;
+  continuation?: string; // Pagination token
 }
 
 /**
@@ -431,10 +410,10 @@ export class MagicEdenV4Service {
 
       // Add cursor for pagination if provided
       if (cursor) {
-        params.append('cursorTimestamp', cursor);
+        params.append('continuation', cursor);
       }
 
-      const fullUrl = `/activity/nft?${params.toString()}`;
+      const fullUrl = `/activities?${params.toString()}`;
       logger.debug(`🌐 Full URL: ${fullUrl}`);
 
       const response: AxiosResponse<MagicEdenV4ActivityResponse> = await this.axiosInstance.get(
@@ -449,7 +428,7 @@ export class MagicEdenV4Service {
       );
 
       const activities = response.data.activities || [];
-      const nextCursor = response.data.pagination?.cursorTimestamp;
+      const nextCursor = response.data.continuation;
 
       return {
         activities,
@@ -1122,7 +1101,7 @@ export class MagicEdenV4Service {
       });
 
       if (cursor) {
-        params.append('cursorTimestamp', cursor);
+        params.append('continuation', cursor);
       }
 
       // Add activity types as array parameters for server-side filtering
@@ -1131,7 +1110,7 @@ export class MagicEdenV4Service {
       }
 
       const response: AxiosResponse<MagicEdenV4ActivityResponse> = await this.axiosInstance.get(
-        `/activity/nft?${params.toString()}`,
+        `/activities?${params.toString()}`,
         {
           headers: {
             'Accept': '*/*',
@@ -1142,7 +1121,7 @@ export class MagicEdenV4Service {
       );
 
       const activities = response.data.activities || [];
-      const nextCursor = response.data.pagination?.cursorTimestamp;
+      const nextCursor = response.data.continuation;
       
       logger.debug(`✅ Retrieved ${activities.length} token activities`);
       
@@ -1447,7 +1426,7 @@ export class MagicEdenV4Service {
 
       // Add cursor for pagination if provided
       if (cursor) {
-        params.append('cursorTimestamp', cursor);
+        params.append('continuation', cursor);
       }
 
       const response: AxiosResponse<MagicEdenV4ActivityResponse> = await this.axiosInstance.get(
@@ -1462,7 +1441,7 @@ export class MagicEdenV4Service {
       );
 
       const activities = response.data.activities || [];
-      const nextCursor = response.data.pagination?.cursorTimestamp;
+      const nextCursor = response.data.continuation;
       
       logger.info(`✅ Magic Eden V4 API: Retrieved ${activities.length} activities (before filtering)`);
       
@@ -1633,7 +1612,7 @@ export class MagicEdenV4Service {
 
   /**
    * Get active asks (listings) for a specific asset
-   * Uses the /v4/asks endpoint which only returns active, valid listings
+   * Uses the /v4/evm-public/orders/asks endpoint which only returns active, valid listings
    * No validation needed - API filters out expired/cancelled listings
    * 
    * @param contract - Contract address
@@ -1649,16 +1628,20 @@ export class MagicEdenV4Service {
       
       logger.info(`🔍 Fetching active asks for ${assetId} from V4 API`);
 
-      // Build URL with array parameters for assetIds
+      // Build URL with required parameters (NEW API format)
       const params = new URLSearchParams({
         chain: 'ethereum',
-        sortDir: 'asc' // Sort by price ascending (native currency)
+        collectionId: contract.toLowerCase(), // Required by new API
+        sortBy: 'createdAt', // Sort by creation time
+        sortDir: 'asc', // Sort ascending (oldest first)
+        limit: '20' // Limit results
       });
       
       params.append('assetIds[]', assetId);
+      params.append('status[]', 'active'); // Only active listings
 
       const response: AxiosResponse<MagicEdenV4AsksResponse> = await this.axiosInstance.get(
-        `/asks?${params.toString()}`,
+        `/orders/asks?${params.toString()}`,
         {
           headers: {
             'Accept': '*/*',
@@ -1678,14 +1661,14 @@ export class MagicEdenV4Service {
 
       // Sort by USD value (lowest first) in case API sorting isn't by USD
       const sortedAsks = asks.sort((a, b) => {
-        const usdA = parseFloat(a.priceV2.amount.fiat?.usd || '0');
-        const usdB = parseFloat(b.priceV2.amount.fiat?.usd || '0');
+        const usdA = parseFloat(a.price.amount.fiat?.usd || '0');
+        const usdB = parseFloat(b.price.amount.fiat?.usd || '0');
         return usdA - usdB;
       });
 
       const lowestAsk = sortedAsks[0];
-      const usdValue = lowestAsk.priceV2.amount.fiat?.usd || '0';
-      logger.debug(`   Lowest USD ask: $${usdValue} (${lowestAsk.priceV2.amount.native} ${lowestAsk.priceV2.currency.symbol})`);
+      const usdValue = lowestAsk.price.amount.fiat?.usd || '0';
+      logger.debug(`   Lowest USD ask: $${usdValue} (${lowestAsk.price.amount.native} ${lowestAsk.price.currency.symbol})`);
 
       return sortedAsks;
 
