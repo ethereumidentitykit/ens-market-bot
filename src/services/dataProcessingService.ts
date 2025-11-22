@@ -189,6 +189,9 @@ export interface LLMPromptContext {
     tokenDataIncomplete: boolean;
     buyerDataIncomplete: boolean;
     sellerDataIncomplete: boolean;
+    // API unavailability tracking (unavailable = endpoint returned 404, data not accessible)
+    buyerDataUnavailable: boolean;
+    sellerDataUnavailable: boolean;
     // Bid truncation tracking (bids limited to prevent token overflow)
     buyerBidsTruncated: boolean;
     buyerBidsTruncatedCount: number;
@@ -942,6 +945,8 @@ export class DataProcessingService {
       tokenDataIncomplete: boolean;
       buyerDataIncomplete: boolean;
       sellerDataIncomplete: boolean;
+      buyerDataUnavailable?: boolean;
+      sellerDataUnavailable?: boolean;
     },
     holdingsData?: {
       buyerHoldings: { names: string[]; incomplete: boolean } | null;
@@ -1181,6 +1186,8 @@ export class DataProcessingService {
         tokenDataIncomplete: fetchStatus?.tokenDataIncomplete || false,
         buyerDataIncomplete: fetchStatus?.buyerDataIncomplete || false,
         sellerDataIncomplete: fetchStatus?.sellerDataIncomplete || false,
+        buyerDataUnavailable: fetchStatus?.buyerDataUnavailable || false,
+        sellerDataUnavailable: fetchStatus?.sellerDataUnavailable || false,
         buyerBidsTruncated,
         buyerBidsTruncatedCount,
         sellerBidsTruncated,

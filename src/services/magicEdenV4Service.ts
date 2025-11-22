@@ -1289,7 +1289,7 @@ export class MagicEdenV4Service {
       maxPages?: number;  // Maximum pages to fetch (default: 25)
       contracts?: string[];  // Optional: Filter by specific contracts (e.g., ENS contracts)
     } = {}
-  ): Promise<{ activities: MagicEdenV4Activity[]; incomplete: boolean; pagesFetched: number }> {
+  ): Promise<{ activities: MagicEdenV4Activity[]; incomplete: boolean; pagesFetched: number; unavailable?: boolean }> {
     // Set defaults
     const limit = options.limit || 100;  // API now supports 100 items per page
     const types = options.types || ['TRADE', 'TRANSFER'];  // Default to sales and transfers
@@ -1317,6 +1317,17 @@ export class MagicEdenV4Service {
           limit,
           contracts || this.ensContracts // Use provided contracts or default to ENS contracts
         );
+
+        // If endpoint is unavailable (404), stop immediately and propagate flag
+        if (response.unavailable) {
+          logger.warn(`   ⚠️  User activity endpoint unavailable, stopping fetch`);
+          return {
+            activities: [],
+            incomplete: true,
+            pagesFetched: 0,
+            unavailable: true
+          };
+        }
 
         // Break if no activities returned
         if (!response.activities || response.activities.length === 0) {
@@ -1360,6 +1371,18 @@ export class MagicEdenV4Service {
       };
 
     } catch (error: any) {
+      const is404Error = error.response?.status === 404 || error.unavailable === true;
+      
+      if (is404Error) {
+        logger.warn(`⚠️  User activity endpoint unavailable (404) - data not accessible`);
+        return {
+          activities: [],
+          incomplete: true,
+          pagesFetched: 0,
+          unavailable: true
+        };
+      }
+      
       logger.error(`❌ Failed to fetch user activity history: ${error.message}`);
       
       // Return partial results if we got any
@@ -1389,7 +1412,7 @@ export class MagicEdenV4Service {
     limit: number = 20,
     contracts?: string[], // Optional contract addresses to filter by
     retryCount: number = 0
-  ): Promise<{ activities: MagicEdenV4Activity[]; continuation?: string }> {
+  ): Promise<{ activities: MagicEdenV4Activity[]; continuation?: string; unavailable?: boolean }> {
     const maxRetries = 3;
     const isTimeout = (error: any) => 
       error.code === 'ECONNABORTED' || 
@@ -1472,16 +1495,28 @@ export class MagicEdenV4Service {
 
     } catch (error: any) {
       const isTimeoutError = isTimeout(error);
+      const is404Error = error.response?.status === 404;
       
       // Log error details
       logger.error(`❌ Magic Eden V4 User Activity Error (attempt ${retryCount + 1}/${maxRetries + 1}):`, {
         message: error.message,
         status: error.response?.status,
         code: error.code,
-        isTimeout: isTimeoutError
+        isTimeout: isTimeoutError,
+        is404: is404Error
       });
 
-      // Retry logic
+      // If 404, don't retry - endpoint is not available
+      if (is404Error) {
+        logger.warn(`⚠️  User activity endpoint not available (404) - returning empty with unavailable flag`);
+        return {
+          activities: [],
+          continuation: undefined,
+          unavailable: true
+        };
+      }
+
+      // Retry logic for non-404 errors
       if (retryCount < maxRetries) {
         const waitTime = Math.min(1000 * Math.pow(2, retryCount), 5000); // Exponential backoff, max 5s
         
