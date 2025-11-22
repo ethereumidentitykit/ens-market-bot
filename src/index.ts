@@ -592,9 +592,10 @@ async function startApplication(): Promise<void> {
         const buyerActivities = magicEdenV4Service.transformV4ToV3Activities(buyerResultV4.activities);
 
         let sellerActivities: TokenActivity[] | null = null;
+        let sellerResultV4: { activities: any[]; incomplete: boolean; pagesFetched: number; unavailable?: boolean } | null = null;
         if (eventData.sellerAddress) {
           logger.debug('   Fetching seller activity from Magic Eden V4...');
-          const sellerResultV4 = await magicEdenV4Service.getUserActivityHistory(
+          sellerResultV4 = await magicEdenV4Service.getUserActivityHistory(
             eventData.sellerAddress,
             { types: ['TRADE', 'MINT', 'TRANSFER'], maxPages: 60 }
           );
@@ -611,7 +612,14 @@ async function startApplication(): Promise<void> {
           buyerActivities,
           sellerActivities,
           magicEdenV4Service,  // Pass V4 service for on-demand proxy resolution
-          ensWorkerService   // Pass for ENS name resolution
+          ensWorkerService,   // Pass for ENS name resolution
+          {
+            tokenDataIncomplete: tokenResultV4.incomplete || false,
+            buyerDataIncomplete: buyerResultV4.incomplete || false,
+            sellerDataIncomplete: sellerResultV4?.incomplete || false,
+            buyerDataUnavailable: buyerResultV4.unavailable || false,
+            sellerDataUnavailable: sellerResultV4?.unavailable || false
+          }
         );
 
         logger.info(`✅ AI Reply Preview generated for ${type} ${transactionId}`);

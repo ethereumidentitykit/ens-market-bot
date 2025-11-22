@@ -870,16 +870,18 @@ TERMINOLOGY:
     }
 
     // Add data quality notes if APIs returned incomplete data
+    // NOTE: Unavailable data (404 errors) is NOT mentioned - AI should just ignore those fields
     const { metadata } = context;
     const dataIssues: string[] = [];
     
     if (metadata.tokenDataIncomplete) {
       dataIssues.push('token history incomplete (pagination stopped early)');
     }
-    if (metadata.buyerDataIncomplete) {
+    // Only mention buyer/seller data if incomplete (not if unavailable - just ignore it)
+    if (!metadata.buyerDataUnavailable && metadata.buyerDataIncomplete) {
       dataIssues.push('buyer history incomplete (pagination stopped early)');
     }
-    if (metadata.sellerDataIncomplete && event.type === 'sale') {
+    if (event.type === 'sale' && !metadata.sellerDataUnavailable && metadata.sellerDataIncomplete) {
       dataIssues.push('seller history incomplete (pagination stopped early)');
     }
     if (metadata.buyerBidsTruncated) {

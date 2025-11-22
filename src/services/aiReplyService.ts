@@ -124,7 +124,9 @@ export class AIReplyService {
         {
           tokenDataIncomplete: contextData.tokenDataIncomplete,
           buyerDataIncomplete: contextData.buyerDataIncomplete,
-          sellerDataIncomplete: contextData.sellerDataIncomplete
+          sellerDataIncomplete: contextData.sellerDataIncomplete,
+          buyerDataUnavailable: contextData.buyerDataUnavailable,
+          sellerDataUnavailable: contextData.sellerDataUnavailable
         },
         {
           buyerHoldings: contextData.buyerHoldings,
@@ -561,6 +563,8 @@ export class AIReplyService {
     tokenDataIncomplete: boolean;
     buyerDataIncomplete: boolean;
     sellerDataIncomplete: boolean;
+    buyerDataUnavailable: boolean;
+    sellerDataUnavailable: boolean;
   }> {
     logger.debug('      Parallel fetching: Token activity, Buyer activity, Seller activity, Holdings, Name research...');
 
@@ -596,10 +600,11 @@ export class AIReplyService {
       ).then(result => ({
         activities: this.magicEdenV4Service.transformV4ToV3Activities(result.activities),
         incomplete: result.incomplete,
-        pagesFetched: result.pagesFetched
+        pagesFetched: result.pagesFetched,
+        unavailable: result.unavailable || false
       })).catch((error: any) => {
         logger.error('      Buyer activity fetch failed:', error.message);
-        return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0 };
+        return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0, unavailable: false };
       }),
       
       // Seller activity history (if applicable) (V4 API)
@@ -619,10 +624,11 @@ export class AIReplyService {
           ).then(result => ({
             activities: this.magicEdenV4Service.transformV4ToV3Activities(result.activities),
             incomplete: result.incomplete,
-            pagesFetched: result.pagesFetched
+            pagesFetched: result.pagesFetched,
+            unavailable: result.unavailable || false
           })).catch((error: any) => {
             logger.error('      Seller activity fetch failed:', error.message);
-            return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0 };
+            return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0, unavailable: false };
           })
         : Promise.resolve(null),
       
@@ -655,7 +661,9 @@ export class AIReplyService {
       nameResearch,
       tokenDataIncomplete: tokenResult.incomplete || false,
       buyerDataIncomplete: buyerResult.incomplete || false,
-      sellerDataIncomplete: sellerResult?.incomplete || false
+      sellerDataIncomplete: sellerResult?.incomplete || false,
+      buyerDataUnavailable: buyerResult.unavailable || false,
+      sellerDataUnavailable: sellerResult?.unavailable || false
     };
   }
 
