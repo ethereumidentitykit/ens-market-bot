@@ -390,10 +390,10 @@ export class NewTweetFormatter {
       const asks = await this.magicEdenV4Service.getActiveAsks(contractAddress, tokenId);
 
       if (asks.length > 0) {
-        // Use lowest ask (already sorted by API with sortDir=asc)
+        // Use lowest ask (already sorted by USD value)
         const lowestAsk = asks[0];
-        const priceEth = parseFloat(lowestAsk.priceV2.amount.native);
-        const currencySymbol = lowestAsk.priceV2.currency.symbol;
+        const priceEth = parseFloat(lowestAsk.price.amount.native);
+        const currencySymbol = lowestAsk.price.currency.symbol;
         
         logger.info(`✅ Found active listing: ${priceEth} ${currencySymbol}`);
         
