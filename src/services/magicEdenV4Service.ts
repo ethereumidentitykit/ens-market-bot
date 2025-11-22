@@ -25,7 +25,6 @@ export type MagicEdenV4ActivityType =
 export interface MagicEdenV4Activity {
   activityType: MagicEdenV4ActivityType;
   activityId: string;
-  namespace: string;
   timestamp: string; // ISO 8601 timestamp
   
   collection: {
@@ -153,10 +152,7 @@ export interface MagicEdenV4Activity {
 
 export interface MagicEdenV4ActivityResponse {
   activities: MagicEdenV4Activity[];
-  pagination: {
-    limit: number;
-    cursorTimestamp?: string; // ISO timestamp for next page
-  };
+  continuation?: string; // Base64 encoded pagination token
 }
 
 /**
@@ -414,10 +410,10 @@ export class MagicEdenV4Service {
 
       // Add cursor for pagination if provided
       if (cursor) {
-        params.append('cursorTimestamp', cursor);
+        params.append('continuation', cursor);
       }
 
-      const fullUrl = `/activity/nft?${params.toString()}`;
+      const fullUrl = `/activities?${params.toString()}`;
       logger.debug(`🌐 Full URL: ${fullUrl}`);
 
       const response: AxiosResponse<MagicEdenV4ActivityResponse> = await this.axiosInstance.get(
@@ -432,7 +428,7 @@ export class MagicEdenV4Service {
       );
 
       const activities = response.data.activities || [];
-      const nextCursor = response.data.pagination?.cursorTimestamp;
+      const nextCursor = response.data.continuation;
 
       return {
         activities,
@@ -1105,7 +1101,7 @@ export class MagicEdenV4Service {
       });
 
       if (cursor) {
-        params.append('cursorTimestamp', cursor);
+        params.append('continuation', cursor);
       }
 
       // Add activity types as array parameters for server-side filtering
@@ -1114,7 +1110,7 @@ export class MagicEdenV4Service {
       }
 
       const response: AxiosResponse<MagicEdenV4ActivityResponse> = await this.axiosInstance.get(
-        `/activity/nft?${params.toString()}`,
+        `/activities?${params.toString()}`,
         {
           headers: {
             'Accept': '*/*',
@@ -1125,7 +1121,7 @@ export class MagicEdenV4Service {
       );
 
       const activities = response.data.activities || [];
-      const nextCursor = response.data.pagination?.cursorTimestamp;
+      const nextCursor = response.data.continuation;
       
       logger.debug(`✅ Retrieved ${activities.length} token activities`);
       
@@ -1430,7 +1426,7 @@ export class MagicEdenV4Service {
 
       // Add cursor for pagination if provided
       if (cursor) {
-        params.append('cursorTimestamp', cursor);
+        params.append('continuation', cursor);
       }
 
       const response: AxiosResponse<MagicEdenV4ActivityResponse> = await this.axiosInstance.get(
@@ -1445,7 +1441,7 @@ export class MagicEdenV4Service {
       );
 
       const activities = response.data.activities || [];
-      const nextCursor = response.data.pagination?.cursorTimestamp;
+      const nextCursor = response.data.continuation;
       
       logger.info(`✅ Magic Eden V4 API: Retrieved ${activities.length} activities (before filtering)`);
       
