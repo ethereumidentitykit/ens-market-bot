@@ -25,7 +25,7 @@ const NATIVE_TOKEN_SYMBOLS: Record<AlchemyNetwork, string> = {
   'opt-mainnet': 'ETH',
   'arb-mainnet': 'ETH',
   'zksync-mainnet': 'ETH',
-  'polygon-mainnet': 'MATIC', // Polygon uses MATIC as native token
+  'polygon-mainnet': 'POL', // Polygon uses POL as native token
   'linea-mainnet': 'ETH'
 };
 
