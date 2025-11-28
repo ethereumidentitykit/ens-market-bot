@@ -97,7 +97,7 @@ export interface WalletPortfolio {
   
   nativeTokens: Array<{
     network: string;
-    symbol: string; // 'ETH', 'MATIC', etc. (network-specific native token)
+    symbol: string; // 'ETH', 'POL', etc. (network-specific native token)
     balance: number;
     valueUsd: number;
   }>;
@@ -435,9 +435,9 @@ export class AlchemyService {
   }
 
   /**
-   * Get token price by symbol (e.g., MATIC, USDC) in USD
+   * Get token price by symbol (e.g., POL, USDC) in USD
    * Uses Alchemy's prices API endpoint
-   * @param symbol Token symbol (e.g., 'MATIC')
+   * @param symbol Token symbol (e.g., 'POL')
    * @returns Price in USD or null on failure
    */
   async getTokenPriceBySymbol(symbol: string): Promise<number | null> {
@@ -708,8 +708,8 @@ export class AlchemyService {
           // Fetch price based on symbol
           if (symbol === 'ETH') {
             nativePrice = await this.getETHPriceUSD();
-          } else if (symbol === 'MATIC') {
-            nativePrice = await this.getTokenPriceBySymbol('MATIC');
+          } else if (symbol === 'POL') {
+            nativePrice = await this.getTokenPriceBySymbol('POL');
           }
           
           if (nativePrice && nativePrice > 0) {
@@ -953,7 +953,7 @@ export class AlchemyService {
         const valueUsd = balanceDecimal * price.priceUsd;
 
         if (balance.tokenAddress === null) {
-          // Native token (ETH, MATIC, etc. - network-specific)
+          // Native token (ETH, POL, etc. - network-specific)
           nativeTokens.push({
             network: balance.network,
             symbol: price.symbol || NATIVE_TOKEN_SYMBOLS[balance.network as AlchemyNetwork] || 'ETH',
