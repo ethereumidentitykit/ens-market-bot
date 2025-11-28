@@ -13,6 +13,7 @@ const SUPPORTED_NETWORKS = [
   'arb-mainnet',
   'zksync-mainnet',
   'polygon-mainnet',
+  'matic-mainnet', // Alchemy API uses both polygon-mainnet and matic-mainnet
   'linea-mainnet'
 ] as const;
 
@@ -26,6 +27,7 @@ const NATIVE_TOKEN_SYMBOLS: Record<AlchemyNetwork, string> = {
   'arb-mainnet': 'ETH',
   'zksync-mainnet': 'ETH',
   'polygon-mainnet': 'POL', // Polygon uses POL as native token
+  'matic-mainnet': 'POL', // Alchemy API uses both polygon-mainnet and matic-mainnet
   'linea-mainnet': 'ETH'
 };
 
