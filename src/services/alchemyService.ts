@@ -18,6 +18,17 @@ const SUPPORTED_NETWORKS = [
 
 export type AlchemyNetwork = typeof SUPPORTED_NETWORKS[number];
 
+// Native token symbols by network
+const NATIVE_TOKEN_SYMBOLS: Record<AlchemyNetwork, string> = {
+  'eth-mainnet': 'ETH',
+  'base-mainnet': 'ETH',
+  'opt-mainnet': 'ETH',
+  'arb-mainnet': 'ETH',
+  'zksync-mainnet': 'ETH',
+  'polygon-mainnet': 'MATIC', // Polygon uses MATIC as native token
+  'linea-mainnet': 'ETH'
+};
+
 // WETH contract addresses across all chains (lowercase for comparison)
 // WETH should always use ETH price (1:1 peg)
 const WETH_ADDRESSES = new Set([
@@ -86,7 +97,7 @@ export interface WalletPortfolio {
   
   nativeTokens: Array<{
     network: string;
-    symbol: string; // 'ETH'
+    symbol: string; // 'ETH', 'MATIC', etc. (network-specific native token)
     balance: number;
     valueUsd: number;
   }>;
@@ -424,6 +435,50 @@ export class AlchemyService {
   }
 
   /**
+   * Get token price by symbol (e.g., MATIC, USDC) in USD
+   * Uses Alchemy's prices API endpoint
+   * @param symbol Token symbol (e.g., 'MATIC')
+   * @returns Price in USD or null on failure
+   */
+  async getTokenPriceBySymbol(symbol: string): Promise<number | null> {
+    try {
+      logger.debug(`Fetching ${symbol} price from Alchemy API`);
+      
+      const response: AxiosResponse<AlchemyPriceResponse> = await axios.get(
+        `https://api.g.alchemy.com/prices/v1/${this.apiKey}/tokens/by-symbol`,
+        {
+          params: {
+            symbols: symbol
+          },
+          timeout: 10000,
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'ENS-TwitterBot/1.0'
+          }
+        }
+      );
+
+      const tokenData = response.data.data[0];
+      if (!tokenData || tokenData.symbol !== symbol) {
+        throw new Error(`${symbol} price data not found in response`);
+      }
+
+      const usdPrice = tokenData.prices.find(p => p.currency === 'usd');
+      if (!usdPrice) {
+        throw new Error(`USD price not found for ${symbol}`);
+      }
+
+      const priceValue = parseFloat(usdPrice.value);
+      logger.debug(`${symbol} price fetched: $${priceValue} (last updated: ${usdPrice.lastUpdatedAt})`);
+      
+      return priceValue;
+    } catch (error: any) {
+      logger.warn(`[Alchemy API] Failed to fetch ${symbol} price:`, error.message);
+      return null;
+    }
+  }
+
+  /**
    * Test the API connection and configuration
    */
   async testConnection(): Promise<boolean> {
@@ -471,7 +526,9 @@ export class AlchemyService {
    */
   private getTokenMetadata(network: string, tokenAddress: string | null): { symbol: string; decimals: number } | undefined {
     if (tokenAddress === null) {
-      return { symbol: 'ETH', decimals: 18 };
+      // Return correct native token symbol for the network
+      const symbol = NATIVE_TOKEN_SYMBOLS[network as AlchemyNetwork] || 'ETH';
+      return { symbol, decimals: 18 };
     }
     
     const key = `${network}:${tokenAddress.toLowerCase()}`;
@@ -632,25 +689,53 @@ export class AlchemyService {
         t.address !== null && !WETH_ADDRESSES.has(t.address.toLowerCase())
       );
       
-      // Get ETH price once for both native ETH and WETH
-      if (nativeTokens.length > 0 || wethTokens.length > 0) {
+      // Handle native tokens - fetch correct price per network
+      if (nativeTokens.length > 0) {
+        // Group native tokens by symbol (ETH, POL, etc.)
+        const nativeBySymbol = new Map<string, Array<{ network: string; address: string | null }>>();
+        nativeTokens.forEach(token => {
+          const symbol = NATIVE_TOKEN_SYMBOLS[token.network as AlchemyNetwork] || 'ETH';
+          if (!nativeBySymbol.has(symbol)) {
+            nativeBySymbol.set(symbol, []);
+          }
+          nativeBySymbol.get(symbol)!.push(token);
+        });
+        
+        // Fetch price for each unique native token symbol
+        for (const [symbol, tokens] of nativeBySymbol.entries()) {
+          let nativePrice: number | null = null;
+          
+          // Fetch price based on symbol
+          if (symbol === 'ETH') {
+            nativePrice = await this.getETHPriceUSD();
+          } else if (symbol === 'MATIC') {
+            nativePrice = await this.getTokenPriceBySymbol('MATIC');
+          }
+          
+          if (nativePrice && nativePrice > 0) {
+            // Add price for all networks using this native token
+            tokens.forEach(token => {
+              prices.push({
+                network: token.network,
+                tokenAddress: null,
+                symbol: symbol,
+                decimals: 18,
+                priceUsd: nativePrice!,
+                lastUpdatedAt: new Date(),
+                source: 'api'
+              });
+            });
+            
+            logger.debug(`   Added ${symbol} price ($${nativePrice}) for ${tokens.length} native token(s)`);
+          }
+        }
+      }
+      
+      // Handle WETH - always uses ETH price (1:1 peg)
+      if (wethTokens.length > 0) {
         const ethPrice = await this.getETHPriceUSD();
         
         if (ethPrice && ethPrice > 0) {
-          // Add ETH price for native tokens
-          nativeTokens.forEach(token => {
-            prices.push({
-              network: token.network,
-              tokenAddress: null,
-              symbol: 'ETH',
-              decimals: 18,
-              priceUsd: ethPrice,
-              lastUpdatedAt: new Date(),
-              source: 'api'
-            });
-          });
-          
-          // Add ETH price for WETH tokens (1:1 peg with ETH)
           const wethPricesToCache: Array<{
             network: string;
             tokenAddress: string | null;
@@ -685,7 +770,7 @@ export class AlchemyService {
             await this.databaseService.setTokenPricesBatch(wethPricesToCache);
           }
           
-          logger.debug(`   Added ETH price ($${ethPrice}) for ${nativeTokens.length} native + ${wethTokens.length} WETH tokens`);
+          logger.debug(`   Added ETH price ($${ethPrice}) for ${wethTokens.length} WETH token(s)`);
         }
       }
 
@@ -868,10 +953,10 @@ export class AlchemyService {
         const valueUsd = balanceDecimal * price.priceUsd;
 
         if (balance.tokenAddress === null) {
-          // Native token (ETH)
+          // Native token (ETH, MATIC, etc. - network-specific)
           nativeTokens.push({
             network: balance.network,
-            symbol: price.symbol || 'ETH',
+            symbol: price.symbol || NATIVE_TOKEN_SYMBOLS[balance.network as AlchemyNetwork] || 'ETH',
             balance: balanceDecimal,
             valueUsd
           });
