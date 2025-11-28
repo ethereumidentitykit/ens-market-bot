@@ -663,6 +663,18 @@ export class AlchemyService {
 
       for (const token of tokens) {
         const cached = await this.databaseService.getTokenPrice(token.network, token.address);
+        
+        // For native tokens, validate cached symbol matches expected network symbol
+        if (cached && token.address === null) {
+          const expectedSymbol = NATIVE_TOKEN_SYMBOLS[token.network as AlchemyNetwork];
+          if (cached.symbol !== expectedSymbol) {
+            // Cached symbol is wrong (e.g., ETH cached for POL) - re-fetch
+            logger.debug(`   Cache invalidated for ${token.network} native: expected ${expectedSymbol}, got ${cached.symbol}`);
+            tokensToFetch.push(token);
+            continue;
+          }
+        }
+        
         if (cached) {
           prices.push({
             network: token.network,
@@ -713,6 +725,15 @@ export class AlchemyService {
           }
           
           if (nativePrice && nativePrice > 0) {
+            // Prepare prices to cache
+            const nativePricesToCache: Array<{
+              network: string;
+              tokenAddress: string | null;
+              symbol: string;
+              decimals: number;
+              priceUsd: number;
+            }> = [];
+            
             // Add price for all networks using this native token
             tokens.forEach(token => {
               prices.push({
@@ -724,7 +745,21 @@ export class AlchemyService {
                 lastUpdatedAt: new Date(),
                 source: 'api'
               });
+              
+              // Prepare for caching
+              nativePricesToCache.push({
+                network: token.network,
+                tokenAddress: null,
+                symbol: symbol,
+                decimals: 18,
+                priceUsd: nativePrice!
+              });
             });
+            
+            // Cache native token prices
+            if (nativePricesToCache.length > 0) {
+              await this.databaseService.setTokenPricesBatch(nativePricesToCache);
+            }
             
             logger.debug(`   Added ${symbol} price ($${nativePrice}) for ${tokens.length} native token(s)`);
           }
