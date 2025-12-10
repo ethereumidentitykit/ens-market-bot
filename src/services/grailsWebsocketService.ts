@@ -9,7 +9,7 @@
 import WebSocket from 'ws';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
-import { TransformedBid } from './bidsProcessingService';
+import type { TransformedBid, BidsProcessingService } from './bidsProcessingService';
 
 // ENS contract addresses
 const ENS_REGISTRY = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
@@ -85,6 +85,17 @@ export class GrailsWebsocketService {
   private isShuttingDown = false;
   private pingInterval: NodeJS.Timeout | null = null;
   private lastEventTime: Date | null = null;
+  private bidsProcessingService: BidsProcessingService | null = null;
+
+  // Stats for monitoring
+  private stats = {
+    eventsReceived: 0,
+    bidsProcessed: 0,
+    bidsDuplicate: 0,
+    bidsFiltered: 0,
+    bidsStored: 0,
+    errors: 0,
+  };
 
   // Connection state
   private _isConnected = false;
@@ -94,6 +105,15 @@ export class GrailsWebsocketService {
 
   get lastEventReceived(): Date | null {
     return this.lastEventTime;
+  }
+
+  /**
+   * Set the BidsProcessingService for processing websocket bids
+   * Called during app initialization to inject the dependency
+   */
+  setBidsProcessingService(service: BidsProcessingService): void {
+    this.bidsProcessingService = service;
+    logger.info('🔌 BidsProcessingService injected into GrailsWebsocketService');
   }
 
   /**
@@ -199,6 +219,7 @@ export class GrailsWebsocketService {
   private handleMessage(message: GrailsIncomingMessage): void {
     if (message.type === 'activity_event') {
       this.lastEventTime = new Date();
+      this.stats.eventsReceived++;
       const event = message.data;
       
       // Only process offer_made events
@@ -216,17 +237,48 @@ export class GrailsWebsocketService {
       }
 
       // Log the transformed bid
-      logger.info(`🔌 Transformed Grails bid:`, {
-        ensName: transformedBid.ensName,
-        bidId: transformedBid.bidId.substring(0, 20) + '...',
-        bidder: transformedBid.makerAddress.substring(0, 10) + '...',
-        price: `${transformedBid.priceDecimal} ${transformedBid.currencySymbol}`,
-        source: transformedBid.sourceName,
-        createdAt: transformedBid.createdAtApi
-      });
+      logger.info(`🔌 Received Grails bid: ${transformedBid.ensName} for ${transformedBid.priceDecimal} ${transformedBid.currencySymbol} (${transformedBid.sourceName})`);
 
-      // TODO Phase 3: Process this event via BidsProcessingService
-      // await this.bidsProcessingService.processWebsocketBid(transformedBid);
+      // Process via BidsProcessingService (async, fire-and-forget with error handling)
+      this.processTransformedBid(transformedBid);
+    }
+  }
+
+  /**
+   * Process a transformed bid through BidsProcessingService
+   * Async handler to avoid blocking websocket message processing
+   */
+  private async processTransformedBid(bid: TransformedBid): Promise<void> {
+    if (!this.bidsProcessingService) {
+      logger.warn('🔌 BidsProcessingService not set, cannot process websocket bid');
+      this.stats.errors++;
+      return;
+    }
+
+    try {
+      this.stats.bidsProcessed++;
+      const result = await this.bidsProcessingService.processWebsocketBid(bid);
+      
+      // Update stats based on result
+      switch (result.action) {
+        case 'stored':
+          this.stats.bidsStored++;
+          break;
+        case 'duplicate':
+          this.stats.bidsDuplicate++;
+          break;
+        case 'filtered':
+          this.stats.bidsFiltered++;
+          break;
+        case 'error':
+          this.stats.errors++;
+          break;
+      }
+
+      logger.debug(`🔌 Websocket bid processed: ${result.action} - ${result.message}`);
+    } catch (error: any) {
+      this.stats.errors++;
+      logger.error(`🔌 Failed to process websocket bid:`, error.message);
     }
   }
 
@@ -308,13 +360,26 @@ export class GrailsWebsocketService {
   }
 
   /**
-   * Get connection status for health checks
+   * Get connection status and stats for health checks
    */
-  getStatus(): { connected: boolean; lastEvent: Date | null; reconnectAttempts: number } {
+  getStatus(): {
+    connected: boolean;
+    lastEvent: Date | null;
+    reconnectAttempts: number;
+    stats: {
+      eventsReceived: number;
+      bidsProcessed: number;
+      bidsDuplicate: number;
+      bidsFiltered: number;
+      bidsStored: number;
+      errors: number;
+    };
+  } {
     return {
       connected: this._isConnected,
       lastEvent: this.lastEventTime,
-      reconnectAttempts: this.reconnectAttempts
+      reconnectAttempts: this.reconnectAttempts,
+      stats: { ...this.stats }
     };
   }
 

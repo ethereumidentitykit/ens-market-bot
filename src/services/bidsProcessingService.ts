@@ -502,6 +502,131 @@ export class BidsProcessingService {
   }
 
   /**
+   * Process a bid from websocket (already transformed)
+   * Used by GrailsWebsocketService for real-time bid processing
+   * 
+   * @param transformedBid - Pre-transformed bid from websocket
+   * @returns Processing result
+   */
+  async processWebsocketBid(transformedBid: TransformedBid): Promise<{
+    success: boolean;
+    action: 'stored' | 'duplicate' | 'filtered' | 'error';
+    message: string;
+  }> {
+    try {
+      const bidId = transformedBid.bidId;
+      const bidName = transformedBid.ensName || transformedBid.tokenId?.slice(-8) || 'unknown';
+      
+      logger.info(`🔌 Processing websocket bid: ${bidName} (${bidId.substring(0, 16)}...)`);
+
+      // Check if already processed (duplicate detection)
+      const isProcessed = await this.databaseService.isBidProcessed(bidId);
+      if (isProcessed) {
+        logger.debug(`⏭️  Websocket bid ${bidId} already processed, skipping`);
+        return { success: true, action: 'duplicate', message: 'Bid already processed' };
+      }
+
+      // Apply filtering logic (reuse existing with websocket-compatible structure)
+      const shouldProcess = await this.shouldProcessWebsocketBid(transformedBid);
+      if (!shouldProcess) {
+        logger.debug(`🚫 Websocket bid ${bidId} filtered out (${transformedBid.priceDecimal} ${transformedBid.currencySymbol})`);
+        return { success: true, action: 'filtered', message: 'Bid filtered by thresholds' };
+      }
+
+      // Enrich with metadata (if needed - Grails usually provides name already)
+      let enrichedBid = { ...transformedBid };
+      if (transformedBid.tokenId && (!transformedBid.ensName || !transformedBid.nftImage)) {
+        try {
+          enrichedBid = await this.enrichBidWithMetadata(transformedBid);
+        } catch (error: any) {
+          logger.warn(`⚠️  Failed to enrich websocket bid with metadata:`, error.message);
+        }
+      }
+
+      // Add USD pricing
+      enrichedBid = await this.addUSDPricing(enrichedBid);
+
+      // Prepare for storage
+      const bidForStorage = {
+        ...enrichedBid,
+        tokenId: enrichedBid.tokenId || undefined,
+        posted: false,
+        tweetId: undefined,
+        createdAt: undefined,
+        updatedAt: undefined
+      };
+
+      // Store in database
+      const insertedId = await this.databaseService.insertBid(bidForStorage);
+      logger.info(`✅ Stored websocket bid ${bidId} (ID: ${insertedId}) - ${enrichedBid.ensName || 'unknown'} for ${enrichedBid.priceDecimal} ${enrichedBid.currencySymbol}`);
+      
+      return { success: true, action: 'stored', message: `Bid stored with ID ${insertedId}` };
+
+    } catch (error: any) {
+      if (error.message?.includes('already processed') || error.message?.includes('UNIQUE constraint')) {
+        return { success: true, action: 'duplicate', message: 'Bid already in database' };
+      }
+      logger.error(`❌ Failed to process websocket bid:`, error.message);
+      return { success: false, action: 'error', message: error.message };
+    }
+  }
+
+  /**
+   * Filtering logic for websocket bids
+   * Similar to shouldProcessBid but adapted for TransformedBid format
+   */
+  private async shouldProcessWebsocketBid(bid: TransformedBid): Promise<boolean> {
+    try {
+      // Skip bids without token ID
+      if (!bid.tokenId) {
+        logger.debug(`🚫 Skipping websocket bid without token ID: ${bid.bidId}`);
+        return false;
+      }
+
+      // Age filter: only bids from last 24 hours
+      const bidAge = Date.now() - new Date(bid.createdAtApi).getTime();
+      const maxAge = 24 * 60 * 60 * 1000;
+      if (bidAge > maxAge) {
+        logger.debug(`🚫 Skipping old websocket bid: ${bid.bidId} (age: ${Math.round(bidAge / 3600000)}h)`);
+        return false;
+      }
+
+      // Validity check: bid must be valid for at least 15 more minutes
+      const now = Math.floor(Date.now() / 1000);
+      const remainingValidity = bid.validUntil - now;
+      if (remainingValidity < 15 * 60) {
+        logger.debug(`🚫 Skipping expiring websocket bid: ${bid.bidId} (expires in ${Math.round(remainingValidity / 60)}min)`);
+        return false;
+      }
+
+      // Price filtering with club-aware thresholds
+      const priceEth = parseFloat(bid.priceDecimal);
+      
+      if (bid.currencySymbol === 'WETH' || bid.currencySymbol === 'ETH') {
+        const ethMinimum = await this.getEthMinimumForBid(bid);
+        const passes = priceEth >= ethMinimum;
+        
+        const bidName = bid.ensName || bid.tokenId?.slice(-6) || 'unnamed';
+        logger.debug(`🔍 WEBSOCKET BID FILTER: ${bidName} - ${priceEth} ETH vs ${ethMinimum} ETH minimum = ${passes ? 'PASS ✅' : 'REJECT ❌'}`);
+        
+        return passes;
+      }
+      
+      // For stablecoins
+      if (bid.currencySymbol === 'USDC' || bid.currencySymbol === 'USDT') {
+        return priceEth >= 100;
+      }
+
+      // Default minimum for other currencies
+      return priceEth >= 0.4;
+
+    } catch (error: any) {
+      logger.error(`Error in websocket bid filtering:`, error.message);
+      return false;
+    }
+  }
+
+  /**
    * Manual sync method for dashboard/testing
    */
   async manualSync(): Promise<{
