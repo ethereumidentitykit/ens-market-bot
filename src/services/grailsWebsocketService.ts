@@ -3,11 +3,34 @@
  * 
  * Connects to the Grails activity websocket to receive real-time bid events.
  * Phase 1: Connection management, subscription, and event logging.
+ * Phase 2: Transform Grails events to internal TransformedBid format.
  */
 
 import WebSocket from 'ws';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
+import { TransformedBid } from './bidsProcessingService';
+
+// ENS contract addresses
+const ENS_REGISTRY = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
+// const ENS_NAME_WRAPPER = '0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401';
+
+// Currency address to symbol mapping
+const CURRENCY_MAP: Record<string, string> = {
+  '0x0000000000000000000000000000000000000000': 'ETH',
+  '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2': 'WETH',
+  '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': 'USDC',
+  '0xdac17f958d2ee523a2206206994597c13d831ec7': 'USDT',
+};
+
+// Platform to source domain/name mapping
+const PLATFORM_MAP: Record<string, { domain: string; name: string }> = {
+  'opensea': { domain: 'opensea.io', name: 'OpenSea' },
+  'blur': { domain: 'blur.io', name: 'Blur' },
+  'x2y2': { domain: 'x2y2.io', name: 'X2Y2' },
+  'looksrare': { domain: 'looksrare.org', name: 'LooksRare' },
+  'grails': { domain: 'grails.app', name: 'Grails' },
+};
 
 // Grails websocket message types
 interface GrailsSubscribeMessage {
@@ -184,18 +207,26 @@ export class GrailsWebsocketService {
         return;
       }
 
-      // Phase 1: Just log the event
-      logger.info(`🔌 Received offer_made event:`, {
-        name: event.name,
-        bidder: event.actor_address.substring(0, 10) + '...',
-        priceWei: event.price_wei,
-        platform: event.platform,
-        orderHash: event.metadata?.order_hash?.substring(0, 20) + '...',
-        createdAt: event.created_at
+      // Transform the event to internal format
+      const transformedBid = this.transformEvent(event);
+      
+      if (!transformedBid) {
+        // Already logged in transformEvent
+        return;
+      }
+
+      // Log the transformed bid
+      logger.info(`🔌 Transformed Grails bid:`, {
+        ensName: transformedBid.ensName,
+        bidId: transformedBid.bidId.substring(0, 20) + '...',
+        bidder: transformedBid.makerAddress.substring(0, 10) + '...',
+        price: `${transformedBid.priceDecimal} ${transformedBid.currencySymbol}`,
+        source: transformedBid.sourceName,
+        createdAt: transformedBid.createdAtApi
       });
 
       // TODO Phase 3: Process this event via BidsProcessingService
-      // await this.bidsProcessingService.processWebsocketBid(event);
+      // await this.bidsProcessingService.processWebsocketBid(transformedBid);
     }
   }
 
@@ -285,6 +316,95 @@ export class GrailsWebsocketService {
       lastEvent: this.lastEventTime,
       reconnectAttempts: this.reconnectAttempts
     };
+  }
+
+  /**
+   * Transform Grails offer_made event to internal TransformedBid format
+   * 
+   * @param event - The Grails offer_made event
+   * @returns TransformedBid or null if event is invalid (missing order_hash)
+   */
+  transformEvent(event: GrailsOfferEvent): TransformedBid | null {
+    // Require order_hash for deduplication
+    const orderHash = event.metadata?.order_hash;
+    if (!orderHash) {
+      logger.warn('🔌 Skipping Grails event without order_hash (cannot deduplicate)', {
+        name: event.name,
+        grailsId: event.id
+      });
+      return null;
+    }
+
+    // Resolve currency symbol from address
+    const currencySymbol = this.resolveCurrencySymbol(event.currency_address);
+
+    // Calculate price in decimal (wei to ETH)
+    const priceDecimal = this.weiToEth(event.price_wei);
+
+    // Map platform to source domain/name
+    const source = this.resolveSource(event.platform);
+
+    // Validity period defaults (Grails doesn't provide these)
+    // Default: valid from now, expires in 7 days
+    const now = Math.floor(Date.now() / 1000);
+    const validFrom = now;
+    const validUntil = now + (7 * 24 * 60 * 60); // 7 days
+
+    const transformed: TransformedBid = {
+      bidId: orderHash,
+      contractAddress: ENS_REGISTRY, // Default to ENS Registry (most common)
+      tokenId: event.token_id || null,
+      makerAddress: event.actor_address,
+      takerAddress: event.counterparty_address || '', // Owner address (bonus from Grails!)
+      status: 'unposted',
+      priceRaw: event.price_wei,
+      priceDecimal: priceDecimal,
+      priceUsd: '', // Will be enriched by BidsProcessingService
+      currencyContract: event.currency_address,
+      currencySymbol: currencySymbol,
+      sourceDomain: source.domain,
+      sourceName: source.name,
+      marketplaceFee: 0, // Not provided by Grails
+      createdAtApi: event.created_at,
+      updatedAtApi: event.created_at, // Same as created (no update info)
+      validFrom: validFrom,
+      validUntil: validUntil,
+      processedAt: new Date().toISOString(),
+      ensName: event.name, // ✅ Already resolved by Grails!
+      nftImage: undefined, // Will be enriched if needed
+    };
+
+    return transformed;
+  }
+
+  /**
+   * Resolve currency symbol from contract address
+   */
+  private resolveCurrencySymbol(currencyAddress: string): string {
+    if (!currencyAddress) return 'ETH';
+    const normalized = currencyAddress.toLowerCase();
+    return CURRENCY_MAP[normalized] || 'UNKNOWN';
+  }
+
+  /**
+   * Convert wei to ETH decimal string
+   */
+  private weiToEth(weiString: string): string {
+    try {
+      const wei = BigInt(weiString);
+      const eth = Number(wei) / 1e18;
+      return eth.toString();
+    } catch {
+      return '0';
+    }
+  }
+
+  /**
+   * Resolve source domain and name from platform string
+   */
+  private resolveSource(platform: string): { domain: string; name: string } {
+    const normalized = platform?.toLowerCase() || '';
+    return PLATFORM_MAP[normalized] || { domain: 'unknown', name: 'Unknown' };
   }
 }
 
