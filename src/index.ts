@@ -32,6 +32,7 @@ import { ENSMetadataService } from './services/ensMetadataService';
 import { ENSTokenUtils } from './services/ensTokenUtils';
 import { DatabaseEventService } from './services/databaseEventService';
 import { OpenAIService } from './services/openaiService';
+import { grailsWebsocketService } from './services/grailsWebsocketService';
 import pgSession from 'connect-pg-simple';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -68,6 +69,10 @@ async function startApplication(): Promise<void> {
     const magicEdenV4Service = new MagicEdenV4Service();
     
     const bidsProcessingService = new BidsProcessingService(magicEdenV4Service, databaseService, alchemyService);
+    
+    // Inject BidsProcessingService into Grails websocket for real-time bid processing
+    grailsWebsocketService.setBidsProcessingService(bidsProcessingService);
+    
     const twitterService = new TwitterService();
     const newTweetFormatter = new NewTweetFormatter(databaseService, alchemyService, openSeaService, ensMetadataService, magicEdenV4Service);
     const rateLimitService = new RateLimitService(databaseService);
@@ -3748,6 +3753,14 @@ async function startApplication(): Promise<void> {
       } catch (error: any) {
         logger.error('Failed to start database event service:', error.message);
       }
+      
+      // Start Grails websocket for real-time bid ingestion
+      try {
+        await grailsWebsocketService.connect();
+        logger.info('🔌 Grails websocket service started');
+      } catch (error: any) {
+        logger.error('Failed to start Grails websocket:', error.message);
+      }
     });
 
     // Graceful shutdown handling
@@ -3756,6 +3769,9 @@ async function startApplication(): Promise<void> {
       
       // Stop database event service first
       await databaseEventService.stop();
+      
+      // Disconnect Grails websocket
+      await grailsWebsocketService.disconnect();
       
       // Gracefully stop scheduler without persisting state (allows resume after restart)
       await schedulerService.gracefulShutdown();
