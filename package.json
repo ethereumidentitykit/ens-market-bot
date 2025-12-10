@@ -13,7 +13,15 @@
     "test": "echo \"No tests specified - skipping\"",
     "vercel-build": "npm run build"
   },
-  "keywords": ["ens", "ethereum", "twitter-bot", "nft", "web3", "ai", "openai"],
+  "keywords": [
+    "ens",
+    "ethereum",
+    "twitter-bot",
+    "nft",
+    "web3",
+    "ai",
+    "openai"
+  ],
   "author": "ENS Market Bot Contributors",
   "license": "MIT",
   "devDependencies": {
@@ -23,6 +31,7 @@
     "@types/express": "^5.0.3",
     "@types/express-session": "^1.18.2",
     "@types/node": "^24.2.0",
+    "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^8.39.0",
     "@typescript-eslint/parser": "^8.39.0",
     "eslint": "^9.32.0",
@@ -52,6 +61,7 @@
     "puppeteer": "^24.16.1",
     "puppeteer-core": "^24.16.1",
     "siwe": "^3.0.0",
-    "viem": "^2.37.5"
+    "viem": "^2.37.5",
+    "ws": "^8.18.3"
   }
 }

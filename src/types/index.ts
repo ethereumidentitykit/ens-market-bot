@@ -195,6 +195,9 @@ export interface Config {
   ensSubgraph: {
     primaryUrl: string;
   };
+  grails?: {
+    websocketUrl: string;
+  };
 }
 
 // Twitter Post Record

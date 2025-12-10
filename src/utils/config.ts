@@ -53,7 +53,10 @@ export const config: Config = {
   } : undefined,
   ensSubgraph: {
     primaryUrl: process.env.ENS_SUBGRAPH_URL || 'https://ensnode-api-production-500f.up.railway.app/subgraph',
-  }
+  },
+  grails: process.env.GRAILS_WEBSOCKET_URL ? {
+    websocketUrl: process.env.GRAILS_WEBSOCKET_URL,
+  } : undefined,
 };
 
 // Validate required configuration
