@@ -1063,6 +1063,22 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    // Grails websocket status endpoint
+    app.get('/api/grails-websocket/status', requireAuth, (req, res) => {
+      try {
+        const status = grailsWebsocketService.getStatus();
+        res.json({
+          success: true,
+          data: status
+        });
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     app.post('/api/scheduler/start', requireAuth, async (req, res) => {
       try {
         await schedulerService.start();

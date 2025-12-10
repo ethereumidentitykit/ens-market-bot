@@ -104,6 +104,7 @@ function dashboard() {
         stats: {},
         recentSales: [],
         schedulerStatus: null,
+        grailsWebsocketStatus: null,
         systemStatus: 'unknown',
         loading: false,
         processing: false,
@@ -604,6 +605,7 @@ function dashboard() {
                 await Promise.all([
                     this.loadStats(),
                     this.loadSchedulerStatus(),
+                    this.loadGrailsWebsocketStatus(),
                     this.checkSystemHealth(),
                     this.loadTwitterConfig(),
                     this.loadTwitterRateLimit()
@@ -809,6 +811,23 @@ function dashboard() {
             } catch (error) {
                 console.error('Failed to load scheduler status:', error);
                 this.schedulerStatus = null;
+            }
+        },
+
+        // Load Grails websocket status
+        async loadGrailsWebsocketStatus() {
+            try {
+                const response = await fetch('/api/grails-websocket/status');
+                const data = await response.json();
+                
+                if (data.success) {
+                    this.grailsWebsocketStatus = data.data;
+                } else {
+                    throw new Error(data.error || 'Failed to load Grails websocket status');
+                }
+            } catch (error) {
+                console.error('Failed to load Grails websocket status:', error);
+                this.grailsWebsocketStatus = null;
             }
         },
 

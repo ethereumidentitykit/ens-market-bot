@@ -1286,11 +1286,12 @@
                 </div>
             </div>
 
-            <!-- Scheduler Status -->
-            <div class="mb-8">
+            <!-- Scheduler & Websocket Status -->
+            <div class="mb-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Scheduler Status -->
                 <div class="bg-white shadow rounded-lg p-6">
                     <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">Scheduler Status</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                         <div class="flex items-center">
                             <span class="text-sm font-medium text-gray-500 mr-2">Status:</span>
                             <span x-show="schedulerStatus?.isRunning" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
@@ -1303,20 +1304,12 @@
                             </span>
                         </div>
                         <div class="flex items-center">
-                            <span class="text-sm font-medium text-gray-500 mr-2">Sales (5min):</span>
-                            <span class="text-sm text-blue-600 font-medium" x-text="schedulerStatus?.nextSalesRunTime ? formatTimestamp(schedulerStatus.nextSalesRunTime) : 'N/A'"></span>
-                        </div>
-                        <div class="flex items-center">
-                            <span class="text-sm font-medium text-gray-500 mr-2">Registrations (1min):</span>
-                            <span class="text-sm text-green-600 font-medium" x-text="schedulerStatus?.nextRegistrationRunTime ? formatTimestamp(schedulerStatus.nextRegistrationRunTime) : 'N/A'"></span>
-                        </div>
-                        <div class="flex items-center">
-                            <span class="text-sm font-medium text-gray-500 mr-2">Bids (2min):</span>
-                            <span class="text-sm text-orange-600 font-medium" x-text="schedulerStatus?.nextBidsRunTime ? formatTimestamp(schedulerStatus.nextBidsRunTime) : 'N/A'"></span>
-                        </div>
-                        <div class="flex items-center">
                             <span class="text-sm font-medium text-gray-500 mr-2">Errors:</span>
                             <span class="text-sm" :class="schedulerStatus?.consecutiveErrors > 0 ? 'text-red-600 font-medium' : 'text-gray-900'" x-text="schedulerStatus?.consecutiveErrors || 0"></span>
+                        </div>
+                        <div class="flex items-center">
+                            <span class="text-sm font-medium text-gray-500 mr-2">Bids:</span>
+                            <span class="text-sm text-orange-600 font-medium" x-text="schedulerStatus?.nextBidsRunTime ? formatTimestamp(schedulerStatus.nextBidsRunTime) : 'N/A'"></span>
                         </div>
                     </div>
                     <div x-show="schedulerStatus?.lastRunTime" class="text-sm text-gray-600 mb-4">
@@ -1329,7 +1322,7 @@
                             class="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
                         >
                             <i class="fas" :class="schedulerStatus?.isRunning ? 'fa-stop' : 'fa-play'" :class="{'loading': schedulerLoading}"></i>
-                            <span class="ml-2" x-text="schedulerStatus?.isRunning ? 'Stop Scheduler' : 'Start Scheduler'"></span>
+                            <span class="ml-2" x-text="schedulerStatus?.isRunning ? 'Stop' : 'Start'"></span>
                         </button>
                         <button 
                             @click="resetSchedulerErrors()" 
@@ -1337,7 +1330,7 @@
                             class="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
                         >
                             <i class="fas fa-redo mr-2" :class="{'loading': schedulerLoading}"></i>
-                            Reset Errors
+                            Reset
                         </button>
                         <button 
                             @click="forceStopScheduler()" 
@@ -1347,6 +1340,59 @@
                             <i class="fas fa-hand-paper mr-2" :class="{'loading': schedulerLoading}"></i>
                             Force Stop
                         </button>
+                    </div>
+                </div>
+
+                <!-- Grails Websocket Status -->
+                <div class="bg-white shadow rounded-lg p-6">
+                    <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">
+                        <i class="fas fa-plug mr-2 text-purple-500"></i>
+                        Grails Websocket
+                    </h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div class="flex items-center">
+                            <span class="text-sm font-medium text-gray-500 mr-2">Status:</span>
+                            <span x-show="grailsWebsocketStatus?.connected" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                <i class="fas fa-check-circle mr-1"></i>
+                                Connected
+                            </span>
+                            <span x-show="!grailsWebsocketStatus?.connected" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                <i class="fas fa-times-circle mr-1"></i>
+                                Disconnected
+                            </span>
+                        </div>
+                        <div class="flex items-center">
+                            <span class="text-sm font-medium text-gray-500 mr-2">Reconnects:</span>
+                            <span class="text-sm" :class="grailsWebsocketStatus?.reconnectAttempts > 0 ? 'text-yellow-600 font-medium' : 'text-gray-900'" x-text="grailsWebsocketStatus?.reconnectAttempts || 0"></span>
+                        </div>
+                        <div class="flex items-center">
+                            <span class="text-sm font-medium text-gray-500 mr-2">Events:</span>
+                            <span class="text-sm text-blue-600 font-medium" x-text="grailsWebsocketStatus?.stats?.eventsReceived || 0"></span>
+                        </div>
+                        <div class="flex items-center">
+                            <span class="text-sm font-medium text-gray-500 mr-2">Stored:</span>
+                            <span class="text-sm text-green-600 font-medium" x-text="grailsWebsocketStatus?.stats?.bidsStored || 0"></span>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 text-xs text-gray-500 mb-4">
+                        <div>
+                            <span class="font-medium">Dup:</span> 
+                            <span x-text="grailsWebsocketStatus?.stats?.bidsDuplicate || 0"></span>
+                        </div>
+                        <div>
+                            <span class="font-medium">Filtered:</span> 
+                            <span x-text="grailsWebsocketStatus?.stats?.bidsFiltered || 0"></span>
+                        </div>
+                        <div>
+                            <span class="font-medium">Errors:</span> 
+                            <span :class="grailsWebsocketStatus?.stats?.errors > 0 ? 'text-red-600' : ''" x-text="grailsWebsocketStatus?.stats?.errors || 0"></span>
+                        </div>
+                    </div>
+                    <div x-show="grailsWebsocketStatus?.lastEvent" class="text-sm text-gray-600">
+                        Last event: <span x-text="grailsWebsocketStatus?.lastEvent ? formatTimestamp(grailsWebsocketStatus.lastEvent) : 'Never'"></span>
+                    </div>
+                    <div x-show="!grailsWebsocketStatus" class="text-sm text-gray-400">
+                        Not configured (GRAILS_WEBSOCKET_URL not set)
                     </div>
                 </div>
             </div>
