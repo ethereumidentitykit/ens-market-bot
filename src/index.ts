@@ -15,6 +15,7 @@ import { DatabaseService } from './services/databaseService';
 import { IDatabaseService, ENSRegistration, ProcessedSale, ENSBid } from './types';
 import { SalesProcessingService } from './services/salesProcessingService';
 import { BidsProcessingService } from './services/bidsProcessingService';
+import { GrailsApiService } from './services/grailsApiService';
 import { MagicEdenV4Service, TokenActivity } from './services/magicEdenV4Service';
 import { SchedulerService } from './services/schedulerService';
 import { TwitterService } from './services/twitterService';
@@ -78,6 +79,16 @@ async function startApplication(): Promise<void> {
     const quickNodeRegistrationService = new QuickNodeRegistrationService(databaseService, ensMetadataService, alchemyService, openSeaService);
     const autoTweetService = new AutoTweetService(newTweetFormatter, twitterService, rateLimitService, databaseService, worldTimeService);
     const schedulerService = new SchedulerService(salesProcessingService, bidsProcessingService, autoTweetService, databaseService);
+    
+    // Initialize GrailsApiService for Grails marketplace offers (if enabled)
+    let grailsApiService: GrailsApiService | null = null;
+    if (process.env.GRAILS_API_URL) {
+      grailsApiService = new GrailsApiService(databaseService, alchemyService);
+      schedulerService.setGrailsApiService(grailsApiService);
+      logger.info('🍷 Grails API Service enabled');
+    } else {
+      logger.info('🍷 Grails API Service disabled (GRAILS_API_URL not set)');
+    }
     
     // Phase 3.4: Initialize AI Reply Service for automated contextual replies
     const { OpenAIService } = await import('./services/openaiService');
@@ -1118,7 +1129,32 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    // Grails API status endpoint
+    app.get('/api/grails/status', requireAuth, (req, res) => {
+      try {
+        if (!grailsApiService) {
+          res.json({
+            success: true,
+            data: {
+              enabled: false,
+              message: 'Grails API Service not configured (GRAILS_API_URL not set)'
+            }
+          });
+          return;
+        }
 
+        const status = grailsApiService.getStatus();
+        res.json({
+          success: true,
+          data: status
+        });
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
 
     // Initialize API Toggle Service with database
     const apiToggleService = APIToggleService.getInstance();
