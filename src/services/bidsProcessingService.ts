@@ -235,7 +235,7 @@ export class BidsProcessingService {
       const hasName = !!bid.ensName;
       const hasImage = !!bid.nftImage;
       
-      logger.debug(`🔍 Magic Eden metadata check - Name: ${hasName ? `"${bid.ensName}"` : 'missing'}, Image: ${hasImage ? 'provided' : 'missing'}`);
+      logger.debug(`🔍 Bid metadata check - Name: ${hasName ? `"${bid.ensName}"` : 'missing'}, Image: ${hasImage ? 'provided' : 'missing'}`);
       
       if (hasName && hasImage) {
         logger.debug(`✅ Using Magic Eden metadata for ${bid.ensName} (no API call needed)`);
@@ -345,13 +345,9 @@ export class BidsProcessingService {
         return passes;
       }
       
-      // For stablecoins, use fixed USD minimums
-      if (bid.currencySymbol === 'USDC' || bid.currencySymbol === 'USDT') {
-        return priceEth >= 100; // Minimum $100 for stablecoins
-      }
-
-      // Default minimum for other currencies  
-      return priceEth >= 0.4; // Increased fallback
+      // For other currencies (stablecoins, etc.), allow all bids through
+      // They will be filtered by the club-aware ETH thresholds if needed
+      return true;
 
     } catch (error: any) {
       logger.error(`Error in bid filtering:`, error.message);
@@ -366,7 +362,7 @@ export class BidsProcessingService {
   private async getEthMinimumForBid(bid: any): Promise<number> {
     try {
       // Simple database lookups for limits
-      const defaultMin = await this.databaseService.getSystemState('autopost_bids_min_eth_default') || '5';
+      const defaultMin = await this.databaseService.getSystemState('autopost_bids_min_eth_default') || '2';
       const club10kMin = await this.databaseService.getSystemState('autopost_bids_min_eth_10k') || '5';
       const club999Min = await this.databaseService.getSystemState('autopost_bids_min_eth_999') || '20';
       
@@ -499,6 +495,142 @@ export class BidsProcessingService {
    */
   getCurrencyDisplayName(symbol: string): string {
     return this.magicEdenService.getCurrencyDisplayName(symbol);
+  }
+
+  /**
+   * Process Grails marketplace bids (already transformed)
+   * These bids come from GrailsApiService and need enrichment + storage
+   */
+  async processGrailsBids(bids: TransformedBid[]): Promise<BidProcessingStats> {
+    const stats: BidProcessingStats = {
+      newBids: 0,
+      duplicates: 0,
+      filtered: 0,
+      errors: 0,
+      processedCount: 0,
+    };
+
+    if (bids.length === 0) {
+      logger.debug('🍷 No Grails bids to process');
+      return stats;
+    }
+
+    logger.info(`🍷 Processing ${bids.length} Grails bids...`);
+
+    for (const bid of bids) {
+      try {
+        await this.processSingleGrailsBid(bid, stats);
+        stats.processedCount++;
+      } catch (error: any) {
+        logger.error(`❌ Failed to process Grails bid ${bid.bidId}:`, error.message);
+        stats.errors++;
+      }
+    }
+
+    logger.info(`✅ Grails bids processing complete: ${stats.newBids} new, ${stats.duplicates} duplicates, ${stats.filtered} filtered, ${stats.errors} errors`);
+    return stats;
+  }
+
+  /**
+   * Process a single Grails bid
+   */
+  private async processSingleGrailsBid(bid: TransformedBid, stats: BidProcessingStats): Promise<void> {
+    try {
+      // Check if already processed (duplicate detection with grails- prefix)
+      const isProcessed = await this.databaseService.isBidProcessed(bid.bidId);
+      if (isProcessed) {
+        logger.debug(`⏭️  Grails bid ${bid.bidId} already processed, skipping`);
+        stats.duplicates++;
+        return;
+      }
+
+      // Apply filtering logic (adapted for Grails - no MagicEdenBid object)
+      if (!(await this.shouldProcessGrailsBid(bid))) {
+        logger.debug(`🚫 Grails bid ${bid.bidId} filtered out (${bid.priceDecimal} ${bid.currencySymbol})`);
+        stats.filtered++;
+        return;
+      }
+
+      // Enrich with ENS metadata (image lookup - Grails provides name but not image)
+      let enrichedBid = { ...bid };
+      if (bid.tokenId) {
+        try {
+          enrichedBid = await this.enrichBidWithMetadata(bid);
+        } catch (error: any) {
+          logger.warn(`⚠️  Failed to enrich Grails bid ${bid.bidId} with metadata:`, error.message);
+          // Continue without metadata
+        }
+      }
+
+      // Add USD pricing
+      enrichedBid = await this.addUSDPricing(enrichedBid);
+
+      // Add default values for database insertion
+      const bidForStorage = {
+        ...enrichedBid,
+        tokenId: enrichedBid.tokenId || undefined,
+        posted: false,
+        tweetId: undefined,
+        createdAt: undefined,
+        updatedAt: undefined
+      };
+
+      // Store in database
+      const insertedId = await this.databaseService.insertBid(bidForStorage);
+      logger.info(`✅ Stored Grails bid ${bid.bidId} (ID: ${insertedId}) - ${enrichedBid.priceDecimal} ${enrichedBid.currencySymbol} for ${enrichedBid.ensName}`);
+      
+      stats.newBids++;
+
+    } catch (error: any) {
+      if (error.message?.includes('already processed')) {
+        stats.duplicates++;
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  /**
+   * Filtering logic for Grails bids (no MagicEdenBid object)
+   * Applies club-aware minimum thresholds and age limits
+   */
+  private async shouldProcessGrailsBid(bid: TransformedBid): Promise<boolean> {
+    try {
+      // Skip bids without token ID - can't resolve ENS name
+      if (!bid.tokenId || bid.tokenId === 'null') {
+        logger.debug(`🚫 Skipping Grails bid without token ID: ${bid.bidId || 'unknown'}`);
+        return false;
+      }
+
+      // Age filter: only bids from last 24 hours
+      const bidAge = Date.now() - new Date(bid.createdAtApi).getTime();
+      const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+      if (bidAge > maxAge) {
+        logger.debug(`🚫 Skipping old Grails bid: ${bid.bidId} (age: ${Math.round(bidAge / 1000 / 60)} minutes)`);
+        return false;
+      }
+
+      // Price filtering with club-aware thresholds
+      const priceEth = parseFloat(bid.priceDecimal);
+      
+      // For ETH/WETH bids, apply club-aware filtering
+      if (bid.currencySymbol === 'WETH' || bid.currencySymbol === 'ETH') {
+        const ethMinimum = await this.getEthMinimumForBid(bid);
+        const passes = priceEth >= ethMinimum;
+        
+        const bidName = bid.ensName || bid.tokenId?.slice(-6) || 'unnamed';
+        logger.debug(`🔍 GRAILS BID FILTER: ${bidName} - ${priceEth} ETH vs ${ethMinimum} ETH minimum = ${passes ? 'PASS ✅' : 'REJECT ❌'}`);
+        
+        return passes;
+      }
+      
+      // For other currencies (stablecoins, etc.), allow all bids through
+      return true;
+
+    } catch (error: any) {
+      logger.error(`Error in Grails bid filtering:`, error.message);
+      return false;
+    }
   }
 
   /**
