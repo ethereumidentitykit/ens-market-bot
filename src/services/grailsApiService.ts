@@ -111,8 +111,8 @@ export class GrailsApiService {
     try {
       // Get last processed timestamp (with 1-hour lookback cap)
       const lastTimestamp = await this.getLastProcessedTimestamp();
-      const oneHourAgo = Date.now() - (60 * 60 * 1000);
-      const boundaryTimestamp = Math.max(lastTimestamp, oneHourAgo);
+      const fourHoursAgo = Date.now() - (4 * 60 * 60 * 1000);
+      const boundaryTimestamp = Math.max(lastTimestamp, fourHoursAgo);
       
       logger.info(`📈 Fetching offers newer than: ${new Date(boundaryTimestamp).toISOString()}`);
 
@@ -248,12 +248,14 @@ export class GrailsApiService {
       const response = await axios.get(nameWrapperUrl, { timeout: 3000 });
       
       if (response.data?.name) {
+        logger.debug(`🎁 Token ${tokenId.slice(-8)}... is wrapped (NameWrapper)`);
         return ENS_NAMEWRAPPER;
       }
     } catch {
       // NameWrapper failed, use Base Registrar
     }
     
+    logger.debug(`📦 Token ${tokenId.slice(-8)}... using Base Registrar (not wrapped)`);
     return ENS_BASE_REGISTRAR;
   }
 

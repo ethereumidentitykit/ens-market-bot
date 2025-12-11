@@ -235,7 +235,7 @@ export class BidsProcessingService {
       const hasName = !!bid.ensName;
       const hasImage = !!bid.nftImage;
       
-      logger.debug(`🔍 Magic Eden metadata check - Name: ${hasName ? `"${bid.ensName}"` : 'missing'}, Image: ${hasImage ? 'provided' : 'missing'}`);
+      logger.debug(`🔍 Bid metadata check - Name: ${hasName ? `"${bid.ensName}"` : 'missing'}, Image: ${hasImage ? 'provided' : 'missing'}`);
       
       if (hasName && hasImage) {
         logger.debug(`✅ Using Magic Eden metadata for ${bid.ensName} (no API call needed)`);
@@ -345,13 +345,9 @@ export class BidsProcessingService {
         return passes;
       }
       
-      // For stablecoins, use fixed USD minimums
-      if (bid.currencySymbol === 'USDC' || bid.currencySymbol === 'USDT') {
-        return priceEth >= 100; // Minimum $100 for stablecoins
-      }
-
-      // Default minimum for other currencies  
-      return priceEth >= 0.4; // Increased fallback
+      // For other currencies (stablecoins, etc.), allow all bids through
+      // They will be filtered by the club-aware ETH thresholds if needed
+      return true;
 
     } catch (error: any) {
       logger.error(`Error in bid filtering:`, error.message);
@@ -366,7 +362,7 @@ export class BidsProcessingService {
   private async getEthMinimumForBid(bid: any): Promise<number> {
     try {
       // Simple database lookups for limits
-      const defaultMin = await this.databaseService.getSystemState('autopost_bids_min_eth_default') || '5';
+      const defaultMin = await this.databaseService.getSystemState('autopost_bids_min_eth_default') || '2';
       const club10kMin = await this.databaseService.getSystemState('autopost_bids_min_eth_10k') || '5';
       const club999Min = await this.databaseService.getSystemState('autopost_bids_min_eth_999') || '20';
       
@@ -628,13 +624,8 @@ export class BidsProcessingService {
         return passes;
       }
       
-      // For stablecoins, use fixed USD minimums
-      if (bid.currencySymbol === 'USDC' || bid.currencySymbol === 'USDT') {
-        return priceEth >= 100; // Minimum $100 for stablecoins
-      }
-
-      // Default minimum for other currencies  
-      return priceEth >= 0.4;
+      // For other currencies (stablecoins, etc.), allow all bids through
+      return true;
 
     } catch (error: any) {
       logger.error(`Error in Grails bid filtering:`, error.message);
