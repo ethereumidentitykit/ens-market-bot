@@ -134,7 +134,12 @@ export class GrailsWebsocketService {
     logger.info(`🔌 Connecting to Grails websocket: ${url}`);
 
     try {
-      this.ws = new WebSocket(url);
+      // Include Origin header - server may require trusted origin to push events
+      this.ws = new WebSocket(url, {
+        headers: {
+          'Origin': 'https://grails.app'
+        }
+      });
       this.setupEventHandlers();
     } catch (error) {
       logger.error('🔌 Failed to create websocket:', error);
@@ -162,7 +167,10 @@ export class GrailsWebsocketService {
 
     this.ws.on('message', (data: WebSocket.Data) => {
       try {
-        const message = JSON.parse(data.toString()) as GrailsIncomingMessage;
+        const rawMessage = data.toString();
+        logger.debug(`🔌 Raw websocket message: ${rawMessage.substring(0, 200)}...`);
+        
+        const message = JSON.parse(rawMessage);
         this.handleMessage(message);
       } catch (error) {
         logger.error('🔌 Failed to parse websocket message:', error);
@@ -190,7 +198,7 @@ export class GrailsWebsocketService {
   }
 
   /**
-   * Subscribe to all events then filter to offer_made only
+   * Subscribe to all events then filter to offers only
    */
   private subscribe(): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
@@ -198,32 +206,29 @@ export class GrailsWebsocketService {
       return;
     }
 
-    // Subscribe to all events
+    // Subscribe to all events - no filter per dev suggestion
     const subscribeMsg: GrailsSubscribeMessage = { type: 'subscribe_all' };
     this.ws.send(JSON.stringify(subscribeMsg));
-    logger.info('🔌 Sent subscribe_all message');
-
-    // Filter to only offer_made events
-    const filterMsg: GrailsFilterMessage = {
-      type: 'set_event_filter',
-      filter_type: 'include',
-      event_types: ['offer_made']
-    };
-    this.ws.send(JSON.stringify(filterMsg));
-    logger.info('🔌 Sent event filter for offer_made events');
+    logger.info('🔌 Sent subscribe_all message (no filter - testing)');
   }
 
   /**
    * Handle incoming websocket messages
    */
-  private handleMessage(message: GrailsIncomingMessage): void {
+  private handleMessage(message: any): void {
+    // Log ALL message types for debugging
+    logger.info(`🔌 Received message type: ${message.type || 'unknown'}`);
+    
     if (message.type === 'activity_event') {
       this.lastEventTime = new Date();
       this.stats.eventsReceived++;
       const event = message.data;
       
-      // Only process offer_made events
-      if (event.event_type !== 'offer_made') {
+      // Log event type for debugging
+      logger.info(`🔌 Activity event: ${event?.event_type} for ${event?.name}`);
+      
+      // Only process offers (bids) - skip sales and listings for now
+      if (event.event_type !== 'offers' && event.event_type !== 'offer_made') {
         logger.debug(`🔌 Ignoring non-offer event: ${event.event_type}`);
         return;
       }
