@@ -1,6 +1,7 @@
 import { CronJob } from 'cron';
 import { SalesProcessingService } from './salesProcessingService';
 import { BidsProcessingService } from './bidsProcessingService';
+import { GrailsApiService } from './grailsApiService';
 import { AutoTweetService, AutoPostSettings, PostResult } from './autoTweetService';
 import { APIToggleService } from './apiToggleService';
 import { logger } from '../utils/logger';
@@ -9,12 +10,14 @@ import { IDatabaseService } from '../types';
 export class SchedulerService {
   private salesProcessingService: SalesProcessingService;
   private bidsProcessingService: BidsProcessingService;
+  private grailsApiService: GrailsApiService | null = null;
   private autoTweetService: AutoTweetService;
   private apiToggleService: APIToggleService;
   private databaseService: IDatabaseService;
   private salesSyncJob: CronJob | null = null;
   private registrationSyncJob: CronJob | null = null;
   private bidsSyncJob: CronJob | null = null;
+  private grailsSyncJob: CronJob | null = null;
   private isRunning: boolean = false;
   private lastRunTime: Date | null = null;
   private lastRunStats: any = null;
@@ -25,6 +28,7 @@ export class SchedulerService {
   private isProcessingSales: boolean = false;
   private isProcessingRegistrations: boolean = false;
   private isProcessingBids: boolean = false;
+  private isProcessingGrails: boolean = false;
 
   constructor(
     salesProcessingService: SalesProcessingService,
@@ -37,6 +41,14 @@ export class SchedulerService {
     this.autoTweetService = autoTweetService;
     this.apiToggleService = APIToggleService.getInstance();
     this.databaseService = databaseService;
+  }
+
+  /**
+   * Set GrailsApiService (injected after construction to avoid circular deps)
+   */
+  setGrailsApiService(grailsApiService: GrailsApiService): void {
+    this.grailsApiService = grailsApiService;
+    logger.info('🍷 GrailsApiService injected into SchedulerService');
   }
 
   /**
@@ -77,7 +89,7 @@ export class SchedulerService {
    */
   async start(): Promise<void> {
     // Stop existing jobs if running
-    if (this.salesSyncJob || this.registrationSyncJob || this.bidsSyncJob) {
+    if (this.salesSyncJob || this.registrationSyncJob || this.bidsSyncJob || this.grailsSyncJob) {
       logger.warn('Scheduler already running, stopping existing jobs first');
       await this.stop();
     }
@@ -115,19 +127,32 @@ export class SchedulerService {
       'America/New_York' // Timezone
     );
 
+    // Create cron job for Grails API polling (every 5 minutes)
+    this.grailsSyncJob = new CronJob(
+      '30 */5 * * * *', // Every 5 minutes at :30 seconds (offset from sales)
+      () => {
+        this.runGrailsSync();
+      },
+      null,
+      false, // Don't start automatically
+      'America/New_York' // Timezone
+    );
+
     this.salesSyncJob.start();
     this.registrationSyncJob.start();
     this.bidsSyncJob.start();
+    this.grailsSyncJob.start();
     this.isRunning = true;
     
     // Save enabled state to database for persistence across restarts
     await this.saveSchedulerState(true);
     
-    logger.info('Scheduler started - Sales: every 5 minutes, Registrations: every 1 minute, Bids: every 1 minute');
+    logger.info('Scheduler started - Sales: every 5 minutes, Registrations: every 1 minute, Bids: every 1 minute, Grails: every 5 minutes');
     logger.info('Tweet processing: REAL-TIME via DatabaseEventService for both Moralis and QuickNode data');
     logger.info(`Next sales run: ${this.salesSyncJob.nextDate().toString()}`);
     logger.info(`Next registration run: ${this.registrationSyncJob.nextDate().toString()}`);
     logger.info(`Next bid run: ${this.bidsSyncJob.nextDate().toString()}`);
+    logger.info(`Next Grails run: ${this.grailsSyncJob.nextDate().toString()}`);
   }
 
   /**
@@ -155,6 +180,12 @@ export class SchedulerService {
       wasRunning = true;
     }
     
+    if (this.grailsSyncJob) {
+      this.grailsSyncJob.stop();
+      this.grailsSyncJob = null;
+      wasRunning = true;
+    }
+    
     if (wasRunning) {
       this.isRunning = false;
       
@@ -162,7 +193,7 @@ export class SchedulerService {
       await this.saveSchedulerState(false);
       
       logger.info('💾 Scheduler state persisted: DISABLED (survives restarts)');
-    logger.info('Scheduler stopped - sales, registration, and bid processing halted');
+    logger.info('Scheduler stopped - sales, registration, bid, and Grails processing halted');
     logger.info('Registration tweet processing continues via real-time DatabaseEventService');
     } else {
       logger.info('Scheduler was not running');
@@ -187,6 +218,11 @@ export class SchedulerService {
     if (this.bidsSyncJob) {
       this.bidsSyncJob.stop();
       this.bidsSyncJob = null;
+    }
+    
+    if (this.grailsSyncJob) {
+      this.grailsSyncJob.stop();
+      this.grailsSyncJob = null;
     }
     
     this.isRunning = false;
@@ -218,10 +254,15 @@ export class SchedulerService {
       this.bidsSyncJob = null;
     }
     
+    if (this.grailsSyncJob) {
+      this.grailsSyncJob.stop();
+      this.grailsSyncJob = null;
+    }
+    
     // Save disabled state to database for persistence across restarts
     await this.saveSchedulerState(false);
     
-    logger.info('Scheduler force stopped - sales, registration, and bid processing halted');
+    logger.info('Scheduler force stopped - sales, registration, bid, and Grails processing halted');
     logger.info('Registration tweet processing continues via real-time DatabaseEventService');
   }
 
@@ -431,6 +472,58 @@ export class SchedulerService {
   }
 
   /**
+   * Execute the Grails API sync process (runs every 5 minutes)
+   * Fetches offers from Grails marketplace that Magic Eden doesn't pick up
+   */
+  private async runGrailsSync(): Promise<void> {
+    if (!this.isRunning) {
+      logger.debug('Skipping Grails sync - scheduler is stopped');
+      return;
+    }
+
+    if (!this.grailsApiService) {
+      logger.debug('Skipping Grails sync - GrailsApiService not initialized');
+      return;
+    }
+
+    if (this.isProcessingGrails) {
+      logger.info('⏳ Grails sync skipped - previous batch still processing');
+      return;
+    }
+
+    this.isProcessingGrails = true;
+    const startTime = new Date();
+    logger.info('🍷 Starting Grails API sync...');
+
+    try {
+      // Fetch new offers from Grails API
+      const offers = await this.grailsApiService.fetchNewOffers();
+      
+      if (offers.length === 0) {
+        logger.info('🍷 Grails sync complete - no new offers');
+      } else {
+        // Process offers through BidsProcessingService
+        const stats = await this.bidsProcessingService.processGrailsBids(offers);
+        
+        const duration = Date.now() - startTime.getTime();
+        logger.info(`🍷 Grails sync completed in ${duration}ms:`, {
+          fetched: offers.length,
+          stored: stats.newBids,
+          duplicates: stats.duplicates,
+          filtered: stats.filtered,
+          errors: stats.errors
+        });
+      }
+
+    } catch (error: any) {
+      logger.error(`🍷 Grails sync failed:`, error.message);
+      // Don't increment consecutiveErrors for Grails - it's supplementary
+    } finally {
+      this.isProcessingGrails = false;
+    }
+  }
+
+  /**
    * Get scheduler status and statistics
    */
   getStatus(): {
@@ -440,6 +533,8 @@ export class SchedulerService {
     nextSalesRunTime: Date | null;
     nextRegistrationRunTime: Date | null;
     nextBidsRunTime: Date | null;
+    nextGrailsRunTime: Date | null;
+    grailsEnabled: boolean;
     lastRunStats: any;
     consecutiveErrors: number;
     uptime: number;
@@ -447,10 +542,11 @@ export class SchedulerService {
     const nextSalesRunTime = this.salesSyncJob ? this.salesSyncJob.nextDate().toJSDate() : null;
     const nextRegistrationRunTime = this.registrationSyncJob ? this.registrationSyncJob.nextDate().toJSDate() : null;
     const nextBidsRunTime = this.bidsSyncJob ? this.bidsSyncJob.nextDate().toJSDate() : null;
+    const nextGrailsRunTime = this.grailsSyncJob ? this.grailsSyncJob.nextDate().toJSDate() : null;
     
     // For backward compatibility, show the nearest upcoming run
     let nextRunTime = null;
-    const allNextTimes = [nextSalesRunTime, nextRegistrationRunTime, nextBidsRunTime].filter(t => t !== null);
+    const allNextTimes = [nextSalesRunTime, nextRegistrationRunTime, nextBidsRunTime, nextGrailsRunTime].filter(t => t !== null);
     if (allNextTimes.length > 0) {
       nextRunTime = new Date(Math.min(...allNextTimes.map(t => t!.getTime())));
     }
@@ -462,6 +558,8 @@ export class SchedulerService {
       nextSalesRunTime,
       nextRegistrationRunTime,
       nextBidsRunTime,
+      nextGrailsRunTime,
+      grailsEnabled: this.grailsApiService !== null,
       lastRunStats: this.lastRunStats,
       consecutiveErrors: this.consecutiveErrors,
       uptime: this.lastRunTime ? Date.now() - this.lastRunTime.getTime() : 0
@@ -478,17 +576,18 @@ export class SchedulerService {
     error?: string;
   }> {
     try {
-      logger.info('Manual sync triggered - running registration and bid processing');
+      logger.info('Manual sync triggered - running registration, bid, and Grails processing');
       logger.info('Sales: QuickNode webhooks (real-time), Registration tweets: DatabaseEventService (real-time)');
       
       // Run all sync methods manually (sales sync is now a no-op)
       await this.runSalesSync(); // No-op: QuickNode handles sales
       await this.runRegistrationSync();
       await this.runBidsSync();
+      await this.runGrailsSync();
       
       return {
         success: true,
-        stats: { message: 'Registration and bid sync completed (sales handled by QuickNode webhooks)' }
+        stats: { message: 'Registration, bid, and Grails sync completed (sales handled by QuickNode webhooks)' }
       };
     } catch (error: any) {
       logger.error('Manual sync failed:', error.message);
@@ -510,14 +609,15 @@ export class SchedulerService {
   /**
    * Get next few scheduled run times for monitoring
    */
-  getUpcomingRuns(count: number = 5): { sales: Date[], registrations: Date[], bids: Date[] } {
+  getUpcomingRuns(count: number = 5): { sales: Date[], registrations: Date[], bids: Date[], grails: Date[] } {
     if (!this.salesSyncJob || !this.registrationSyncJob || !this.bidsSyncJob) {
-      return { sales: [], registrations: [], bids: [] };
+      return { sales: [], registrations: [], bids: [], grails: [] };
     }
 
     const salesRuns: Date[] = [];
     const registrationRuns: Date[] = [];
     const bidRuns: Date[] = [];
+    const grailsRuns: Date[] = [];
     
     // Get next few sales runs (every 5 minutes)
     let currentTime = new Date();
@@ -541,7 +641,16 @@ export class SchedulerService {
       bidRuns.push(nextBidRun);
     }
     
-    return { sales: salesRuns, registrations: registrationRuns, bids: bidRuns };
+    // Get next few Grails runs (every 5 minutes)
+    if (this.grailsSyncJob) {
+      for (let i = 0; i < count; i++) {
+        const nextGrailsRun = new Date(this.grailsSyncJob.nextDate().toJSDate());
+        nextGrailsRun.setMinutes(nextGrailsRun.getMinutes() + (i * 5));
+        grailsRuns.push(nextGrailsRun);
+      }
+    }
+    
+    return { sales: salesRuns, registrations: registrationRuns, bids: bidRuns, grails: grailsRuns };
   }
 
   /**
