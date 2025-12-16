@@ -138,6 +138,11 @@ function dashboard() {
         tweetGenerating: false,
         tweetSending: false,
 
+        // Bid blacklist state
+        bidBlacklist: [],
+        newBlacklistName: '',
+        blacklistLoading: false,
+
         // AI Replies state
         aiRepliesEnabled: false,
         openaiConfigured: false,
@@ -535,6 +540,7 @@ function dashboard() {
             await this.loadToggleStates();
             await this.loadAutoPostSettings();
             await this.loadPriceTiers();
+            await this.loadBidBlacklist();
             await this.refreshData();
             await this.loadUnpostedSales();
             await this.loadUnpostedRegistrations();
@@ -1901,8 +1907,68 @@ function dashboard() {
             }
         },
 
+        // Bid Blacklist Methods
+        async loadBidBlacklist() {
+            try {
+                const response = await this.fetch('/api/admin/bid-blacklist');
+                if (response.ok) {
+                    const data = await response.json();
+                    this.bidBlacklist = data.blacklist || [];
+                }
+            } catch (error) {
+                console.error('Failed to load bid blacklist:', error);
+            }
+        },
 
+        async addToBlacklist() {
+            const name = this.newBlacklistName.trim();
+            if (!name) return;
 
+            this.blacklistLoading = true;
+            try {
+                const response = await this.fetch('/api/admin/bid-blacklist', {
+                    method: 'POST',
+                    body: JSON.stringify({ names: [name] })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    this.bidBlacklist = data.blacklist || [];
+                    this.newBlacklistName = '';
+                    this.showMessage(`Added "${name}" to blacklist`, 'success');
+                } else {
+                    this.showMessage('Failed to add to blacklist', 'error');
+                }
+            } catch (error) {
+                console.error('Failed to add to blacklist:', error);
+                this.showMessage('Failed to add to blacklist', 'error');
+            } finally {
+                this.blacklistLoading = false;
+            }
+        },
+
+        async removeFromBlacklist(name) {
+            this.blacklistLoading = true;
+            try {
+                const response = await this.fetch('/api/admin/bid-blacklist', {
+                    method: 'DELETE',
+                    body: JSON.stringify({ name })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    this.bidBlacklist = data.blacklist || [];
+                    this.showMessage(`Removed "${name}" from blacklist`, 'success');
+                } else {
+                    this.showMessage('Failed to remove from blacklist', 'error');
+                }
+            } catch (error) {
+                console.error('Failed to remove from blacklist:', error);
+                this.showMessage('Failed to remove from blacklist', 'error');
+            } finally {
+                this.blacklistLoading = false;
+            }
+        },
 
 
         // Select bid for modal display

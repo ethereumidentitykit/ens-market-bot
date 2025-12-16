@@ -797,6 +797,81 @@ export class DatabaseService implements IDatabaseService {
   }
 
   /**
+   * Bid Blacklist Methods
+   * Manages a list of ENS names to ignore during bid processing
+   */
+
+  /**
+   * Get the current bid blacklist
+   * @returns Array of blacklisted ENS names
+   */
+  async getBidBlacklist(): Promise<string[]> {
+    const value = await this.getSystemState('bid_name_blacklist');
+    if (!value) return [];
+    try {
+      return JSON.parse(value);
+    } catch {
+      logger.warn('Failed to parse bid blacklist, returning empty array');
+      return [];
+    }
+  }
+
+  /**
+   * Set the entire bid blacklist (replaces existing)
+   * @param names - Array of ENS names to blacklist
+   */
+  async setBidBlacklist(names: string[]): Promise<void> {
+    // Normalize names (lowercase, trim)
+    const normalized = names.map(n => n.toLowerCase().trim()).filter(n => n.length > 0);
+    // Remove duplicates
+    const unique = [...new Set(normalized)];
+    await this.setSystemState('bid_name_blacklist', JSON.stringify(unique));
+    logger.info(`Bid blacklist set to ${unique.length} names`);
+  }
+
+  /**
+   * Add a name to the bid blacklist
+   * @param name - ENS name to add
+   */
+  async addToBidBlacklist(name: string): Promise<void> {
+    const normalized = name.toLowerCase().trim();
+    if (!normalized) return;
+    
+    const current = await this.getBidBlacklist();
+    if (!current.includes(normalized)) {
+      current.push(normalized);
+      await this.setSystemState('bid_name_blacklist', JSON.stringify(current));
+      logger.info(`Added "${normalized}" to bid blacklist`);
+    }
+  }
+
+  /**
+   * Remove a name from the bid blacklist
+   * @param name - ENS name to remove
+   */
+  async removeFromBidBlacklist(name: string): Promise<void> {
+    const normalized = name.toLowerCase().trim();
+    const current = await this.getBidBlacklist();
+    const updated = current.filter(n => n !== normalized);
+    
+    if (updated.length !== current.length) {
+      await this.setSystemState('bid_name_blacklist', JSON.stringify(updated));
+      logger.info(`Removed "${normalized}" from bid blacklist`);
+    }
+  }
+
+  /**
+   * Check if a name is blacklisted
+   * @param name - ENS name to check
+   * @returns true if blacklisted
+   */
+  async isNameBlacklisted(name: string): Promise<boolean> {
+    const normalized = name.toLowerCase().trim();
+    const blacklist = await this.getBidBlacklist();
+    return blacklist.includes(normalized);
+  }
+
+  /**
    * Get database statistics
    */
   async getStats(): Promise<{

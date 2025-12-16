@@ -323,6 +323,15 @@ export class BidsProcessingService {
         return false;
       }
 
+      // Check blacklist - skip if name is blacklisted
+      if (bid.ensName) {
+        const isBlacklisted = await this.databaseService.isNameBlacklisted(bid.ensName);
+        if (isBlacklisted) {
+          logger.debug(`🚫 Skipping blacklisted name: ${bid.ensName}`);
+          return false;
+        }
+      }
+
       // Age filter: only bids from last 24 hours
       const bidAge = Date.now() - new Date(bid.createdAtApi).getTime();
       const maxAge = 24 * 60 * 60 * 1000; // 24 hours
@@ -600,6 +609,15 @@ export class BidsProcessingService {
       if (!bid.tokenId || bid.tokenId === 'null') {
         logger.debug(`🚫 Skipping Grails bid without token ID: ${bid.bidId || 'unknown'}`);
         return false;
+      }
+
+      // Check blacklist - skip if name is blacklisted
+      if (bid.ensName) {
+        const isBlacklisted = await this.databaseService.isNameBlacklisted(bid.ensName);
+        if (isBlacklisted) {
+          logger.debug(`🚫 Skipping blacklisted Grails bid: ${bid.ensName}`);
+          return false;
+        }
       }
 
       // Age filter: only bids from last 24 hours

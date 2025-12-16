@@ -275,6 +275,13 @@ export interface IDatabaseService {
   markBidAsFailed(id: number, reason: string): Promise<void>;
   getBidById(id: number): Promise<ENSBid | null>;
   
+  // Bid blacklist methods
+  getBidBlacklist(): Promise<string[]>;
+  setBidBlacklist(names: string[]): Promise<void>;
+  addToBidBlacklist(name: string): Promise<void>;
+  removeFromBidBlacklist(name: string): Promise<void>;
+  isNameBlacklisted(name: string): Promise<boolean>;
+  
   // Price tier methods
   getPriceTiers(transactionType?: string): Promise<PriceTier[]>;
   updatePriceTier(transactionType: string, tierLevel: number, minUsd: number, maxUsd: number | null): Promise<void>;

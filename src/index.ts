@@ -1613,6 +1613,84 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    // Bid Blacklist API endpoints
+    app.get('/api/admin/bid-blacklist', requireAuth, async (req, res) => {
+      try {
+        const blacklist = await databaseService.getBidBlacklist();
+        res.json({
+          success: true,
+          blacklist
+        });
+      } catch (error: any) {
+        logger.error('Failed to get bid blacklist:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.post('/api/admin/bid-blacklist', requireAuth, async (req, res) => {
+      try {
+        const { names } = req.body;
+        
+        if (!names || !Array.isArray(names)) {
+          return res.status(400).json({
+            success: false,
+            error: 'names must be an array of strings'
+          });
+        }
+
+        // Add each name to the blacklist
+        for (const name of names) {
+          if (typeof name === 'string' && name.trim()) {
+            await databaseService.addToBidBlacklist(name);
+          }
+        }
+
+        const blacklist = await databaseService.getBidBlacklist();
+        res.json({
+          success: true,
+          message: `Added ${names.length} name(s) to blacklist`,
+          blacklist
+        });
+      } catch (error: any) {
+        logger.error('Failed to add to bid blacklist:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.delete('/api/admin/bid-blacklist', requireAuth, async (req, res) => {
+      try {
+        const { name } = req.body;
+        
+        if (!name || typeof name !== 'string') {
+          return res.status(400).json({
+            success: false,
+            error: 'name must be a string'
+          });
+        }
+
+        await databaseService.removeFromBidBlacklist(name);
+        const blacklist = await databaseService.getBidBlacklist();
+        
+        res.json({
+          success: true,
+          message: `Removed "${name}" from blacklist`,
+          blacklist
+        });
+      } catch (error: any) {
+        logger.error('Failed to remove from bid blacklist:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     // Twitter API endpoints
     app.get('/api/twitter/test', requireAuth, async (req, res) => {
       try {
