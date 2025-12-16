@@ -5,6 +5,33 @@ import { logger } from './logger';
  */
 
 /**
+ * Checks if an ENS name is a subdomain (e.g., sub.name.eth)
+ * A subdomain has more than one label before the .eth TLD
+ * 
+ * Examples:
+ * - "name.eth" → false (top-level name)
+ * - "sub.name.eth" → true (subdomain)
+ * - "a.b.c.eth" → true (nested subdomain)
+ * 
+ * @param name - The ENS name to check
+ * @returns true if the name is a subdomain
+ */
+export function isSubdomain(name: string | null | undefined): boolean {
+  if (!name) return false;
+  
+  // Remove .eth suffix if present
+  const withoutEth = name.toLowerCase().endsWith('.eth') 
+    ? name.slice(0, -4) 
+    : name;
+  
+  // Count dots in the remaining name
+  // If there are any dots, it's a subdomain
+  const dotCount = (withoutEth.match(/\./g) || []).length;
+  
+  return dotCount > 0;
+}
+
+/**
  * Detects if a "name" is actually a token ID hash instead of a real ENS name
  * 
  * Token ID hashes have these characteristics:

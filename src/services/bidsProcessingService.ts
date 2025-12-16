@@ -1,7 +1,7 @@
 import { MagicEdenV4Service } from './magicEdenV4Service';
 import { IDatabaseService, ENSBid, BidProcessingStats, MagicEdenBid } from '../types';
 import { logger } from '../utils/logger';
-import { isTokenIdHash } from '../utils/nameUtils';
+import { isTokenIdHash, isSubdomain } from '../utils/nameUtils';
 import { AlchemyService } from './alchemyService';
 import { ClubService } from './clubService';
 import { ensSubgraphService } from './ensSubgraphService';
@@ -332,6 +332,12 @@ export class BidsProcessingService {
         }
       }
 
+      // Skip subdomains (e.g., sub.name.eth)
+      if (bid.ensName && isSubdomain(bid.ensName)) {
+        logger.debug(`🚫 Skipping subdomain bid: ${bid.ensName}`);
+        return false;
+      }
+
       // Age filter: only bids from last 24 hours
       const bidAge = Date.now() - new Date(bid.createdAtApi).getTime();
       const maxAge = 24 * 60 * 60 * 1000; // 24 hours
@@ -618,6 +624,12 @@ export class BidsProcessingService {
           logger.debug(`🚫 Skipping blacklisted Grails bid: ${bid.ensName}`);
           return false;
         }
+      }
+
+      // Skip subdomains (e.g., sub.name.eth)
+      if (bid.ensName && isSubdomain(bid.ensName)) {
+        logger.debug(`🚫 Skipping Grails subdomain bid: ${bid.ensName}`);
+        return false;
       }
 
       // Age filter: only bids from last 24 hours

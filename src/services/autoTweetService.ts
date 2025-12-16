@@ -4,6 +4,7 @@
  */
 
 import { logger } from '../utils/logger';
+import { isSubdomain } from '../utils/nameUtils';
 import { ProcessedSale, IDatabaseService, ENSRegistration, ENSBid } from '../types';
 import { APIToggleService } from './apiToggleService';
 import { NewTweetFormatter } from './newTweetFormatter';
@@ -190,6 +191,18 @@ export class AutoTweetService {
       };
     }
 
+    // Skip subdomains (e.g., sub.name.eth)
+    if (sale.nftName && isSubdomain(sale.nftName)) {
+      logger.debug(`🚫 Skipping subdomain sale: ${sale.nftName}`);
+      return {
+        success: false,
+        saleId,
+        skipped: true,
+        reason: 'Subdomain sales are not posted',
+        type: 'sale'
+      };
+    }
+
     // Check if sale is too old (use sales-specific settings)
     if (!(await this.isWithinTimeLimit(sale, settings.sales.maxAgeHours))) {
       return {
@@ -300,6 +313,19 @@ export class AutoTweetService {
    */
   private async processSingleRegistration(registration: ENSRegistration, settings: AutoPostSettings): Promise<PostResult> {
     const registrationId = registration.id!;
+    const regName = registration.ensName || registration.fullName;
+
+    // Skip subdomains (e.g., sub.name.eth)
+    if (regName && isSubdomain(regName)) {
+      logger.debug(`🚫 Skipping subdomain registration: ${regName}`);
+      return {
+        success: false,
+        registrationId,
+        skipped: true,
+        reason: 'Subdomain registrations are not posted',
+        type: 'registration'
+      };
+    }
 
     // Check if registration is too old (use registrations-specific settings)
     if (!(await this.isWithinRegistrationTimeLimit(registration, settings.registrations.maxAgeHours))) {
