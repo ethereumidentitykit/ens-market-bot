@@ -196,6 +196,22 @@ export class BidsProcessingService {
       // Add USD pricing
       enrichedBid = await this.addUSDPricing(enrichedBid);
 
+      // Post-enrichment filtering: blacklist and subdomain checks (now that we have the ENS name)
+      if (enrichedBid.ensName) {
+        const isBlacklisted = await this.databaseService.isNameBlacklisted(enrichedBid.ensName);
+        if (isBlacklisted) {
+          logger.info(`🚫 Skipping blacklisted name: ${enrichedBid.ensName}`);
+          stats.filtered++;
+          return;
+        }
+        
+        if (isSubdomain(enrichedBid.ensName)) {
+          logger.debug(`🚫 Skipping subdomain bid: ${enrichedBid.ensName}`);
+          stats.filtered++;
+          return;
+        }
+      }
+
       // Add default values for database insertion
       const bidForStorage = {
         ...enrichedBid,
