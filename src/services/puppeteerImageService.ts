@@ -596,7 +596,7 @@ export class PuppeteerImageService {
         <title>ENS Transaction Image</title>
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
         <style>
             * {
                 margin: 0;
@@ -607,7 +607,7 @@ export class PuppeteerImageService {
             body {
                 width: ${this.IMAGE_WIDTH}px;
                 height: ${this.IMAGE_HEIGHT}px;
-                font-family: 'Inter', 'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif;
+                font-family: 'Inter', 'Noto Sans KR', 'Noto Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif;
                 overflow: hidden;
                 position: relative;
                 background: #1E1E1E;
@@ -657,7 +657,7 @@ export class PuppeteerImageService {
                 color: white;
                 font-size: 85px;
                 font-weight: 600;
-                font-family: 'Inter', 'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif;
+                font-family: 'Inter', 'Noto Sans KR', 'Noto Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif;
             }
 
             /* ETH Price (Left Side - Center Aligned) */
@@ -670,7 +670,7 @@ export class PuppeteerImageService {
                 color: white;
                 font-size: 48px;
                 font-weight: normal;
-                font-family: 'Inter', 'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif;
+                font-family: 'Inter', 'Noto Sans KR', 'Noto Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif;
             }
 
             /* Seller Section (Dynamic Positioning) */
@@ -690,7 +690,7 @@ export class PuppeteerImageService {
                 font-weight: normal;
                 white-space: nowrap;
                 margin-left: 8px;
-                font-family: 'Inter', 'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif;
+                font-family: 'Inter', 'Noto Sans KR', 'Noto Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif;
             }
 
             .seller-avatar {
@@ -717,7 +717,7 @@ export class PuppeteerImageService {
                 font-weight: normal;
                 white-space: nowrap;
                 margin-left: 8px;
-                font-family: 'Inter', 'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif;
+                font-family: 'Inter', 'Noto Sans KR', 'Noto Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif;
             }
 
             .buyer-avatar {
@@ -1109,7 +1109,7 @@ export class PuppeteerImageService {
       
       htmlTextElements.push(`
         <div style="position: absolute; left: ${element.x}px; top: ${adjustedY}px; 
-                    font-family: 'Inter', 'Noto Sans KR', sans-serif;
+                    font-family: 'Inter', 'Noto Sans KR', 'Noto Sans Arabic', sans-serif;
                     font-size: ${unifiedFontSize}px; font-weight: 500; color: ${element.fill};
                     line-height: 1; 
                     filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.15));">
@@ -1121,9 +1121,9 @@ export class PuppeteerImageService {
     // Build complete HTML with background, logo, and text
     // Load Inter font from Google Fonts with weight 500
     const html = `
-      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@500&family=Noto+Sans+KR:wght@500&display=swap" rel="stylesheet">
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@500&family=Noto+Sans+KR:wght@500&family=Noto+Sans+Arabic:wght@500&display=swap" rel="stylesheet">
       <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@500&family=Noto+Sans+KR:wght@500&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@500&family=Noto+Sans+KR:wght@500&family=Noto+Sans+Arabic:wght@500&display=swap');
       </style>
       <div style="width: 270px; height: 270px; position: relative; overflow: hidden; ${backgroundStyle}">
         ${svgPaths}
