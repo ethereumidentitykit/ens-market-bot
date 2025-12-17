@@ -806,6 +806,7 @@ export class NewTweetFormatter {
   /**
    * Build marketplace URL for an ENS name
    * Format: grails.app/name.eth
+   * Encodes emoji and special characters for URL safety
    */
   private buildMarketplaceUrl(ensName: string): string {
     // Handle cases where ensName might be "Unknown ENS" or similar error states
@@ -820,7 +821,11 @@ export class NewTweetFormatter {
     // Ensure .eth suffix
     const fullEnsName = ensName.endsWith('.eth') ? ensName : `${ensName}.eth`;
     
-    return `grails.app/${fullEnsName}`;
+    // URL-encode the name to handle emojis (especially keycap digits like 0⃣)
+    // and other special characters that can break URLs
+    const encodedName = encodeURIComponent(fullEnsName);
+    
+    return `grails.app/${encodedName}`;
   }
 
   /**
