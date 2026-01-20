@@ -61,17 +61,19 @@ export class ClubService {
 
   /**
    * Get comma-separated club handles for club slugs
-   * Filters out clubs without handles
+   * Filters out clubs without handles and deduplicates
    */
   public getClubMention(clubs: string[]): string | null {
     if (!clubs || clubs.length === 0) return null;
 
-    const handles = clubs
-      .map(slug => getClubHandle(slug))
-      .filter((handle): handle is string => handle !== null && handle.trim() !== '');
+    const uniqueHandles = [...new Set(
+      clubs
+        .map(slug => getClubHandle(slug))
+        .filter((handle): handle is string => handle !== null && handle.trim() !== '')
+    )];
 
-    if (handles.length === 0) return null;
-    return handles.join(', ');
+    if (uniqueHandles.length === 0) return null;
+    return uniqueHandles.join(', ');
   }
 
   /**
@@ -85,15 +87,19 @@ export class ClubService {
   /**
    * Get formatted club string with names and handles properly paired
    * Format: "999 Club @ens999club, Pokemon @PokemonENS"
+   * Deduplicates handles - only shows each handle once (on first category)
    */
   public getFormattedClubString(clubs: string[]): string | null {
     if (!clubs || clubs.length === 0) return null;
 
+    const usedHandles = new Set<string>();
     const clubStrings = clubs.map(slug => {
       const label = getClubLabel(slug);
       const handle = getClubHandle(slug);
 
-      if (handle && handle.trim() !== '') {
+      // Only include handle if it hasn't been used yet
+      if (handle && handle.trim() !== '' && !usedHandles.has(handle)) {
+        usedHandles.add(handle);
         return `${label} ${handle}`;
       }
       return label;
