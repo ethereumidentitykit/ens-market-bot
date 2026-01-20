@@ -461,11 +461,11 @@ export class NewTweetFormatter {
     const ownerHandle = this.getDisplayHandle(ownerAccount, registration.ownerAddress);
     const ownerLine = `Minter: ${ownerHandle}`;
     
-    // Club line (show club name with handle properly paired)
+    // Category line (show category name with handle properly paired)
     const clubs = await this.clubService.getClubs(ensName);
     const formattedClubString = this.clubService.getFormattedClubString(clubs);
     const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
-    const clubLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
+    const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     
     // Grails marketplace link
     const marketplaceUrl = this.buildMarketplaceUrl(ensName);
@@ -475,8 +475,8 @@ export class NewTweetFormatter {
     if (historicalLine) {
       tweet += `\n\n${historicalLine}`;
     }
-    if (clubLine) {
-      tweet += `\n${clubLine}`;
+    if (categoryLine) {
+      tweet += `\n${categoryLine}`;
     }
     if (marketplaceUrl) {
       tweet += `\n\n${marketplaceUrl}`;
@@ -640,11 +640,11 @@ export class NewTweetFormatter {
       }
     }
     
-    // Club line (show club name with handle properly paired)
+    // Category line (show category name with handle properly paired)
     const clubs = await this.clubService.getClubs(ensName);
     const formattedClubString = this.clubService.getFormattedClubString(clubs);
     const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
-    const clubLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
+    const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     
     // Marketplace link
     const marketplaceUrl = this.buildMarketplaceUrl(ensName);
@@ -657,8 +657,8 @@ export class NewTweetFormatter {
     if (historicalLine) {
       tweet += `\n${historicalLine}`;
     }
-    if (clubLine) {
-      tweet += `\n${clubLine}`;
+    if (categoryLine) {
+      tweet += `\n${categoryLine}`;
     }
     if (marketplaceUrl) {
       tweet += `\n\n${marketplaceUrl}`;
@@ -743,13 +743,13 @@ export class NewTweetFormatter {
     const buyerLine = `Buyer: ${buyerHandle}`;
     const sellerLine = `Seller: ${sellerHandle}`;
     
-    // Club line (show club name with handle properly paired)
+    // Category line (show category name with handle properly paired)
     logger.info(`[NewTweetFormatter] Getting club info for sale: ${ensName}`);
     const clubs = await this.clubService.getClubs(ensName);
     const formattedClubString = this.clubService.getFormattedClubString(clubs);
     const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
-    const clubLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
-    logger.info(`[NewTweetFormatter] Sale club line result: "${clubLine}"`);
+    const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
+    logger.info(`[NewTweetFormatter] Sale category line result: "${categoryLine}"`);
     
     // Grails marketplace link
     const marketplaceUrl = this.buildMarketplaceUrl(ensName);
@@ -766,8 +766,8 @@ export class NewTweetFormatter {
     if (historicalLine) {
       tweet += `\n${historicalLine}`;
     }
-    if (clubLine) {
-      tweet += `\n${clubLine}`;
+    if (categoryLine) {
+      tweet += `\n${categoryLine}`;
     }
     if (marketplaceUrl) {
       tweet += `\n\n${marketplaceUrl}`;
@@ -1408,8 +1408,8 @@ export class NewTweetFormatter {
     const clubs = await this.clubService.getClubs(ensName);
     const formattedClubString = this.clubService.getFormattedClubString(clubs);
     const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
-    const clubLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
-    logger.info(`[NewTweetFormatter] Preview club line result: "${clubLine}"`);
+    const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
+    logger.info(`[NewTweetFormatter] Preview category line result: "${categoryLine}"`);
     
     const breakdown = {
       header: `💰 SOLD: ${ensName}`,
@@ -1418,7 +1418,7 @@ export class NewTweetFormatter {
       buyerLine: `Buyer: ${buyerHandle}`,
       sellerLine: `Seller: ${sellerHandle}`,
       brokerLine,
-      clubLine: clubLine,
+      categoryLine: categoryLine,
       marketplaceUrl: this.buildMarketplaceUrl(ensName),
       buyerHandle: buyerHandle,
       sellerHandle: sellerHandle,
@@ -1459,14 +1459,14 @@ export class NewTweetFormatter {
     const clubs = await this.clubService.getClubs(ensName);
     const formattedClubString = this.clubService.getFormattedClubString(clubs);
     const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
-    const clubLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
+    const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     
     const breakdown = {
       header: `🏛️ REGISTERED: ${ensName}`,
       ensName: ensName,
       priceLine: priceUsd ? `For: ${priceUsd.replace(/[()]/g, '')} (${priceEth} ETH)` : `For: ${priceEth} ETH`,
       ownerLine: `Minter: ${ownerHandle}`,
-      clubLine: clubLine,
+      categoryLine: categoryLine,
       marketplaceUrl: this.buildMarketplaceUrl(ensName),
       ownerHandle: ownerHandle
     };
@@ -1614,7 +1614,7 @@ export class NewTweetFormatter {
     const clubs = await this.clubService.getClubs(ensName);
     const formattedClubString = this.clubService.getFormattedClubString(clubs);
     const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
-    const clubLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
+    const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     
     const breakdown = {
       header: `✋ OFFER: ${ensName}`,
@@ -1623,7 +1623,7 @@ export class NewTweetFormatter {
       validLine: `Valid: ${duration}`,
       bidderLine: `Bidder: ${bidderHandle}`,
       currentOwnerLine: `Owner: ${currentOwnerHandle}`,
-      clubLine: clubLine,
+      categoryLine: categoryLine,
       marketplaceUrl: marketplaceUrl,
       bidderHandle: bidderHandle,
       currentOwnerHandle: currentOwnerHandle

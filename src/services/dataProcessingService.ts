@@ -199,8 +199,8 @@ export interface LLMPromptContext {
     sellerBidsTruncatedCount: number;
   };
   
-  // Club membership info (if name belongs to any clubs)
-  clubInfo: string | null; // Formatted club string (e.g., "999 Club #1,234 @ENS999club")
+  // Category membership info (if name belongs to any categories)
+  clubInfo: string | null; // Formatted category string (e.g., "999 Club @ens999club")
 }
 
 /**
@@ -215,7 +215,7 @@ export class DataProcessingService {
     '0x00ca04c45da318d5b7e7b14d5381ca59f09c73f0', // Additional proxy
   ];
   
-  // Club service for checking ENS name club memberships
+  // Category service for checking ENS name category memberships
   private readonly clubService = new ClubService();
 
   constructor() {
@@ -1147,14 +1147,14 @@ export class DataProcessingService {
       }
     }
     
-    // Step 3.75: Check club membership
-    logger.debug(`   🎯 Checking club membership for ${eventData.tokenName}...`);
-    const clubs = await this.clubService.getClubs(eventData.tokenName);
-    const clubInfo = this.clubService.getFormattedClubString(clubs);
+    // Step 3.75: Check category membership
+    logger.debug(`   🎯 Checking category membership for ${eventData.tokenName}...`);
+    const categories = await this.clubService.getClubs(eventData.tokenName);
+    const clubInfo = this.clubService.getFormattedClubString(categories);
     if (clubInfo) {
-      logger.debug(`   ✅ Club membership found: ${clubInfo}`);
+      logger.debug(`   ✅ Category membership found: ${clubInfo}`);
     } else {
-      logger.debug(`   ℹ️  No club membership found`);
+      logger.debug(`   ℹ️  No category membership found`);
     }
     
     // Step 4: Assemble complete context
