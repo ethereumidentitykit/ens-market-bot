@@ -44,13 +44,7 @@ export class NewTweetFormatter {
     private ensMetadataService?: ENSMetadataService,
     private magicEdenV4Service?: MagicEdenV4Service
   ) {
-    logger.info('[NewTweetFormatter] Constructor called - ClubService should be initialized');
-    // Add a small delay to let ClubService initialize, then check status
-    setTimeout(() => {
-      logger.info(`[NewTweetFormatter] ClubService initialized: ${this.clubService.isInitialized()}`);
-      const stats = this.clubService.getStats();
-      logger.info(`[NewTweetFormatter] ClubService stats: ${JSON.stringify(stats)}`);
-    }, 1000);
+    logger.info('[NewTweetFormatter] Constructor called');
   }
 
   /**
@@ -467,9 +461,11 @@ export class NewTweetFormatter {
     const ownerHandle = this.getDisplayHandle(ownerAccount, registration.ownerAddress);
     const ownerLine = `Minter: ${ownerHandle}`;
     
-    // Club line (show club name with handle properly paired)
-    const formattedClubString = this.clubService.getFormattedClubString(ensName);
-    const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
+    // Category line (show category name with handle properly paired)
+    const clubs = await this.clubService.getClubs(ensName);
+    const formattedClubString = this.clubService.getFormattedClubString(clubs);
+    const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
+    const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     
     // Grails marketplace link
     const marketplaceUrl = this.buildMarketplaceUrl(ensName);
@@ -479,8 +475,8 @@ export class NewTweetFormatter {
     if (historicalLine) {
       tweet += `\n\n${historicalLine}`;
     }
-    if (clubLine) {
-      tweet += `\n${clubLine}`;
+    if (categoryLine) {
+      tweet += `\n${categoryLine}`;
     }
     if (marketplaceUrl) {
       tweet += `\n\n${marketplaceUrl}`;
@@ -644,9 +640,11 @@ export class NewTweetFormatter {
       }
     }
     
-    // Club line (show club name with handle properly paired)
-    const formattedClubString = this.clubService.getFormattedClubString(ensName);
-    const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
+    // Category line (show category name with handle properly paired)
+    const clubs = await this.clubService.getClubs(ensName);
+    const formattedClubString = this.clubService.getFormattedClubString(clubs);
+    const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
+    const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     
     // Marketplace link
     const marketplaceUrl = this.buildMarketplaceUrl(ensName);
@@ -659,8 +657,8 @@ export class NewTweetFormatter {
     if (historicalLine) {
       tweet += `\n${historicalLine}`;
     }
-    if (clubLine) {
-      tweet += `\n${clubLine}`;
+    if (categoryLine) {
+      tweet += `\n${categoryLine}`;
     }
     if (marketplaceUrl) {
       tweet += `\n\n${marketplaceUrl}`;
@@ -745,13 +743,13 @@ export class NewTweetFormatter {
     const buyerLine = `Buyer: ${buyerHandle}`;
     const sellerLine = `Seller: ${sellerHandle}`;
     
-    // Club line (show club name with handle properly paired)
+    // Category line (show category name with handle properly paired)
     logger.info(`[NewTweetFormatter] Getting club info for sale: ${ensName}`);
-    logger.info(`[NewTweetFormatter] ClubService instance exists: ${!!this.clubService}`);
-    logger.info(`[NewTweetFormatter] ClubService initialized: ${this.clubService?.isInitialized()}`);
-    const formattedClubString = this.clubService.getFormattedClubString(ensName);
-    const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
-    logger.info(`[NewTweetFormatter] Sale club line result: "${clubLine}"`);
+    const clubs = await this.clubService.getClubs(ensName);
+    const formattedClubString = this.clubService.getFormattedClubString(clubs);
+    const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
+    const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
+    logger.info(`[NewTweetFormatter] Sale category line result: "${categoryLine}"`);
     
     // Grails marketplace link
     const marketplaceUrl = this.buildMarketplaceUrl(ensName);
@@ -768,8 +766,8 @@ export class NewTweetFormatter {
     if (historicalLine) {
       tweet += `\n${historicalLine}`;
     }
-    if (clubLine) {
-      tweet += `\n${clubLine}`;
+    if (categoryLine) {
+      tweet += `\n${categoryLine}`;
     }
     if (marketplaceUrl) {
       tweet += `\n\n${marketplaceUrl}`;
@@ -779,19 +777,19 @@ export class NewTweetFormatter {
   }
 
   /**
-   * Get club mention for ENS name if applicable
+   * Get club mention for club slugs
    * Supports multiple clubs with comma separation
    */
-  private getClubMention(ensName: string): string | null {
-    return this.clubService.getClubMention(ensName);
+  private getClubMention(clubs: string[]): string | null {
+    return this.clubService.getClubMention(clubs);
   }
 
   /**
-   * Get human-readable club name for ENS name if applicable
+   * Get human-readable club name for club slugs
    * Supports multiple clubs with comma separation
    */
-  private getClubName(ensName: string): string | null {
-    return this.clubService.getClubName(ensName);
+  private getClubName(clubs: string[]): string | null {
+    return this.clubService.getClubName(clubs);
   }
 
   /**
@@ -1407,11 +1405,11 @@ export class NewTweetFormatter {
     
     // Check for club mention
     logger.info(`[NewTweetFormatter] Preview - Getting club info for: ${ensName}`);
-    logger.info(`[NewTweetFormatter] Preview - ClubService instance exists: ${!!this.clubService}`);
-    logger.info(`[NewTweetFormatter] Preview - ClubService initialized: ${this.clubService?.isInitialized()}`);
-    const formattedClubString = this.clubService.getFormattedClubString(ensName);
-    const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
-    logger.info(`[NewTweetFormatter] Preview club line result: "${clubLine}"`);
+    const clubs = await this.clubService.getClubs(ensName);
+    const formattedClubString = this.clubService.getFormattedClubString(clubs);
+    const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
+    const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
+    logger.info(`[NewTweetFormatter] Preview category line result: "${categoryLine}"`);
     
     const breakdown = {
       header: `💰 SOLD: ${ensName}`,
@@ -1420,7 +1418,7 @@ export class NewTweetFormatter {
       buyerLine: `Buyer: ${buyerHandle}`,
       sellerLine: `Seller: ${sellerHandle}`,
       brokerLine,
-      clubLine: clubLine,
+      categoryLine: categoryLine,
       marketplaceUrl: this.buildMarketplaceUrl(ensName),
       buyerHandle: buyerHandle,
       sellerHandle: sellerHandle,
@@ -1458,15 +1456,17 @@ export class NewTweetFormatter {
     const ownerHandle = this.getDisplayHandle(ownerAccount, registration.ownerAddress);
     
     // Check for club mention
-    const formattedClubString = this.clubService.getFormattedClubString(ensName);
-    const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
+    const clubs = await this.clubService.getClubs(ensName);
+    const formattedClubString = this.clubService.getFormattedClubString(clubs);
+    const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
+    const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     
     const breakdown = {
       header: `🏛️ REGISTERED: ${ensName}`,
       ensName: ensName,
       priceLine: priceUsd ? `For: ${priceUsd.replace(/[()]/g, '')} (${priceEth} ETH)` : `For: ${priceEth} ETH`,
       ownerLine: `Minter: ${ownerHandle}`,
-      clubLine: clubLine,
+      categoryLine: categoryLine,
       marketplaceUrl: this.buildMarketplaceUrl(ensName),
       ownerHandle: ownerHandle
     };
@@ -1611,8 +1611,10 @@ export class NewTweetFormatter {
     }
     
     // Check for club mention
-    const formattedClubString = this.clubService.getFormattedClubString(ensName);
-    const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
+    const clubs = await this.clubService.getClubs(ensName);
+    const formattedClubString = this.clubService.getFormattedClubString(clubs);
+    const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
+    const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     
     const breakdown = {
       header: `✋ OFFER: ${ensName}`,
@@ -1621,7 +1623,7 @@ export class NewTweetFormatter {
       validLine: `Valid: ${duration}`,
       bidderLine: `Bidder: ${bidderHandle}`,
       currentOwnerLine: `Owner: ${currentOwnerHandle}`,
-      clubLine: clubLine,
+      categoryLine: categoryLine,
       marketplaceUrl: marketplaceUrl,
       bidderHandle: bidderHandle,
       currentOwnerHandle: currentOwnerHandle

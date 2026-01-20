@@ -521,11 +521,11 @@ WHAT TO FOCUS ON:
    - Explain obscure names, non-English words, or technical terms, acrynms, romanised foriegn languages, etc.
    - **Username/Gamertag value**: If the name is highly suited as a username or gamertag (demon, killer, anon, legend, chad, ghost, etc), mention it. These are valuable for personal branding in gaming/crypto communities.
 
-4. **Club membership**: If the name belongs to a club (e.g., "999 Club #1,234 @ENS999club"):
-   - Just mention the club and rank if relevant (e.g., "#1,234 in 999 Club")
+4. **Category membership**: If the name belongs to a category (e.g., "999 @ens999club"):
+   - Just mention the category if relevant
    - Highlight special patterns (0101 for 10k, 101 for 999, palindromes, etc.)
-   - 999 and 10k clubs are self-evident - no need to explain
-   - For name clubs, include Forebears data if available (e.g., "sam: 101st most popular globally, mainly US/UK")
+   - 999 and 10k categories are self-evident - no need to explain
+   - For name categories, include Forebears data if available (e.g., "sam: 101st most popular globally, mainly US/UK")
    - Prepunk: Only mention if sub-10k (increasingly rare), sub-1k (very rare), or sub-100 (extremely valuable even without meaning) 
 
 5. **Trading patterns** based on the user tx history and current holdings provided: Only mention if unusual
@@ -720,10 +720,12 @@ TERMINOLOGY:
       }
     }
     
-    // Include club membership if available (sanitized)
+    // Include category membership if available (sanitized)
     if (clubInfo) {
       const sanitizedClubInfo = this.sanitizeLabel(clubInfo);
-      prompt += `- Club: ${sanitizedClubInfo}\n`;
+      // Pluralize based on comma count (multiple categories)
+      const categoryLabel = clubInfo.includes(',') ? 'Categories' : 'Category';
+      prompt += `- ${categoryLabel}: ${sanitizedClubInfo}\n`;
     }
 
     // Include name research if available
