@@ -19,3 +19,13 @@ export const MONITORED_CONTRACTS = [
 
 // Export just the addresses for backward compatibility
 export const CONTRACT_ADDRESSES = MONITORED_CONTRACTS.map(c => c.address);
+
+/**
+ * Known marketplace fee recipient addresses
+ * Used to filter out marketplace fees when displaying broker info in tweets
+ * All addresses stored lowercase for comparison
+ */
+export const KNOWN_MARKETPLACE_FEE_ADDRESSES = new Set([
+  '0x0000a26b00c1f0df003000390027140000faa719', // OpenSea fee recipient
+  // Add more marketplace addresses as discovered
+]);

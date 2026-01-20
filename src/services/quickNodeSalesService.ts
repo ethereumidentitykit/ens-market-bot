@@ -28,6 +28,12 @@ interface SeaportOrder {
     amount: string;
     recipient: string;
   }>;
+  // Fee recipient data from QuickNode filter
+  fee?: {
+    recipient: string;
+    amount: string;
+    percent: number;
+  };
 }
 
 interface QuickNodeWebhookData {
@@ -163,6 +169,9 @@ export class QuickNodeSalesService {
     blockNumber: number;
     blockTimestamp: string;
     logIndex: number;
+    feeRecipientAddress?: string;
+    feeAmountWei?: string;
+    feePercent?: number;
   } | null> {
     try {
       // Find ENS token in either offer OR consideration 
@@ -327,7 +336,11 @@ export class QuickNodeSalesService {
         priceEth,
         blockNumber,
         blockTimestamp,
-        logIndex
+        logIndex,
+        // Fee recipient data from QuickNode filter
+        feeRecipientAddress: order.fee?.recipient,
+        feeAmountWei: order.fee?.amount,
+        feePercent: order.fee?.percent
       };
       
     } catch (error: any) {
@@ -351,6 +364,9 @@ export class QuickNodeSalesService {
     blockNumber: number;
     blockTimestamp: string;
     logIndex: number;
+    feeRecipientAddress?: string;
+    feeAmountWei?: string;
+    feePercent?: number;
   }): Promise<Omit<ProcessedSale, 'id'> | null> {
     try {
       logger.debug(`Enriching sale data for token ${saleData.tokenId}`);
@@ -451,7 +467,11 @@ export class QuickNodeSalesService {
         nftName,
         nftImage,
         nftDescription: undefined, // Explicitly don't store description
-        verifiedCollection: true // ENS is always verified
+        verifiedCollection: true, // ENS is always verified
+        // Fee recipient data (broker/referral)
+        feeRecipientAddress: saleData.feeRecipientAddress,
+        feeAmountWei: saleData.feeAmountWei,
+        feePercent: saleData.feePercent
       };
 
       return processedSale;
