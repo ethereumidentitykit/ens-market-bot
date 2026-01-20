@@ -80,7 +80,14 @@ Uses `decodeEVMReceipts()` with the Seaport ABI to decode `OrderFulfilled` event
 2. **NFT Filter**: Require target ENS contract in `offer[]` or `consideration[]` with NFT itemType (2-5)
 3. **Spam Filter**: Require ≥ 0.04 ETH total across ETH + WETH in the trade
 
-### Step 4: Output Structure
+### Step 4: Extract Fee Recipients
+
+After filtering, extract fee recipients from the consideration array:
+- Any consideration item where `recipient !== offerer` is a fee
+- Calculate percentage: `(feeAmount / totalEthLikeWei) * 100`
+- Include all fees (filtering for marketplaces happens in backend)
+
+### Step 5: Output Structure
 
 ```json
 {
@@ -116,11 +123,18 @@ Uses `decodeEVMReceipts()` with the Seaport ABI to decode `OrderFulfilled` event
       ],
       "ethLikeWei": "50000000000000000",
       "ethLikeEth": "0.05",
-      "minEthLikeWei": "40000000000000000"
+      "minEthLikeWei": "40000000000000000",
+      "fee": {
+        "recipient": "0x...",
+        "amount": "2500000000000000",
+        "percent": 5
+      }
     }
   ]
 }
 ```
+
+**Note**: `fee` is `null` if no fee recipients found (all consideration goes to offerer).
 
 ## Full Filter Code
 
@@ -271,6 +285,28 @@ function main(stream) {
       const ethLikeWei = sumEthLikeWei(offer, consideration);
       if (ethLikeWei < MIN_WEI) continue;
 
+      // Extract fee recipient: any ETH/WETH consideration where recipient !== offerer
+      const offererLc = lc(ev.offerer);
+      let fee = null;
+      for (const c of consideration) {
+        if (!isEthLike(c)) continue;
+        const recipientLc = lc(c.recipient);
+        if (recipientLc === offererLc) continue; // This is seller's payment, skip
+        
+        // Found a fee recipient
+        const feeAmount = toBI(c.amount);
+        const percent = ethLikeWei > 0n 
+          ? Number((feeAmount * 100n) / ethLikeWei) 
+          : 0;
+        
+        fee = {
+          recipient: c.recipient,
+          amount: feeAmount.toString(),
+          percent
+        };
+        break; // Take first fee recipient only (as per requirements)
+      }
+
       out.push({
         txHash: r.transactionHash,
         blockNumber: r.blockNumber,
@@ -287,7 +323,8 @@ function main(stream) {
         consideration,
         ethLikeWei: ethLikeWei.toString(),
         ethLikeEth: formatEth(ethLikeWei),
-        minEthLikeWei: MIN_WEI.toString()
+        minEthLikeWei: MIN_WEI.toString(),
+        fee
       });
     }
   }

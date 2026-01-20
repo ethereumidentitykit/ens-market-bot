@@ -469,7 +469,7 @@ export class NewTweetFormatter {
     const formattedClubString = this.clubService.getFormattedClubString(ensName);
     const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
     
-    // OpenSea link
+    // Grails marketplace link
     const marketplaceUrl = this.buildMarketplaceUrl(ensName);
     
     // Combine all lines
@@ -750,7 +750,7 @@ export class NewTweetFormatter {
     const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
     logger.info(`[NewTweetFormatter] Sale club line result: "${clubLine}"`);
     
-    // OpenSea link
+    // Grails marketplace link
     const marketplaceUrl = this.buildMarketplaceUrl(ensName);
     
     // Combine all lines
