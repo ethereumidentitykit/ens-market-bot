@@ -12,7 +12,7 @@ import { ClubService } from './clubService';
 import { MagicEdenV4Service } from './magicEdenV4Service';
 import { ENSTokenUtils } from './ensTokenUtils';
 import { TimeUtils } from '../utils/timeUtils';
-import { KNOWN_MARKETPLACE_FEE_ADDRESSES } from '../config/contracts';
+import { isKnownMarketplaceFee } from '../config/contracts';
 
 export interface GeneratedTweet {
   text: string;
@@ -760,20 +760,9 @@ export class NewTweetFormatter {
     let tweet = `${header}\n\n${priceLine}\n${buyerLine}\n\n${sellerLine}`;
     
     // Add broker line if fee recipient present and not a known marketplace
-    if (sale.feeRecipientAddress) {
-      const feeAddressLower = sale.feeRecipientAddress.toLowerCase();
-      const isMarketplace = KNOWN_MARKETPLACE_FEE_ADDRESSES.has(feeAddressLower);
-      const meetsThreshold = sale.feePercent && sale.feePercent >= 1; // 1% minimum
-      
-      if (!isMarketplace && meetsThreshold) {
-        const brokerHandle = this.getDisplayHandle(feeRecipientAccount || null, sale.feeRecipientAddress);
-        const feePercent = sale.feePercent ? `${sale.feePercent}%` : '';
-        const feeEth = sale.feeAmountWei 
-          ? `${(Number(sale.feeAmountWei) / 1e18).toFixed(2)} ETH` 
-          : '';
-        const feeInfo = feePercent && feeEth ? `, ${feePercent} (${feeEth})` : '';
-        tweet += `\nBroker: ${brokerHandle}${feeInfo}`;
-      }
+    const brokerLine = this.formatBrokerLine(sale, feeRecipientAccount || null);
+    if (brokerLine) {
+      tweet += `\n${brokerLine}`;
     }
     
     if (historicalLine) {
@@ -907,6 +896,32 @@ export class NewTweetFormatter {
 
     // Fallback to shortened address
     return this.shortenAddress(account.address || fallbackAddress);
+  }
+
+  /**
+   * Format broker line for tweet display
+   * Returns undefined if fee recipient is a marketplace or below threshold
+   * Format: "Broker: name.eth @handle, X.XX% (Y.YY ETH)"
+   */
+  private formatBrokerLine(
+    sale: ProcessedSale, 
+    feeRecipientAccount: ENSWorkerAccount | null
+  ): string | undefined {
+    if (!sale.feeRecipientAddress) return undefined;
+    
+    const isMarketplace = isKnownMarketplaceFee(sale.feeRecipientAddress);
+    const meetsThreshold = sale.feePercent && sale.feePercent >= 1; // 1% minimum
+    
+    if (isMarketplace || !meetsThreshold) return undefined;
+    
+    const brokerHandle = this.getDisplayHandle(feeRecipientAccount, sale.feeRecipientAddress);
+    const feePercent = sale.feePercent ? `${sale.feePercent.toFixed(2)}%` : '';
+    const feeEth = sale.feeAmountWei 
+      ? `${(Number(sale.feeAmountWei) / 1e18).toFixed(2)} ETH` 
+      : '';
+    const feeInfo = feePercent && feeEth ? `, ${feePercent} (${feeEth})` : '';
+    
+    return `Broker: ${brokerHandle}${feeInfo}`;
   }
 
   /**
@@ -1389,23 +1404,10 @@ export class NewTweetFormatter {
     const sellerHandle = this.getDisplayHandle(sellerAccount, sale.sellerAddress);
     
     // Broker line (only if valid fee recipient)
-    let brokerLine: string | undefined;
-    let brokerHandle: string | undefined;
-    if (sale.feeRecipientAddress) {
-      const feeAddressLower = sale.feeRecipientAddress.toLowerCase();
-      const isMarketplace = KNOWN_MARKETPLACE_FEE_ADDRESSES.has(feeAddressLower);
-      const meetsThreshold = sale.feePercent && sale.feePercent >= 1;
-      
-      if (!isMarketplace && meetsThreshold) {
-        brokerHandle = this.getDisplayHandle(feeRecipientAccount, sale.feeRecipientAddress);
-        const feePercent = sale.feePercent ? `${sale.feePercent}%` : '';
-        const feeEth = sale.feeAmountWei 
-          ? `${(Number(sale.feeAmountWei) / 1e18).toFixed(2)} ETH` 
-          : '';
-        const feeInfo = feePercent && feeEth ? `, ${feePercent} (${feeEth})` : '';
-        brokerLine = `Broker: ${brokerHandle}${feeInfo}`;
-      }
-    }
+    const brokerLine = this.formatBrokerLine(sale, feeRecipientAccount);
+    const brokerHandle = sale.feeRecipientAddress
+      ? this.getDisplayHandle(feeRecipientAccount, sale.feeRecipientAddress)
+      : undefined;
     
     // Check for club mention
     logger.info(`[NewTweetFormatter] Preview - Getting club info for: ${ensName}`);
