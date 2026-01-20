@@ -50,7 +50,7 @@ export class QuickNodeSalesService {
   private readonly ENS_NAMEWRAPPER = '0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401';
   private readonly WETH_ADDRESS = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
   private readonly NATIVE_ETH_ITEM_TYPE = 0;
-  private readonly MIN_PRICE_ETH = 0.0001; // Minimum price filter (lowered for testing)
+  private readonly MIN_PRICE_ETH = 0.01; // Minimum price filter
   
   // Known marketplace intermediaries that indicate proxy contracts
   private readonly PROBLEMATIC_INTERMEDIARIES = [
