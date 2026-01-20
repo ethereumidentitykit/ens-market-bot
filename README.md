@@ -196,6 +196,12 @@ The bot uses a sophisticated AI pipeline to generate insights:
 - Handles portfolio timing correctly (pre-bid vs post-purchase)
 - Uses portfolio context for wash trading detection and conviction signals
 
+## Documentation
+
+Additional technical documentation is available in the `docs/` folder:
+
+- **[QuickNode Sales Stream Filter](docs/quicknode-stream-filter.md)** - Seaport OrderFulfilled event filter for ENS sales
+- **[QuickNode Registration Stream Filter](docs/quicknode-registration-filter.md)** - NameRegistered event filter for ENS registrations
 
 ## Rate Limiting
 
