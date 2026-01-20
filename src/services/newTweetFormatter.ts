@@ -12,6 +12,7 @@ import { ClubService } from './clubService';
 import { MagicEdenV4Service } from './magicEdenV4Service';
 import { ENSTokenUtils } from './ensTokenUtils';
 import { TimeUtils } from '../utils/timeUtils';
+import { KNOWN_MARKETPLACE_FEE_ADDRESSES } from '../config/contracts';
 
 export interface GeneratedTweet {
   text: string;
@@ -203,14 +204,15 @@ export class NewTweetFormatter {
     try {
       logger.info(`Generating new format tweet for sale: ${sale.transactionHash}`);
 
-      // Get full account data for buyer and seller to access Twitter records
-      const [buyerAccount, sellerAccount] = await Promise.all([
+      // Get full account data for buyer, seller, and fee recipient to access Twitter records
+      const [buyerAccount, sellerAccount, feeRecipientAccount] = await Promise.all([
         this.getAccountData(sale.buyerAddress),
-        this.getAccountData(sale.sellerAddress)
+        this.getAccountData(sale.sellerAddress),
+        sale.feeRecipientAddress ? this.getAccountData(sale.feeRecipientAddress) : Promise.resolve(null)
       ]);
 
       // Generate the tweet text
-      const tweetText = await this.formatTweetText(sale, buyerAccount, sellerAccount);
+      const tweetText = await this.formatTweetText(sale, buyerAccount, sellerAccount, feeRecipientAccount);
       
       // Generate image if database service is available
       let imageBuffer: Buffer | undefined;
@@ -708,7 +710,8 @@ export class NewTweetFormatter {
   private async formatTweetText(
     sale: ProcessedSale, 
     buyerAccount: ENSWorkerAccount | null, 
-    sellerAccount: ENSWorkerAccount | null
+    sellerAccount: ENSWorkerAccount | null,
+    feeRecipientAccount?: ENSWorkerAccount | null
   ): Promise<string> {
     // Header: 💰 SOLD: name.eth
     const rawEnsName = sale.nftName || 'Unknown ENS';
@@ -755,6 +758,24 @@ export class NewTweetFormatter {
     
     // Combine all lines
     let tweet = `${header}\n\n${priceLine}\n${buyerLine}\n\n${sellerLine}`;
+    
+    // Add broker line if fee recipient present and not a known marketplace
+    if (sale.feeRecipientAddress) {
+      const feeAddressLower = sale.feeRecipientAddress.toLowerCase();
+      const isMarketplace = KNOWN_MARKETPLACE_FEE_ADDRESSES.has(feeAddressLower);
+      const meetsThreshold = sale.feePercent && sale.feePercent >= 1; // 1% minimum
+      
+      if (!isMarketplace && meetsThreshold) {
+        const brokerHandle = this.getDisplayHandle(feeRecipientAccount || null, sale.feeRecipientAddress);
+        const feePercent = sale.feePercent ? `${sale.feePercent}%` : '';
+        const feeEth = sale.feeAmountWei 
+          ? `${(Number(sale.feeAmountWei) / 1e18).toFixed(2)} ETH` 
+          : '';
+        const feeInfo = feePercent && feeEth ? `, ${feePercent} (${feeEth})` : '';
+        tweet += `\nBroker: ${brokerHandle}${feeInfo}`;
+      }
+    }
+    
     if (historicalLine) {
       tweet += `\n${historicalLine}`;
     }
@@ -1343,18 +1364,21 @@ export class NewTweetFormatter {
       priceLine: string;
       sellerLine: string;
       buyerLine: string;
+      brokerLine?: string;
       marketplaceUrl: string;
       buyerHandle: string;
       sellerHandle: string;
+      brokerHandle?: string;
     };
   }> {
     const tweet = await this.generateTweet(sale);
     const validation = this.validateTweet(tweet.text);
     
     // Get account data for breakdown
-    const [buyerAccount, sellerAccount] = await Promise.all([
+    const [buyerAccount, sellerAccount, feeRecipientAccount] = await Promise.all([
       this.getAccountData(sale.buyerAddress),
-      this.getAccountData(sale.sellerAddress)
+      this.getAccountData(sale.sellerAddress),
+      sale.feeRecipientAddress ? this.getAccountData(sale.feeRecipientAddress) : Promise.resolve(null)
     ]);
 
     const rawEnsName = sale.nftName || 'Unknown ENS';
@@ -1363,6 +1387,25 @@ export class NewTweetFormatter {
     const priceUsd = sale.priceUsd ? `$${parseFloat(sale.priceUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
     const buyerHandle = this.getDisplayHandle(buyerAccount, sale.buyerAddress);
     const sellerHandle = this.getDisplayHandle(sellerAccount, sale.sellerAddress);
+    
+    // Broker line (only if valid fee recipient)
+    let brokerLine: string | undefined;
+    let brokerHandle: string | undefined;
+    if (sale.feeRecipientAddress) {
+      const feeAddressLower = sale.feeRecipientAddress.toLowerCase();
+      const isMarketplace = KNOWN_MARKETPLACE_FEE_ADDRESSES.has(feeAddressLower);
+      const meetsThreshold = sale.feePercent && sale.feePercent >= 1;
+      
+      if (!isMarketplace && meetsThreshold) {
+        brokerHandle = this.getDisplayHandle(feeRecipientAccount, sale.feeRecipientAddress);
+        const feePercent = sale.feePercent ? `${sale.feePercent}%` : '';
+        const feeEth = sale.feeAmountWei 
+          ? `${(Number(sale.feeAmountWei) / 1e18).toFixed(2)} ETH` 
+          : '';
+        const feeInfo = feePercent && feeEth ? `, ${feePercent} (${feeEth})` : '';
+        brokerLine = `Broker: ${brokerHandle}${feeInfo}`;
+      }
+    }
     
     // Check for club mention
     logger.info(`[NewTweetFormatter] Preview - Getting club info for: ${ensName}`);
@@ -1378,10 +1421,12 @@ export class NewTweetFormatter {
       priceLine: priceUsd ? `For: ${priceUsd} (${priceEth} ETH)` : `For: ${priceEth} ETH`,
       buyerLine: `Buyer: ${buyerHandle}`,
       sellerLine: `Seller: ${sellerHandle}`,
+      brokerLine,
       clubLine: clubLine,
       marketplaceUrl: this.buildMarketplaceUrl(ensName),
       buyerHandle: buyerHandle,
-      sellerHandle: sellerHandle
+      sellerHandle: sellerHandle,
+      brokerHandle
     };
 
     return { tweet, validation, breakdown };
