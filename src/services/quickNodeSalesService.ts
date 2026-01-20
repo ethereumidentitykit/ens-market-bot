@@ -28,6 +28,12 @@ interface SeaportOrder {
     amount: string;
     recipient: string;
   }>;
+  // Fee recipient data from QuickNode filter
+  fee?: {
+    recipient: string;
+    amount: string;
+    percent: number;
+  };
 }
 
 interface QuickNodeWebhookData {
@@ -44,7 +50,7 @@ export class QuickNodeSalesService {
   private readonly ENS_NAMEWRAPPER = '0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401';
   private readonly WETH_ADDRESS = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
   private readonly NATIVE_ETH_ITEM_TYPE = 0;
-  private readonly MIN_PRICE_ETH = 0.01; // Minimum price filter
+  private readonly MIN_PRICE_ETH = 0.0001; // Minimum price filter (lowered for testing)
   
   // Known marketplace intermediaries that indicate proxy contracts
   private readonly PROBLEMATIC_INTERMEDIARIES = [
@@ -163,6 +169,9 @@ export class QuickNodeSalesService {
     blockNumber: number;
     blockTimestamp: string;
     logIndex: number;
+    feeRecipientAddress?: string;
+    feeAmountWei?: string;
+    feePercent?: number;
   } | null> {
     try {
       // Find ENS token in either offer OR consideration 
@@ -318,6 +327,11 @@ export class QuickNodeSalesService {
       // TODO: Could fetch actual block timestamp from Alchemy if needed for accuracy
       const blockTimestamp = new Date().toISOString();
 
+      // Log fee extraction if present
+      if (order.fee) {
+        logger.debug(`💰 Fee recipient detected: ${order.fee.recipient} (${order.fee.percent}%, ${order.fee.amount} wei)`);
+      }
+
       return {
         transactionHash: order.txHash,
         contractAddress: ensToken.token.toLowerCase(),
@@ -327,7 +341,11 @@ export class QuickNodeSalesService {
         priceEth,
         blockNumber,
         blockTimestamp,
-        logIndex
+        logIndex,
+        // Fee recipient data from QuickNode filter
+        feeRecipientAddress: order.fee?.recipient,
+        feeAmountWei: order.fee?.amount,
+        feePercent: order.fee?.percent
       };
       
     } catch (error: any) {
@@ -351,6 +369,9 @@ export class QuickNodeSalesService {
     blockNumber: number;
     blockTimestamp: string;
     logIndex: number;
+    feeRecipientAddress?: string;
+    feeAmountWei?: string;
+    feePercent?: number;
   }): Promise<Omit<ProcessedSale, 'id'> | null> {
     try {
       logger.debug(`Enriching sale data for token ${saleData.tokenId}`);
@@ -451,7 +472,11 @@ export class QuickNodeSalesService {
         nftName,
         nftImage,
         nftDescription: undefined, // Explicitly don't store description
-        verifiedCollection: true // ENS is always verified
+        verifiedCollection: true, // ENS is always verified
+        // Fee recipient data (broker/referral)
+        feeRecipientAddress: saleData.feeRecipientAddress,
+        feeAmountWei: saleData.feeAmountWei,
+        feePercent: saleData.feePercent
       };
 
       return processedSale;

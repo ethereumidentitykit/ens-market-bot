@@ -94,6 +94,13 @@ export class DatabaseService implements IDatabaseService {
         CREATE INDEX IF NOT EXISTS idx_posted ON processed_sales(posted);
       `);
 
+      // Add fee recipient columns for broker/referral tracking
+      await this.pool.query(`
+        ALTER TABLE processed_sales ADD COLUMN IF NOT EXISTS fee_recipient_address VARCHAR(42);
+        ALTER TABLE processed_sales ADD COLUMN IF NOT EXISTS fee_amount_wei VARCHAR(78);
+        ALTER TABLE processed_sales ADD COLUMN IF NOT EXISTS fee_percent DECIMAL(5,2);
+      `);
+
       // Create system_state table
       await this.pool.query(`
         CREATE TABLE IF NOT EXISTS system_state (
@@ -436,8 +443,9 @@ export class DatabaseService implements IDatabaseService {
           buyer_address, seller_address, price_eth, price_usd,
           block_number, block_timestamp, log_index, processed_at, posted,
           collection_name, collection_logo, nft_name, nft_image,
-          nft_description, marketplace_logo, current_usd_value, verified_collection
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+          nft_description, marketplace_logo, current_usd_value, verified_collection,
+          fee_recipient_address, fee_amount_wei, fee_percent
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
         RETURNING id
       `, [
         sale.transactionHash,
@@ -460,7 +468,10 @@ export class DatabaseService implements IDatabaseService {
         sale.nftDescription || null,
         sale.marketplaceLogo || null,
         sale.currentUsdValue || null,
-        sale.verifiedCollection || false
+        sale.verifiedCollection || false,
+        sale.feeRecipientAddress || null,
+        sale.feeAmountWei || null,
+        sale.feePercent || null
       ]);
 
       const insertedId = result.rows[0].id;
@@ -509,7 +520,9 @@ export class DatabaseService implements IDatabaseService {
           collection_name as "collectionName", collection_logo as "collectionLogo",
           nft_name as "nftName", nft_image as "nftImage", nft_description as "nftDescription",
           marketplace_logo as "marketplaceLogo", current_usd_value as "currentUsdValue",
-          verified_collection as "verifiedCollection"
+          verified_collection as "verifiedCollection",
+          fee_recipient_address as "feeRecipientAddress", fee_amount_wei as "feeAmountWei",
+          fee_percent as "feePercent"
         FROM processed_sales 
         ORDER BY block_number DESC 
         LIMIT $1
@@ -545,7 +558,9 @@ export class DatabaseService implements IDatabaseService {
           collection_name as "collectionName", collection_logo as "collectionLogo",
           nft_name as "nftName", nft_image as "nftImage", nft_description as "nftDescription",
           marketplace_logo as "marketplaceLogo", current_usd_value as "currentUsdValue",
-          verified_collection as "verifiedCollection"
+          verified_collection as "verifiedCollection",
+          fee_recipient_address as "feeRecipientAddress", fee_amount_wei as "feeAmountWei",
+          fee_percent as "feePercent"
         FROM processed_sales 
         WHERE id = $1
       `, [id]);
@@ -633,7 +648,9 @@ export class DatabaseService implements IDatabaseService {
           collection_name as "collectionName", collection_logo as "collectionLogo",
           nft_name as "nftName", nft_image as "nftImage", nft_description as "nftDescription",
           marketplace_logo as "marketplaceLogo", current_usd_value as "currentUsdValue",
-          verified_collection as "verifiedCollection"
+          verified_collection as "verifiedCollection",
+          fee_recipient_address as "feeRecipientAddress", fee_amount_wei as "feeAmountWei",
+          fee_percent as "feePercent"
         FROM processed_sales 
         WHERE posted = FALSE 
           AND block_timestamp > NOW() - INTERVAL '1 hour' * $2
