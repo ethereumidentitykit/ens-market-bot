@@ -723,7 +723,9 @@ TERMINOLOGY:
     // Include club membership if available (sanitized)
     if (clubInfo) {
       const sanitizedClubInfo = this.sanitizeLabel(clubInfo);
-      prompt += `- Club: ${sanitizedClubInfo}\n`;
+      // Pluralize based on comma count (multiple categories)
+      const categoryLabel = clubInfo.includes(',') ? 'Categories' : 'Category';
+      prompt += `- ${categoryLabel}: ${sanitizedClubInfo}\n`;
     }
 
     // Include name research if available

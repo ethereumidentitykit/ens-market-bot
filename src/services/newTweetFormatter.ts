@@ -464,7 +464,8 @@ export class NewTweetFormatter {
     // Club line (show club name with handle properly paired)
     const clubs = await this.clubService.getClubs(ensName);
     const formattedClubString = this.clubService.getFormattedClubString(clubs);
-    const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
+    const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
+    const clubLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     
     // Grails marketplace link
     const marketplaceUrl = this.buildMarketplaceUrl(ensName);
@@ -642,7 +643,8 @@ export class NewTweetFormatter {
     // Club line (show club name with handle properly paired)
     const clubs = await this.clubService.getClubs(ensName);
     const formattedClubString = this.clubService.getFormattedClubString(clubs);
-    const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
+    const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
+    const clubLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     
     // Marketplace link
     const marketplaceUrl = this.buildMarketplaceUrl(ensName);
@@ -745,7 +747,8 @@ export class NewTweetFormatter {
     logger.info(`[NewTweetFormatter] Getting club info for sale: ${ensName}`);
     const clubs = await this.clubService.getClubs(ensName);
     const formattedClubString = this.clubService.getFormattedClubString(clubs);
-    const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
+    const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
+    const clubLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     logger.info(`[NewTweetFormatter] Sale club line result: "${clubLine}"`);
     
     // Grails marketplace link
@@ -1404,7 +1407,8 @@ export class NewTweetFormatter {
     logger.info(`[NewTweetFormatter] Preview - Getting club info for: ${ensName}`);
     const clubs = await this.clubService.getClubs(ensName);
     const formattedClubString = this.clubService.getFormattedClubString(clubs);
-    const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
+    const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
+    const clubLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     logger.info(`[NewTweetFormatter] Preview club line result: "${clubLine}"`);
     
     const breakdown = {
@@ -1454,7 +1458,8 @@ export class NewTweetFormatter {
     // Check for club mention
     const clubs = await this.clubService.getClubs(ensName);
     const formattedClubString = this.clubService.getFormattedClubString(clubs);
-    const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
+    const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
+    const clubLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     
     const breakdown = {
       header: `🏛️ REGISTERED: ${ensName}`,
@@ -1608,7 +1613,8 @@ export class NewTweetFormatter {
     // Check for club mention
     const clubs = await this.clubService.getClubs(ensName);
     const formattedClubString = this.clubService.getFormattedClubString(clubs);
-    const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
+    const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
+    const clubLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     
     const breakdown = {
       header: `✋ OFFER: ${ensName}`,
