@@ -90,6 +90,10 @@ export interface ProcessedSale {
   marketplaceLogo?: string;
   currentUsdValue?: string;
   verifiedCollection?: boolean;
+  // Fee recipient tracking (broker/referral)
+  feeRecipientAddress?: string;
+  feeAmountWei?: string;
+  feePercent?: number;
 }
 
 // ENS Registration Record
