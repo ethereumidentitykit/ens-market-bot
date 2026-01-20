@@ -486,17 +486,15 @@ export class BidsProcessingService {
       }
 
       // Apply club-aware logic using ClubService
-      const clubs = this.clubService.getClubInfo(ensName);
+      const clubs = await this.clubService.getClubs(ensName);
       
       // Check for premium clubs with special thresholds (in priority order)
-      for (const club of clubs) {
-        if (club.id === '999_club') {
-          logger.debug(`🎯 BID FILTER: ${ensName} - 999 Club detected, minimum: ${club999Min} ETH`);
-          return parseFloat(club999Min);
-        } else if (club.id === '10k_club') {
-          logger.debug(`🎯 BID FILTER: ${ensName} - 10k Club detected, minimum: ${club10kMin} ETH`);
-          return parseFloat(club10kMin);
-        }
+      if (clubs.includes('999')) {
+        logger.debug(`🎯 BID FILTER: ${ensName} - 999 Club detected, minimum: ${club999Min} ETH`);
+        return parseFloat(club999Min);
+      } else if (clubs.includes('10k')) {
+        logger.debug(`🎯 BID FILTER: ${ensName} - 10k Club detected, minimum: ${club10kMin} ETH`);
+        return parseFloat(club10kMin);
       }
       
       // Default minimum for other names

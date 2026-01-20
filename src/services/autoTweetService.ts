@@ -12,6 +12,7 @@ import { TwitterService } from './twitterService';
 import { RateLimitService } from './rateLimitService';
 import { WorldTimeService } from './worldTimeService';
 import { ClubService } from './clubService';
+import { getClubLabel } from '../constants/clubMetadata';
 
 export interface TransactionSpecificSettings {
   enabled: boolean;
@@ -215,16 +216,17 @@ export class AutoTweetService {
     }
 
     // Check if sale meets ETH minimum requirements (use sales-specific settings)
-    const ethMinimum = this.getEthMinimumForSale(sale, settings.sales);
+    const ethMinimum = await this.getEthMinimumForSale(sale, settings.sales);
     const saleEthValue = parseFloat(sale.priceEth);
     
     if (saleEthValue < ethMinimum) {
+      const categoryName = await this.getCategoryName(sale);
       logger.info(`❌ SALE FILTER: ${sale.nftName} - ${sale.priceEth} ETH < ${ethMinimum} ETH minimum - REJECTED`);
       return {
         success: false,
         saleId,
         skipped: true,
-        reason: `${sale.priceEth} ETH below minimum ${ethMinimum} ETH for ${this.getCategoryName(sale)}`,
+        reason: `${sale.priceEth} ETH below minimum ${ethMinimum} ETH for ${categoryName}`,
         type: 'sale'
       };
     }
@@ -340,14 +342,15 @@ export class AutoTweetService {
 
     // Check if registration meets ETH minimum requirements (use registrations-specific settings)
     const registrationEthValue = parseFloat(registration.costEth || '0');
-    const ethMinimum = this.getEthMinimumForRegistration(registration, settings.registrations);
+    const ethMinimum = await this.getEthMinimumForRegistration(registration, settings.registrations);
     
     if (registrationEthValue < ethMinimum) {
+      const categoryName = await this.getRegistrationCategoryName(registration);
       return {
         success: false,
         registrationId,
         skipped: true,
-        reason: `${registration.costEth} ETH below minimum ${ethMinimum} ETH for ${this.getRegistrationCategoryName(registration)}`,
+        reason: `${registration.costEth} ETH below minimum ${ethMinimum} ETH for ${categoryName}`,
         type: 'registration'
       };
     }
@@ -460,21 +463,19 @@ export class AutoTweetService {
   /**
    * Get ETH minimum requirement for a sale based on category
    */
-  private getEthMinimumForSale(sale: ProcessedSale, settings: TransactionSpecificSettings): number {
+  private async getEthMinimumForSale(sale: ProcessedSale, settings: TransactionSpecificSettings): Promise<number> {
     const nftName = sale.nftName || '';
-    const clubs = this.clubService.getClubInfo(nftName);
+    const clubs = await this.clubService.getClubs(nftName);
     
-    logger.info(`🔍 SALE FILTER: ${nftName} - clubs detected: [${clubs.map(c => c.name).join(', ') || 'none'}]`);
+    logger.info(`🔍 SALE FILTER: ${nftName} - clubs detected: [${clubs.map(c => getClubLabel(c)).join(', ') || 'none'}]`);
     
     // Check for premium clubs with special thresholds (in priority order)
-    for (const club of clubs) {
-      if (club.id === '999_club') {
-        logger.info(`🎯 SALE FILTER: ${nftName} - 999 Club detected, minimum: ${settings.minEth999Club} ETH`);
-        return settings.minEth999Club;
-      } else if (club.id === '10k_club') {
-        logger.info(`🎯 SALE FILTER: ${nftName} - 10k Club detected, minimum: ${settings.minEth10kClub} ETH`);
-        return settings.minEth10kClub;
-      }
+    if (clubs.includes('999')) {
+      logger.info(`🎯 SALE FILTER: ${nftName} - 999 Club detected, minimum: ${settings.minEth999Club} ETH`);
+      return settings.minEth999Club;
+    } else if (clubs.includes('10k')) {
+      logger.info(`🎯 SALE FILTER: ${nftName} - 10k Club detected, minimum: ${settings.minEth10kClub} ETH`);
+      return settings.minEth10kClub;
     }
     
     logger.info(`🎯 SALE FILTER: ${nftName} - default minimum: ${settings.minEthDefault} ETH`);
@@ -484,34 +485,30 @@ export class AutoTweetService {
   /**
    * Get category name for logging/debugging
    */
-  private getCategoryName(sale: ProcessedSale): string {
+  private async getCategoryName(sale: ProcessedSale): Promise<string> {
     const nftName = sale.nftName || '';
-    const clubs = this.clubService.getClubInfo(nftName);
+    const clubs = await this.clubService.getClubs(nftName);
     
     // Return the first premium club found, or standard
-    for (const club of clubs) {
-      if (club.id === '999_club' || club.id === '10k_club') {
-        return club.name;
-      }
+    if (clubs.includes('999') || clubs.includes('10k')) {
+      return getClubLabel(clubs.find(c => c === '999' || c === '10k') || clubs[0]);
     }
     
-    return clubs.length > 0 ? clubs[0].name : 'Standard';
+    return clubs.length > 0 ? getClubLabel(clubs[0]) : 'Standard';
   }
 
   /**
    * Get ETH minimum requirement for a registration based on category
    */
-  private getEthMinimumForRegistration(registration: ENSRegistration, settings: TransactionSpecificSettings): number {
+  private async getEthMinimumForRegistration(registration: ENSRegistration, settings: TransactionSpecificSettings): Promise<number> {
     const ensName = registration.fullName || registration.ensName || '';
-    const clubs = this.clubService.getClubInfo(ensName);
+    const clubs = await this.clubService.getClubs(ensName);
     
     // Check for premium clubs with special thresholds (in priority order)
-    for (const club of clubs) {
-      if (club.id === '999_club') {
-        return settings.minEth999Club;
-      } else if (club.id === '10k_club') {
-        return settings.minEth10kClub;
-      }
+    if (clubs.includes('999')) {
+      return settings.minEth999Club;
+    } else if (clubs.includes('10k')) {
+      return settings.minEth10kClub;
     }
     
     return settings.minEthDefault;
@@ -520,18 +517,17 @@ export class AutoTweetService {
   /**
    * Get registration category name for logging/debugging
    */
-  private getRegistrationCategoryName(registration: ENSRegistration): string {
+  private async getRegistrationCategoryName(registration: ENSRegistration): Promise<string> {
     const ensName = registration.fullName || registration.ensName || '';
-    const clubs = this.clubService.getClubInfo(ensName);
+    const clubs = await this.clubService.getClubs(ensName);
     
     // Return the first premium club found, or standard
-    for (const club of clubs) {
-      if (club.id === '999_club' || club.id === '10k_club') {
-        return `${club.name} registration`;
-      }
+    if (clubs.includes('999') || clubs.includes('10k')) {
+      const clubSlug = clubs.find(c => c === '999' || c === '10k') || clubs[0];
+      return `${getClubLabel(clubSlug)} registration`;
     }
     
-    return clubs.length > 0 ? `${clubs[0].name} registration` : 'Standard registration';
+    return clubs.length > 0 ? `${getClubLabel(clubs[0])} registration` : 'Standard registration';
   }
 
   /**
@@ -751,15 +747,13 @@ export class AutoTweetService {
       }
 
       // Apply club-aware logic using ClubService
-      const clubs = this.clubService.getClubInfo(ensName);
+      const clubs = await this.clubService.getClubs(ensName);
       
       // Check for premium clubs with special thresholds (in priority order)
-      for (const club of clubs) {
-        if (club.id === '999_club') {
-          return settings.minEth999Club;
-        } else if (club.id === '10k_club') {
-          return settings.minEth10kClub;
-        }
+      if (clubs.includes('999')) {
+        return settings.minEth999Club;
+      } else if (clubs.includes('10k')) {
+        return settings.minEth10kClub;
       }
       
       return settings.minEthDefault;
@@ -824,16 +818,15 @@ export class AutoTweetService {
       }
 
       // Apply club-aware logic using ClubService
-      const clubs = this.clubService.getClubInfo(ensName);
+      const clubs = await this.clubService.getClubs(ensName);
       
       // Return the first premium club found, or standard
-      for (const club of clubs) {
-        if (club.id === '999_club' || club.id === '10k_club') {
-          return `${club.name} bid`;
-        }
+      if (clubs.includes('999') || clubs.includes('10k')) {
+        const clubSlug = clubs.find(c => c === '999' || c === '10k') || clubs[0];
+        return `${getClubLabel(clubSlug)} bid`;
       }
       
-      return clubs.length > 0 ? `${clubs[0].name} bid` : 'Standard bid';
+      return clubs.length > 0 ? `${getClubLabel(clubs[0])} bid` : 'Standard bid';
 
     } catch (error: any) {
       return 'Standard bid';

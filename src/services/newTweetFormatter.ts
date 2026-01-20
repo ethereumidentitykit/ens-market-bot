@@ -44,13 +44,7 @@ export class NewTweetFormatter {
     private ensMetadataService?: ENSMetadataService,
     private magicEdenV4Service?: MagicEdenV4Service
   ) {
-    logger.info('[NewTweetFormatter] Constructor called - ClubService should be initialized');
-    // Add a small delay to let ClubService initialize, then check status
-    setTimeout(() => {
-      logger.info(`[NewTweetFormatter] ClubService initialized: ${this.clubService.isInitialized()}`);
-      const stats = this.clubService.getStats();
-      logger.info(`[NewTweetFormatter] ClubService stats: ${JSON.stringify(stats)}`);
-    }, 1000);
+    logger.info('[NewTweetFormatter] Constructor called');
   }
 
   /**
@@ -468,7 +462,8 @@ export class NewTweetFormatter {
     const ownerLine = `Minter: ${ownerHandle}`;
     
     // Club line (show club name with handle properly paired)
-    const formattedClubString = this.clubService.getFormattedClubString(ensName);
+    const clubs = await this.clubService.getClubs(ensName);
+    const formattedClubString = this.clubService.getFormattedClubString(clubs);
     const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
     
     // Grails marketplace link
@@ -645,7 +640,8 @@ export class NewTweetFormatter {
     }
     
     // Club line (show club name with handle properly paired)
-    const formattedClubString = this.clubService.getFormattedClubString(ensName);
+    const clubs = await this.clubService.getClubs(ensName);
+    const formattedClubString = this.clubService.getFormattedClubString(clubs);
     const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
     
     // Marketplace link
@@ -747,9 +743,8 @@ export class NewTweetFormatter {
     
     // Club line (show club name with handle properly paired)
     logger.info(`[NewTweetFormatter] Getting club info for sale: ${ensName}`);
-    logger.info(`[NewTweetFormatter] ClubService instance exists: ${!!this.clubService}`);
-    logger.info(`[NewTweetFormatter] ClubService initialized: ${this.clubService?.isInitialized()}`);
-    const formattedClubString = this.clubService.getFormattedClubString(ensName);
+    const clubs = await this.clubService.getClubs(ensName);
+    const formattedClubString = this.clubService.getFormattedClubString(clubs);
     const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
     logger.info(`[NewTweetFormatter] Sale club line result: "${clubLine}"`);
     
@@ -779,19 +774,19 @@ export class NewTweetFormatter {
   }
 
   /**
-   * Get club mention for ENS name if applicable
+   * Get club mention for club slugs
    * Supports multiple clubs with comma separation
    */
-  private getClubMention(ensName: string): string | null {
-    return this.clubService.getClubMention(ensName);
+  private getClubMention(clubs: string[]): string | null {
+    return this.clubService.getClubMention(clubs);
   }
 
   /**
-   * Get human-readable club name for ENS name if applicable
+   * Get human-readable club name for club slugs
    * Supports multiple clubs with comma separation
    */
-  private getClubName(ensName: string): string | null {
-    return this.clubService.getClubName(ensName);
+  private getClubName(clubs: string[]): string | null {
+    return this.clubService.getClubName(clubs);
   }
 
   /**
@@ -1407,9 +1402,8 @@ export class NewTweetFormatter {
     
     // Check for club mention
     logger.info(`[NewTweetFormatter] Preview - Getting club info for: ${ensName}`);
-    logger.info(`[NewTweetFormatter] Preview - ClubService instance exists: ${!!this.clubService}`);
-    logger.info(`[NewTweetFormatter] Preview - ClubService initialized: ${this.clubService?.isInitialized()}`);
-    const formattedClubString = this.clubService.getFormattedClubString(ensName);
+    const clubs = await this.clubService.getClubs(ensName);
+    const formattedClubString = this.clubService.getFormattedClubString(clubs);
     const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
     logger.info(`[NewTweetFormatter] Preview club line result: "${clubLine}"`);
     
@@ -1458,7 +1452,8 @@ export class NewTweetFormatter {
     const ownerHandle = this.getDisplayHandle(ownerAccount, registration.ownerAddress);
     
     // Check for club mention
-    const formattedClubString = this.clubService.getFormattedClubString(ensName);
+    const clubs = await this.clubService.getClubs(ensName);
+    const formattedClubString = this.clubService.getFormattedClubString(clubs);
     const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
     
     const breakdown = {
@@ -1611,7 +1606,8 @@ export class NewTweetFormatter {
     }
     
     // Check for club mention
-    const formattedClubString = this.clubService.getFormattedClubString(ensName);
+    const clubs = await this.clubService.getClubs(ensName);
+    const formattedClubString = this.clubService.getFormattedClubString(clubs);
     const clubLine = formattedClubString ? `Club: ${formattedClubString}` : '';
     
     const breakdown = {
