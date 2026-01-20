@@ -910,18 +910,14 @@ export class NewTweetFormatter {
     if (!sale.feeRecipientAddress) return undefined;
     
     const isMarketplace = isKnownMarketplaceFee(sale.feeRecipientAddress);
-    const meetsThreshold = sale.feePercent && sale.feePercent >= 1; // 1% minimum
+    const meetsThreshold = sale.feePercent && Number(sale.feePercent) >= 1; // 1% minimum
     
     if (isMarketplace || !meetsThreshold) return undefined;
     
     const brokerHandle = this.getDisplayHandle(feeRecipientAccount, sale.feeRecipientAddress);
-    const feePercent = sale.feePercent ? `${sale.feePercent.toFixed(2)}%` : '';
-    const feeEth = sale.feeAmountWei 
-      ? `${(Number(sale.feeAmountWei) / 1e18).toFixed(2)} ETH` 
-      : '';
-    const feeInfo = feePercent && feeEth ? `, ${feePercent} (${feeEth})` : '';
+    const feePercent = sale.feePercent ? `, ${Number(sale.feePercent).toFixed(2)}%` : '';
     
-    return `Broker: ${brokerHandle}${feeInfo}`;
+    return `Broker: ${brokerHandle}${feePercent}`;
   }
 
   /**

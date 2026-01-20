@@ -295,8 +295,9 @@ function main(stream) {
         
         // Found a fee recipient
         const feeAmount = toBI(c.amount);
+        // Multiply by 10000 then divide by 100 to preserve 2 decimal places
         const percent = ethLikeWei > 0n 
-          ? Number((feeAmount * 100n) / ethLikeWei) 
+          ? Number((feeAmount * 10000n) / ethLikeWei) / 100
           : 0;
         
         fee = {
