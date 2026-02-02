@@ -485,6 +485,14 @@ export class BidsProcessingService {
         return 999; // Impossibly high threshold = always reject
       }
 
+      // CRITICAL: Check blacklist here AFTER name is resolved
+      // (The earlier blacklist check in shouldProcessBid may have been skipped if Magic Eden didn't provide the name)
+      const isBlacklisted = await this.databaseService.isNameBlacklisted(ensName);
+      if (isBlacklisted) {
+        logger.info(`🚫 BLACKLIST REJECT: ${ensName} is blacklisted - rejecting bid`);
+        return 999; // Impossibly high threshold = always reject
+      }
+
       // Apply club-aware logic using ClubService
       const clubs = await this.clubService.getClubs(ensName);
       
