@@ -28,21 +28,53 @@ export class ClubService {
 
       if (!response.ok) {
         logger.warn(`[ClubService] API returned ${response.status} for ${ensName}`);
-        return [];
+        // Fallback: detect by pattern when API fails
+        return this.detectClubsByPattern(ensName);
       }
 
       const data: GrailsNameResponse = await response.json();
 
       if (!data.success || !data.data?.clubs) {
-        return [];
+        logger.warn(`[ClubService] API returned no clubs for ${ensName} (success: ${data.success}, clubs: ${JSON.stringify(data.data?.clubs)})`);
+        // Fallback: detect 999 Club by pattern (3-digit numbers 000-999)
+        return this.detectClubsByPattern(ensName);
       }
 
       logger.debug(`[ClubService] Found ${data.data.clubs.length} clubs for ${ensName}: ${data.data.clubs.join(', ')}`);
       return data.data.clubs;
     } catch (error: any) {
       logger.error(`[ClubService] Failed to fetch clubs for ${ensName}:`, error.message);
-      return [];
+      // Fallback: detect 999 Club by pattern (3-digit numbers 000-999)
+      return this.detectClubsByPattern(ensName);
     }
+  }
+
+  /**
+   * Fallback: Detect clubs by pattern matching when API fails
+   * Currently detects 999 Club (3-digit numbers 000-999) and 10k Club (4-digit numbers)
+   */
+  private detectClubsByPattern(ensName: string): string[] {
+    if (!ensName) return [];
+    
+    // Remove .eth suffix if present
+    const label = ensName.toLowerCase().endsWith('.eth') 
+      ? ensName.slice(0, -4) 
+      : ensName;
+    
+    const clubs: string[] = [];
+    
+    // 999 Club: exactly 3 digits (000-999)
+    if (/^\d{3}$/.test(label)) {
+      clubs.push('999');
+      logger.info(`[ClubService] Pattern fallback: ${ensName} detected as 999 Club (3-digit number)`);
+    }
+    // 10k Club: exactly 4 digits (0000-9999)
+    else if (/^\d{4}$/.test(label)) {
+      clubs.push('10k');
+      logger.info(`[ClubService] Pattern fallback: ${ensName} detected as 10k Club (4-digit number)`);
+    }
+    
+    return clubs;
   }
 
   /**
