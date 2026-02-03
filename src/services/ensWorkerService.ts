@@ -29,6 +29,31 @@ export interface ENSWorkerAccount {
   errors?: any;
 }
 
+// Minimal shape of the EthFollow "data" API account response
+// (used as a backup when ENS Worker times out or errors).
+interface EthFollowAccount {
+  address: string;
+  ens?: {
+    name?: string;
+    avatar?: string;
+    records?: {
+      name?: string;
+      description?: string;
+      avatar?: string;
+      'com.twitter'?: string;
+      'com.discord'?: string;
+      'com.github'?: string;
+      'network.dm3.profile'?: string;
+      email?: string;
+      url?: string;
+      'org.telegram'?: string;
+      header?: string;
+      status?: string;
+    };
+    updated_at?: string;
+  };
+}
+
 export interface ResolvedName {
   address: string;
   displayName: string;
@@ -50,10 +75,12 @@ export interface ResolvedProfile {
  */
 export class ENSWorkerService {
   private readonly baseUrl = 'https://enstate-prod-us-east-1.up.railway.app/u';
+  private readonly ethFollowDataBaseUrl = process.env.ETHFOLLOW_DATA_BASE_URL || 'https://data.ethfollow.xyz/api/v1';
   private readonly cache = new Map<string, ResolvedName>();
   private readonly profileCache = new Map<string, { data: ResolvedProfile; timestamp: number }>();
   private readonly accountCache = new Map<string, { data: ENSWorkerAccount | null; timestamp: number }>();
   private readonly cacheTimeout = 5 * 60 * 1000; // 5 minutes cache
+  private readonly failureCacheTimeout = 30 * 1000; // 30 seconds for failed lookups (avoid "stuck null" for 5 minutes)
 
   /**
    * Resolve a single Ethereum address to its ENS name and display name
@@ -102,6 +129,25 @@ export class ENSWorkerService {
 
     } catch (error: any) {
       logger.warn(`Failed to resolve address ${address} with ENS Worker:`, error.message);
+      logger.info(`🔄 Falling back to EthFollow data API for address resolution: ${address}`);
+
+      const fallbackAccount = await this.getEthFollowAccount(address);
+      if (fallbackAccount) {
+        const resolved: ResolvedName = {
+          address: normalizedAddress,
+          displayName: this.getDisplayName(fallbackAccount),
+          ensName: fallbackAccount.name || undefined,
+          hasEns: !!fallbackAccount.name
+        };
+
+        this.cache.set(normalizedAddress, resolved);
+        setTimeout(() => {
+          this.cache.delete(normalizedAddress);
+        }, this.cacheTimeout);
+
+        logger.debug(`Resolved (EthFollow fallback) ${address} -> ${resolved.displayName} (ENS: ${resolved.hasEns})`);
+        return resolved;
+      }
       
       // Return fallback with shortened address
       const fallback: ResolvedName = {
@@ -169,6 +215,23 @@ export class ENSWorkerService {
 
     } catch (error: any) {
       logger.info(`Failed to get profile for address ${address} with ENS Worker:`, error.message);
+      logger.info(`🔄 Falling back to EthFollow data API for profile lookup: ${address}`);
+
+      const fallbackAccount = await this.getEthFollowAccount(address);
+      if (fallbackAccount) {
+        const avatar = fallbackAccount.avatar || fallbackAccount.records?.avatar;
+        const profile: ResolvedProfile = {
+          address: normalizedAddress,
+          displayName: this.getDisplayName(fallbackAccount),
+          ensName: fallbackAccount.name || undefined,
+          avatar,
+          hasEns: !!fallbackAccount.name
+        };
+
+        this.profileCache.set(normalizedAddress, { data: profile, timestamp: Date.now() });
+        logger.debug(`Got profile (EthFollow fallback) ${address} -> ${profile.displayName} (ENS: ${profile.hasEns}, Avatar: ${!!profile.avatar})`);
+        return profile;
+      }
       
       // Return fallback with shortened address
       const fallback: ResolvedProfile = {
@@ -283,7 +346,9 @@ export class ENSWorkerService {
       return response.data.records || null;
     } catch (error: any) {
       logger.warn(`Failed to get ENS records for address ${address}:`, error.message);
-      return null;
+      logger.info(`🔄 Falling back to EthFollow data API for ENS records: ${address}`);
+      const fallbackAccount = await this.getEthFollowAccount(address);
+      return fallbackAccount?.records || null;
     }
   }
 
@@ -315,9 +380,17 @@ export class ENSWorkerService {
     
     // Check cache first
     const cached = this.accountCache.get(normalizedAddress);
-    if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
-      logger.debug(`Using cached account data for ${address} -> ${cached.data?.name || 'no ENS'}`);
-      return cached.data;
+    if (cached) {
+      const ageMs = Date.now() - cached.timestamp;
+      if (cached.data !== null && ageMs < this.cacheTimeout) {
+        logger.debug(`Using cached account data for ${address} -> ${cached.data?.name || 'no ENS'}`);
+        return cached.data;
+      }
+      // If cached value is null, only honor it briefly; then retry (so a transient timeout doesn't block lookups for 5 minutes)
+      if (cached.data === null && ageMs < this.failureCacheTimeout) {
+        logger.debug(`Using cached null account data for ${address} (age ${ageMs}ms)`);
+        return null;
+      }
     }
     
     try {
@@ -341,11 +414,71 @@ export class ENSWorkerService {
 
     } catch (error: any) {
       logger.info(`Failed to get full account data for address ${address} with ENS Worker:`, error.message);
-      
-      // Cache the null result (shorter timeout for failed lookups)
+      logger.info(`🔄 Falling back to EthFollow data API for full account: ${address}`);
+
+      const fallbackAccount = await this.getEthFollowAccount(address);
+      if (fallbackAccount) {
+        this.accountCache.set(normalizedAddress, { data: fallbackAccount, timestamp: Date.now() });
+        return fallbackAccount;
+      }
+
+      // Cache the null result briefly for failed lookups
       this.accountCache.set(normalizedAddress, { data: null, timestamp: Date.now() });
-      
       return null;
     }
+  }
+
+  private async getEthFollowAccount(address: string): Promise<ENSWorkerAccount | null> {
+    try {
+      const response = await axios.get<EthFollowAccount>(
+        `${this.ethFollowDataBaseUrl}/users/${address}/account?cache=fresh`,
+        {
+          timeout: 8000,
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'ENS-Sales-Bot/1.0'
+          }
+        }
+      );
+
+      const data = response.data;
+      return this.mapEthFollowAccountToENSWorkerAccount(address, data);
+    } catch (error: any) {
+      logger.warn(`EthFollow data API fallback failed for ${address}:`, error.message);
+      return null;
+    }
+  }
+
+  private mapEthFollowAccountToENSWorkerAccount(address: string, data: EthFollowAccount): ENSWorkerAccount {
+    const normalizedAddress = (data.address || address).toLowerCase();
+    const records = data.ens?.records;
+    const name = data.ens?.name || '';
+    const avatar = data.ens?.avatar || records?.avatar;
+    const display =
+      records?.name ||
+      name ||
+      this.shortenAddress(normalizedAddress);
+
+    return {
+      name,
+      address: normalizedAddress,
+      avatar,
+      display,
+      records: records
+        ? {
+            avatar: avatar,
+            'com.twitter': records['com.twitter'],
+            'com.discord': records['com.discord'],
+            'com.github': records['com.github'],
+            'network.dm3.profile': records['network.dm3.profile'],
+            description: records.description,
+            email: records.email,
+            url: records.url,
+            'org.telegram': records['org.telegram'],
+            header: records.header,
+            status: records.status
+          }
+        : undefined
+    };
   }
 }

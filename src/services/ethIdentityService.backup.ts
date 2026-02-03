@@ -42,7 +42,7 @@ export interface ResolvedProfile {
  * *** BACKUP VERSION - Use ENSWorkerService for current implementation ***
  */
 export class EthIdentityService {
-  private readonly baseUrl = 'http://api.ethfollow.xyz/api/v1';
+  private readonly baseUrl = 'https://data.ethfollow.xyz/api/v1';
   private readonly cache = new Map<string, ResolvedName>();
   private readonly cacheTimeout = 5 * 60 * 1000; // 5 minutes cache
 
