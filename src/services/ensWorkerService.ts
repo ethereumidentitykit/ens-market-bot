@@ -393,13 +393,16 @@ export class ENSWorkerService {
       }
     }
     
+    const ensWorkerUrl = `${this.baseUrl}/${address}`;
+    const startTime = Date.now();
+    
     try {
-      logger.debug(`Getting full account data with ENS Worker for address: ${address}`);
+      logger.debug(`[ENS Worker] Requesting: ${ensWorkerUrl}`);
       
       const response = await axios.get<ENSWorkerAccount>(
-        `${this.baseUrl}/${address}`,
+        ensWorkerUrl,
         {
-          timeout: 10000, // 30 second timeout
+          timeout: 10000, // 10 second timeout
           headers: {
             'Accept': 'application/json',
             'User-Agent': 'ENS-Sales-Bot/1.0'
@@ -407,20 +410,47 @@ export class ENSWorkerService {
         }
       );
 
+      const elapsed = Date.now() - startTime;
+      logger.debug(`[ENS Worker] ✅ Success for ${address} in ${elapsed}ms -> ${response.data.name || 'no primary ENS'}`);
+
       // Cache the successful result
       this.accountCache.set(normalizedAddress, { data: response.data, timestamp: Date.now() });
 
       return response.data;
 
     } catch (error: any) {
-      logger.info(`Failed to get full account data for address ${address} with ENS Worker:`, error.message);
-      logger.info(`🔄 Falling back to EthFollow data API for full account: ${address}`);
-
+      const elapsed = Date.now() - startTime;
+      
+      // Detailed error logging
+      const errorDetails = {
+        address,
+        url: ensWorkerUrl,
+        elapsed: `${elapsed}ms`,
+        errorCode: error.code || 'N/A',
+        errorMessage: error.message,
+        isTimeout: error.code === 'ECONNABORTED' || error.message?.includes('timeout'),
+        isNetworkError: error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED' || error.code === 'ECONNRESET',
+        httpStatus: error.response?.status || 'N/A',
+        httpStatusText: error.response?.statusText || 'N/A',
+        responseData: error.response?.data ? JSON.stringify(error.response.data).slice(0, 200) : 'N/A'
+      };
+      
+      logger.warn(`[ENS Worker] ❌ Failed for ${address}:`, JSON.stringify(errorDetails));
+      
+      // Try EthFollow fallback
+      logger.info(`[ENS Worker] 🔄 Falling back to EthFollow data API for: ${address}`);
+      const fallbackStartTime = Date.now();
+      
       const fallbackAccount = await this.getEthFollowAccount(address);
+      const fallbackElapsed = Date.now() - fallbackStartTime;
+      
       if (fallbackAccount) {
+        logger.info(`[EthFollow] ✅ Fallback success for ${address} in ${fallbackElapsed}ms -> ${fallbackAccount.name || 'no primary ENS'}`);
         this.accountCache.set(normalizedAddress, { data: fallbackAccount, timestamp: Date.now() });
         return fallbackAccount;
       }
+      
+      logger.warn(`[EthFollow] ❌ Fallback also failed for ${address} after ${fallbackElapsed}ms`);
 
       // Cache the null result briefly for failed lookups
       this.accountCache.set(normalizedAddress, { data: null, timestamp: Date.now() });
@@ -429,9 +459,13 @@ export class ENSWorkerService {
   }
 
   private async getEthFollowAccount(address: string): Promise<ENSWorkerAccount | null> {
+    const fallbackUrl = `${this.ethFollowDataBaseUrl}/users/${address}/account?cache=fresh`;
+    
     try {
+      logger.debug(`[EthFollow] Requesting: ${fallbackUrl}`);
+      
       const response = await axios.get<EthFollowAccount>(
-        `${this.ethFollowDataBaseUrl}/users/${address}/account?cache=fresh`,
+        fallbackUrl,
         {
           timeout: 8000,
           headers: {
@@ -442,9 +476,17 @@ export class ENSWorkerService {
       );
 
       const data = response.data;
+      logger.debug(`[EthFollow] Response received: hasENS=${!!data.ens}, name=${data.ens?.name || 'none'}`);
       return this.mapEthFollowAccountToENSWorkerAccount(address, data);
     } catch (error: any) {
-      logger.warn(`EthFollow data API fallback failed for ${address}:`, error.message);
+      const errorDetails = {
+        url: fallbackUrl,
+        errorCode: error.code || 'N/A',
+        errorMessage: error.message,
+        isTimeout: error.code === 'ECONNABORTED' || error.message?.includes('timeout'),
+        httpStatus: error.response?.status || 'N/A'
+      };
+      logger.warn(`[EthFollow] ❌ Request failed:`, JSON.stringify(errorDetails));
       return null;
     }
   }
