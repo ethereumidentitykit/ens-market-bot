@@ -63,6 +63,16 @@ const ENS_NAMEWRAPPER = '0xd4416b13d2b3a9abae7acd5d6c2bbdbe25686401';
 const ENS_BASE_REGISTRAR = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
 
 /**
+ * Active listing returned by getListingsForName()
+ */
+export interface GrailsActiveListing {
+  price: number;          // Decimal price (e.g. 0.5)
+  priceWei: string;
+  currencySymbol: string; // ETH, WETH, USDC, etc.
+  source: string;         // e.g. "grails", "opensea"
+}
+
+/**
  * Grails service stats type
  */
 export interface GrailsServiceStats {
@@ -324,6 +334,52 @@ export class GrailsApiService {
       lastFetchTime: this.stats.lastFetchTime,
       stats: this.getStats(),
     };
+  }
+
+  /**
+   * Fetch active listings for an ENS name from Grails API
+   * Uses the /names/{name} endpoint (same as grails-app frontend)
+   * Static method — no service instance needed, just an HTTP call
+   */
+  static async getListingsForName(name: string): Promise<GrailsActiveListing[]> {
+    try {
+      const cleanName = name.endsWith('.eth') ? name : `${name}.eth`;
+      const apiBase = process.env.GRAILS_API_URL
+        ? process.env.GRAILS_API_URL.replace(/\/activity$/, '')
+        : 'https://grails-api.ethid.org/api/v1';
+      const url = `${apiBase}/names/${encodeURIComponent(cleanName)}`;
+
+      logger.info(`🍷 Fetching Grails listings for: ${cleanName}`);
+
+      const response = await axios.get(url, {
+        timeout: 10000,
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'ENS-TwitterBot/2.0',
+        },
+      });
+
+      if (!response.data?.success || !response.data?.data?.listings) {
+        logger.debug(`🍷 No listings data in Grails response for ${cleanName}`);
+        return [];
+      }
+
+      const activeListings: GrailsActiveListing[] = response.data.data.listings
+        .filter((l: any) => l.status === 'active')
+        .map((l: any) => ({
+          price: parseFloat(l.price),
+          priceWei: l.price_wei,
+          currencySymbol: CURRENCY_MAP[l.currency_address?.toLowerCase()] || 'ETH',
+          source: l.source || 'grails',
+        }));
+
+      logger.info(`🍷 Found ${activeListings.length} active Grails listing(s) for ${cleanName}`);
+      return activeListings;
+
+    } catch (error: any) {
+      logger.warn(`🍷 Failed to fetch Grails listings for ${name}:`, error.message);
+      return [];
+    }
   }
 }
 

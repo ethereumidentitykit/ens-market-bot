@@ -10,6 +10,7 @@ import { OpenSeaService } from './openSeaService';
 import { ENSMetadataService } from './ensMetadataService';
 import { ClubService } from './clubService';
 import { MagicEdenV4Service } from './magicEdenV4Service';
+import { GrailsApiService } from './grailsApiService';
 import { ENSTokenUtils } from './ensTokenUtils';
 import { TimeUtils } from '../utils/timeUtils';
 import { isKnownMarketplaceFee } from '../config/contracts';
@@ -368,43 +369,96 @@ export class NewTweetFormatter {
 
   /**
    * Get current listing price context for bids
-   * Uses V4 /asks endpoint which only returns active, valid listings
+   * Queries Magic Eden and Grails in parallel, picks the lowest listing across both
+   * Shows source(s) in parentheses, e.g. "(grails)" or "(grails + opensea)"
    */
   private async getListingContext(
     contractAddress: string,
     tokenId: string,
-    bidAmountEth: number
+    bidAmountEth: number,
+    ensName?: string
   ): Promise<string | null> {
-    if (!this.magicEdenV4Service) {
-      logger.debug('[NewTweetFormatter] Magic Eden V4 service not available for listing context');
+    logger.info(`🔍 Fetching listing context for ${contractAddress}:${tokenId}${ensName ? ` (${ensName})` : ''}`);
+
+    // Query both marketplaces in parallel
+    const [magicEdenResult, grailsResult] = await Promise.all([
+      // Magic Eden: lookup by contract + tokenId
+      this.magicEdenV4Service
+        ? this.magicEdenV4Service.getActiveAsks(contractAddress, tokenId).catch((err: any) => {
+            logger.warn('⚠️ Magic Eden listing lookup failed:', err.message);
+            return [];
+          })
+        : Promise.resolve([]),
+      // Grails: lookup by ENS name
+      ensName
+        ? GrailsApiService.getListingsForName(ensName).catch((err: any) => {
+            logger.warn('⚠️ Grails listing lookup failed:', err.message);
+            return [];
+          })
+        : Promise.resolve([]),
+    ]);
+
+    // Normalise both into { price, symbol, source } for comparison
+    type Candidate = { price: number; symbol: string; source: string };
+    const candidates: Candidate[] = [];
+
+    // Canonical display names for marketplace sources
+    const SOURCE_DISPLAY: Record<string, string> = {
+      grails: 'Grails',
+      opensea: 'OpenSea',
+      blur: 'Blur',
+      x2y2: 'X2Y2',
+      looksrare: 'LooksRare',
+      magiceden: 'Magic Eden',
+    };
+    const displaySource = (raw: string): string => {
+      const key = raw.toLowerCase();
+      return SOURCE_DISPLAY[key] || raw; // pass through unknown sources as-is
+    };
+
+    for (const ask of magicEdenResult) {
+      candidates.push({
+        price: parseFloat(ask.price.amount.native),
+        symbol: ask.price.currency.symbol,
+        source: displaySource(ask.source || 'opensea'),
+      });
+    }
+
+    for (const listing of grailsResult) {
+      candidates.push({
+        price: listing.price,
+        symbol: listing.currencySymbol,
+        source: displaySource(listing.source || 'grails'),
+      });
+    }
+
+    if (candidates.length === 0) {
+      logger.info('ℹ️ No active listing found on any marketplace');
       return null;
     }
 
-    try {
-      logger.info(`🔍 Fetching listing context for ${contractAddress}:${tokenId}`);
+    // Find the lowest price
+    candidates.sort((a, b) => a.price - b.price);
+    const lowestPrice = candidates[0].price;
 
-      const asks = await this.magicEdenV4Service.getActiveAsks(contractAddress, tokenId);
+    // Collect unique sources at that lowest price, Grails always first
+    const sourcesAtLowest = [
+      ...new Set(
+        candidates
+          .filter((c) => c.price === lowestPrice)
+          .map((c) => c.source)
+      ),
+    ].sort((a, b) => {
+      if (a === 'Grails') return -1;
+      if (b === 'Grails') return 1;
+      return 0;
+    });
 
-      if (asks.length > 0) {
-        // Use lowest ask (already sorted by USD value)
-        const lowestAsk = asks[0];
-        const priceEth = parseFloat(lowestAsk.price.amount.native);
-        const currencySymbol = lowestAsk.price.currency.symbol;
-        
-        logger.info(`✅ Found active listing: ${priceEth} ${currencySymbol}`);
-        
-        // Format with currency symbol (usually ETH)
-        const displaySymbol = currencySymbol === 'ETH' ? 'ETH' : currencySymbol;
-        return `List Price: ${priceEth.toFixed(2)} ${displaySymbol}`;
-      }
+    const displaySymbol = candidates[0].symbol === 'WETH' ? 'ETH' : candidates[0].symbol;
+    const sourceTag = sourcesAtLowest.join(' + ');
 
-      logger.info('ℹ️ No active listing found');
-      return null;
-
-    } catch (error: any) {
-      logger.warn('⚠️ Failed to fetch listing context:', error.message);
-      return null;
-    }
+    logger.info(`✅ Best listing: ${lowestPrice} ${displaySymbol} (${sourceTag}) — ${candidates.length} total across marketplaces`);
+    return `List Price: ${lowestPrice.toFixed(2)} ${displaySymbol} (${sourceTag})`;
   }
 
   /**
@@ -577,7 +631,8 @@ export class NewTweetFormatter {
       const listing = await this.getListingContext(
         bid.contractAddress,
         bid.tokenId,
-        bidAmountEth
+        bidAmountEth,
+        ensName
       );
       if (listing) {
         listingLine = listing;
