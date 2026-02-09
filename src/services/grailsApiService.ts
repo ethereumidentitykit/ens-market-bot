@@ -366,12 +366,18 @@ export class GrailsApiService {
 
       const activeListings: GrailsActiveListing[] = response.data.data.listings
         .filter((l: any) => l.status === 'active')
-        .map((l: any) => ({
-          price: parseFloat(l.price),
-          priceWei: l.price_wei,
-          currencySymbol: CURRENCY_MAP[l.currency_address?.toLowerCase()] || 'ETH',
-          source: l.source || 'grails',
-        }));
+        .map((l: any) => {
+          const currencySymbol = CURRENCY_MAP[l.currency_address?.toLowerCase()] || 'ETH';
+          // Grails API price field is in wei — convert to decimal
+          const decimals = (currencySymbol === 'USDC' || currencySymbol === 'USDT') ? 6 : 18;
+          const priceDecimal = parseFloat(l.price) / Math.pow(10, decimals);
+          return {
+            price: priceDecimal,
+            priceWei: l.price, // l.price IS the wei value (no separate price_wei on listings)
+            currencySymbol,
+            source: l.source || 'grails',
+          };
+        });
 
       logger.info(`🍷 Found ${activeListings.length} active Grails listing(s) for ${cleanName}`);
       return activeListings;
