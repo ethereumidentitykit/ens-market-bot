@@ -429,12 +429,21 @@
                                 </div>
                             </div>
                             <button @click="saveTransactionAutoPostSettings('bids')" class="mt-2 px-3 py-1 bg-orange-500 hover:bg-orange-600 text-white rounded text-xs font-medium transition-colors">Save Bid Settings</button>
-                            
-                            <!-- Bid Blacklist -->
-                            <div class="mt-3 pt-3 border-t border-white/20">
+                        </div>
+
+                        <!-- Blacklists -->
+                        <div class="bg-gray-800/60 border border-gray-600/50 backdrop-blur rounded-lg p-3">
+                            <div class="flex items-center mb-3">
+                                <i class="fas fa-shield-alt text-red-400 mr-2"></i>
+                                <span class="text-sm font-medium text-blue-100">Blacklists</span>
+                            </div>
+
+                            <!-- Name Blacklist -->
+                            <div class="mb-3">
                                 <div class="flex items-center mb-2">
                                     <i class="fas fa-ban text-red-400 mr-2 text-xs"></i>
                                     <span class="text-xs font-medium text-white">Name Blacklist</span>
+                                    <span class="ml-1 text-[10px] text-white/40">(blocks bids)</span>
                                 </div>
                                 <div class="flex gap-2 mb-2">
                                     <input type="text" 
@@ -461,8 +470,8 @@
                                 <div x-show="bidBlacklist.length === 0" class="text-xs text-white/50 italic">No blacklisted names</div>
                             </div>
 
-                            <!-- Address Blacklist (Wallet-level filtering for wash trades) -->
-                            <div class="mt-3 pt-3 border-t border-white/20">
+                            <!-- Address Blacklist -->
+                            <div class="pt-3 border-t border-white/10">
                                 <div class="flex items-center mb-2">
                                     <i class="fas fa-user-slash text-orange-400 mr-2 text-xs"></i>
                                     <span class="text-xs font-medium text-white">Address Blacklist</span>
@@ -2582,7 +2591,15 @@
                         <div class="space-y-4">
                             <div>
                                 <label class="block text-sm font-medium text-gray-400 mb-1">ENS Name</label>
-                                <p class="text-white font-medium" x-text="selectedSale?.nftName || 'Unknown'"></p>
+                                <div class="flex items-center gap-2">
+                                    <p class="text-white font-medium" x-text="selectedSale?.nftName || 'Unknown'"></p>
+                                    <button x-show="selectedSale?.nftName" 
+                                            @click="addToBlacklistFromModal(selectedSale.nftName)"
+                                            class="px-1.5 py-0.5 bg-red-500/20 hover:bg-red-500/40 border border-red-500/50 text-red-300 hover:text-white rounded text-[10px] font-medium transition-colors"
+                                            title="Block this name">
+                                        <i class="fas fa-ban mr-0.5"></i>Block
+                                    </button>
+                                </div>
                             </div>
                             
                             <div>
@@ -2654,11 +2671,27 @@
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
                                 <label class="block text-sm font-medium text-gray-400 mb-1">Buyer</label>
-                                <p class="text-white font-mono text-sm break-all" x-text="selectedSale?.buyerAddress"></p>
+                                <div class="flex items-start gap-2">
+                                    <p class="text-white font-mono text-sm break-all flex-1" x-text="selectedSale?.buyerAddress"></p>
+                                    <button x-show="selectedSale?.buyerAddress" 
+                                            @click="addToAddressBlacklistFromModal(selectedSale.buyerAddress)"
+                                            class="shrink-0 px-1.5 py-0.5 bg-orange-500/20 hover:bg-orange-500/40 border border-orange-500/50 text-orange-300 hover:text-white rounded text-[10px] font-medium transition-colors"
+                                            title="Block this address">
+                                        <i class="fas fa-user-slash mr-0.5"></i>Block
+                                    </button>
+                                </div>
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-gray-400 mb-1">Seller</label>
-                                <p class="text-white font-mono text-sm break-all" x-text="selectedSale?.sellerAddress"></p>
+                                <div class="flex items-start gap-2">
+                                    <p class="text-white font-mono text-sm break-all flex-1" x-text="selectedSale?.sellerAddress"></p>
+                                    <button x-show="selectedSale?.sellerAddress" 
+                                            @click="addToAddressBlacklistFromModal(selectedSale.sellerAddress)"
+                                            class="shrink-0 px-1.5 py-0.5 bg-orange-500/20 hover:bg-orange-500/40 border border-orange-500/50 text-orange-300 hover:text-white rounded text-[10px] font-medium transition-colors"
+                                            title="Block this address">
+                                        <i class="fas fa-user-slash mr-0.5"></i>Block
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>

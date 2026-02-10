@@ -1649,6 +1649,51 @@ function dashboard() {
             this.selectedSale = null;
         },
 
+        // Modal block helpers - add name to bid blacklist
+        async addToBlacklistFromModal(name) {
+            if (!name) return;
+            if (!confirm(`Block name "${name}"?\n\nThis will prevent bids for this name from being tweeted.`)) return;
+            try {
+                const response = await this.fetch('/api/admin/bid-blacklist', {
+                    method: 'POST',
+                    body: JSON.stringify({ names: [name] })
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    this.bidBlacklist = data.blacklist || [];
+                    this.showMessage(`Blocked name "${name}"`, 'success');
+                } else {
+                    this.showMessage('Failed to block name', 'error');
+                }
+            } catch (error) {
+                console.error('Failed to block name:', error);
+                this.showMessage('Failed to block name', 'error');
+            }
+        },
+
+        // Modal block helpers - add address to address blacklist
+        async addToAddressBlacklistFromModal(address) {
+            if (!address) return;
+            const truncated = address.slice(0, 6) + '...' + address.slice(-4);
+            if (!confirm(`Block address ${truncated}?\n\nThis will prevent all sales and bids involving this wallet from being tweeted.`)) return;
+            try {
+                const response = await this.fetch('/api/admin/address-blacklist', {
+                    method: 'POST',
+                    body: JSON.stringify({ addresses: [address] })
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    this.addressBlacklist = data.blacklist || [];
+                    this.showMessage(`Blocked address ${truncated}`, 'success');
+                } else {
+                    this.showMessage('Failed to block address', 'error');
+                }
+            } catch (error) {
+                console.error('Failed to block address:', error);
+                this.showMessage('Failed to block address', 'error');
+            }
+        },
+
         // Master API Toggle Functions
         async toggleTwitterAPI() {
             try {
@@ -1929,6 +1974,7 @@ function dashboard() {
         async addToBlacklist() {
             const name = this.newBlacklistName.trim();
             if (!name) return;
+            if (!confirm(`Block name "${name}"?\n\nThis will prevent bids for this name from being tweeted.`)) return;
 
             this.blacklistLoading = true;
             try {
@@ -1954,6 +2000,7 @@ function dashboard() {
         },
 
         async removeFromBlacklist(name) {
+            if (!confirm(`Unblock name "${name}"?`)) return;
             this.blacklistLoading = true;
             try {
                 const response = await this.fetch('/api/admin/bid-blacklist', {
@@ -1992,6 +2039,8 @@ function dashboard() {
         async addToAddressBlacklist() {
             const address = this.newBlacklistAddress.trim();
             if (!address) return;
+            const truncatedAddr = address.slice(0, 6) + '...' + address.slice(-4);
+            if (!confirm(`Block address ${truncatedAddr}?\n\nThis will prevent all sales and bids involving this wallet from being tweeted.`)) return;
 
             this.addressBlacklistLoading = true;
             try {
@@ -2018,6 +2067,8 @@ function dashboard() {
         },
 
         async removeFromAddressBlacklist(address) {
+            const truncated = address.slice(0, 6) + '...' + address.slice(-4);
+            if (!confirm(`Unblock address ${truncated}?`)) return;
             this.addressBlacklistLoading = true;
             try {
                 const response = await this.fetch('/api/admin/address-blacklist', {

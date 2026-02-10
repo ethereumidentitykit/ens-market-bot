@@ -24,6 +24,7 @@ export const CLUB_LABELS: Record<string, string> = {
   periodic_table: 'Periodic Table',
   english_adjectives: 'English Adjectives',
   wikidata_top_nouns: 'Top Nouns',
+  top_nouns: 'Top Nouns',
   wikidata_top_fantasy_char: 'Top Fantasy',
   '3_letter_palindromes': '3 Letter Palindromes',
   '3_digit_palindromes': '3 Digit Palindromes',
@@ -56,6 +57,12 @@ export const CLUB_LABELS: Record<string, string> = {
   familynames_usa: 'Surnames USA',
   firstnames_usa: 'First Names USA',
   mythical_creatures: 'Mythical Creatures',
+  ai_words: 'AI Words',
+  catholicism: 'Catholicism',
+  crayola_classic: 'Classic Crayola',
+  holidays: 'Holidays',
+  instruments: 'Instruments',
+  personas: 'Personas',
 };
 
 export const CLUB_TWITTER_HANDLES: Record<string, string> = {
