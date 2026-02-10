@@ -279,12 +279,19 @@ export interface IDatabaseService {
   markBidAsFailed(id: number, reason: string): Promise<void>;
   getBidById(id: number): Promise<ENSBid | null>;
   
-  // Bid blacklist methods
+  // Bid blacklist methods (name-based)
   getBidBlacklist(): Promise<string[]>;
   setBidBlacklist(names: string[]): Promise<void>;
   addToBidBlacklist(name: string): Promise<void>;
   removeFromBidBlacklist(name: string): Promise<void>;
   isNameBlacklisted(name: string): Promise<boolean>;
+  
+  // Address blacklist methods (wallet-based, for wash trade filtering)
+  getAddressBlacklist(): Promise<string[]>;
+  setAddressBlacklist(addresses: string[]): Promise<void>;
+  addToAddressBlacklist(address: string): Promise<void>;
+  removeFromAddressBlacklist(address: string): Promise<void>;
+  isAddressBlacklisted(address: string): Promise<boolean>;
   
   // Price tier methods
   getPriceTiers(transactionType?: string): Promise<PriceTier[]>;

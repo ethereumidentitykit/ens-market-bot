@@ -460,6 +460,38 @@
                                 </div>
                                 <div x-show="bidBlacklist.length === 0" class="text-xs text-white/50 italic">No blacklisted names</div>
                             </div>
+
+                            <!-- Address Blacklist (Wallet-level filtering for wash trades) -->
+                            <div class="mt-3 pt-3 border-t border-white/20">
+                                <div class="flex items-center mb-2">
+                                    <i class="fas fa-user-slash text-orange-400 mr-2 text-xs"></i>
+                                    <span class="text-xs font-medium text-white">Address Blacklist</span>
+                                    <span class="ml-1 text-[10px] text-white/40">(blocks sales & bids)</span>
+                                </div>
+                                <div class="flex gap-2 mb-2">
+                                    <input type="text" 
+                                           x-model="newBlacklistAddress" 
+                                           @keyup.enter="addToAddressBlacklist()"
+                                           placeholder="0x..." 
+                                           class="flex-1 px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs placeholder-white/50 focus:outline-none focus:ring-1 focus:ring-white/50 font-mono">
+                                    <button @click="addToAddressBlacklist()" 
+                                            :disabled="addressBlacklistLoading || !newBlacklistAddress.trim()"
+                                            class="px-2 py-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white rounded text-xs font-medium transition-colors">
+                                        <i class="fas fa-plus"></i>
+                                    </button>
+                                </div>
+                                <div class="flex flex-wrap gap-1 max-h-24 overflow-y-auto" x-show="addressBlacklist.length > 0">
+                                    <template x-for="addr in addressBlacklist" :key="addr">
+                                        <span class="inline-flex items-center px-2 py-0.5 bg-orange-500/30 border border-orange-500/50 rounded text-xs text-white font-mono">
+                                            <span x-text="addr.slice(0, 6) + '...' + addr.slice(-4)"></span>
+                                            <button @click="removeFromAddressBlacklist(addr)" class="ml-1 text-orange-300 hover:text-white" :title="addr">
+                                                <i class="fas fa-times text-[10px]"></i>
+                                            </button>
+                                        </span>
+                                    </template>
+                                </div>
+                                <div x-show="addressBlacklist.length === 0" class="text-xs text-white/50 italic">No blacklisted addresses</div>
+                            </div>
                         </div>
                     </div>
                     

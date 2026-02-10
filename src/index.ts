@@ -1691,6 +1691,84 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    // Address Blacklist API endpoints (wallet-level filtering for wash trades)
+    app.get('/api/admin/address-blacklist', requireAuth, async (req, res) => {
+      try {
+        const blacklist = await databaseService.getAddressBlacklist();
+        res.json({
+          success: true,
+          blacklist
+        });
+      } catch (error: any) {
+        logger.error('Failed to get address blacklist:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.post('/api/admin/address-blacklist', requireAuth, async (req, res) => {
+      try {
+        const { addresses } = req.body;
+        
+        if (!addresses || !Array.isArray(addresses)) {
+          return res.status(400).json({
+            success: false,
+            error: 'addresses must be an array of strings'
+          });
+        }
+
+        // Add each address to the blacklist
+        for (const address of addresses) {
+          if (typeof address === 'string' && address.trim()) {
+            await databaseService.addToAddressBlacklist(address);
+          }
+        }
+
+        const blacklist = await databaseService.getAddressBlacklist();
+        res.json({
+          success: true,
+          message: `Added ${addresses.length} address(es) to blacklist`,
+          blacklist
+        });
+      } catch (error: any) {
+        logger.error('Failed to add to address blacklist:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.delete('/api/admin/address-blacklist', requireAuth, async (req, res) => {
+      try {
+        const { address } = req.body;
+        
+        if (!address || typeof address !== 'string') {
+          return res.status(400).json({
+            success: false,
+            error: 'address must be a string'
+          });
+        }
+
+        await databaseService.removeFromAddressBlacklist(address);
+        const blacklist = await databaseService.getAddressBlacklist();
+        
+        res.json({
+          success: true,
+          message: `Removed "${address}" from blacklist`,
+          blacklist
+        });
+      } catch (error: any) {
+        logger.error('Failed to remove from address blacklist:', error.message);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     // Twitter API endpoints
     app.get('/api/twitter/test', requireAuth, async (req, res) => {
       try {
@@ -1806,6 +1884,22 @@ async function startApplication(): Promise<void> {
         }
 
         const sale = unpostedSales[0];
+
+        // Check address blacklist (buyer or seller)
+        if (sale.buyerAddress && await databaseService.isAddressBlacklisted(sale.buyerAddress)) {
+          const truncated = sale.buyerAddress.slice(0, 6) + '...' + sale.buyerAddress.slice(-4);
+          return res.status(403).json({
+            success: false,
+            error: `Buyer address ${truncated} is on the address blacklist`
+          });
+        }
+        if (sale.sellerAddress && await databaseService.isAddressBlacklisted(sale.sellerAddress)) {
+          const truncated = sale.sellerAddress.slice(0, 6) + '...' + sale.sellerAddress.slice(-4);
+          return res.status(403).json({
+            success: false,
+            error: `Seller address ${truncated} is on the address blacklist`
+          });
+        }
 
         // Format the tweet with name resolution
         const formattedTweet = await newTweetFormatter.generateTweet(sale);
@@ -1948,6 +2042,22 @@ async function startApplication(): Promise<void> {
         //     error: 'Sale has already been posted to Twitter'
         //   });
         // }
+
+        // Check address blacklist (buyer or seller)
+        if (sale.buyerAddress && await databaseService.isAddressBlacklisted(sale.buyerAddress)) {
+          const truncated = sale.buyerAddress.slice(0, 6) + '...' + sale.buyerAddress.slice(-4);
+          return res.status(403).json({
+            success: false,
+            error: `Buyer address ${truncated} is on the address blacklist`
+          });
+        }
+        if (sale.sellerAddress && await databaseService.isAddressBlacklisted(sale.sellerAddress)) {
+          const truncated = sale.sellerAddress.slice(0, 6) + '...' + sale.sellerAddress.slice(-4);
+          return res.status(403).json({
+            success: false,
+            error: `Seller address ${truncated} is on the address blacklist`
+          });
+        }
 
         // Check rate limit first
         await rateLimitService.validateTweetPost();
@@ -2098,6 +2208,22 @@ async function startApplication(): Promise<void> {
         //     error: 'Sale has already been posted to Twitter'
         //   });
         // }
+
+        // Check address blacklist (buyer or seller)
+        if (sale.buyerAddress && await databaseService.isAddressBlacklisted(sale.buyerAddress)) {
+          const truncated = sale.buyerAddress.slice(0, 6) + '...' + sale.buyerAddress.slice(-4);
+          return res.status(403).json({
+            success: false,
+            error: `Buyer address ${truncated} is on the address blacklist`
+          });
+        }
+        if (sale.sellerAddress && await databaseService.isAddressBlacklisted(sale.sellerAddress)) {
+          const truncated = sale.sellerAddress.slice(0, 6) + '...' + sale.sellerAddress.slice(-4);
+          return res.status(403).json({
+            success: false,
+            error: `Seller address ${truncated} is on the address blacklist`
+          });
+        }
 
         // Check rate limit first
         await rateLimitService.validateTweetPost();
@@ -2370,6 +2496,15 @@ async function startApplication(): Promise<void> {
           return res.status(404).json({
             success: false,
             error: 'Bid not found or already posted'
+          });
+        }
+
+        // Check address blacklist (bidder/maker)
+        if (bid.makerAddress && await databaseService.isAddressBlacklisted(bid.makerAddress)) {
+          const truncated = bid.makerAddress.slice(0, 6) + '...' + bid.makerAddress.slice(-4);
+          return res.status(403).json({
+            success: false,
+            error: `Bidder address ${truncated} is on the address blacklist`
           });
         }
 

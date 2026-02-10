@@ -204,6 +204,30 @@ export class AutoTweetService {
       };
     }
 
+    // Check address blacklist (buyer or seller)
+    if (sale.buyerAddress && await this.databaseService.isAddressBlacklisted(sale.buyerAddress)) {
+      const truncated = sale.buyerAddress.slice(0, 6) + '...' + sale.buyerAddress.slice(-4);
+      logger.info(`🚫 ADDRESS BLACKLIST: Skipping sale ${sale.nftName} - buyer ${truncated} is blacklisted`);
+      return {
+        success: false,
+        saleId,
+        skipped: true,
+        reason: `Buyer address ${truncated} is blacklisted`,
+        type: 'sale'
+      };
+    }
+    if (sale.sellerAddress && await this.databaseService.isAddressBlacklisted(sale.sellerAddress)) {
+      const truncated = sale.sellerAddress.slice(0, 6) + '...' + sale.sellerAddress.slice(-4);
+      logger.info(`🚫 ADDRESS BLACKLIST: Skipping sale ${sale.nftName} - seller ${truncated} is blacklisted`);
+      return {
+        success: false,
+        saleId,
+        skipped: true,
+        reason: `Seller address ${truncated} is blacklisted`,
+        type: 'sale'
+      };
+    }
+
     // Check if sale is too old (use sales-specific settings)
     if (!(await this.isWithinTimeLimit(sale, settings.sales.maxAgeHours))) {
       return {
@@ -605,6 +629,19 @@ export class AutoTweetService {
         bidId,
         skipped: true,
         reason: `Bid is older than ${settings.bids.maxAgeHours} hours`,
+        type: 'bid'
+      };
+    }
+
+    // Check address blacklist (bidder/maker)
+    if (bid.makerAddress && await this.databaseService.isAddressBlacklisted(bid.makerAddress)) {
+      const truncated = bid.makerAddress.slice(0, 6) + '...' + bid.makerAddress.slice(-4);
+      logger.info(`🚫 ADDRESS BLACKLIST: Skipping bid on ${bid.ensName} - bidder ${truncated} is blacklisted`);
+      return {
+        success: false,
+        bidId,
+        skipped: true,
+        reason: `Bidder address ${truncated} is blacklisted`,
         type: 'bid'
       };
     }

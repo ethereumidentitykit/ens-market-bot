@@ -143,6 +143,11 @@ function dashboard() {
         newBlacklistName: '',
         blacklistLoading: false,
 
+        // Address blacklist state (wallet-level filtering)
+        addressBlacklist: [],
+        newBlacklistAddress: '',
+        addressBlacklistLoading: false,
+
         // AI Replies state
         aiRepliesEnabled: false,
         openaiConfigured: false,
@@ -541,6 +546,7 @@ function dashboard() {
             await this.loadAutoPostSettings();
             await this.loadPriceTiers();
             await this.loadBidBlacklist();
+            await this.loadAddressBlacklist();
             await this.refreshData();
             await this.loadUnpostedSales();
             await this.loadUnpostedRegistrations();
@@ -1970,6 +1976,70 @@ function dashboard() {
             }
         },
 
+        // Address Blacklist Methods (wallet-level filtering)
+        async loadAddressBlacklist() {
+            try {
+                const response = await this.fetch('/api/admin/address-blacklist');
+                if (response.ok) {
+                    const data = await response.json();
+                    this.addressBlacklist = data.blacklist || [];
+                }
+            } catch (error) {
+                console.error('Failed to load address blacklist:', error);
+            }
+        },
+
+        async addToAddressBlacklist() {
+            const address = this.newBlacklistAddress.trim();
+            if (!address) return;
+
+            this.addressBlacklistLoading = true;
+            try {
+                const response = await this.fetch('/api/admin/address-blacklist', {
+                    method: 'POST',
+                    body: JSON.stringify({ addresses: [address] })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    this.addressBlacklist = data.blacklist || [];
+                    this.newBlacklistAddress = '';
+                    const truncated = address.slice(0, 6) + '...' + address.slice(-4);
+                    this.showMessage(`Added ${truncated} to address blacklist`, 'success');
+                } else {
+                    this.showMessage('Failed to add to address blacklist', 'error');
+                }
+            } catch (error) {
+                console.error('Failed to add to address blacklist:', error);
+                this.showMessage('Failed to add to address blacklist', 'error');
+            } finally {
+                this.addressBlacklistLoading = false;
+            }
+        },
+
+        async removeFromAddressBlacklist(address) {
+            this.addressBlacklistLoading = true;
+            try {
+                const response = await this.fetch('/api/admin/address-blacklist', {
+                    method: 'DELETE',
+                    body: JSON.stringify({ address })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    this.addressBlacklist = data.blacklist || [];
+                    const truncated = address.slice(0, 6) + '...' + address.slice(-4);
+                    this.showMessage(`Removed ${truncated} from address blacklist`, 'success');
+                } else {
+                    this.showMessage('Failed to remove from address blacklist', 'error');
+                }
+            } catch (error) {
+                console.error('Failed to remove from address blacklist:', error);
+                this.showMessage('Failed to remove from address blacklist', 'error');
+            } finally {
+                this.addressBlacklistLoading = false;
+            }
+        },
 
         // Select bid for modal display
         selectBid(bid) {

@@ -889,6 +889,82 @@ export class DatabaseService implements IDatabaseService {
   }
 
   /**
+   * Address Blacklist Methods
+   * Manages a list of wallet addresses to ignore during sales and bid posting
+   * (prevents wash trade tweets from known bad actors)
+   */
+
+  /**
+   * Get the current address blacklist
+   * @returns Array of blacklisted wallet addresses (lowercase hex)
+   */
+  async getAddressBlacklist(): Promise<string[]> {
+    const value = await this.getSystemState('address_blacklist');
+    if (!value) return [];
+    try {
+      return JSON.parse(value);
+    } catch {
+      logger.warn('Failed to parse address blacklist, returning empty array');
+      return [];
+    }
+  }
+
+  /**
+   * Set the entire address blacklist (replaces existing)
+   * @param addresses - Array of wallet addresses to blacklist
+   */
+  async setAddressBlacklist(addresses: string[]): Promise<void> {
+    // Normalize addresses (lowercase, trim)
+    const normalized = addresses.map(a => a.toLowerCase().trim()).filter(a => a.length > 0);
+    // Remove duplicates
+    const unique = [...new Set(normalized)];
+    await this.setSystemState('address_blacklist', JSON.stringify(unique));
+    logger.info(`Address blacklist set to ${unique.length} addresses`);
+  }
+
+  /**
+   * Add an address to the address blacklist
+   * @param address - Wallet address to add
+   */
+  async addToAddressBlacklist(address: string): Promise<void> {
+    const normalized = address.toLowerCase().trim();
+    if (!normalized) return;
+    
+    const current = await this.getAddressBlacklist();
+    if (!current.includes(normalized)) {
+      current.push(normalized);
+      await this.setSystemState('address_blacklist', JSON.stringify(current));
+      logger.info(`Added "${normalized}" to address blacklist`);
+    }
+  }
+
+  /**
+   * Remove an address from the address blacklist
+   * @param address - Wallet address to remove
+   */
+  async removeFromAddressBlacklist(address: string): Promise<void> {
+    const normalized = address.toLowerCase().trim();
+    const current = await this.getAddressBlacklist();
+    const updated = current.filter(a => a !== normalized);
+    
+    if (updated.length !== current.length) {
+      await this.setSystemState('address_blacklist', JSON.stringify(updated));
+      logger.info(`Removed "${normalized}" from address blacklist`);
+    }
+  }
+
+  /**
+   * Check if a wallet address is blacklisted
+   * @param address - Wallet address to check
+   * @returns true if blacklisted
+   */
+  async isAddressBlacklisted(address: string): Promise<boolean> {
+    const normalized = address.toLowerCase().trim();
+    const blacklist = await this.getAddressBlacklist();
+    return blacklist.includes(normalized);
+  }
+
+  /**
    * Get database statistics
    */
   async getStats(): Promise<{
