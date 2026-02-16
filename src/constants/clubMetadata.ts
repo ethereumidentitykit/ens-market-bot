@@ -63,6 +63,15 @@ export const CLUB_LABELS: Record<string, string> = {
   holidays: 'Holidays',
   instruments: 'Instruments',
   personas: 'Personas',
+  conspiracy_theories: 'Conspiracy Theories',
+  currency_names: 'Currency Names',
+  currency_symbols: 'Currency Symbols',
+  finance_terms: 'Finance',
+  gen_alpha: 'Gen Alpha',
+  historic_figures: 'Historic Figures',
+  memes: 'Memes',
+  natural_wonders: 'Natural Wonders',
+  paranormal: 'Paranormal',
 };
 
 export const CLUB_TWITTER_HANDLES: Record<string, string> = {
