@@ -2201,14 +2201,29 @@ Issued At: ${issuedAt}`;
                     body: JSON.stringify({ message, signature })
                 });
 
+                if (!loginResponse.ok) {
+                    let errorMsg = 'Authentication failed';
+                    try {
+                        const errData = await loginResponse.json();
+                        errorMsg = errData.error || errorMsg;
+                    } catch {
+                        if (loginResponse.status === 0 || loginResponse.type === 'opaque') {
+                            errorMsg = 'Request blocked by CORS — the server may not be configured to allow this domain';
+                        } else {
+                            errorMsg = `Server error (${loginResponse.status}) — check server logs for details`;
+                        }
+                    }
+                    this.authError = errorMsg;
+                    return;
+                }
+
                 const result = await loginResponse.json();
 
                 if (result.success) {
                     this.isAuthenticated = true;
-                    this.connectedAddress = checksumAddress; // Use checksummed address for display
+                    this.connectedAddress = checksumAddress;
                     this.authError = '';
                     
-                    // Load dashboard data now that we're authenticated
                     await this.loadDashboardData();
                 } else {
                     this.authError = result.error || 'Authentication failed';
@@ -2217,10 +2232,12 @@ Issued At: ${issuedAt}`;
             } catch (error) {
                 if (error.code === 4001) {
                     this.authError = 'You rejected the signature request';
-                } else if (error.message.includes('User denied')) {
+                } else if (error.message && error.message.includes('User denied')) {
                     this.authError = 'Signature was cancelled';
+                } else if (error.message && error.message.includes('Failed to fetch')) {
+                    this.authError = 'Request blocked — possible CORS or network issue. Check server configuration.';
                 } else {
-                    this.authError = 'Failed to sign in: ' + (error.message || 'Unknown error');
+                    this.authError = 'Sign-in failed: ' + (error.message || 'Unknown error');
                 }
                 console.error('Sign in failed:', error);
             } finally {

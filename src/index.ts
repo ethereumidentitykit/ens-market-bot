@@ -232,7 +232,7 @@ async function startApplication(): Promise<void> {
           if (allowedOrigins.includes(origin)) {
             callback(null, true);
           } else {
-            logger.warn(`CORS blocked request from origin: ${origin}`);
+            logger.warn(`CORS blocked request from origin: ${origin} (allowed: ${allowedOrigins.join(', ')}). Check SIWE_DOMAIN env var if this origin should be allowed.`);
             callback(new Error('Not allowed by CORS'));
           }
         } else {
