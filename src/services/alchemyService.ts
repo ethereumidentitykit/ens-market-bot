@@ -128,9 +128,9 @@ export class AlchemyService {
   private apiKey: string;
   private databaseService: DatabaseService;
 
-  // ETH price cache (30-minute in-memory cache to avoid API abuse)
-  private ethPriceCache: { price: number; timestamp: number } | null = null;
-  private readonly CACHE_DURATION = 30 * 60 * 1000; // 30 minutes in milliseconds
+  private ethPriceCache: { price: number; timestamp: number; isFallback: boolean } | null = null;
+  private readonly CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
+  private readonly FALLBACK_CACHE_DURATION = 2 * 60 * 1000; // 2 minutes — retry quickly after API failure
 
   constructor(databaseService: DatabaseService) {
     this.baseUrl = config.alchemy.baseUrl;
@@ -382,12 +382,10 @@ export class AlchemyService {
     } catch (error: any) {
       logger.warn('[Alchemy API] Failed to fetch ETH price:', error.message);
       
-      // Fallback to $4000 if API is unavailable
-      const fallbackPrice = 4000;
-      logger.info(`💰 Using fallback ETH price: $${fallbackPrice} (API unavailable)`);
+      const fallbackPrice = 2000;
+      logger.info(`💰 Using fallback ETH price: $${fallbackPrice} (API unavailable, will retry in 2m)`);
       
-      // Cache the fallback price to avoid repeated API attempts
-      await this.cacheETHPrice(fallbackPrice);
+      await this.cacheETHPrice(fallbackPrice, true);
       
       return fallbackPrice;
     }
@@ -405,15 +403,18 @@ export class AlchemyService {
 
       const now = Date.now();
       const age = now - this.ethPriceCache.timestamp;
+      const maxAge = this.ethPriceCache.isFallback ? this.FALLBACK_CACHE_DURATION : this.CACHE_DURATION;
       
-      if (age > this.CACHE_DURATION) {
-        logger.debug('ETH price cache expired, will fetch fresh');
+      if (age > maxAge) {
+        const label = this.ethPriceCache.isFallback ? 'fallback' : 'cached';
+        logger.debug(`ETH ${label} price expired, will fetch fresh`);
         this.ethPriceCache = null;
         return null;
       }
 
       const cacheAgeMinutes = Math.floor(age / 60000);
-      logger.debug(`Using cached ETH price: $${this.ethPriceCache.price} (${cacheAgeMinutes}m old)`);
+      const label = this.ethPriceCache.isFallback ? 'fallback' : 'cached';
+      logger.debug(`Using ${label} ETH price: $${this.ethPriceCache.price} (${cacheAgeMinutes}m old)`);
       return this.ethPriceCache.price;
     } catch (error: any) {
       logger.debug('Failed to get cached ETH price:', error.message);
@@ -421,16 +422,15 @@ export class AlchemyService {
     }
   }
 
-  /**
-   * Cache ETH price with timestamp for 30-minute expiry
-   */
-  private async cacheETHPrice(price: number): Promise<void> {
+  private async cacheETHPrice(price: number, isFallback = false): Promise<void> {
     try {
       this.ethPriceCache = {
-        price: price,
-        timestamp: Date.now()
+        price,
+        timestamp: Date.now(),
+        isFallback
       };
-      logger.debug(`ETH price cached: $${price} (will expire in 30 minutes)`);
+      const ttl = isFallback ? '2 minutes' : '30 minutes';
+      logger.debug(`ETH price cached: $${price} (will expire in ${ttl})`);
     } catch (error: any) {
       logger.debug('Failed to cache ETH price:', error.message);
     }
