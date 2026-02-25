@@ -528,7 +528,7 @@ export class PuppeteerImageService {
       const sellerAvatarBase64 = await this.loadRemoteImageAsBase64(data.sellerAvatar);
       if (sellerAvatarBase64) {
         sellerAvatarPath = sellerAvatarBase64;
-        logger.debug(`Loaded seller avatar successfully: ${data.sellerAvatar}`);
+        logger.debug(`Loaded seller avatar successfully (${sellerAvatarBase64.length} chars)`);
       }
     }
     
