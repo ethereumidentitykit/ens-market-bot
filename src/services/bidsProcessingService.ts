@@ -28,7 +28,7 @@ export interface TransformedBid {
   status: string;
   priceRaw: string;
   priceDecimal: string;
-  priceUsd: string;
+  priceUsd: string | null;
   currencyContract: string;
   currencySymbol: string;
   sourceDomain: string;

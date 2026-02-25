@@ -344,7 +344,7 @@ export interface ENSBid {
   // Pricing  
   priceRaw: string;        // Raw wei/token amount
   priceDecimal: string;    // Decimal amount (e.g., "0.05")
-  priceUsd?: string;       // USD value
+  priceUsd?: string | null; // USD value
   currencyContract: string; // Token contract address
   currencySymbol: string;  // WETH, USDC, etc.
   

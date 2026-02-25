@@ -1019,7 +1019,7 @@ export class MagicEdenV4Service {
     status: string;
     priceRaw: string;
     priceDecimal: string;
-    priceUsd: string;
+    priceUsd: string | null;
     currencyContract: string;
     currencySymbol: string;
     sourceDomain: string;
@@ -1042,7 +1042,7 @@ export class MagicEdenV4Service {
       status: 'unposted', // Always use 'unposted' for internal status
       priceRaw: magicEdenBid.price.amount.raw,
       priceDecimal: magicEdenBid.price.amount.decimal.toString(),
-      priceUsd: magicEdenBid.price.amount.usd?.toString() || '',
+      priceUsd: magicEdenBid.price.amount.usd?.toString() || null,
       currencyContract: magicEdenBid.price.currency.contract,
       currencySymbol: magicEdenBid.price.currency.symbol,
       sourceDomain: magicEdenBid.source.domain,

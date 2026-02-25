@@ -232,7 +232,7 @@ export class GrailsApiService {
       status: 'unposted',
       priceRaw: offer.price_wei,
       priceDecimal: priceDecimalFloat.toFixed(6),
-      priceUsd: '', // Will be enriched by BidsProcessingService
+      priceUsd: null, // Will be enriched by BidsProcessingService
       currencyContract: offer.currency_address,
       currencySymbol,
       sourceDomain: 'grails.app',
