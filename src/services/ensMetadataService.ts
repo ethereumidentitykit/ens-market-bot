@@ -93,7 +93,7 @@ export class ENSMetadataService {
     }
 
     // Fallback to OG Registry
-    const ogRegistryContract = '0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147ea85';
+    const ogRegistryContract = '0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147eA85';
     metadata = await this.getMetadata(ogRegistryContract, tokenId);
     
     if (metadata) {
@@ -112,7 +112,7 @@ export class ENSMetadataService {
     try {
       // Test with a known ENS token (vitalik.eth)
       const testTokenId = '79233663829379634837589865448569342784712482819484549289560981379859480642508';
-      const testContract = '0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147ea85';
+      const testContract = '0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147eA85';
       
       const metadata = await this.getMetadata(testContract, testTokenId);
       

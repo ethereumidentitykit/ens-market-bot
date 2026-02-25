@@ -163,7 +163,7 @@ export class QuickNodeRegistrationService {
     
     // Generate contract-specific token IDs using ENSTokenUtils
     const fullEnsName = `${ensName}.eth`;
-    const baseRegistrarContract = '0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147ea85';
+    const baseRegistrarContract = '0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147eA85';
     const nameWrapperContract = '0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401';
     
     // Base Registrar uses labelhash (tokenIdDecimal is already correct)
