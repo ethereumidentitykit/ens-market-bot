@@ -32,7 +32,7 @@ export class ENSMetadataService {
    */
   async getMetadata(contractAddress: string, tokenId: string): Promise<ENSMetadata | null> {
     try {
-      const url = `${this.baseUrl}/${contractAddress}/${tokenId}`;
+      const url = `${this.baseUrl}/${contractAddress.toLowerCase()}/${tokenId}`;
       logger.debug(`Fetching ENS metadata from: ${url}`);
       
       const response: AxiosResponse<ENSMetadata> = await axios.get(url, {

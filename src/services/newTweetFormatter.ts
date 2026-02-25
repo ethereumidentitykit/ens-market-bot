@@ -1044,6 +1044,20 @@ export class NewTweetFormatter {
       tokenId: registration.tokenId
     };
 
+    // If image was missing from ingestion, retry via ENS Metadata API using correct token IDs derived from the name
+    if (!imageData.nftImageUrl && registration.tokenId && this.ensMetadataService) {
+      try {
+        logger.info(`🔄 Registration image missing, retrying ENS metadata lookup for ${ensName} (tokenId: ${registration.tokenId})`);
+        const ensMetadata = await this.ensMetadataService.getMetadataWithFallback(registration.tokenId);
+        if (ensMetadata?.image || ensMetadata?.image_url) {
+          imageData.nftImageUrl = ensMetadata.image || ensMetadata.image_url;
+          logger.info(`✅ Recovered registration image via ENS metadata retry: ${imageData.nftImageUrl?.substring(0, 80)}`);
+        }
+      } catch (error: any) {
+        logger.warn(`⚠️ ENS metadata retry failed for registration image: ${error.message}`);
+      }
+    }
+
     logger.info('Converted registration to image data:', {
       ensName: imageData.ensName,
       ownerEns: imageData.buyerEns,
