@@ -1076,12 +1076,15 @@ export class NewTweetFormatter {
   private async convertBidToImageData(bid: ENSBid, bidderAccount: ENSWorkerAccount | null): Promise<RealImageData> {
     logger.info(`Converting bid to image data: ${bid.bidId}`);
     
-    // Parse ETH price
     const priceEth = parseFloat(bid.priceDecimal);
-    
-    // Recalculate USD price with fresh ETH rate for accurate image generation
+    const symbol = bid.currencySymbol?.toUpperCase();
+
     let priceUsd = 0;
-    if (this.alchemyService && (bid.currencySymbol === 'ETH' || bid.currencySymbol === 'WETH')) {
+    if (symbol === 'USDC' || symbol === 'USDT' || symbol === 'DAI') {
+      // Stablecoins: 1:1 USD
+      priceUsd = priceEth;
+      logger.debug(`💰 Stablecoin USD price: ${priceEth} ${symbol} = $${priceUsd.toFixed(2)}`);
+    } else if (this.alchemyService && (symbol === 'ETH' || symbol === 'WETH')) {
       try {
         const freshEthPriceUsd = await this.alchemyService.getETHPriceUSD();
         if (freshEthPriceUsd) {
@@ -1219,7 +1222,8 @@ export class NewTweetFormatter {
       saleId: bid.id,
       transactionHash: bid.bidId, // Use bid ID as transaction reference
       contractAddress: bid.contractAddress,
-      tokenId: bid.tokenId
+      tokenId: bid.tokenId,
+      currencySymbol: bid.currencySymbol || 'ETH'
     };
 
     logger.info('Converted bid to image data:', {
@@ -1276,7 +1280,8 @@ export class NewTweetFormatter {
       transactionHash: bid.bidId, // Use bid ID as transaction reference
       timestamp: new Date(), // Use current timestamp
       contractAddress: bid.contractAddress,
-      tokenId: bid.tokenId
+      tokenId: bid.tokenId,
+      currencySymbol: realData.currencySymbol
     };
   }
 

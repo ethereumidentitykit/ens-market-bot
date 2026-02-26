@@ -17,4 +17,5 @@ export interface ImageData {
   // NFT contract info for metadata fallbacks
   contractAddress?: string;
   tokenId?: string;
+  currencySymbol?: string;
 }

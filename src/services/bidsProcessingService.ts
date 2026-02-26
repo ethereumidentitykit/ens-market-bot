@@ -296,22 +296,26 @@ export class BidsProcessingService {
    */
   private async addUSDPricing(bid: any): Promise<any> {
     try {
-      // Only add USD pricing for ETH/WETH bids
-      if (bid.currencySymbol !== 'WETH' && bid.currencySymbol !== 'ETH') {
-        return bid;
+      const symbol = bid.currencySymbol?.toUpperCase();
+
+      // Stablecoins: 1:1 USD
+      if (symbol === 'USDC' || symbol === 'USDT' || symbol === 'DAI') {
+        const priceUsd = parseFloat(bid.priceDecimal).toFixed(2);
+        logger.debug(`💰 Stablecoin USD pricing: ${bid.priceDecimal} ${symbol} = $${priceUsd}`);
+        return { ...bid, priceUsd };
       }
 
-      const pricingStartTime = Date.now();
-      const ethPriceUSD = await this.alchemyService.getETHPriceUSD();
-      const pricingTime = Date.now() - pricingStartTime;
-      
-      if (ethPriceUSD) {
-        const priceUsd = (parseFloat(bid.priceDecimal) * ethPriceUSD).toFixed(2);
-        logger.debug(`💰 USD pricing added in ${pricingTime}ms: ${bid.priceDecimal} ETH = $${priceUsd}`);
-        return {
-          ...bid,
-          priceUsd
-        };
+      // ETH/WETH: convert via live price
+      if (symbol === 'ETH' || symbol === 'WETH') {
+        const pricingStartTime = Date.now();
+        const ethPriceUSD = await this.alchemyService.getETHPriceUSD();
+        const pricingTime = Date.now() - pricingStartTime;
+
+        if (ethPriceUSD) {
+          const priceUsd = (parseFloat(bid.priceDecimal) * ethPriceUSD).toFixed(2);
+          logger.debug(`💰 USD pricing added in ${pricingTime}ms: ${bid.priceDecimal} ETH = $${priceUsd}`);
+          return { ...bid, priceUsd };
+        }
       }
 
       return bid;
@@ -362,23 +366,33 @@ export class BidsProcessingService {
       }
 
       // Price filtering with club-aware thresholds
-      const priceEth = parseFloat(bid.priceDecimal);
-      
-      // For ETH/WETH bids, apply club-aware filtering
-      if (bid.currencySymbol === 'WETH' || bid.currencySymbol === 'ETH') {
-        const ethMinimum = await this.getEthMinimumForBid(bid);
-        const passes = priceEth >= ethMinimum;
-        
-        // DEBUG: Log filtering decision for troubleshooting
-        const bidName = bid.ensName || bid.tokenId?.slice(-6) || 'unnamed';
-        logger.debug(`🔍 BID FILTER: ${bidName} - ${priceEth} ETH vs ${ethMinimum} ETH minimum = ${passes ? 'PASS ✅' : 'REJECT ❌'}`);
-        
+      const priceDecimal = parseFloat(bid.priceDecimal);
+      const symbol = bid.currencySymbol?.toUpperCase();
+      const ethMinimum = await this.getEthMinimumForBid(bid);
+      const bidName = bid.ensName || bid.tokenId?.slice(-6) || 'unnamed';
+
+      if (symbol === 'WETH' || symbol === 'ETH') {
+        const passes = priceDecimal >= ethMinimum;
+        logger.debug(`🔍 BID FILTER: ${bidName} - ${priceDecimal} ETH vs ${ethMinimum} ETH minimum = ${passes ? 'PASS ✅' : 'REJECT ❌'}`);
         return passes;
       }
-      
-      // For other currencies (stablecoins, etc.), allow all bids through
-      // They will be filtered by the club-aware ETH thresholds if needed
-      return true;
+
+      // Stablecoins: convert USD amount to ETH equivalent for threshold comparison
+      if (symbol === 'USDC' || symbol === 'USDT' || symbol === 'DAI') {
+        const ethPriceUSD = await this.alchemyService.getETHPriceUSD();
+        if (ethPriceUSD) {
+          const ethEquivalent = priceDecimal / ethPriceUSD;
+          const passes = ethEquivalent >= ethMinimum;
+          logger.debug(`🔍 BID FILTER: ${bidName} - ${priceDecimal} ${symbol} (~${ethEquivalent.toFixed(4)} ETH) vs ${ethMinimum} ETH minimum = ${passes ? 'PASS ✅' : 'REJECT ❌'}`);
+          return passes;
+        }
+        logger.warn(`⚠️ Cannot filter ${symbol} bid - ETH price unavailable, rejecting`);
+        return false;
+      }
+
+      // Unknown currencies: reject to be safe
+      logger.debug(`🚫 BID FILTER: ${bidName} - unknown currency ${symbol}, rejecting`);
+      return false;
 
     } catch (error: any) {
       logger.error(`Error in bid filtering:`, error.message);
@@ -663,21 +677,33 @@ export class BidsProcessingService {
       }
 
       // Price filtering with club-aware thresholds
-      const priceEth = parseFloat(bid.priceDecimal);
-      
-      // For ETH/WETH bids, apply club-aware filtering
-      if (bid.currencySymbol === 'WETH' || bid.currencySymbol === 'ETH') {
-        const ethMinimum = await this.getEthMinimumForBid(bid);
-        const passes = priceEth >= ethMinimum;
-        
-        const bidName = bid.ensName || bid.tokenId?.slice(-6) || 'unnamed';
-        logger.debug(`🔍 GRAILS BID FILTER: ${bidName} - ${priceEth} ETH vs ${ethMinimum} ETH minimum = ${passes ? 'PASS ✅' : 'REJECT ❌'}`);
-        
+      const priceDecimal = parseFloat(bid.priceDecimal);
+      const symbol = bid.currencySymbol?.toUpperCase();
+      const ethMinimum = await this.getEthMinimumForBid(bid);
+      const bidName = bid.ensName || bid.tokenId?.slice(-6) || 'unnamed';
+
+      if (symbol === 'WETH' || symbol === 'ETH') {
+        const passes = priceDecimal >= ethMinimum;
+        logger.debug(`🔍 GRAILS BID FILTER: ${bidName} - ${priceDecimal} ETH vs ${ethMinimum} ETH minimum = ${passes ? 'PASS ✅' : 'REJECT ❌'}`);
         return passes;
       }
-      
-      // For other currencies (stablecoins, etc.), allow all bids through
-      return true;
+
+      // Stablecoins: convert USD amount to ETH equivalent for threshold comparison
+      if (symbol === 'USDC' || symbol === 'USDT' || symbol === 'DAI') {
+        const ethPriceUSD = await this.alchemyService.getETHPriceUSD();
+        if (ethPriceUSD) {
+          const ethEquivalent = priceDecimal / ethPriceUSD;
+          const passes = ethEquivalent >= ethMinimum;
+          logger.debug(`🔍 GRAILS BID FILTER: ${bidName} - ${priceDecimal} ${symbol} (~${ethEquivalent.toFixed(4)} ETH) vs ${ethMinimum} ETH minimum = ${passes ? 'PASS ✅' : 'REJECT ❌'}`);
+          return passes;
+        }
+        logger.warn(`⚠️ Cannot filter ${symbol} Grails bid - ETH price unavailable, rejecting`);
+        return false;
+      }
+
+      // Unknown currencies: reject to be safe
+      logger.debug(`🚫 GRAILS BID FILTER: ${bidName} - unknown currency ${symbol}, rejecting`);
+      return false;
 
     } catch (error: any) {
       logger.error(`Error in Grails bid filtering:`, error.message);

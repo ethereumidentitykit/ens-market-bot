@@ -23,6 +23,7 @@ export interface RealImageData {
   // NFT contract info for metadata fallbacks
   contractAddress?: string;
   tokenId?: string;
+  currencySymbol?: string;
 }
 
 /**

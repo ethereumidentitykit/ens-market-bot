@@ -754,7 +754,7 @@ export class PuppeteerImageService {
 
             <!-- ETH Price -->
             <div class="eth-price">
-                ${this.formatEthPrice(data.priceEth)} ETH
+                ${this.formatEthPrice(data.priceEth)} ${data.currencySymbol || 'ETH'}
             </div>
 
             ${imageType !== 'registration' ? `
