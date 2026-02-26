@@ -249,9 +249,12 @@ export class AutoTweetService {
     const symbol = sale.currencySymbol || 'ETH';
 
     let saleEthEquivalent = priceValue;
-    if (symbol === 'USDC' || symbol === 'USDT' || symbol === 'DAI') {
+    if (symbol === 'USDC' || symbol === 'USDT') {
       const ethPrice = this.alchemyService ? await this.alchemyService.getETHPriceUSD() : null;
-      saleEthEquivalent = ethPrice ? priceValue / ethPrice : 0;
+      if (!ethPrice) {
+        logger.warn(`⚠️ ETH price unavailable — allowing ${symbol} sale through (fail-open)`);
+      }
+      saleEthEquivalent = ethPrice ? priceValue / ethPrice : ethMinimum;
     }
 
     if (saleEthEquivalent < ethMinimum) {

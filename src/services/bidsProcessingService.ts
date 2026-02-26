@@ -299,7 +299,7 @@ export class BidsProcessingService {
       const symbol = bid.currencySymbol?.toUpperCase();
 
       // Stablecoins: 1:1 USD
-      if (symbol === 'USDC' || symbol === 'USDT' || symbol === 'DAI') {
+      if (symbol === 'USDC' || symbol === 'USDT') {
         const priceUsd = parseFloat(bid.priceDecimal).toFixed(2);
         logger.debug(`💰 Stablecoin USD pricing: ${bid.priceDecimal} ${symbol} = $${priceUsd}`);
         return { ...bid, priceUsd };
@@ -378,16 +378,16 @@ export class BidsProcessingService {
       }
 
       // Stablecoins: convert USD amount to ETH equivalent for threshold comparison
-      if (symbol === 'USDC' || symbol === 'USDT' || symbol === 'DAI') {
+      if (symbol === 'USDC' || symbol === 'USDT') {
         const ethPriceUSD = await this.alchemyService.getETHPriceUSD();
-        if (ethPriceUSD) {
-          const ethEquivalent = priceDecimal / ethPriceUSD;
-          const passes = ethEquivalent >= ethMinimum;
-          logger.debug(`🔍 BID FILTER: ${bidName} - ${priceDecimal} ${symbol} (~${ethEquivalent.toFixed(4)} ETH) vs ${ethMinimum} ETH minimum = ${passes ? 'PASS ✅' : 'REJECT ❌'}`);
-          return passes;
+        if (!ethPriceUSD) {
+          logger.warn(`⚠️ ETH price unavailable — allowing ${symbol} bid through (fail-open)`);
+          return true;
         }
-        logger.warn(`⚠️ Cannot filter ${symbol} bid - ETH price unavailable, rejecting`);
-        return false;
+        const ethEquivalent = priceDecimal / ethPriceUSD;
+        const passes = ethEquivalent >= ethMinimum;
+        logger.debug(`🔍 BID FILTER: ${bidName} - ${priceDecimal} ${symbol} (~${ethEquivalent.toFixed(4)} ETH) vs ${ethMinimum} ETH minimum = ${passes ? 'PASS ✅' : 'REJECT ❌'}`);
+        return passes;
       }
 
       // Unknown currencies: reject to be safe
@@ -689,16 +689,16 @@ export class BidsProcessingService {
       }
 
       // Stablecoins: convert USD amount to ETH equivalent for threshold comparison
-      if (symbol === 'USDC' || symbol === 'USDT' || symbol === 'DAI') {
+      if (symbol === 'USDC' || symbol === 'USDT') {
         const ethPriceUSD = await this.alchemyService.getETHPriceUSD();
-        if (ethPriceUSD) {
-          const ethEquivalent = priceDecimal / ethPriceUSD;
-          const passes = ethEquivalent >= ethMinimum;
-          logger.debug(`🔍 GRAILS BID FILTER: ${bidName} - ${priceDecimal} ${symbol} (~${ethEquivalent.toFixed(4)} ETH) vs ${ethMinimum} ETH minimum = ${passes ? 'PASS ✅' : 'REJECT ❌'}`);
-          return passes;
+        if (!ethPriceUSD) {
+          logger.warn(`⚠️ ETH price unavailable — allowing ${symbol} Grails bid through (fail-open)`);
+          return true;
         }
-        logger.warn(`⚠️ Cannot filter ${symbol} Grails bid - ETH price unavailable, rejecting`);
-        return false;
+        const ethEquivalent = priceDecimal / ethPriceUSD;
+        const passes = ethEquivalent >= ethMinimum;
+        logger.debug(`🔍 GRAILS BID FILTER: ${bidName} - ${priceDecimal} ${symbol} (~${ethEquivalent.toFixed(4)} ETH) vs ${ethMinimum} ETH minimum = ${passes ? 'PASS ✅' : 'REJECT ❌'}`);
+        return passes;
       }
 
       // Unknown currencies: reject to be safe

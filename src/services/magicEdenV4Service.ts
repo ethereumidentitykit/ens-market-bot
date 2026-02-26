@@ -1571,8 +1571,7 @@ export class MagicEdenV4Service {
     const currencyMap: { [key: string]: string } = {
       'WETH': 'ETH',
       'USDC': 'USDC',
-      'USDT': 'USDT',
-      'DAI': 'DAI'
+      'USDT': 'USDT'
     };
     return currencyMap[symbol.toUpperCase()] || symbol;
   }
@@ -1870,7 +1869,7 @@ export class MagicEdenV4Service {
       currencySymbol = v4Activity.unitPrice.currency.symbol;
       currencyDecimals = v4Activity.unitPrice.currency.decimals;
       
-      const isStablecoin = ['USDC', 'USDT', 'DAI'].includes(currencySymbol);
+      const isStablecoin = ['USDC', 'USDT'].includes(currencySymbol);
       if (isStablecoin) {
         priceUsd = priceDecimal;
       } else {
@@ -1890,7 +1889,7 @@ export class MagicEdenV4Service {
       currencySymbol = v4Activity.bid.priceV2.currency.symbol;
       currencyDecimals = v4Activity.bid.priceV2.currency.decimals;
       
-      const isStablecoin = ['USDC', 'USDT', 'DAI'].includes(currencySymbol);
+      const isStablecoin = ['USDC', 'USDT'].includes(currencySymbol);
       if (isStablecoin) {
         priceUsd = priceDecimal;
       } else {

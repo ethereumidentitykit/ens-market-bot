@@ -404,7 +404,7 @@ export class QuickNodeSalesService {
       // 1. Calculate USD price based on currency
       let priceUsd: string;
       const symbol = saleData.currencySymbol.toUpperCase();
-      if (symbol === 'USDC' || symbol === 'USDT' || symbol === 'DAI') {
+      if (symbol === 'USDC' || symbol === 'USDT') {
         priceUsd = parseFloat(saleData.priceAmount).toFixed(2);
       } else {
         const ethPriceUsd = await this.alchemyService.getETHPriceUSD();

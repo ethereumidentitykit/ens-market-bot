@@ -731,8 +731,7 @@ export class NewTweetFormatter {
     const currencyMap: { [key: string]: string } = {
       'WETH': 'ETH',
       'USDC': 'USDC',
-      'USDT': 'USDT', 
-      'DAI': 'DAI'
+      'USDT': 'USDT'
     };
     return currencyMap[symbol.toUpperCase()] || symbol;
   }
@@ -1081,7 +1080,7 @@ export class NewTweetFormatter {
     const symbol = bid.currencySymbol?.toUpperCase();
 
     let priceUsd = 0;
-    if (symbol === 'USDC' || symbol === 'USDT' || symbol === 'DAI') {
+    if (symbol === 'USDC' || symbol === 'USDT') {
       // Stablecoins: 1:1 USD
       priceUsd = priceEth;
       logger.debug(`💰 Stablecoin USD price: ${priceEth} ${symbol} = $${priceUsd.toFixed(2)}`);
@@ -1409,8 +1408,8 @@ export class NewTweetFormatter {
       errors.push('Tweet should include "For:" label');
     }
 
-    if (!content.includes('ETH') && !content.includes('USDC') && !content.includes('USDT') && !content.includes('DAI')) {
-      errors.push('Tweet should include price with currency (ETH, USDC, USDT, or DAI)');
+    if (!content.includes('ETH') && !content.includes('USDC') && !content.includes('USDT')) {
+      errors.push('Tweet should include price with currency (ETH, USDC, or USDT)');
     }
 
     if (!content.includes('Seller:')) {
