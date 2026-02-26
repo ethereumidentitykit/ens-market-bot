@@ -450,34 +450,17 @@ export class PuppeteerImageService {
     // Use actual images or fallbacks
     const templateImagePath = `data:image/png;base64,${backgroundImageBase64}`;
     
-    // Convert NFT SVG to PNG (all NFT images are SVG format) with OpenSea fallback
+    // Convert NFT image to base64 (handles both SVG and raster formats) with OpenSea fallback
     let nftImageBase64 = `data:image/png;base64,${ensPlaceholderBase64}`; // Default fallback
     if (data.nftImageUrl) {
-      // Try original URL first
       let imageProcessed = false;
       try {
         logger.info(`🖼️ Processing NFT image: ${data.nftImageUrl}`);
-        
-        // Download the SVG content
-        const svgResponse = await axios.get(data.nftImageUrl, {
-          timeout: 10000,
-          headers: { 'User-Agent': 'ENS-TwitterBot/1.0' }
-        });
-        
-        const svgContent = svgResponse.data;
-        logger.info(`📥 Downloaded NFT SVG (${svgContent.length} chars): ${svgContent.substring(0, 150)}...`);
-        
-        // Parse SVG to extract background and text, rebuild as HTML
-        const htmlContent = await this.convertSvgToHtmlWithEmojis(svgContent);
-        logger.info(`🔄 Converted SVG to HTML overlay with emoji processing`);
-        
-        // Convert HTML to PNG using SvgConverter
-        const pngBuffer = await SvgConverter.convertSvgToPng(htmlContent);
-        const pngBase64 = pngBuffer.toString('base64');
-        
-        nftImageBase64 = `data:image/png;base64,${pngBase64}`;
-        logger.info(`✅ Successfully converted NFT to PNG with Apple emojis`);
-        imageProcessed = true;
+        const result = await this.processNftImageUrl(data.nftImageUrl);
+        if (result) {
+          nftImageBase64 = result;
+          imageProcessed = true;
+        }
       } catch (error: any) {
         logger.warn(`❌ Failed to process original NFT image: ${data.nftImageUrl}`, error.message);
       }
@@ -486,26 +469,18 @@ export class PuppeteerImageService {
       if (!imageProcessed && openSeaService && data.contractAddress && data.tokenId) {
         try {
           logger.info(`🔄 Trying OpenSea fallback for NFT image: ${data.ensName} (${data.contractAddress}/${data.tokenId})`);
-          
           const metadata = await openSeaService.getSimplifiedMetadata(data.contractAddress, data.tokenId);
           
           if (metadata?.image) {
             logger.info(`📥 Found OpenSea image URL: ${metadata.image}`);
-            
-            // Try to process the OpenSea image
-            const openSeaResponse = await axios.get(metadata.image, {
-              timeout: 10000,
-              headers: { 'User-Agent': 'ENS-TwitterBot/1.0' }
-            });
-            
-            const openSeaContent = openSeaResponse.data;
-            const openSeaHtmlContent = await this.convertSvgToHtmlWithEmojis(openSeaContent);
-            const openSeaPngBuffer = await SvgConverter.convertSvgToPng(openSeaHtmlContent);
-            const openSeaPngBase64 = openSeaPngBuffer.toString('base64');
-            
-            nftImageBase64 = `data:image/png;base64,${openSeaPngBase64}`;
-            logger.info(`✅ Successfully used OpenSea fallback image for ${data.ensName}`);
-            imageProcessed = true;
+            const fallbackResult = await this.processNftImageUrl(metadata.image);
+            if (fallbackResult) {
+              nftImageBase64 = fallbackResult;
+              logger.info(`✅ Successfully used OpenSea fallback image for ${data.ensName}`);
+              imageProcessed = true;
+            } else {
+              logger.warn(`⚠️ OpenSea fallback image produced empty result for ${data.ensName}`);
+            }
           } else {
             logger.warn(`⚠️ OpenSea returned no image for ${data.contractAddress}/${data.tokenId}`);
           }
@@ -981,10 +956,92 @@ export class PuppeteerImageService {
   }
 
   /**
+   * Detect whether a downloaded image buffer is SVG (text) or a raster format.
+   * Checks content-type header first, then falls back to magic byte sniffing.
+   */
+  private static detectImageFormat(buffer: Buffer, contentType: string): { isSvg: boolean; mimeType: string } {
+    const ct = contentType.toLowerCase();
+    if (ct.includes('svg')) return { isSvg: true, mimeType: 'image/svg+xml' };
+    if (ct.includes('avif')) return { isSvg: false, mimeType: 'image/avif' };
+    if (ct.includes('webp')) return { isSvg: false, mimeType: 'image/webp' };
+    if (ct.includes('png')) return { isSvg: false, mimeType: 'image/png' };
+    if (ct.includes('jpeg') || ct.includes('jpg')) return { isSvg: false, mimeType: 'image/jpeg' };
+    if (ct.includes('gif')) return { isSvg: false, mimeType: 'image/gif' };
+
+    if (buffer.length >= 4) {
+      if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) {
+        return { isSvg: false, mimeType: 'image/png' };
+      }
+      if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
+        return { isSvg: false, mimeType: 'image/jpeg' };
+      }
+      if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) {
+        return { isSvg: false, mimeType: 'image/gif' };
+      }
+      if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 && buffer.length >= 12 &&
+          buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50) {
+        return { isSvg: false, mimeType: 'image/webp' };
+      }
+    }
+    if (buffer.length >= 12) {
+      const boxType = buffer.toString('ascii', 4, 8);
+      if (boxType === 'ftyp') {
+        return { isSvg: false, mimeType: 'image/avif' };
+      }
+    }
+
+    const textStart = buffer.toString('utf-8', 0, Math.min(buffer.length, 200)).trim();
+    if (textStart.startsWith('<') || textStart.startsWith('<?xml')) {
+      return { isSvg: true, mimeType: 'image/svg+xml' };
+    }
+
+    return { isSvg: false, mimeType: contentType || 'image/png' };
+  }
+
+  /**
+   * Download an NFT image URL and return a base64 data URL.
+   * Handles both SVG (via the HTML conversion pipeline) and raster formats (direct use).
+   * Returns null if the image could not be processed or produced empty SVG output.
+   */
+  private static async processNftImageUrl(imageUrl: string): Promise<string | null> {
+    const response = await axios.get(imageUrl, {
+      responseType: 'arraybuffer',
+      timeout: 10000,
+      headers: { 'User-Agent': 'ENS-TwitterBot/1.0' }
+    });
+
+    const buffer = Buffer.from(response.data);
+    const contentType = response.headers['content-type'] || '';
+    const format = this.detectImageFormat(buffer, contentType);
+
+    if (!format.isSvg) {
+      logger.info(`📷 NFT image is raster format (${format.mimeType}, ${buffer.length} bytes), using directly`);
+      const base64 = buffer.toString('base64');
+      return `data:${format.mimeType};base64,${base64}`;
+    }
+
+    const svgContent = buffer.toString('utf-8');
+    logger.info(`📥 Downloaded NFT SVG (${svgContent.length} chars): ${svgContent.substring(0, 150)}...`);
+
+    const result = await this.convertSvgToHtmlWithEmojis(svgContent);
+    logger.info(`🔄 Converted SVG to HTML overlay with emoji processing`);
+
+    if (result.pathCount === 0 && result.textCount === 0) {
+      logger.warn(`⚠️ SVG parsing produced empty result (0 paths, 0 text elements) - treating as failure`);
+      return null;
+    }
+
+    const pngBuffer = await SvgConverter.convertSvgToPng(result.html);
+    const pngBase64 = pngBuffer.toString('base64');
+    logger.info(`✅ Successfully converted NFT SVG to PNG with Apple emojis`);
+    return `data:image/png;base64,${pngBase64}`;
+  }
+
+  /**
    * Convert ENS SVG to HTML with proper emoji processing
    * Extracts background image and text, rebuilds as HTML where emojiMappingService works
    */
-  private static async convertSvgToHtmlWithEmojis(svgContent: string): Promise<string> {
+  private static async convertSvgToHtmlWithEmojis(svgContent: string): Promise<{ html: string; pathCount: number; textCount: number }> {
     logger.info(`🔍 Parsing SVG structure for HTML conversion`);
     
     // Extract background - could be a custom image OR use default ENS background
@@ -1132,6 +1189,6 @@ export class PuppeteerImageService {
     `;
     
     logger.info(`✨ Built HTML overlay with ${pathMatches.length} paths and ${htmlTextElements.length} text elements`);
-    return html;
+    return { html, pathCount: pathMatches.length, textCount: htmlTextElements.length };
   }
 }
