@@ -73,8 +73,9 @@ export interface ProcessedSale {
   marketplace: string;
   buyerAddress: string;
   sellerAddress: string;
-  priceEth: string;
+  priceAmount: string;
   priceUsd?: string;
+  currencySymbol?: string;
   blockNumber: number;
   blockTimestamp: string;
   logIndex?: number; // Event index within transaction (for unique identification)
