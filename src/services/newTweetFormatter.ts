@@ -771,10 +771,11 @@ export class NewTweetFormatter {
     const ensName = this.cleanEnsName(rawEnsName);
     const header = `💰 SOLD: ${ensName}`;
     
-    // Price line: For: $X (Y ETH) - 2 decimal places for USD in tweets
-    const priceEth = parseFloat(sale.priceEth).toFixed(2);
+    // Price line: For: $X (Y ETH/USDC) - 2 decimal places for USD in tweets
+    const priceVal = parseFloat(sale.priceAmount).toFixed(2);
+    const currency = sale.currencySymbol || 'ETH';
     const priceUsd = sale.priceUsd ? `$${parseFloat(sale.priceUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
-    const priceLine = priceUsd ? `For: ${priceUsd} (${priceEth} ETH)` : `For: ${priceEth} ETH`;
+    const priceLine = priceUsd ? `For: ${priceUsd} (${priceVal} ${currency})` : `For: ${priceVal} ${currency}`;
     
     // Historical context line (NEW)
     let historicalLine = '';
@@ -1407,8 +1408,8 @@ export class NewTweetFormatter {
       errors.push('Tweet should include "For:" label');
     }
 
-    if (!content.includes('ETH')) {
-      errors.push('Tweet should include price in ETH');
+    if (!content.includes('ETH') && !content.includes('USDC') && !content.includes('USDT') && !content.includes('DAI')) {
+      errors.push('Tweet should include price with currency (ETH, USDC, USDT, or DAI)');
     }
 
     if (!content.includes('Seller:')) {
@@ -1466,7 +1467,8 @@ export class NewTweetFormatter {
 
     const rawEnsName = sale.nftName || 'Unknown ENS';
     const ensName = this.cleanEnsName(rawEnsName);
-    const priceEth = parseFloat(sale.priceEth).toFixed(2);
+    const priceVal = parseFloat(sale.priceAmount).toFixed(2);
+    const currency = sale.currencySymbol || 'ETH';
     const priceUsd = sale.priceUsd ? `$${parseFloat(sale.priceUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
     const buyerHandle = this.getDisplayHandle(buyerAccount, sale.buyerAddress);
     const sellerHandle = this.getDisplayHandle(sellerAccount, sale.sellerAddress);
@@ -1488,7 +1490,7 @@ export class NewTweetFormatter {
     const breakdown = {
       header: `💰 SOLD: ${ensName}`,
       ensName: ensName,
-      priceLine: priceUsd ? `For: ${priceUsd} (${priceEth} ETH)` : `For: ${priceEth} ETH`,
+      priceLine: priceUsd ? `For: ${priceUsd} (${priceVal} ${currency})` : `For: ${priceVal} ${currency}`,
       buyerLine: `Buyer: ${buyerHandle}`,
       sellerLine: `Seller: ${sellerHandle}`,
       brokerLine,
