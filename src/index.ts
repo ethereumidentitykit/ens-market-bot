@@ -2760,7 +2760,7 @@ async function startApplication(): Promise<void> {
           if (sortBy === 'blockNumber' || sortBy === 'id') {
             aVal = Number(aVal);
             bVal = Number(bVal);
-          } else if (sortBy === 'priceEth') {
+          } else if (sortBy === 'priceAmount') {
             aVal = parseFloat(aVal);
             bVal = parseFloat(bVal);
           }
