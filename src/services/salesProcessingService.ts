@@ -208,13 +208,13 @@ export class SalesProcessingService {
    * Convert NFTSale (Enhanced from Moralis) to ProcessedSale format
    */
   private async convertToProcessedSale(sale: EnhancedNFTSale): Promise<Omit<ProcessedSale, 'id'>> {
-    let priceEth = this.calculateTotalPrice(sale);
+    let priceAmount = this.calculateTotalPrice(sale);
     let priceUsd = sale.currentUsdValue;
-    
+
     // Apply WETH price multiplier if this is a WETH sale
-    const wethMultiplier = this.applyWethPriceCorrection(sale, priceEth, priceUsd);
+    const wethMultiplier = this.applyWethPriceCorrection(sale, priceAmount, priceUsd);
     if (wethMultiplier.applied) {
-      priceEth = wethMultiplier.correctedEthPrice;
+      priceAmount = wethMultiplier.correctedEthPrice;
       priceUsd = wethMultiplier.correctedUsdPrice;
     }
     
@@ -246,8 +246,8 @@ export class SalesProcessingService {
       marketplace: sale.marketplace,
       buyerAddress: sale.buyerAddress.toLowerCase(),
       sellerAddress: sale.sellerAddress.toLowerCase(),
-      priceEth,
-      priceUsd: priceUsd || undefined, // Use corrected USD value if WETH was applied
+      priceAmount,
+      priceUsd: priceUsd || undefined,
       blockNumber: sale.blockNumber,
       blockTimestamp,
       processedAt: new Date().toISOString(),
@@ -362,7 +362,7 @@ export class SalesProcessingService {
           stats.newSales++;
           highestProcessedBlockNumber = Math.max(highestProcessedBlockNumber, sale.blockNumber);
 
-          logger.debug(`Processed new sale: ${sale.transactionHash} for ${processedSale.priceEth} ETH`);
+          logger.debug(`Processed new sale: ${sale.transactionHash} for ${processedSale.priceAmount} ETH`);
 
         } catch (error: any) {
           stats.errors++;

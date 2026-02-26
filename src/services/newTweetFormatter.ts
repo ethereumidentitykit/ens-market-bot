@@ -339,8 +339,8 @@ export class NewTweetFormatter {
       );
 
       if (primaryResult) {
-        logger.info(`✅ Found historical data from primary contract: ${primaryResult.priceEth} ${primaryResult.currencySymbol || 'ETH'}`);
-        return TimeUtils.formatHistoricalEvent(Number(primaryResult.priceEth), primaryResult.timestamp, primaryResult.type, primaryResult.currencySymbol);
+        logger.info(`✅ Found historical data from primary contract: ${primaryResult.priceAmount} ${primaryResult.currencySymbol || 'ETH'}`);
+        return TimeUtils.formatHistoricalEvent(Number(primaryResult.priceAmount), primaryResult.timestamp, primaryResult.type, primaryResult.currencySymbol);
       }
 
       // Try fallback lookup if configured (V4 API)
@@ -353,8 +353,8 @@ export class NewTweetFormatter {
         );
 
         if (fallbackResult) {
-          logger.info(`✅ Found historical data from fallback contract: ${fallbackResult.priceEth} ${fallbackResult.currencySymbol || 'ETH'}`);
-          return TimeUtils.formatHistoricalEvent(Number(fallbackResult.priceEth), fallbackResult.timestamp, fallbackResult.type, fallbackResult.currencySymbol);
+          logger.info(`✅ Found historical data from fallback contract: ${fallbackResult.priceAmount} ${fallbackResult.currencySymbol || 'ETH'}`);
+          return TimeUtils.formatHistoricalEvent(Number(fallbackResult.priceAmount), fallbackResult.timestamp, fallbackResult.type, fallbackResult.currencySymbol);
         }
       }
 

@@ -426,9 +426,9 @@ export class AIReplyService {
     return {
       type,
       tokenName,
-      price: parseFloat(isSale ? sale!.priceEth : isRegistration ? (registration!.costEth || '0') : bid!.priceDecimal),
+      price: parseFloat(isSale ? sale!.priceAmount : isRegistration ? (registration!.costEth || '0') : bid!.priceDecimal),
       priceUsd: parseFloat(isSale ? (sale!.priceUsd || '0') : isRegistration ? (registration!.costUsd || '0') : (bid!.priceUsd || '0')),
-      currency: 'ETH',
+      currency: isSale ? (sale!.currencySymbol || 'ETH') : isBid ? (bid!.currencySymbol || 'ETH') : 'ETH',
       timestamp: isBid 
         ? new Date(bid!.createdAtApi).getTime() / 1000 
         : new Date((sale || registration)!.blockTimestamp).getTime() / 1000,

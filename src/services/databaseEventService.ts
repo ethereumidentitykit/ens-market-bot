@@ -541,7 +541,7 @@ export class DatabaseEventService {
         return;
       }
 
-      logger.info(`🚀 INSTANT PROCESSING: ${sale.nftName || sale.tokenId} (${sale.priceEth} ETH) - ID: ${saleId}`);
+      logger.info(`🚀 INSTANT PROCESSING: ${sale.nftName || sale.tokenId} (${sale.priceAmount} ${sale.currencySymbol || 'ETH'}) - ID: ${saleId}`);
 
       // Get auto-post settings
       const settings = await this.autoTweetService.getSettings();
@@ -754,7 +754,7 @@ export class DatabaseEventService {
         for (const sale of unpostedSales) {
           if (sale.id) {
             this.addSaleToQueue(sale.id);
-            logger.info(`🔄 Recovered unposted sale: ${sale.nftName || sale.tokenId} (${sale.priceEth} ETH) - ID: ${sale.id}`);
+            logger.info(`🔄 Recovered unposted sale: ${sale.nftName || sale.tokenId} (${sale.priceAmount} ${sale.currencySymbol || 'ETH'}) - ID: ${sale.id}`);
           }
         }
       } else if (allUnpostedSales.length > 0) {

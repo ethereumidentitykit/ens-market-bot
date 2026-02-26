@@ -819,7 +819,7 @@
                                 >
                                     <option value="">Select a sale...</option>
                                     <template x-for="sale in unpostedSales" :key="sale.id">
-                                        <option :value="sale.id" x-text="`${sale.nftName || 'Unknown'} - ${parseFloat(sale.priceEth).toFixed(2)} ETH`"></option>
+                                        <option :value="sale.id" x-text="`${sale.nftName || 'Unknown'} - ${parseFloat(sale.priceAmount).toFixed(2)} ${sale.currencySymbol || 'ETH'}`"></option>
                                     </template>
                                 </select>
                                 <button 
@@ -1195,7 +1195,7 @@
                                 >
                                     <option value="">Select a sale...</option>
                                     <template x-for="sale in postedSales" :key="sale.id">
-                                        <option :value="sale.id" x-text="`${sale.nftName || 'Unknown'} - ${parseFloat(sale.priceEth).toFixed(2)} ETH`"></option>
+                                        <option :value="sale.id" x-text="`${sale.nftName || 'Unknown'} - ${parseFloat(sale.priceAmount).toFixed(2)} ${sale.currencySymbol || 'ETH'}`"></option>
                                     </template>
                                 </select>
                                 <button 
@@ -1988,7 +1988,7 @@
                                 <!-- Price -->
                                 <div class="col-span-2 flex items-center">
                                     <div class="flex flex-col">
-                                        <span class="font-medium text-white" x-text="parseFloat(sale.priceEth).toFixed(3) + ' ETH'"></span>
+                                        <span class="font-medium text-white" x-text="parseFloat(sale.priceAmount).toFixed(3) + ' ' + (sale.currencySymbol || 'ETH')"></span>
                                         <span x-show="sale.priceUsd" class="text-xs text-gray-400" x-text="'$' + parseFloat(sale.priceUsd).toLocaleString()"></span>
                                     </div>
                                 </div>
@@ -2608,8 +2608,8 @@
                             </div>
                             
                             <div>
-                                <label class="block text-sm font-medium text-gray-400 mb-1">Price (ETH)</label>
-                                <p class="text-white font-bold text-lg" x-text="selectedSale ? parseFloat(selectedSale.priceEth).toFixed(6) + ' ETH' : ''"></p>
+                                <label class="block text-sm font-medium text-gray-400 mb-1">Price</label>
+                                <p class="text-white font-bold text-lg" x-text="selectedSale ? parseFloat(selectedSale.priceAmount).toFixed(6) + ' ' + (selectedSale.currencySymbol || 'ETH') : ''"></p>
                             </div>
                             
                             <div x-show="selectedSale?.priceUsd">

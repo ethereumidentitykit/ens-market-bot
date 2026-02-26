@@ -37,13 +37,13 @@ export class TimeUtils {
    * Example: "Last Sale: 0.25 ETH, 19 Mar 2024" or "Last Sale: 1000 USDC, 22 Nov 2022"
    */
   static formatHistoricalEvent(
-    priceEth: number, 
+    price: number, 
     timestamp: number, 
     eventType: 'sale' | 'mint',
     currencySymbol?: string
   ): string {
     const dateString = TimeUtils.formatDateForTweet(timestamp);
-    const formattedPrice = priceEth.toFixed(2);
+    const formattedPrice = price.toFixed(2);
     const label = eventType === 'sale' ? 'Last Sale:' : 'Last Reg:';
     
     // Use provided currency symbol or default to ETH for backwards compatibility
@@ -72,10 +72,9 @@ export class TimeUtils {
    * Format listing price for bid tweets
    * Example: "$1,234.56 (0.75 ETH)" or "$999.70 (1000 USDC)"
    */
-  static formatListingPrice(priceEth: number, priceUsd?: number, currencySymbol?: string): string {
-    // Use provided currency symbol or default to ETH for backwards compatibility
+  static formatListingPrice(price: number, priceUsd?: number, currencySymbol?: string): string {
     const currency = currencySymbol ? CurrencyUtils.getDisplayName(currencySymbol) : 'ETH';
-    const formattedPrice = priceEth.toFixed(2);
+    const formattedPrice = price.toFixed(2);
     
     if (priceUsd && priceUsd > 0) {
       const formattedUsd = `$${priceUsd.toLocaleString('en-US', { 

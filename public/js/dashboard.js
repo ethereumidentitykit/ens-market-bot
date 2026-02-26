@@ -250,7 +250,7 @@ function dashboard() {
                     this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
                 } else {
                     this.sortBy = field;
-                    this.sortOrder = field === 'blockNumber' || field === 'priceEth' || field === 'id' ? 'desc' : 'asc';
+                    this.sortOrder = field === 'blockNumber' || field === 'priceAmount' || field === 'id' ? 'desc' : 'asc';
                 }
                 this.loadPage(1);
             },
@@ -273,7 +273,7 @@ function dashboard() {
                 }
 
                 const threshold = parseFloat(this.ethFilter.replace('+', ''));
-                return sales.filter(sale => parseFloat(sale.priceEth) >= threshold);
+                return sales.filter(sale => parseFloat(sale.priceAmount) >= threshold);
             }
         },
 
