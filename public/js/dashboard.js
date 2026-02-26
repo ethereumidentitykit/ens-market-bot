@@ -1656,6 +1656,17 @@ function dashboard() {
             this.selectedBid = bid;
         },
 
+        isNameBlocked(name) {
+            if (!name) return false;
+            return this.bidBlacklist.includes(name);
+        },
+
+        isAddressBlocked(address) {
+            if (!address) return false;
+            const lower = address.toLowerCase();
+            return this.addressBlacklist.some(a => a.toLowerCase() === lower);
+        },
+
         // Modal block helpers - add name to bid blacklist
         async addToBlacklistFromModal(name) {
             if (!name) return;
@@ -2097,11 +2108,6 @@ function dashboard() {
             } finally {
                 this.addressBlacklistLoading = false;
             }
-        },
-
-        // Select bid for modal display
-        selectBid(bid) {
-            this.selectedBid = bid;
         },
 
         // Helper function to show messages

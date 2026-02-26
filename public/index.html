@@ -2593,7 +2593,11 @@
                                 <label class="block text-sm font-medium text-gray-400 mb-1">ENS Name</label>
                                 <div class="flex items-center gap-2">
                                     <p class="text-white font-medium" x-text="selectedSale?.nftName || 'Unknown'"></p>
-                                    <button x-show="selectedSale?.nftName" 
+                                    <span x-show="selectedSale?.nftName && isNameBlocked(selectedSale.nftName)"
+                                          class="px-1.5 py-0.5 bg-red-500/30 border border-red-500/50 text-red-300 rounded text-[10px] font-medium">
+                                        <i class="fas fa-ban mr-0.5"></i>Blocked
+                                    </span>
+                                    <button x-show="selectedSale?.nftName && !isNameBlocked(selectedSale.nftName)" 
                                             @click="addToBlacklistFromModal(selectedSale.nftName)"
                                             class="px-1.5 py-0.5 bg-red-500/20 hover:bg-red-500/40 border border-red-500/50 text-red-300 hover:text-white rounded text-[10px] font-medium transition-colors"
                                             title="Block this name">
@@ -2673,7 +2677,11 @@
                                 <label class="block text-sm font-medium text-gray-400 mb-1">Buyer</label>
                                 <div class="flex items-start gap-2">
                                     <p class="text-white font-mono text-sm break-all flex-1" x-text="selectedSale?.buyerAddress"></p>
-                                    <button x-show="selectedSale?.buyerAddress" 
+                                    <span x-show="selectedSale?.buyerAddress && isAddressBlocked(selectedSale.buyerAddress)"
+                                          class="shrink-0 px-1.5 py-0.5 bg-orange-500/30 border border-orange-500/50 text-orange-300 rounded text-[10px] font-medium">
+                                        <i class="fas fa-user-slash mr-0.5"></i>Blocked
+                                    </span>
+                                    <button x-show="selectedSale?.buyerAddress && !isAddressBlocked(selectedSale.buyerAddress)"
                                             @click="addToAddressBlacklistFromModal(selectedSale.buyerAddress)"
                                             class="shrink-0 px-1.5 py-0.5 bg-orange-500/20 hover:bg-orange-500/40 border border-orange-500/50 text-orange-300 hover:text-white rounded text-[10px] font-medium transition-colors"
                                             title="Block this address">
@@ -2685,7 +2693,11 @@
                                 <label class="block text-sm font-medium text-gray-400 mb-1">Seller</label>
                                 <div class="flex items-start gap-2">
                                     <p class="text-white font-mono text-sm break-all flex-1" x-text="selectedSale?.sellerAddress"></p>
-                                    <button x-show="selectedSale?.sellerAddress" 
+                                    <span x-show="selectedSale?.sellerAddress && isAddressBlocked(selectedSale.sellerAddress)"
+                                          class="shrink-0 px-1.5 py-0.5 bg-orange-500/30 border border-orange-500/50 text-orange-300 rounded text-[10px] font-medium">
+                                        <i class="fas fa-user-slash mr-0.5"></i>Blocked
+                                    </span>
+                                    <button x-show="selectedSale?.sellerAddress && !isAddressBlocked(selectedSale.sellerAddress)"
                                             @click="addToAddressBlacklistFromModal(selectedSale.sellerAddress)"
                                             class="shrink-0 px-1.5 py-0.5 bg-orange-500/20 hover:bg-orange-500/40 border border-orange-500/50 text-orange-300 hover:text-white rounded text-[10px] font-medium transition-colors"
                                             title="Block this address">
@@ -2744,7 +2756,11 @@
                                 <label class="block text-sm font-medium text-gray-400 mb-1">ENS Name</label>
                                 <div class="flex items-center gap-2">
                                     <p class="text-white font-medium" x-text="selectedRegistration?.fullName || (selectedRegistration?.ensName + '.eth')"></p>
-                                    <button x-show="selectedRegistration?.fullName || selectedRegistration?.ensName" 
+                                    <span x-show="(selectedRegistration?.fullName || selectedRegistration?.ensName) && isNameBlocked(selectedRegistration.fullName || (selectedRegistration.ensName + '.eth'))"
+                                          class="px-1.5 py-0.5 bg-red-500/30 border border-red-500/50 text-red-300 rounded text-[10px] font-medium">
+                                        <i class="fas fa-ban mr-0.5"></i>Blocked
+                                    </span>
+                                    <button x-show="(selectedRegistration?.fullName || selectedRegistration?.ensName) && !isNameBlocked(selectedRegistration.fullName || (selectedRegistration.ensName + '.eth'))"
                                             @click="addToBlacklistFromModal(selectedRegistration.fullName || (selectedRegistration.ensName + '.eth'))"
                                             class="px-1.5 py-0.5 bg-red-500/20 hover:bg-red-500/40 border border-red-500/50 text-red-300 hover:text-white rounded text-[10px] font-medium transition-colors"
                                             title="Block this name">
@@ -2803,7 +2819,11 @@
                         <h3 class="text-lg font-medium text-white mb-4">Owner</h3>
                         <div class="flex items-start gap-2">
                             <p class="text-white font-mono text-sm break-all flex-1" x-text="selectedRegistration?.ownerAddress"></p>
-                            <button x-show="selectedRegistration?.ownerAddress" 
+                            <span x-show="selectedRegistration?.ownerAddress && isAddressBlocked(selectedRegistration.ownerAddress)"
+                                  class="shrink-0 px-1.5 py-0.5 bg-orange-500/30 border border-orange-500/50 text-orange-300 rounded text-[10px] font-medium">
+                                <i class="fas fa-user-slash mr-0.5"></i>Blocked
+                            </span>
+                            <button x-show="selectedRegistration?.ownerAddress && !isAddressBlocked(selectedRegistration.ownerAddress)"
                                     @click="addToAddressBlacklistFromModal(selectedRegistration.ownerAddress)"
                                     class="shrink-0 px-1.5 py-0.5 bg-orange-500/20 hover:bg-orange-500/40 border border-orange-500/50 text-orange-300 hover:text-white rounded text-[10px] font-medium transition-colors"
                                     title="Block this address">
@@ -2855,7 +2875,11 @@
                                 <label class="block text-sm font-medium text-gray-400 mb-1">ENS Name</label>
                                 <div class="flex items-center gap-2">
                                     <p class="text-white font-medium" x-text="selectedBid?.ensName || 'Unknown'"></p>
-                                    <button x-show="selectedBid?.ensName" 
+                                    <span x-show="selectedBid?.ensName && isNameBlocked(selectedBid.ensName)"
+                                          class="px-1.5 py-0.5 bg-red-500/30 border border-red-500/50 text-red-300 rounded text-[10px] font-medium">
+                                        <i class="fas fa-ban mr-0.5"></i>Blocked
+                                    </span>
+                                    <button x-show="selectedBid?.ensName && !isNameBlocked(selectedBid.ensName)"
                                             @click="addToBlacklistFromModal(selectedBid.ensName)"
                                             class="px-1.5 py-0.5 bg-red-500/20 hover:bg-red-500/40 border border-red-500/50 text-red-300 hover:text-white rounded text-[10px] font-medium transition-colors"
                                             title="Block this name">
@@ -2927,7 +2951,11 @@
                         <h3 class="text-lg font-medium text-white mb-4">Bidder</h3>
                         <div class="flex items-start gap-2">
                             <p class="text-white font-mono text-sm break-all flex-1" x-text="selectedBid?.makerAddress"></p>
-                            <button x-show="selectedBid?.makerAddress" 
+                            <span x-show="selectedBid?.makerAddress && isAddressBlocked(selectedBid.makerAddress)"
+                                  class="shrink-0 px-1.5 py-0.5 bg-orange-500/30 border border-orange-500/50 text-orange-300 rounded text-[10px] font-medium">
+                                <i class="fas fa-user-slash mr-0.5"></i>Blocked
+                            </span>
+                            <button x-show="selectedBid?.makerAddress && !isAddressBlocked(selectedBid.makerAddress)"
                                     @click="addToAddressBlacklistFromModal(selectedBid.makerAddress)"
                                     class="shrink-0 px-1.5 py-0.5 bg-orange-500/20 hover:bg-orange-500/40 border border-orange-500/50 text-orange-300 hover:text-white rounded text-[10px] font-medium transition-colors"
                                     title="Block this address">
@@ -2942,6 +2970,6 @@
         </div> <!-- End of authenticated dashboard content -->
     </div>
 
-    <script src="/js/dashboard.js"></script>
+    <script src="/js/dashboard.js?v=20260226"></script>
 </body>
 </html>
