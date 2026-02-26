@@ -2167,7 +2167,7 @@
                                     </thead>
                                     <tbody class="divide-y divide-gray-700">
                                         <template x-for="registration in registrationsView.data?.registrations || []" :key="registration.id">
-                                            <tr class="bg-gray-800 hover:bg-gray-750">
+                                            <tr @click="openRegistrationModal(registration)" class="bg-gray-800 hover:bg-gray-700 cursor-pointer transition-colors duration-150">
                                                 <td class="px-6 py-4 whitespace-nowrap">
                                                     <div class="flex items-center">
                                                         <img x-show="registration.image" :src="registration.image" class="h-10 w-10 rounded-lg mr-3" alt="">
@@ -2428,7 +2428,7 @@
                                 </thead>
                                 <tbody class="divide-y divide-gray-700">
                                     <template x-for="bid in bidsView.bids" :key="bid.id">
-                                        <tr class="hover:bg-gray-700 transition-colors duration-150 cursor-pointer" @click="selectBid(bid)">
+                                        <tr class="hover:bg-gray-700 transition-colors duration-150 cursor-pointer" @click="openBidModal(bid)">
                                             <!-- ENS Name -->
                                             <td class="px-6 py-4 whitespace-nowrap">
                                                 <div class="flex items-center">
@@ -2571,8 +2571,8 @@
         <!-- End Database View -->
 
         <!-- Sale Details Modal -->
-        <div x-show="selectedSale" x-transition class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div class="bg-gray-800 border border-gray-700 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div x-show="selectedSale" x-transition @click="selectedSale = null" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div @click.stop class="bg-gray-800 border border-gray-700 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
                 <!-- Modal Header -->
                 <div class="flex items-center justify-between p-6 border-b border-gray-700">
                     <h2 class="text-xl font-bold text-white flex items-center">
@@ -2724,6 +2724,221 @@
                 </div>
             </div>
         </div>
+        <!-- Registration Details Modal -->
+        <div x-show="selectedRegistration" x-transition @click="selectedRegistration = null" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div @click.stop class="bg-gray-800 border border-gray-700 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                <div class="flex items-center justify-between p-6 border-b border-gray-700">
+                    <h2 class="text-xl font-bold text-white flex items-center">
+                        <i class="fas fa-file-signature text-blue-400 mr-3"></i>
+                        Registration Details
+                    </h2>
+                    <button @click="selectedRegistration = null" class="text-gray-400 hover:text-white">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+
+                <div x-show="selectedRegistration" class="p-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-400 mb-1">ENS Name</label>
+                                <div class="flex items-center gap-2">
+                                    <p class="text-white font-medium" x-text="selectedRegistration?.fullName || (selectedRegistration?.ensName + '.eth')"></p>
+                                    <button x-show="selectedRegistration?.fullName || selectedRegistration?.ensName" 
+                                            @click="addToBlacklistFromModal(selectedRegistration.fullName || (selectedRegistration.ensName + '.eth'))"
+                                            class="px-1.5 py-0.5 bg-red-500/20 hover:bg-red-500/40 border border-red-500/50 text-red-300 hover:text-white rounded text-[10px] font-medium transition-colors"
+                                            title="Block this name">
+                                        <i class="fas fa-ban mr-0.5"></i>Block
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-400 mb-1">Cost</label>
+                                <p class="text-white font-bold text-lg" x-text="selectedRegistration ? parseFloat(selectedRegistration.costEth || 0).toFixed(6) + ' ETH' : ''"></p>
+                            </div>
+
+                            <div x-show="selectedRegistration?.costUsd">
+                                <label class="block text-sm font-medium text-gray-400 mb-1">Cost (USD)</label>
+                                <p class="text-white font-bold text-lg" x-text="selectedRegistration?.costUsd ? '$' + parseFloat(selectedRegistration.costUsd).toLocaleString() : ''"></p>
+                            </div>
+
+                            <div x-show="selectedRegistration?.image">
+                                <label class="block text-sm font-medium text-gray-400 mb-1">Image</label>
+                                <img :src="selectedRegistration?.image" class="h-20 w-20 rounded-lg border border-gray-600" alt="">
+                            </div>
+                        </div>
+
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-400 mb-1">Block Timestamp</label>
+                                <p class="text-white" x-text="selectedRegistration ? formatTimestamp(selectedRegistration.blockTimestamp) : ''"></p>
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-400 mb-1">Fetched</label>
+                                <p class="text-white" x-text="selectedRegistration ? getTimeAgo(selectedRegistration.processedAt) : ''"></p>
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-400 mb-1">Posted Status</label>
+                                <span x-show="selectedRegistration?.posted" class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-900 text-green-300">
+                                    <i class="fas fa-check mr-1"></i>
+                                    Posted to Twitter
+                                </span>
+                                <span x-show="!selectedRegistration?.posted" class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-900 text-yellow-300">
+                                    <i class="fas fa-clock mr-1"></i>
+                                    Pending
+                                </span>
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-400 mb-1">Token ID</label>
+                                <p class="text-white font-mono text-sm break-all" x-text="selectedRegistration?.tokenId"></p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-6 pt-6 border-t border-gray-700">
+                        <h3 class="text-lg font-medium text-white mb-4">Owner</h3>
+                        <div class="flex items-start gap-2">
+                            <p class="text-white font-mono text-sm break-all flex-1" x-text="selectedRegistration?.ownerAddress"></p>
+                            <button x-show="selectedRegistration?.ownerAddress" 
+                                    @click="addToAddressBlacklistFromModal(selectedRegistration.ownerAddress)"
+                                    class="shrink-0 px-1.5 py-0.5 bg-orange-500/20 hover:bg-orange-500/40 border border-orange-500/50 text-orange-300 hover:text-white rounded text-[10px] font-medium transition-colors"
+                                    title="Block this address">
+                                <i class="fas fa-user-slash mr-0.5"></i>Block
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="mt-6 pt-6 border-t border-gray-700">
+                        <h3 class="text-lg font-medium text-white mb-4">Transaction</h3>
+                        <div class="space-y-3">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-400 mb-1">Transaction Hash</label>
+                                <div class="flex items-center space-x-2">
+                                    <p class="text-white font-mono text-sm break-all flex-1" x-text="selectedRegistration?.transactionHash"></p>
+                                    <a 
+                                        :href="selectedRegistration ? 'https://etherscan.io/tx/' + selectedRegistration.transactionHash : '#'" 
+                                        target="_blank"
+                                        class="inline-flex items-center px-3 py-1 border border-green-600 text-sm font-medium rounded text-green-300 bg-green-900 hover:bg-green-800"
+                                    >
+                                        <i class="fas fa-external-link-alt mr-1"></i>
+                                        Etherscan
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bid Details Modal -->
+        <div x-show="selectedBid" x-transition @click="selectedBid = null" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div @click.stop class="bg-gray-800 border border-gray-700 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                <div class="flex items-center justify-between p-6 border-b border-gray-700">
+                    <h2 class="text-xl font-bold text-white flex items-center">
+                        <i class="fas fa-gavel text-purple-400 mr-3"></i>
+                        Bid Details
+                    </h2>
+                    <button @click="selectedBid = null" class="text-gray-400 hover:text-white">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+
+                <div x-show="selectedBid" class="p-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-400 mb-1">ENS Name</label>
+                                <div class="flex items-center gap-2">
+                                    <p class="text-white font-medium" x-text="selectedBid?.ensName || 'Unknown'"></p>
+                                    <button x-show="selectedBid?.ensName" 
+                                            @click="addToBlacklistFromModal(selectedBid.ensName)"
+                                            class="px-1.5 py-0.5 bg-red-500/20 hover:bg-red-500/40 border border-red-500/50 text-red-300 hover:text-white rounded text-[10px] font-medium transition-colors"
+                                            title="Block this name">
+                                        <i class="fas fa-ban mr-0.5"></i>Block
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-400 mb-1">Bid Amount</label>
+                                <p class="text-white font-bold text-lg" x-text="selectedBid ? parseFloat(selectedBid.priceDecimal).toFixed(6) + ' ' + (selectedBid.currencySymbol === 'WETH' ? 'ETH' : (selectedBid.currencySymbol || 'ETH')) : ''"></p>
+                            </div>
+
+                            <div x-show="selectedBid?.priceUsd">
+                                <label class="block text-sm font-medium text-gray-400 mb-1">Price (USD)</label>
+                                <p class="text-white font-bold text-lg" x-text="selectedBid?.priceUsd ? '$' + parseFloat(selectedBid.priceUsd).toLocaleString() : ''"></p>
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-400 mb-1">Marketplace</label>
+                                <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium" 
+                                      :class="selectedBid?.marketplace === 'opensea' ? 'bg-blue-900 text-blue-300' : 
+                                             selectedBid?.marketplace === 'blur' ? 'bg-orange-900 text-orange-300' :
+                                             'bg-gray-700 text-gray-300'"
+                                      x-text="selectedBid?.marketplace || 'Unknown'">
+                                </span>
+                            </div>
+
+                            <div x-show="selectedBid?.nftImage">
+                                <label class="block text-sm font-medium text-gray-400 mb-1">Image</label>
+                                <img :src="selectedBid?.nftImage" class="h-20 w-20 rounded-lg border border-gray-600" alt="" onerror="this.style.display='none'">
+                            </div>
+                        </div>
+
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-400 mb-1">Created</label>
+                                <p class="text-white" x-text="selectedBid?.createdAtApi ? formatTimestamp(selectedBid.createdAtApi) : ''"></p>
+                            </div>
+
+                            <div x-show="selectedBid?.validUntil">
+                                <label class="block text-sm font-medium text-gray-400 mb-1">Valid Until</label>
+                                <p class="text-white" x-text="selectedBid?.validUntil ? new Date(selectedBid.validUntil * 1000).toLocaleString() : ''"></p>
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-400 mb-1">Status</label>
+                                <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium"
+                                      :class="selectedBid?.status === 'posted' ? 'bg-green-900 text-green-300' : 
+                                             selectedBid?.status === 'skipped' ? 'bg-gray-700 text-gray-300' :
+                                             'bg-yellow-900 text-yellow-300'"
+                                      x-text="selectedBid?.status || 'unposted'">
+                                </span>
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-400 mb-1">Token ID</label>
+                                <p class="text-white font-mono text-sm break-all" x-text="selectedBid?.tokenId"></p>
+                            </div>
+
+                            <div x-show="selectedBid?.orderHash">
+                                <label class="block text-sm font-medium text-gray-400 mb-1">Order Hash</label>
+                                <p class="text-white font-mono text-sm break-all" x-text="selectedBid?.orderHash"></p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-6 pt-6 border-t border-gray-700">
+                        <h3 class="text-lg font-medium text-white mb-4">Bidder</h3>
+                        <div class="flex items-start gap-2">
+                            <p class="text-white font-mono text-sm break-all flex-1" x-text="selectedBid?.makerAddress"></p>
+                            <button x-show="selectedBid?.makerAddress" 
+                                    @click="addToAddressBlacklistFromModal(selectedBid.makerAddress)"
+                                    class="shrink-0 px-1.5 py-0.5 bg-orange-500/20 hover:bg-orange-500/40 border border-orange-500/50 text-orange-300 hover:text-white rounded text-[10px] font-medium transition-colors"
+                                    title="Block this address">
+                                <i class="fas fa-user-slash mr-0.5"></i>Block
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         </div> <!-- End of authenticated dashboard content -->
     </div>
 

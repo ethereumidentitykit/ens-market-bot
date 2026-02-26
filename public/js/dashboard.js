@@ -170,10 +170,9 @@ function dashboard() {
         databaseResetMessageType: 'info',
         processingReset: false,
 
-        // Sale modal state
+        // Modal state
         selectedSale: null,
-        
-        // Bid modal state
+        selectedRegistration: null,
         selectedBid: null,
 
         // Database viewer state
@@ -1647,6 +1646,14 @@ function dashboard() {
 
         closeSaleModal() {
             this.selectedSale = null;
+        },
+
+        openRegistrationModal(registration) {
+            this.selectedRegistration = registration;
+        },
+
+        openBidModal(bid) {
+            this.selectedBid = bid;
         },
 
         // Modal block helpers - add name to bid blacklist
