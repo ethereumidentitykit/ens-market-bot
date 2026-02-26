@@ -339,8 +339,8 @@ export class NewTweetFormatter {
       );
 
       if (primaryResult) {
-        logger.info(`✅ Found historical data from primary contract: ${primaryResult.priceEth} ${primaryResult.currencySymbol || 'ETH'}`);
-        return TimeUtils.formatHistoricalEvent(Number(primaryResult.priceEth), primaryResult.timestamp, primaryResult.type, primaryResult.currencySymbol);
+        logger.info(`✅ Found historical data from primary contract: ${primaryResult.priceAmount} ${primaryResult.currencySymbol || 'ETH'}`);
+        return TimeUtils.formatHistoricalEvent(Number(primaryResult.priceAmount), primaryResult.timestamp, primaryResult.type, primaryResult.currencySymbol);
       }
 
       // Try fallback lookup if configured (V4 API)
@@ -353,8 +353,8 @@ export class NewTweetFormatter {
         );
 
         if (fallbackResult) {
-          logger.info(`✅ Found historical data from fallback contract: ${fallbackResult.priceEth} ${fallbackResult.currencySymbol || 'ETH'}`);
-          return TimeUtils.formatHistoricalEvent(Number(fallbackResult.priceEth), fallbackResult.timestamp, fallbackResult.type, fallbackResult.currencySymbol);
+          logger.info(`✅ Found historical data from fallback contract: ${fallbackResult.priceAmount} ${fallbackResult.currencySymbol || 'ETH'}`);
+          return TimeUtils.formatHistoricalEvent(Number(fallbackResult.priceAmount), fallbackResult.timestamp, fallbackResult.type, fallbackResult.currencySymbol);
         }
       }
 
@@ -731,8 +731,7 @@ export class NewTweetFormatter {
     const currencyMap: { [key: string]: string } = {
       'WETH': 'ETH',
       'USDC': 'USDC',
-      'USDT': 'USDT', 
-      'DAI': 'DAI'
+      'USDT': 'USDT'
     };
     return currencyMap[symbol.toUpperCase()] || symbol;
   }
@@ -771,10 +770,11 @@ export class NewTweetFormatter {
     const ensName = this.cleanEnsName(rawEnsName);
     const header = `💰 SOLD: ${ensName}`;
     
-    // Price line: For: $X (Y ETH) - 2 decimal places for USD in tweets
-    const priceEth = parseFloat(sale.priceEth).toFixed(2);
+    // Price line: For: $X (Y ETH/USDC) - 2 decimal places for USD in tweets
+    const priceVal = parseFloat(sale.priceAmount).toFixed(2);
+    const currency = sale.currencySymbol || 'ETH';
     const priceUsd = sale.priceUsd ? `$${parseFloat(sale.priceUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
-    const priceLine = priceUsd ? `For: ${priceUsd} (${priceEth} ETH)` : `For: ${priceEth} ETH`;
+    const priceLine = priceUsd ? `For: ${priceUsd} (${priceVal} ${currency})` : `For: ${priceVal} ${currency}`;
     
     // Historical context line (NEW)
     let historicalLine = '';
@@ -1080,7 +1080,7 @@ export class NewTweetFormatter {
     const symbol = bid.currencySymbol?.toUpperCase();
 
     let priceUsd = 0;
-    if (symbol === 'USDC' || symbol === 'USDT' || symbol === 'DAI') {
+    if (symbol === 'USDC' || symbol === 'USDT') {
       // Stablecoins: 1:1 USD
       priceUsd = priceEth;
       logger.debug(`💰 Stablecoin USD price: ${priceEth} ${symbol} = $${priceUsd.toFixed(2)}`);
@@ -1256,9 +1256,10 @@ export class NewTweetFormatter {
       sellerEns: realData.sellerEns,
       sellerAvatar: realData.sellerAvatar,
       transactionHash: sale.transactionHash,
-      timestamp: new Date(), // Use current timestamp
+      timestamp: new Date(),
       contractAddress: sale.contractAddress,
-      tokenId: sale.tokenId
+      tokenId: sale.tokenId,
+      currencySymbol: realData.currencySymbol
     };
   }
 
@@ -1407,8 +1408,8 @@ export class NewTweetFormatter {
       errors.push('Tweet should include "For:" label');
     }
 
-    if (!content.includes('ETH')) {
-      errors.push('Tweet should include price in ETH');
+    if (!content.includes('ETH') && !content.includes('USDC') && !content.includes('USDT')) {
+      errors.push('Tweet should include price with currency (ETH, USDC, or USDT)');
     }
 
     if (!content.includes('Seller:')) {
@@ -1466,7 +1467,8 @@ export class NewTweetFormatter {
 
     const rawEnsName = sale.nftName || 'Unknown ENS';
     const ensName = this.cleanEnsName(rawEnsName);
-    const priceEth = parseFloat(sale.priceEth).toFixed(2);
+    const priceVal = parseFloat(sale.priceAmount).toFixed(2);
+    const currency = sale.currencySymbol || 'ETH';
     const priceUsd = sale.priceUsd ? `$${parseFloat(sale.priceUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
     const buyerHandle = this.getDisplayHandle(buyerAccount, sale.buyerAddress);
     const sellerHandle = this.getDisplayHandle(sellerAccount, sale.sellerAddress);
@@ -1488,7 +1490,7 @@ export class NewTweetFormatter {
     const breakdown = {
       header: `💰 SOLD: ${ensName}`,
       ensName: ensName,
-      priceLine: priceUsd ? `For: ${priceUsd} (${priceEth} ETH)` : `For: ${priceEth} ETH`,
+      priceLine: priceUsd ? `For: ${priceUsd} (${priceVal} ${currency})` : `For: ${priceVal} ${currency}`,
       buyerLine: `Buyer: ${buyerHandle}`,
       sellerLine: `Seller: ${sellerHandle}`,
       brokerLine,

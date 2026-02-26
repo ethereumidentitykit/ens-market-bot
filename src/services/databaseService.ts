@@ -64,8 +64,9 @@ export class DatabaseService implements IDatabaseService {
           marketplace VARCHAR(50) NOT NULL,
           buyer_address VARCHAR(42) NOT NULL,
           seller_address VARCHAR(42) NOT NULL,
-          price_eth DECIMAL(18,8) NOT NULL,
+          price_amount DECIMAL(18,8) NOT NULL,
           price_usd DECIMAL(12,2),
+          currency_symbol VARCHAR(20) DEFAULT 'ETH',
           block_number INTEGER NOT NULL,
           block_timestamp TIMESTAMP NOT NULL,
           log_index INTEGER,
@@ -99,6 +100,19 @@ export class DatabaseService implements IDatabaseService {
         ALTER TABLE processed_sales ADD COLUMN IF NOT EXISTS fee_recipient_address VARCHAR(42);
         ALTER TABLE processed_sales ADD COLUMN IF NOT EXISTS fee_amount_wei VARCHAR(78);
         ALTER TABLE processed_sales ADD COLUMN IF NOT EXISTS fee_percent DECIMAL(5,2);
+      `);
+
+      // Rename price_eth → price_amount and add currency_symbol for multi-currency support
+      const colCheck = await this.pool.query(`
+        SELECT column_name FROM information_schema.columns 
+        WHERE table_name = 'processed_sales' AND column_name = 'price_eth'
+      `);
+      if (colCheck.rows.length > 0) {
+        await this.pool.query(`ALTER TABLE processed_sales RENAME COLUMN price_eth TO price_amount`);
+        logger.info('Migrated processed_sales: price_eth → price_amount');
+      }
+      await this.pool.query(`
+        ALTER TABLE processed_sales ADD COLUMN IF NOT EXISTS currency_symbol VARCHAR(20) DEFAULT 'ETH';
       `);
 
       // Create system_state table
@@ -440,12 +454,12 @@ export class DatabaseService implements IDatabaseService {
       const result = await this.pool.query(`
         INSERT INTO processed_sales (
           transaction_hash, contract_address, token_id, marketplace,
-          buyer_address, seller_address, price_eth, price_usd,
+          buyer_address, seller_address, price_amount, price_usd, currency_symbol,
           block_number, block_timestamp, log_index, processed_at, posted,
           collection_name, collection_logo, nft_name, nft_image,
           nft_description, marketplace_logo, current_usd_value, verified_collection,
           fee_recipient_address, fee_amount_wei, fee_percent
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
         RETURNING id
       `, [
         sale.transactionHash,
@@ -454,8 +468,9 @@ export class DatabaseService implements IDatabaseService {
         sale.marketplace,
         sale.buyerAddress,
         sale.sellerAddress,
-        parseFloat(sale.priceEth),
+        parseFloat(sale.priceAmount),
         sale.priceUsd ? parseFloat(sale.priceUsd) : null,
+        sale.currencySymbol || 'ETH',
         sale.blockNumber,
         new Date(sale.blockTimestamp),
         sale.logIndex || null,
@@ -514,7 +529,8 @@ export class DatabaseService implements IDatabaseService {
         SELECT 
           id, transaction_hash as "transactionHash", contract_address as "contractAddress",
           token_id as "tokenId", marketplace, buyer_address as "buyerAddress",
-          seller_address as "sellerAddress", price_eth as "priceEth", price_usd as "priceUsd",
+          seller_address as "sellerAddress", price_amount as "priceAmount", price_usd as "priceUsd",
+          currency_symbol as "currencySymbol",
           block_number as "blockNumber", block_timestamp as "blockTimestamp", log_index as "logIndex",
           processed_at as "processedAt", tweet_id as "tweetId", posted,
           collection_name as "collectionName", collection_logo as "collectionLogo",
@@ -530,7 +546,7 @@ export class DatabaseService implements IDatabaseService {
 
       return result.rows.map(row => ({
         ...row,
-        priceEth: row.priceEth.toString(),
+        priceAmount: row.priceAmount.toString(),
         priceUsd: row.priceUsd ? row.priceUsd.toString() : undefined,
         blockTimestamp: row.blockTimestamp.toISOString(),
         processedAt: row.processedAt.toISOString()
@@ -552,7 +568,8 @@ export class DatabaseService implements IDatabaseService {
         SELECT 
           id, transaction_hash as "transactionHash", contract_address as "contractAddress",
           token_id as "tokenId", marketplace, buyer_address as "buyerAddress",
-          seller_address as "sellerAddress", price_eth as "priceEth", price_usd as "priceUsd",
+          seller_address as "sellerAddress", price_amount as "priceAmount", price_usd as "priceUsd",
+          currency_symbol as "currencySymbol",
           block_number as "blockNumber", block_timestamp as "blockTimestamp", log_index as "logIndex",
           processed_at as "processedAt", tweet_id as "tweetId", posted,
           collection_name as "collectionName", collection_logo as "collectionLogo",
@@ -572,7 +589,7 @@ export class DatabaseService implements IDatabaseService {
       const row = result.rows[0];
       return {
         ...row,
-        priceEth: row.priceEth.toString(),
+        priceAmount: row.priceAmount.toString(),
         priceUsd: row.priceUsd ? row.priceUsd.toString() : undefined,
         blockTimestamp: row.blockTimestamp.toISOString(),
         processedAt: row.processedAt.toISOString()
@@ -642,7 +659,8 @@ export class DatabaseService implements IDatabaseService {
         SELECT 
           id, transaction_hash as "transactionHash", contract_address as "contractAddress",
           token_id as "tokenId", marketplace, buyer_address as "buyerAddress",
-          seller_address as "sellerAddress", price_eth as "priceEth", price_usd as "priceUsd",
+          seller_address as "sellerAddress", price_amount as "priceAmount", price_usd as "priceUsd",
+          currency_symbol as "currencySymbol",
           block_number as "blockNumber", block_timestamp as "blockTimestamp", log_index as "logIndex",
           processed_at as "processedAt", tweet_id as "tweetId", posted,
           collection_name as "collectionName", collection_logo as "collectionLogo",
@@ -662,7 +680,7 @@ export class DatabaseService implements IDatabaseService {
 
       return result.rows.map(row => ({
         ...row,
-        priceEth: row.priceEth.toString(),
+        priceAmount: row.priceAmount.toString(),
         priceUsd: row.priceUsd ? row.priceUsd.toString() : undefined,
         blockTimestamp: row.blockTimestamp.toISOString(),
         processedAt: row.processedAt.toISOString()

@@ -77,7 +77,7 @@ async function startApplication(): Promise<void> {
     const siweService = new SiweService(databaseService);
     const quickNodeSalesService = new QuickNodeSalesService(databaseService, openSeaService, ensMetadataService, alchemyService);
     const quickNodeRegistrationService = new QuickNodeRegistrationService(databaseService, ensMetadataService, alchemyService, openSeaService);
-    const autoTweetService = new AutoTweetService(newTweetFormatter, twitterService, rateLimitService, databaseService, worldTimeService);
+    const autoTweetService = new AutoTweetService(newTweetFormatter, twitterService, rateLimitService, databaseService, worldTimeService, alchemyService);
     const schedulerService = new SchedulerService(salesProcessingService, bidsProcessingService, autoTweetService, databaseService);
     
     // Initialize GrailsApiService for Grails marketplace offers (if enabled)
@@ -575,9 +575,9 @@ async function startApplication(): Promise<void> {
         const eventData = {
           type: type as 'sale' | 'registration' | 'bid',
           tokenName,
-          price: parseFloat(isSale ? sale!.priceEth : isRegistration ? (registration!.costEth || '0') : bid!.priceDecimal),
+          price: parseFloat(isSale ? sale!.priceAmount : isRegistration ? (registration!.costEth || '0') : bid!.priceDecimal),
           priceUsd: parseFloat(isSale ? (sale!.priceUsd || '0') : isRegistration ? (registration!.costUsd || '0') : (bid!.priceUsd || '0')),
-          currency: 'ETH',
+          currency: isSale ? (sale!.currencySymbol || 'ETH') : isBid ? (bid!.currencySymbol || 'ETH') : 'ETH',
           timestamp: isBid 
             ? new Date(bid!.createdAtApi).getTime() / 1000 
             : new Date((sale || registration)!.blockTimestamp).getTime() / 1000,
@@ -1990,8 +1990,9 @@ async function startApplication(): Promise<void> {
               transactionHash: sale.transactionHash,
               contractAddress: sale.contractAddress,
               tokenId: sale.tokenId,
-              priceEth: sale.priceEth,
+              priceAmount: sale.priceAmount,
               priceUsd: sale.priceUsd,
+              currencySymbol: sale.currencySymbol || 'ETH',
               marketplace: sale.marketplace
             },
             previews
@@ -2151,8 +2152,9 @@ async function startApplication(): Promise<void> {
               id: sale.id,
               transactionHash: sale.transactionHash,
               nftName: sale.nftName,
-              priceEth: sale.priceEth,
+              priceAmount: sale.priceAmount,
               priceUsd: sale.priceUsd,
+              currencySymbol: sale.currencySymbol || 'ETH',
               buyerAddress: sale.buyerAddress,
               sellerAddress: sale.sellerAddress
             },
@@ -2745,7 +2747,7 @@ async function startApplication(): Promise<void> {
             sale.buyerAddress.toLowerCase().includes(searchLower) ||
             sale.sellerAddress.toLowerCase().includes(searchLower) ||
             sale.tokenId.includes(search) ||
-            sale.priceEth.includes(search)
+            sale.priceAmount.includes(search)
           );
         }
 
@@ -2758,7 +2760,7 @@ async function startApplication(): Promise<void> {
           if (sortBy === 'blockNumber' || sortBy === 'id') {
             aVal = Number(aVal);
             bVal = Number(bVal);
-          } else if (sortBy === 'priceEth') {
+          } else if (sortBy === 'priceAmount') {
             aVal = parseFloat(aVal);
             bVal = parseFloat(bVal);
           }

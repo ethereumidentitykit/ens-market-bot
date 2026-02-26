@@ -1,10 +1,10 @@
-# QuickNode Stream Filter - ENS Sales Monitoring
+# QuickNode Sales Filter - ENS Sales Monitoring
 
 This document describes the QuickNode Streams filter function used to monitor ENS domain sales via Seaport (OpenSea) events.
 
 ## Overview
 
-The filter listens for `OrderFulfilled` events from Seaport contracts (v1.5 and v1.6) and filters for ENS-related NFT trades that meet a minimum ETH threshold.
+The filter listens for `OrderFulfilled` events from Seaport contracts (v1.5 and v1.6) and filters for ENS-related NFT trades that meet a minimum value threshold (ETH/WETH or USDC/USDT).
 
 ## Configuration
 
@@ -24,8 +24,9 @@ The filter listens for `OrderFulfilled` events from Seaport contracts (v1.5 and 
 
 ### Spam Filter
 
-- **Minimum ETH**: `0.04 ETH` (40,000,000,000,000,000 wei)
-- Counts both native ETH and WETH (ERC-20)
+- **Minimum ETH**: `0.04 ETH` (40,000,000,000,000,000 wei) — counts native ETH and WETH
+- **Minimum Stablecoin**: `100 USDC/USDT` (100,000,000 units at 6 decimals)
+- Orders meeting EITHER threshold pass through
 
 ## Event ABI
 
@@ -78,7 +79,7 @@ Uses `decodeEVMReceipts()` with the Seaport ABI to decode `OrderFulfilled` event
 
 1. **Contract Filter**: Only process events from labeled Seaport contracts
 2. **NFT Filter**: Require target ENS contract in `offer[]` or `consideration[]` with NFT itemType (2-5)
-3. **Spam Filter**: Require ≥ 0.04 ETH total across ETH + WETH in the trade
+3. **Spam Filter**: Require ≥ 0.04 ETH (ETH + WETH) OR ≥ 100 USDC/USDT in the trade
 
 ### Step 4: Extract Fee Recipients
 
@@ -124,6 +125,8 @@ After filtering, extract fee recipients from the consideration array:
       "ethLikeWei": "50000000000000000",
       "ethLikeEth": "0.05",
       "minEthLikeWei": "40000000000000000",
+      "stablecoinUnits": null,
+      "stablecoinSymbol": null,
       "fee": {
         "recipient": "0x...",
         "amount": "2500000000000000",
@@ -134,7 +137,10 @@ After filtering, extract fee recipients from the consideration array:
 }
 ```
 
-**Note**: `fee` is `null` if no fee recipients found (all consideration goes to offerer).
+**Notes**:
+- `fee` is `null` if no fee recipients found (all consideration goes to offerer)
+- `stablecoinUnits` and `stablecoinSymbol` are `null` for ETH/WETH-only trades
+- For stablecoin trades, `ethLikeWei` will be `"0"` and `stablecoinUnits` holds the 6-decimal amount
 
 ## Full Filter Code
 
@@ -184,6 +190,11 @@ function main(stream) {
   const MIN_WEI = 40_000_000_000_000_000n; // 0.04 ETH
   const ZERO  = '0x0000000000000000000000000000000000000000';
   const WETH  = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'.toLowerCase();
+
+  // --- Stablecoin support ---
+  const USDC = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
+  const USDT = '0xdac17f958d2ee523a2206206994597c13d831ec7';
+  const MIN_STABLECOIN_UNITS = 100_000_000n; // 100 USDC/USDT (6 decimals)
 
   // --- helpers ---
   const lc = (x) => (x || '').toLowerCase();
@@ -236,11 +247,26 @@ function main(stream) {
   const isEthLike = (e) =>
     (Number(e.itemType) === 0 && lc(e.token) === lc(ZERO)) || // native ETH
     (Number(e.itemType) === 1 && lc(e.token) === WETH);       // WETH (ERC-20)
+  const isStablecoin = (e) =>
+    Number(e.itemType) === 1 && (lc(e.token) === USDC || lc(e.token) === USDT);
   const sumEthLikeWei = (offer, consideration) => {
     let s = 0n;
     for (const a of (offer || [])) if (isEthLike(a)) s += toBI(a.amount);
     for (const a of (consideration || [])) if (isEthLike(a)) s += toBI(a.amount);
     return s;
+  };
+  const sumStablecoinUnits = (offer, consideration) => {
+    let s = 0n;
+    for (const a of (offer || [])) if (isStablecoin(a)) s += toBI(a.amount);
+    for (const a of (consideration || [])) if (isStablecoin(a)) s += toBI(a.amount);
+    return s;
+  };
+  const stablecoinSymbol = (offer, consideration) => {
+    for (const a of [...(offer || []), ...(consideration || [])]) {
+      if (!isStablecoin(a)) continue;
+      return lc(a.token) === USDC ? 'USDC' : 'USDT';
+    }
+    return null;
   };
   const formatEth = (wei) => {
     const w = toBI(wei);
@@ -281,23 +307,27 @@ function main(stream) {
       // Require target NFT somewhere in the trade
       if (REQUIRE_TARGET_CONTRACT && !(hasTargetNft(offer) || hasTargetNft(consideration))) continue;
 
-      // Spam filter: require >= 0.04 ETH (ETH or WETH) across both sides
+      // Spam filter: require >= 0.04 ETH OR >= 100 USDC/USDT
       const ethLikeWei = sumEthLikeWei(offer, consideration);
-      if (ethLikeWei < MIN_WEI) continue;
+      const scUnits = sumStablecoinUnits(offer, consideration);
+      if (ethLikeWei < MIN_WEI && scUnits < MIN_STABLECOIN_UNITS) continue;
 
-      // Extract fee recipient: any ETH/WETH consideration where recipient !== offerer
+      // Determine the payment currency for fee calculation
+      const paymentTotal = ethLikeWei > 0n ? ethLikeWei : scUnits;
+      const isPaymentEth = ethLikeWei > 0n;
+      const isPayment = (e) => isPaymentEth ? isEthLike(e) : isStablecoin(e);
+
+      // Extract fee recipient: any payment-currency consideration where recipient !== offerer
       const offererLc = lc(ev.offerer);
       let fee = null;
       for (const c of consideration) {
-        if (!isEthLike(c)) continue;
+        if (!isPayment(c)) continue;
         const recipientLc = lc(c.recipient);
-        if (recipientLc === offererLc) continue; // This is seller's payment, skip
+        if (recipientLc === offererLc) continue;
         
-        // Found a fee recipient
         const feeAmount = toBI(c.amount);
-        // Multiply by 10000 then divide by 100 to preserve 2 decimal places
-        const percent = ethLikeWei > 0n 
-          ? Number((feeAmount * 10000n) / ethLikeWei) / 100
+        const percent = paymentTotal > 0n 
+          ? Number((feeAmount * 10000n) / paymentTotal) / 100
           : 0;
         
         fee = {
@@ -305,8 +335,10 @@ function main(stream) {
           amount: feeAmount.toString(),
           percent
         };
-        break; // Take first fee recipient only (as per requirements)
+        break;
       }
+
+      const scSym = stablecoinSymbol(offer, consideration);
 
       out.push({
         txHash: r.transactionHash,
@@ -325,6 +357,8 @@ function main(stream) {
         ethLikeWei: ethLikeWei.toString(),
         ethLikeEth: formatEth(ethLikeWei),
         minEthLikeWei: MIN_WEI.toString(),
+        stablecoinUnits: scUnits > 0n ? scUnits.toString() : null,
+        stablecoinSymbol: scSym,
         fee
       });
     }
@@ -348,6 +382,7 @@ The webhook sends data to `/webhook/salesv2` on your server, which processes the
 
 - Both `offer` and `consideration` are checked for ENS NFTs to handle both buy and sell orders
 - WETH is treated equivalent to ETH for minimum threshold calculation
+- USDC and USDT are recognized as valid payment currencies with a separate minimum threshold
 - Raw arrays are preserved alongside parsed arrays for debugging
 - Block number is returned in hex format
 

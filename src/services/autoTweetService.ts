@@ -12,6 +12,7 @@ import { TwitterService } from './twitterService';
 import { RateLimitService } from './rateLimitService';
 import { WorldTimeService } from './worldTimeService';
 import { ClubService } from './clubService';
+import { AlchemyService } from './alchemyService';
 import { getClubLabel } from '../constants/clubMetadata';
 
 export interface TransactionSpecificSettings {
@@ -49,13 +50,15 @@ export class AutoTweetService {
   private databaseService: IDatabaseService;
   private worldTimeService: WorldTimeService;
   private clubService: ClubService;
+  private alchemyService?: AlchemyService;
 
   constructor(
     newTweetFormatter: NewTweetFormatter,
     twitterService: TwitterService,
     rateLimitService: RateLimitService,
     databaseService: IDatabaseService,
-    worldTimeService: WorldTimeService
+    worldTimeService: WorldTimeService,
+    alchemyService?: AlchemyService
   ) {
     this.apiToggleService = APIToggleService.getInstance();
     this.newTweetFormatter = newTweetFormatter;
@@ -64,6 +67,7 @@ export class AutoTweetService {
     this.databaseService = databaseService;
     this.worldTimeService = worldTimeService;
     this.clubService = new ClubService();
+    this.alchemyService = alchemyService;
   }
 
   /**
@@ -239,23 +243,35 @@ export class AutoTweetService {
       };
     }
 
-    // Check if sale meets ETH minimum requirements (use sales-specific settings)
+    // Check if sale meets minimum requirements (use sales-specific settings)
     const ethMinimum = await this.getEthMinimumForSale(sale, settings.sales);
-    const saleEthValue = parseFloat(sale.priceEth);
-    
-    if (saleEthValue < ethMinimum) {
+    const priceValue = parseFloat(sale.priceAmount);
+    const symbol = sale.currencySymbol || 'ETH';
+
+    let saleEthEquivalent = priceValue;
+    if (symbol === 'USDC' || symbol === 'USDT') {
+      const ethPrice = this.alchemyService ? await this.alchemyService.getETHPriceUSD() : null;
+      if (!ethPrice) {
+        logger.warn(`⚠️ ETH price unavailable — allowing ${symbol} sale through (fail-open)`);
+      }
+      saleEthEquivalent = ethPrice ? priceValue / ethPrice : ethMinimum;
+    }
+
+    if (saleEthEquivalent < ethMinimum) {
       const categoryName = await this.getCategoryName(sale);
-      logger.info(`❌ SALE FILTER: ${sale.nftName} - ${sale.priceEth} ETH < ${ethMinimum} ETH minimum - REJECTED`);
+      const priceDisplay = symbol === 'ETH' ? `${sale.priceAmount} ETH` : `${sale.priceAmount} ${symbol} (~${saleEthEquivalent.toFixed(4)} ETH)`;
+      logger.info(`❌ SALE FILTER: ${sale.nftName} - ${priceDisplay} < ${ethMinimum} ETH minimum - REJECTED`);
       return {
         success: false,
         saleId,
         skipped: true,
-        reason: `${sale.priceEth} ETH below minimum ${ethMinimum} ETH for ${categoryName}`,
+        reason: `${priceDisplay} below minimum ${ethMinimum} ETH for ${categoryName}`,
         type: 'sale'
       };
     }
-    
-    logger.info(`✅ SALE FILTER: ${sale.nftName} - ${sale.priceEth} ETH >= ${ethMinimum} ETH minimum - PASSED`);
+
+    const priceDisplay = symbol === 'ETH' ? `${sale.priceAmount} ETH` : `${sale.priceAmount} ${symbol}`;
+    logger.info(`✅ SALE FILTER: ${sale.nftName} - ${priceDisplay} >= ${ethMinimum} ETH minimum - PASSED`);
 
     // Check rate limits
     const rateLimitCheck = await this.rateLimitService.canPostTweet();
@@ -270,7 +286,7 @@ export class AutoTweetService {
     }
 
     // Generate and post tweet
-    logger.info(`Auto-posting sale: ${sale.nftName} for ${sale.priceEth} ETH`);
+    logger.info(`Auto-posting sale: ${sale.nftName} for ${sale.priceAmount} ${symbol}`);
     
     try {
       // Generate tweet content and image

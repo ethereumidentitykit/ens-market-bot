@@ -1571,8 +1571,7 @@ export class MagicEdenV4Service {
     const currencyMap: { [key: string]: string } = {
       'WETH': 'ETH',
       'USDC': 'USDC',
-      'USDT': 'USDT',
-      'DAI': 'DAI'
+      'USDT': 'USDT'
     };
     return currencyMap[symbol.toUpperCase()] || symbol;
   }
@@ -1728,7 +1727,7 @@ export class MagicEdenV4Service {
     tokenId: string,
     currentTxHash?: string,
     thresholdEth: number = 0.01
-  ): Promise<{ type: 'sale' | 'mint'; priceEth: string; priceUsd: string; timestamp: number; daysAgo: number; currencySymbol: string; currencyContract: string; priceDecimal: number } | null> {
+  ): Promise<{ type: 'sale' | 'mint'; priceAmount: string; priceUsd: string; timestamp: number; daysAgo: number; currencySymbol: string; currencyContract: string; priceDecimal: number } | null> {
     try {
       logger.info(`🔍 Fetching historical sales for ${contract}:${tokenId} (V4 API)`);
       
@@ -1774,7 +1773,7 @@ export class MagicEdenV4Service {
           
           return {
             type,
-            priceEth: priceDecimal.toFixed(2),
+            priceAmount: priceDecimal.toFixed(2),
             priceUsd: activity.price.amount.usd?.toFixed(2) || '',
             timestamp: activity.timestamp,
             daysAgo,
@@ -1870,7 +1869,7 @@ export class MagicEdenV4Service {
       currencySymbol = v4Activity.unitPrice.currency.symbol;
       currencyDecimals = v4Activity.unitPrice.currency.decimals;
       
-      const isStablecoin = ['USDC', 'USDT', 'DAI'].includes(currencySymbol);
+      const isStablecoin = ['USDC', 'USDT'].includes(currencySymbol);
       if (isStablecoin) {
         priceUsd = priceDecimal;
       } else {
@@ -1890,7 +1889,7 @@ export class MagicEdenV4Service {
       currencySymbol = v4Activity.bid.priceV2.currency.symbol;
       currencyDecimals = v4Activity.bid.priceV2.currency.decimals;
       
-      const isStablecoin = ['USDC', 'USDT', 'DAI'].includes(currencySymbol);
+      const isStablecoin = ['USDC', 'USDT'].includes(currencySymbol);
       if (isStablecoin) {
         priceUsd = priceDecimal;
       } else {

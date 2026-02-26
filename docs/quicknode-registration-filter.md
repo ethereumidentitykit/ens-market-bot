@@ -125,7 +125,6 @@ totalCost = (baseCost !== undefined || premium !== undefined)
 function main(stream) {
   // --- ABIs (exact per controllers) ---
   const ENS_ABI = [
-    // Legacy controller (5 args): name, label, owner, cost, expires
     { type: 'event', name: 'NameRegistered', anonymous: false, inputs: [
       { indexed: false, name: 'name',  type: 'string'  },
       { indexed: true,  name: 'label', type: 'bytes32' },
@@ -133,7 +132,6 @@ function main(stream) {
       { indexed: false, name: 'cost',  type: 'uint256' },
       { indexed: false, name: 'expires', type: 'uint256' }
     ]},
-    // Current controller (6 args): name, label, owner, baseCost, premium, expires
     { type: 'event', name: 'NameRegistered', anonymous: false, inputs: [
       { indexed: false, name: 'name',     type: 'string'  },
       { indexed: true,  name: 'label',    type: 'bytes32' },
@@ -142,7 +140,7 @@ function main(stream) {
       { indexed: false, name: 'premium',  type: 'uint256' },
       { indexed: false, name: 'expires',  type: 'uint256' }
     ]},
-    // Newest controller (7 args): label, labelhash, owner, baseCost, premium, expires, referrer
+    // newest: string 'label', indexed 'labelhash' (bytes32), 'referrer' (bytes32)
     { type: 'event', name: 'NameRegistered', anonymous: false, inputs: [
       { indexed: false, name: 'label',     type: 'string'  },
       { indexed: true,  name: 'labelhash', type: 'bytes32' },
@@ -162,8 +160,8 @@ function main(stream) {
   ]);
   const LIMIT_TO_LABELLED = true;
 
-  // price cutoff
-  const MIN_TOTAL_WEI = 40_000_000_000_000_000n; // 0.04 ETH
+  // price cutoff (set to 40_000_000_000_000_000n for 0.04 ETH, keep 0n while testing)
+  const MIN_TOTAL_WEI = 40_000_000_000_000_000n;
 
   // helpers
   const lc = (x) => (x || '').toLowerCase();

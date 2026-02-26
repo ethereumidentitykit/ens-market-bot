@@ -49,8 +49,11 @@ export class QuickNodeSalesService {
   private readonly ENS_REGISTRY = '0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147eA85';
   private readonly ENS_NAMEWRAPPER = '0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401';
   private readonly WETH_ADDRESS = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
+  private readonly USDC_ADDRESS = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+  private readonly USDT_ADDRESS = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
   private readonly NATIVE_ETH_ITEM_TYPE = 0;
-  private readonly MIN_PRICE_ETH = 0.01; // Minimum price filter
+  private readonly MIN_PRICE_ETH = 0.01;
+  private readonly STABLECOIN_DECIMALS = 6;
   
   // Known marketplace intermediaries that indicate proxy contracts
   private readonly PROBLEMATIC_INTERMEDIARIES = [
@@ -142,7 +145,7 @@ export class QuickNodeSalesService {
         const saleId = await this.databaseService.insertSale(enrichedSale);
         results.stored++;
         
-        logger.info(`✅ QuickNode sale stored: ${enrichedSale.nftName} (${enrichedSale.priceEth} ETH) - ID: ${saleId}`);
+        logger.info(`✅ QuickNode sale stored: ${enrichedSale.nftName} (${enrichedSale.priceAmount} ${enrichedSale.currencySymbol || 'ETH'}) - ID: ${saleId}`);
         
       } catch (error: any) {
         results.errors++;
@@ -165,7 +168,8 @@ export class QuickNodeSalesService {
     tokenId: string;
     buyerAddress: string;
     sellerAddress: string;
-    priceEth: string;
+    priceAmount: string;
+    currencySymbol: string;
     blockNumber: number;
     blockTimestamp: string;
     logIndex: number;
@@ -192,51 +196,74 @@ export class QuickNodeSalesService {
         return null; // Not an ENS sale
       }
 
-      // Find ETH/WETH payments in either consideration OR offer
-      // (depends on whether we're looking at buyer or seller perspective)
-      const ethPaymentsInConsideration = order.consideration?.filter(item => 
-        item.itemType === this.NATIVE_ETH_ITEM_TYPE || // Native ETH
-        item.token.toLowerCase() === this.WETH_ADDRESS.toLowerCase() // WETH
-      ) || [];
-      
-      const ethPaymentsInOffer = order.offer?.filter(item => 
-        item.itemType === this.NATIVE_ETH_ITEM_TYPE || // Native ETH
-        item.token.toLowerCase() === this.WETH_ADDRESS.toLowerCase() // WETH
-      ) || [];
+      // Find payments: try ETH/WETH first, then stablecoins
+      const allItems = [...(order.consideration || []), ...(order.offer || [])];
 
-      const ethPayments = [...ethPaymentsInConsideration, ...ethPaymentsInOffer];
+      const ethPayments = allItems.filter(item =>
+        item.itemType === this.NATIVE_ETH_ITEM_TYPE ||
+        item.token.toLowerCase() === this.WETH_ADDRESS.toLowerCase()
+      );
 
-      if (ethPayments.length === 0) {
-        logger.debug(`No ETH/WETH payments found in order ${order.orderHash}`);
+      const stablecoinPayments = allItems.filter(item =>
+        item.token.toLowerCase() === this.USDC_ADDRESS.toLowerCase() ||
+        item.token.toLowerCase() === this.USDT_ADDRESS.toLowerCase()
+      );
+
+      let priceAmount: string;
+      let currencySymbol: string;
+
+      if (ethPayments.length > 0) {
+        const totalWei = ethPayments.reduce((sum, p) => sum + BigInt(p.amount), BigInt(0));
+        priceAmount = (Number(totalWei) / 1e18).toString();
+        currencySymbol = 'ETH';
+      } else if (stablecoinPayments.length > 0) {
+        const totalUnits = stablecoinPayments.reduce((sum, p) => sum + BigInt(p.amount), BigInt(0));
+        priceAmount = (Number(totalUnits) / 10 ** this.STABLECOIN_DECIMALS).toString();
+        const tokenAddr = stablecoinPayments[0].token.toLowerCase();
+        currencySymbol = tokenAddr === this.USDC_ADDRESS.toLowerCase() ? 'USDC' : 'USDT';
+      } else {
+        logger.debug(`No ETH/WETH/USDC/USDT payments found in order ${order.orderHash}`);
         return null;
       }
 
-      // Sum all ETH payments (seller gets multiple payments due to fees)
-      const totalWei = ethPayments.reduce((sum, payment) => {
-        return sum + BigInt(payment.amount);
-      }, BigInt(0));
-
-      const priceEth = (Number(totalWei) / 1e18).toString();
-      
-      // Apply minimum price filter
-      if (parseFloat(priceEth) < this.MIN_PRICE_ETH) {
-        logger.debug(`Sale below minimum price: ${priceEth} ETH < ${this.MIN_PRICE_ETH} ETH`);
+      // Apply minimum price filter (ETH-equivalent)
+      const priceNum = parseFloat(priceAmount);
+      if (currencySymbol === 'ETH' && priceNum < this.MIN_PRICE_ETH) {
+        logger.debug(`Sale below minimum price: ${priceAmount} ETH < ${this.MIN_PRICE_ETH} ETH`);
         return null;
+      } else if (currencySymbol !== 'ETH') {
+        const ethPrice = await this.alchemyService.getETHPriceUSD();
+        if (!ethPrice) {
+          logger.warn(`⚠️ ETH price unavailable — skipping min-price check for ${currencySymbol} sale (fail-open)`);
+        } else {
+          const ethEquiv = priceNum / ethPrice;
+          if (ethEquiv < this.MIN_PRICE_ETH) {
+            logger.debug(`Sale below minimum price: ${priceAmount} ${currencySymbol} (~${ethEquiv.toFixed(4)} ETH) < ${this.MIN_PRICE_ETH} ETH`);
+            return null;
+          }
+        }
       }
 
-      // Find the seller: the recipient of the largest ETH payment (main sale amount)
+      // Find the seller: the recipient of the largest payment (main sale amount)
       // In Seaport, the seller gets the main payment, marketplace gets fees
       // Only consideration items have recipients, offer items don't
-      const ethPaymentsWithRecipients = ethPaymentsInConsideration.length > 0 
-        ? ethPaymentsInConsideration 
-        : ethPaymentsInOffer;
-      
-      if (ethPaymentsWithRecipients.length === 0) {
-        logger.debug(`No ETH payments with recipients found in order ${order.orderHash}`);
+      const payments = ethPayments.length > 0 ? ethPayments : stablecoinPayments;
+      const paymentsInConsideration = (order.consideration || []).filter(item =>
+        payments.some(p => p.token === item.token && p.amount === item.amount)
+      );
+      const paymentsInOffer = (order.offer || []).filter(item =>
+        payments.some(p => p.token === item.token && p.amount === item.amount)
+      );
+      const paymentsWithRecipients = paymentsInConsideration.length > 0
+        ? paymentsInConsideration
+        : paymentsInOffer;
+
+      if (paymentsWithRecipients.length === 0) {
+        logger.debug(`No payments with recipients found in order ${order.orderHash}`);
         return null;
       }
       
-      const mainPayment = ethPaymentsWithRecipients.reduce((max, payment) => 
+      const mainPayment = paymentsWithRecipients.reduce((max, payment) => 
         BigInt(payment.amount) > BigInt(max.amount) ? payment : max
       );
       
@@ -338,7 +365,8 @@ export class QuickNodeSalesService {
         tokenId: ensToken.identifier,
         buyerAddress,
         sellerAddress,
-        priceEth,
+        priceAmount,
+        currencySymbol,
         blockNumber,
         blockTimestamp,
         logIndex,
@@ -365,7 +393,8 @@ export class QuickNodeSalesService {
     tokenId: string;
     buyerAddress: string;
     sellerAddress: string;
-    priceEth: string;
+    priceAmount: string;
+    currencySymbol: string;
     blockNumber: number;
     blockTimestamp: string;
     logIndex: number;
@@ -376,10 +405,17 @@ export class QuickNodeSalesService {
     try {
       logger.debug(`Enriching sale data for token ${saleData.tokenId}`);
 
-      // 1. Get USD price using Alchemy service (with caching and $4000 fallback)
-      const ethPriceUsd = await this.alchemyService.getETHPriceUSD();
-      const usdValue = parseFloat(saleData.priceEth) * ethPriceUsd!; // ethPriceUsd never null due to fallback
-      const priceUsd = usdValue.toFixed(2);
+      // 1. Calculate USD price based on currency
+      let priceUsd: string | undefined;
+      const symbol = saleData.currencySymbol.toUpperCase();
+      if (symbol === 'USDC' || symbol === 'USDT') {
+        priceUsd = parseFloat(saleData.priceAmount).toFixed(2);
+      } else {
+        const ethPriceUsd = await this.alchemyService.getETHPriceUSD();
+        priceUsd = ethPriceUsd
+          ? (parseFloat(saleData.priceAmount) * ethPriceUsd).toFixed(2)
+          : undefined;
+      }
 
       // 2. Try OpenSea first for metadata
       let nftName: string | undefined;
@@ -460,8 +496,9 @@ export class QuickNodeSalesService {
         marketplace: '', // Leave empty as requested
         buyerAddress: saleData.buyerAddress,
         sellerAddress: saleData.sellerAddress,
-        priceEth: saleData.priceEth,
+        priceAmount: saleData.priceAmount,
         priceUsd,
+        currencySymbol: saleData.currencySymbol,
         blockNumber: saleData.blockNumber,
         blockTimestamp: saleData.blockTimestamp,
         logIndex: saleData.logIndex,
@@ -511,32 +548,29 @@ export class QuickNodeSalesService {
         return 'not an ENS token';
       }
 
-      // Check for ETH/WETH payments in either consideration or offer
-      const ethPaymentsInConsideration = order.consideration?.filter(item => 
-        item.itemType === this.NATIVE_ETH_ITEM_TYPE || // Native ETH
-        item.token.toLowerCase() === this.WETH_ADDRESS.toLowerCase() // WETH
-      ) || [];
-      
-      const ethPaymentsInOffer = order.offer?.filter(item => 
-        item.itemType === this.NATIVE_ETH_ITEM_TYPE || // Native ETH
-        item.token.toLowerCase() === this.WETH_ADDRESS.toLowerCase() // WETH
-      ) || [];
+      // Check for payments (ETH/WETH or stablecoins)
+      const allItems = [...(order.consideration || []), ...(order.offer || [])];
+      const hasEth = allItems.some(item =>
+        item.itemType === this.NATIVE_ETH_ITEM_TYPE ||
+        item.token.toLowerCase() === this.WETH_ADDRESS.toLowerCase()
+      );
+      const hasStablecoin = allItems.some(item =>
+        item.token.toLowerCase() === this.USDC_ADDRESS.toLowerCase() ||
+        item.token.toLowerCase() === this.USDT_ADDRESS.toLowerCase()
+      );
 
-      const ethPayments = [...ethPaymentsInConsideration, ...ethPaymentsInOffer];
-
-      if (ethPayments.length === 0) {
-        return 'no ETH/WETH payments found';
+      if (!hasEth && !hasStablecoin) {
+        return 'no ETH/WETH/USDC/USDT payments found';
       }
 
-      // Check minimum price
-      const totalWei = ethPayments.reduce((sum, payment) => {
-        return sum + BigInt(payment.amount);
-      }, BigInt(0));
-
-      const priceEth = Number(totalWei) / 1e18;
-      
-      if (priceEth < this.MIN_PRICE_ETH) {
-        return `price ${priceEth.toFixed(4)} ETH < ${this.MIN_PRICE_ETH} ETH minimum`;
+      if (hasEth) {
+        const totalWei = allItems
+          .filter(item => item.itemType === this.NATIVE_ETH_ITEM_TYPE || item.token.toLowerCase() === this.WETH_ADDRESS.toLowerCase())
+          .reduce((sum, p) => sum + BigInt(p.amount), BigInt(0));
+        const priceEthVal = Number(totalWei) / 1e18;
+        if (priceEthVal < this.MIN_PRICE_ETH) {
+          return `price ${priceEthVal.toFixed(4)} ETH < ${this.MIN_PRICE_ETH} ETH minimum`;
+        }
       }
 
       return 'unknown reason';
