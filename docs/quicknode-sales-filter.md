@@ -1,4 +1,4 @@
-# QuickNode Stream Filter - ENS Sales Monitoring
+# QuickNode Sales Filter - ENS Sales Monitoring
 
 This document describes the QuickNode Streams filter function used to monitor ENS domain sales via Seaport (OpenSea) events.
 
