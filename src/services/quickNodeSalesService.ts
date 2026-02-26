@@ -408,7 +408,9 @@ export class QuickNodeSalesService {
         priceUsd = parseFloat(saleData.priceAmount).toFixed(2);
       } else {
         const ethPriceUsd = await this.alchemyService.getETHPriceUSD();
-        priceUsd = (parseFloat(saleData.priceAmount) * ethPriceUsd!).toFixed(2);
+        priceUsd = ethPriceUsd
+          ? (parseFloat(saleData.priceAmount) * ethPriceUsd).toFixed(2)
+          : '0';
       }
 
       // 2. Try OpenSea first for metadata
