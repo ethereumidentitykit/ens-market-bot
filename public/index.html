@@ -225,19 +225,6 @@
                                 <span x-text="apiToggles.twitterEnabled ? 'Enabled' : 'Disabled'"></span>
                             </button>
                         </div>
-                        <!-- Moralis API Toggle -->
-                        <div class="flex items-center space-x-2">
-                            <span class="text-sm text-gray-700">Moralis API:</span>
-                            <button 
-                                @click="toggleMoralisAPI()"
-                                :disabled="loading"
-                                :class="apiToggles.moralisEnabled ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'"
-                                class="relative inline-flex items-center px-3 py-1 rounded-full text-xs font-medium text-white transition-colors disabled:opacity-50"
-                            >
-                                <i :class="apiToggles.moralisEnabled ? 'fas fa-check' : 'fas fa-times'" class="mr-1"></i>
-                                <span x-text="apiToggles.moralisEnabled ? 'Enabled' : 'Disabled'"></span>
-                            </button>
-                        </div>
                         <!-- Magic Eden API Toggle -->
                         <div class="flex items-center space-x-2">
                             <span class="text-sm text-gray-700">Magic Eden API:</span>
@@ -509,10 +496,6 @@
                         <div class="flex items-center">
                             <div :class="apiToggles.twitterEnabled ? 'bg-green-400' : 'bg-red-400'" class="w-2 h-2 rounded-full mr-2"></div>
                             <span class="text-blue-100">Twitter API: <span x-text="apiToggles.twitterEnabled ? 'Connected' : 'Disabled'"></span></span>
-                        </div>
-                        <div class="flex items-center">
-                            <div :class="apiToggles.moralisEnabled ? 'bg-green-400' : 'bg-red-400'" class="w-2 h-2 rounded-full mr-2"></div>
-                            <span class="text-blue-100">Moralis API: <span x-text="apiToggles.moralisEnabled ? 'Connected' : 'Disabled'"></span></span>
                         </div>
                         <div class="flex items-center space-x-4">
                             <div class="flex items-center" x-show="autoPostSettings.sales?.enabled">

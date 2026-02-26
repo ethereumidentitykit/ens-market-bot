@@ -15,10 +15,6 @@ export const config: Config = {
     token: process.env.BITQUERY_TOKEN,
     baseUrl: process.env.BITQUERY_BASE_URL || 'https://streaming.bitquery.io/graphql',
   } : undefined,
-  moralis: process.env.MORALIS_API_KEY ? {
-    apiKey: process.env.MORALIS_API_KEY,
-    baseUrl: process.env.MORALIS_BASE_URL || 'https://deep-index.moralis.io/api/v2.2',
-  } : undefined,
   twitter: {
     apiKey: process.env.TWITTER_API_KEY || '',
     apiSecret: process.env.TWITTER_API_SECRET || '',
@@ -58,7 +54,7 @@ export const config: Config = {
 
 // Validate required configuration
 export function validateConfig(): void {
-  const required = ['MORALIS_API_KEY', 'SESSION_SECRET'];
+  const required = ['SESSION_SECRET'];
   const missing = required.filter((key) => !process.env[key]);
   
   if (missing.length > 0) {

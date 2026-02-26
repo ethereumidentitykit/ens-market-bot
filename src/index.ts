@@ -9,11 +9,9 @@ import { generateNonce } from 'siwe';
 import { config, validateConfig } from './utils/config';
 import { logger } from './utils/logger';
 import { MONITORED_CONTRACTS } from './config/contracts';
-import { MoralisService } from './services/moralisService';
 import { AlchemyService } from './services/alchemyService';
 import { DatabaseService } from './services/databaseService';
 import { IDatabaseService, ENSRegistration, ProcessedSale, ENSBid } from './types';
-import { SalesProcessingService } from './services/salesProcessingService';
 import { BidsProcessingService } from './services/bidsProcessingService';
 import { GrailsApiService } from './services/grailsApiService';
 import { MagicEdenV4Service, TokenActivity } from './services/magicEdenV4Service';
@@ -58,13 +56,10 @@ async function startApplication(): Promise<void> {
     const databaseService = new DatabaseService();
 
     // Initialize services
-    const moralisService = new MoralisService();
     const alchemyService = new AlchemyService(databaseService);
     const openSeaService = new OpenSeaService();
     const ensMetadataService = new ENSMetadataService();
-    
-    const salesProcessingService = new SalesProcessingService(moralisService, databaseService);
-    
+
     // Magic Eden V4 Service (V3 removed - fully migrated)
     const magicEdenV4Service = new MagicEdenV4Service();
     
@@ -78,7 +73,7 @@ async function startApplication(): Promise<void> {
     const quickNodeSalesService = new QuickNodeSalesService(databaseService, openSeaService, ensMetadataService, alchemyService);
     const quickNodeRegistrationService = new QuickNodeRegistrationService(databaseService, ensMetadataService, alchemyService, openSeaService);
     const autoTweetService = new AutoTweetService(newTweetFormatter, twitterService, rateLimitService, databaseService, worldTimeService, alchemyService);
-    const schedulerService = new SchedulerService(salesProcessingService, bidsProcessingService, autoTweetService, databaseService);
+    const schedulerService = new SchedulerService(bidsProcessingService, autoTweetService, databaseService);
     
     // Initialize GrailsApiService for Grails marketplace offers (if enabled)
     let grailsApiService: GrailsApiService | null = null;
@@ -425,76 +420,6 @@ async function startApplication(): Promise<void> {
         res.status(500).json({
           success: false,
           message: 'Error fetching ETH price from Alchemy',
-          error: error.message
-        });
-      }
-    });
-
-    // Manual fetch endpoint for testing
-    app.get('/api/fetch-sales', requireAuth, async (req, res) => {
-      try {
-        const { contractAddress, limit } = req.query;
-        
-        if (contractAddress) {
-          // Fetch for specific contract
-          const response = await moralisService.getNFTTrades(
-            contractAddress as string,
-            parseInt(limit as string) || 300
-          );
-          res.json({ success: true, data: response });
-        } else {
-          // Fetch for all contracts
-          const sales = await moralisService.getAllRecentTrades(
-            parseInt(limit as string) || 300
-          );
-          res.json({ success: true, data: { trades: sales, count: sales.length } });
-        }
-      } catch (error: any) {
-        res.status(500).json({
-          success: false,
-          error: error.message
-        });
-      }
-    });
-
-    // Debug endpoint to check Moralis configuration
-    app.get('/api/debug/moralis', requireAuth, async (req, res) => {
-      try {
-        const hasApiKey = !!config.moralis?.apiKey;
-        const apiKeyLength = config.moralis?.apiKey?.length || 0;
-        const baseUrl = config.moralis?.baseUrl;
-        
-        // Try a simple API call
-        let apiTestResult = null;
-        try {
-          // Use first contract from our configuration for testing
-          const testContract = MONITORED_CONTRACTS[0].address;
-          const testResult = await moralisService.getNFTTrades(testContract, 1);
-          apiTestResult = {
-            success: true,
-            resultCount: testResult?.trades?.length || 0,
-            hasResult: !!testResult?.trades
-          };
-        } catch (error: any) {
-          apiTestResult = {
-            success: false,
-            error: error.message
-          };
-        }
-        
-        res.json({
-          success: true,
-          debug: {
-            hasApiKey,
-            apiKeyLength,
-            baseUrl,
-            environment: config.nodeEnv,
-            apiTestResult
-          }
-        });
-      } catch (error: any) {
-        res.status(500).json({
-          success: false,
           error: error.message
         });
       }
@@ -894,10 +819,11 @@ async function startApplication(): Promise<void> {
 
     app.get('/api/stats', requireAuth, async (req, res) => {
       try {
-        const stats = await salesProcessingService.getProcessingStats();
+        const dbStats = await databaseService.getStats();
+        const recentSales = await databaseService.getRecentSales(10);
         res.json({
           success: true,
-          data: stats
+          data: { database: dbStats, recentSales }
         });
       } catch (error: any) {
         res.status(500).json({
@@ -1071,33 +997,6 @@ async function startApplication(): Promise<void> {
         });
       } catch (error: any) {
         logger.error('Toggle Twitter API error:', error);
-        res.status(500).json({
-          success: false,
-          error: error.message
-        });
-      }
-    });
-
-    app.post('/api/admin/toggle-moralis', requireAuth, async (req, res) => {
-      try {
-        const { enabled } = req.body;
-        if (typeof enabled !== 'boolean') {
-          return res.status(400).json({
-            success: false,
-            error: 'enabled must be a boolean'
-          });
-        }
-
-        await apiToggleService.setMoralisEnabled(enabled);
-        logger.info(`Moralis API ${enabled ? 'enabled' : 'disabled'} via admin toggle`);
-        
-        const state = apiToggleService.getState();
-        res.json({
-          success: true,
-          moralisEnabled: state.moralisEnabled
-        });
-      } catch (error: any) {
-        logger.error('Toggle Moralis API error:', error);
         res.status(500).json({
           success: false,
           error: error.message
@@ -3179,246 +3078,6 @@ async function startApplication(): Promise<void> {
       }
     }
 
-    // ENS Registration Webhook from Moralis Streams
-    app.post('/webhook/ens-registrations', async (req, res) => {
-      try {
-        logger.info('🎉 ENS Registration webhook received');
-        
-        // Handle the webhook data - sometimes it comes as an array with JSON string
-        let webhookData = req.body;
-        
-        // If it's an array with a string, parse the first element
-        if (Array.isArray(webhookData) && typeof webhookData[0] === 'string') {
-          webhookData = JSON.parse(webhookData[0]);
-        }
-        
-        logger.info('Webhook data:', JSON.stringify(webhookData, null, 2));
-        
-        // Check if this is a test webhook (empty data)
-        if (!webhookData.logs || webhookData.logs.length === 0) {
-          if (!webhookData.block?.number || webhookData.block.number === '') {
-            logger.info('✅ Test webhook received successfully - no actual events to process');
-            return res.status(200).json({ 
-              success: true, 
-              message: 'Test webhook received',
-              type: 'test'
-            });
-          }
-          logger.warn('No logs found in webhook data');
-          return res.status(200).json({ 
-            success: true, 
-            message: 'Webhook received but no logs to process',
-            type: 'no_logs'
-          });
-        }
-        
-        // Process each log (should be NameRegistered events)
-        for (const log of webhookData.logs) {
-          try {
-            // Extract event data from the decoded abi
-            const eventData = {
-              transactionHash: log.transactionHash,
-              blockNumber: webhookData.block?.number || 'unknown',
-              blockTimestamp: webhookData.block?.timestamp || Date.now(),
-              contractAddress: log.address
-            };
-            
-            // Check if we have decoded event data
-            if (webhookData.logs[0] && webhookData.abi && webhookData.abi[0]) {
-              logger.info('🔍 Processing NameRegistered event...');
-              
-              // The event name and cost should be in the decoded data
-              // For now, let's log everything we receive to understand the structure
-              logger.info('Event details:', {
-                transactionHash: eventData.transactionHash,
-                blockNumber: eventData.blockNumber,
-                blockTimestamp: eventData.blockTimestamp,
-                contractAddress: eventData.contractAddress,
-                topic0: log.topic0,
-                topic1: log.topic1,
-                topic2: log.topic2,
-                data: log.data
-              });
-              
-              // Extract ENS data from webhook using multi-format detection
-              const extractedData = extractRegistrationData(log.data, eventData.contractAddress);
-              const tokenId = log.topic1; // This is the keccak256 hash of the ENS name
-              const ownerAddress = log.topic2?.replace('0x000000000000000000000000', '0x'); // Remove leading zeros padding
-              
-              logger.info('📝 Extracted ENS registration data:', {
-                ensName: extractedData.ensName,
-                tokenId,
-                ownerAddress,
-                cost: `${extractedData.cost} wei`,
-                contractFormat: extractedData.contractFormat,
-                baseCost: extractedData.baseCost ? `${extractedData.baseCost} wei` : undefined,
-                premium: extractedData.premium ? `${extractedData.premium} wei` : undefined,
-                transactionHash: eventData.transactionHash
-              });
-
-              // Fetch ENS metadata (image, description, etc.)
-              // Generate contract-specific token IDs using ENSTokenUtils
-              const fullEnsName = `${extractedData.ensName}.eth`;
-              const baseRegistrarContract = '0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147eA85';
-              const nameWrapperContract = '0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401';
-              
-              // Base Registrar uses labelhash (from topic1) 
-              const baseRegistrarTokenId = BigInt(tokenId).toString();
-              // NameWrapper uses namehash (generated from full ENS name)
-              const nameWrapperTokenId = BigInt(ENSTokenUtils.getTokenIdForContract(nameWrapperContract, fullEnsName)).toString();
-              
-              logger.debug(`Token ID generation for "${fullEnsName}":`);
-              logger.debug(`  Base Registrar (labelhash): ${tokenId} -> ${baseRegistrarTokenId}`);
-              logger.debug(`  NameWrapper (namehash): ${ENSTokenUtils.getTokenIdForContract(nameWrapperContract, fullEnsName)} -> ${nameWrapperTokenId}`);
-              
-              // Use OpenSea service with correct NFT contracts and token IDs
-              let ensMetadata: { name?: string; image?: string; description?: string } | null = null;
-              let openSeaSuccess = false;
-              
-              // 1. Try OpenSea with Base Registrar contract first (has most names)
-              logger.info(`🔍 Enriching registration - trying OpenSea with Base Registrar (${baseRegistrarTokenId})...`);
-              try {
-                const openSeaData = await openSeaService.getSimplifiedMetadata(baseRegistrarContract, baseRegistrarTokenId);
-                if (openSeaData) {
-                  ensMetadata = {
-                    name: openSeaData.name,
-                    image: openSeaData.image,
-                    description: openSeaData.description
-                  };
-                  openSeaSuccess = true;
-                  logger.info(`✅ OpenSea metadata success (Base Registrar): ${openSeaData.name} (${openSeaData.collection})`);
-                } else {
-                  logger.debug(`⚠️ OpenSea returned null for Base Registrar ${baseRegistrarTokenId}`);
-                }
-              } catch (error: any) {
-                logger.debug(`❌ OpenSea Base Registrar failed for ${baseRegistrarTokenId}: ${error.message}`);
-              }
-              
-              // 2. Try OpenSea with NameWrapper contract if Base Registrar failed
-              if (!ensMetadata) {
-                logger.info(`🔍 Trying OpenSea with NameWrapper contract (${nameWrapperTokenId})...`);
-                try {
-                  const openSeaData = await openSeaService.getSimplifiedMetadata(nameWrapperContract, nameWrapperTokenId);
-                  if (openSeaData) {
-                    ensMetadata = {
-                      name: openSeaData.name,
-                      image: openSeaData.image,
-                      description: openSeaData.description
-                    };
-                    openSeaSuccess = true;
-                    logger.info(`✅ OpenSea metadata success (NameWrapper): ${openSeaData.name} (${openSeaData.collection})`);
-                  } else {
-                    logger.debug(`⚠️ OpenSea returned null for NameWrapper ${nameWrapperTokenId}`);
-                  }
-                } catch (error: any) {
-                  logger.debug(`❌ OpenSea NameWrapper failed for ${nameWrapperTokenId}: ${error.message}`);
-                }
-              }
-              
-              // 3. Fallback to ENS Metadata service if OpenSea failed completely
-              if (!ensMetadata) {
-                logger.warn(`⚠️ Falling back to ENS Metadata API for registration ${baseRegistrarTokenId} (OpenSea failed)`);
-                try {
-                  const ensData = await ensMetadataService.getMetadataWithFallback(baseRegistrarTokenId);
-                  if (ensData) {
-                    ensMetadata = {
-                      name: ensData.name,
-                      image: ensData.image,
-                      description: ensData.description
-                    };
-                    logger.info(`✅ ENS metadata fallback success: ${ensData.name}`);
-                  } else {
-                    logger.error(`❌ ENS metadata fallback returned null for registration ${baseRegistrarTokenId}`);
-                  }
-                } catch (error: any) {
-                  logger.error(`❌ ENS metadata fallback failed for registration ${baseRegistrarTokenId}: ${error.message}`);
-                }
-              }
-              
-              // 4. Log enrichment results
-              if (ensMetadata) {
-                const enrichmentSource = openSeaSuccess ? 'OpenSea' : 'ENS Metadata (fallback)';
-                logger.info(`📋 Registration enrichment complete for ${ensMetadata.name}: metadata=${enrichmentSource}, hasImage=${!!ensMetadata.image}, hasDescription=${!!ensMetadata.description}`);
-                logger.info('🖼️ ENS metadata fetched:', {
-                  name: ensMetadata.name,
-                  image: ensMetadata.image,
-                  description: ensMetadata.description
-                });
-              } else {
-                logger.error(`❌ No NFT name found for registration ${baseRegistrarTokenId} - metadata enrichment failed`);
-                logger.warn('⚠️ Failed to fetch ENS metadata for', extractedData.ensName);
-              }
-              
-              // Convert cost from wei to ETH
-              const costInWei = BigInt(extractedData.cost);
-              const costInEth = (Number(costInWei) / 1e18).toFixed(6);
-              
-              // Get current ETH price in USD for cost calculation
-              let costUsd: string | undefined;
-              try {
-                const ethPriceUsd = await alchemyService.getETHPriceUSD();
-                if (ethPriceUsd) {
-                  const costInUsd = parseFloat(costInEth) * ethPriceUsd;
-                  costUsd = costInUsd.toFixed(2);
-                  logger.info(`💰 ETH price: $${ethPriceUsd}, Registration cost: ${costInEth} ETH ($${costUsd})`);
-                }
-              } catch (error: any) {
-                logger.warn('Failed to fetch ETH price for USD conversion:', error.message);
-              }
-              
-              // Duplicate checking and source tracking handled by insertRegistrationWithSourceTracking
-
-              // Prepare registration data
-              const registrationData: Omit<ENSRegistration, 'id'> = {
-                transactionHash: eventData.transactionHash,
-                contractAddress: eventData.contractAddress,
-                tokenId: baseRegistrarTokenId,
-                ensName: extractedData.ensName,
-                fullName: ensMetadata?.name || `${extractedData.ensName}.eth`,
-                ownerAddress,
-                costWei: extractedData.cost,
-                costEth: costInEth,
-                costUsd: costUsd,
-                blockNumber: parseInt(eventData.blockNumber),
-                blockTimestamp: new Date(parseInt(eventData.blockTimestamp) * 1000).toISOString(),
-                processedAt: new Date().toISOString(),
-                image: ensMetadata?.image,
-                description: ensMetadata?.description,
-                posted: false,
-                expiresAt: undefined, // TODO: Calculate expiration if needed
-              };
-
-              // Store registration in database with source tracking and duplicate detection
-              const registrationId = await databaseService.insertRegistrationWithSourceTracking(registrationData, 'moralis');
-              // Success logging is handled by insertRegistrationWithSourceTracking
-
-              // TODO: Format and send tweet
-              
-              logger.info('✅ ENS registration event processed successfully');
-            }
-            
-          } catch (eventError: any) {
-            logger.error('Error processing event:', eventError.message);
-          }
-        }
-        
-        // Respond to Moralis that we received the webhook
-        res.status(200).json({ 
-          success: true,
-          message: 'Webhook received and processed',
-          eventsProcessed: webhookData.logs.length,
-          timestamp: new Date().toISOString()
-        });
-        
-      } catch (error: any) {
-        logger.error('Error processing ENS registration webhook:', error.message);
-        res.status(500).json({ 
-          error: 'Webhook processing failed',
-          message: error.message
-        });
-      }
-    });
-
     // QuickNode Sales Webhook - salesv2 (manual body capture for no content-type)
     app.post('/webhook/salesv2', (req, res) => {
       // Capture raw body manually since QuickNode doesn't send Content-Type
@@ -3800,7 +3459,6 @@ async function startApplication(): Promise<void> {
           unpostedSales: '/api/unposted-sales?limit=10'
         },
         webhooks: {
-          ensRegistrations: '/webhook/ens-registrations',
           salesv2: '/webhook/salesv2',
           quicknodeRegistrations: '/webhook/quicknode-registrations'
         }

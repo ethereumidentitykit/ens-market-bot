@@ -1,5 +1,4 @@
 import { CronJob } from 'cron';
-import { SalesProcessingService } from './salesProcessingService';
 import { BidsProcessingService } from './bidsProcessingService';
 import { GrailsApiService } from './grailsApiService';
 import { AutoTweetService, AutoPostSettings, PostResult } from './autoTweetService';
@@ -8,7 +7,6 @@ import { logger } from '../utils/logger';
 import { IDatabaseService } from '../types';
 
 export class SchedulerService {
-  private salesProcessingService: SalesProcessingService;
   private bidsProcessingService: BidsProcessingService;
   private grailsApiService: GrailsApiService | null = null;
   private autoTweetService: AutoTweetService;
@@ -31,12 +29,10 @@ export class SchedulerService {
   private isProcessingGrails: boolean = false;
 
   constructor(
-    salesProcessingService: SalesProcessingService,
     bidsProcessingService: BidsProcessingService,
     autoTweetService: AutoTweetService,
     databaseService: IDatabaseService
   ) {
-    this.salesProcessingService = salesProcessingService;
     this.bidsProcessingService = bidsProcessingService;
     this.autoTweetService = autoTweetService;
     this.apiToggleService = APIToggleService.getInstance();
@@ -148,7 +144,7 @@ export class SchedulerService {
     await this.saveSchedulerState(true);
     
     logger.info('Scheduler started - Sales: every 5 minutes, Registrations: every 1 minute, Bids: every 1 minute, Grails: every 5 minutes');
-    logger.info('Tweet processing: REAL-TIME via DatabaseEventService for both Moralis and QuickNode data');
+    logger.info('Tweet processing: REAL-TIME via DatabaseEventService for QuickNode data');
     logger.info(`Next sales run: ${this.salesSyncJob.nextDate().toString()}`);
     logger.info(`Next registration run: ${this.registrationSyncJob.nextDate().toString()}`);
     logger.info(`Next bid run: ${this.bidsSyncJob.nextDate().toString()}`);
@@ -281,7 +277,8 @@ export class SchedulerService {
 
   /**
    * Execute the sales sync process (runs every 5 minutes)
-   * NOTE: Moralis sales processing disabled - QuickNode webhooks handle all sales in real-time
+   * QuickNode webhooks handle all sales ingestion in real-time.
+   * This is kept as a heartbeat / placeholder for future maintenance tasks.
    */
   private async runSalesSync(): Promise<void> {
     if (!this.isRunning) {
@@ -296,63 +293,30 @@ export class SchedulerService {
 
     this.isProcessingSales = true;
     const startTime = new Date();
-    logger.info('Starting sales sync...');
 
     try {
-      // Refresh NTP time cache before processing
       await this.autoTweetService.refreshTimeCache();
-      
-      // ⚠️ MORALIS SALES PROCESSING DISABLED ⚠️
-      // QuickNode webhooks now handle ALL sales ingestion in real-time
-      // Moralis was causing duplicates due to incorrect log_index extraction
-      // and never provided data that QuickNode didn't already capture
-      
-      logger.info(`✅ Sales sync skipped - QuickNode webhooks handle all sales in real-time`);
-      
-      // Mock result for stats tracking
-      const moralisResult = {
-        fetched: 0,
-        newSales: 0,
-        duplicates: 0,
-        filtered: 0,
-        errors: 0
-      };
-      
+
       this.lastRunTime = startTime;
-      this.lastRunStats = moralisResult;
-      this.consecutiveErrors = 0; // Reset error counter on success
+      this.lastRunStats = { fetched: 0, newSales: 0, duplicates: 0, filtered: 0, errors: 0 };
+      this.consecutiveErrors = 0;
 
       const duration = Date.now() - startTime.getTime();
-      
-      logger.info(`Sales sync completed in ${duration}ms:`, {
-        fetched: moralisResult.fetched,
-        newSales: moralisResult.newSales,
-        duplicates: moralisResult.duplicates,
-        errors: moralisResult.errors
-      });
-      
-      if (moralisResult.errors > 0) {
-        logger.warn(`⚠️ Encountered ${moralisResult.errors} errors during Moralis processing`);
-      }
+      logger.debug(`Sales sync heartbeat completed in ${duration}ms - QuickNode webhooks handle all sales`);
 
     } catch (error: any) {
       this.consecutiveErrors++;
-      
-      logger.error(`Scheduled sync failed (attempt ${this.consecutiveErrors}/${this.maxConsecutiveErrors}):`, error.message);
-      
+      logger.error(`Sales sync failed (attempt ${this.consecutiveErrors}/${this.maxConsecutiveErrors}):`, error.message);
+
       this.lastRunStats = {
         success: false,
         error: error.message,
         consecutiveErrors: this.consecutiveErrors
       };
 
-      // Stop scheduler if too many consecutive errors
       if (this.consecutiveErrors >= this.maxConsecutiveErrors) {
         logger.error(`Too many consecutive errors (${this.consecutiveErrors}). Stopping scheduler for safety.`);
         this.stop();
-        
-        // TODO: In a production system, this would trigger alerts
-        // For now, just log the critical error
         logger.error('🚨 SCHEDULER STOPPED DUE TO REPEATED FAILURES - Manual intervention required');
       }
     } finally {
@@ -362,9 +326,9 @@ export class SchedulerService {
 
   /**
    * Execute the registration sync process (runs every 1 minute)
-   * NOTE: Registration data ingestion handled by Moralis (/webhook/ens-registrations) and QuickNode webhooks
-   * NOTE: Registration tweet processing is now handled by DatabaseEventService via NOTIFY/LISTEN
-   * This method is kept for potential future registration maintenance tasks
+   * Registration data ingestion handled by QuickNode webhooks.
+   * Tweet processing handled by DatabaseEventService via NOTIFY/LISTEN.
+   * Kept for potential future maintenance tasks.
    */
   private async runRegistrationSync(): Promise<void> {
     if (!this.isRunning) {
@@ -382,19 +346,8 @@ export class SchedulerService {
     logger.debug('Starting registration sync (maintenance only)...');
 
     try {
-      // Registration data ingestion: Handled by multiple webhooks:
-      // - Moralis webhook: /webhook/ens-registrations (fallback)
-      // - QuickNode webhook: /webhook/quicknode-registrations (primary)
-      // Both store to database with duplicate protection
-      
-      // Registration tweet processing: Handled by DatabaseEventService via NOTIFY/LISTEN
-      // This provides instant real-time processing when registrations are stored in database
-      
-      // Future: Add any registration maintenance tasks here (e.g., data cleanup, analytics)
-      
       const duration = Date.now() - startTime.getTime();
-      
-      logger.debug(`Registration sync completed in ${duration}ms - dual webhook ingestion active (Moralis fallback + QuickNode primary)`);
+      logger.debug(`Registration sync completed in ${duration}ms`);
 
     } catch (error: any) {
       logger.error(`Registration sync failed:`, error.message);

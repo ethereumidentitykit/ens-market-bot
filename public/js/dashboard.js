@@ -46,7 +46,6 @@ function dashboard() {
         // Master API Toggles
         apiToggles: {
             twitterEnabled: true,
-            moralisEnabled: true,
             magicEdenEnabled: true,
             openaiEnabled: true,
             aiAutoPostingEnabled: false
@@ -552,7 +551,6 @@ function dashboard() {
                 if (response.ok) {
                     const data = await response.json();
                     this.apiToggles.twitterEnabled = data.twitterEnabled;
-                    this.apiToggles.moralisEnabled = data.moralisEnabled;
                     this.apiToggles.magicEdenEnabled = data.magicEdenEnabled;
                     this.apiToggles.openaiEnabled = data.openaiEnabled;
                     this.autoPostSettings.enabled = data.autoPostingEnabled;
@@ -1426,31 +1424,6 @@ function dashboard() {
             }
         },
 
-        async toggleMoralisAPI() {
-            try {
-                this.loading = true;
-                const response = await fetch('/api/admin/toggle-moralis', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ enabled: !this.apiToggles.moralisEnabled })
-                });
-                
-                if (response.ok) {
-                    this.apiToggles.moralisEnabled = !this.apiToggles.moralisEnabled;
-                    this.showMessage(
-                        `Moralis API ${this.apiToggles.moralisEnabled ? 'enabled' : 'disabled'}`,
-                        'success'
-                    );
-                } else {
-                    throw new Error('Failed to toggle Moralis API');
-                }
-            } catch (error) {
-                console.error('Toggle Moralis API error:', error);
-                this.showMessage('Failed to toggle Moralis API', 'error');
-            } finally {
-                this.loading = false;
-            }
-        },
 
         async toggleMagicEdenAPI() {
             try {

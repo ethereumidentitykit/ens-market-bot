@@ -7,7 +7,6 @@ import { logger } from '../utils/logger';
 
 export interface APIToggleState {
   twitterEnabled: boolean;
-  moralisEnabled: boolean;
   magicEdenEnabled: boolean;
   openaiEnabled: boolean;
   autoPostingEnabled: boolean;
@@ -18,7 +17,6 @@ export class APIToggleService {
   private static instance: APIToggleService;
   private state: APIToggleState = {
     twitterEnabled: true,
-    moralisEnabled: true,
     magicEdenEnabled: true,
     openaiEnabled: true,
     autoPostingEnabled: false,
@@ -55,7 +53,6 @@ export class APIToggleService {
     try {
       // Load each toggle state from system_state table
       const twitterState = await this.dbService.getSystemState('api_toggle_twitter');
-      const moralisState = await this.dbService.getSystemState('api_toggle_moralis');
       const magicEdenState = await this.dbService.getSystemState('api_toggle_magic_eden');
       const openaiState = await this.dbService.getSystemState('api_toggle_openai');
       const autoPostState = await this.dbService.getSystemState('api_toggle_auto_post');
@@ -64,9 +61,6 @@ export class APIToggleService {
       // Parse and apply states, keeping defaults if not found
       if (twitterState) {
         this.state.twitterEnabled = twitterState === 'true';
-      }
-      if (moralisState) {
-        this.state.moralisEnabled = moralisState === 'true';
       }
       if (magicEdenState) {
         this.state.magicEdenEnabled = magicEdenState === 'true';
@@ -95,7 +89,6 @@ export class APIToggleService {
 
     try {
       await this.dbService.setSystemState('api_toggle_twitter', this.state.twitterEnabled.toString());
-      await this.dbService.setSystemState('api_toggle_moralis', this.state.moralisEnabled.toString());
       await this.dbService.setSystemState('api_toggle_magic_eden', this.state.magicEdenEnabled.toString());
       await this.dbService.setSystemState('api_toggle_openai', this.state.openaiEnabled.toString());
       await this.dbService.setSystemState('api_toggle_auto_post', this.state.autoPostingEnabled.toString());
@@ -112,13 +105,6 @@ export class APIToggleService {
    */
   isTwitterEnabled(): boolean {
     return this.state.twitterEnabled;
-  }
-
-  /**
-   * Check if Moralis API is enabled
-   */
-  isMoralisEnabled(): boolean {
-    return this.state.moralisEnabled;
   }
 
   /**
@@ -167,14 +153,6 @@ export class APIToggleService {
       this.state.autoPostingEnabled = false;
     }
     
-    await this.saveToDatabase();
-  }
-
-  /**
-   * Set Moralis API toggle state
-   */
-  async setMoralisEnabled(enabled: boolean): Promise<void> {
-    this.state.moralisEnabled = enabled;
     await this.saveToDatabase();
   }
 

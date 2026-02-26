@@ -154,7 +154,7 @@ export class QuickNodeRegistrationService {
   }
 
   /**
-   * Enrich registration with metadata (mirrors existing Moralis webhook flow exactly)
+   * Enrich registration with metadata (image, description, etc.)
    */
   private async enrichRegistrationData(
     ensName: string, 

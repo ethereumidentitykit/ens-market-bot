@@ -89,7 +89,6 @@ export interface ProcessedSale {
   nftImage?: string;
   nftDescription?: string;
   marketplaceLogo?: string;
-  currentUsdValue?: string;
   verifiedCollection?: boolean;
   // Fee recipient tracking (broker/referral)
   feeRecipientAddress?: string;
@@ -167,10 +166,6 @@ export interface Config {
   };
   bitquery?: {
     token: string;
-    baseUrl: string;
-  };
-  moralis?: {
-    apiKey: string;
     baseUrl: string;
   };
   twitter: {
@@ -264,7 +259,7 @@ export interface IDatabaseService {
   cleanupOldImages(): Promise<void>;
   // ENS registration methods
   insertRegistration(registration: Omit<ENSRegistration, 'id'>): Promise<number>;
-  insertRegistrationWithSourceTracking(registration: Omit<ENSRegistration, 'id'>, source: 'quicknode' | 'moralis'): Promise<number>;
+  insertRegistrationWithSourceTracking(registration: Omit<ENSRegistration, 'id'>, source: string): Promise<number>;
   isRegistrationProcessed(tokenId: string): Promise<boolean>;
   getRecentRegistrations(limit?: number): Promise<ENSRegistration[]>;
   getRegistrationById(id: number): Promise<ENSRegistration | null>;

@@ -154,20 +154,9 @@ export class RealDataImageService {
     
     // Parse prices
     const priceEth = parseFloat(sale.priceAmount);
-    const priceUsd = sale.priceUsd ? parseFloat(sale.priceUsd) : 0;
-    
-    // Compare Moralis USD and DB USD, use the lower non-zero value for safety
-    const moralisUsdValueRaw = sale.currentUsdValue ? parseFloat(sale.currentUsdValue) : 0;
-    const dbUsdValueRaw = priceUsd;
+    const finalUsdPrice = sale.priceUsd ? parseFloat(sale.priceUsd) : 0;
 
-    let finalUsdPrice = 0;
-    if (moralisUsdValueRaw > 0 && dbUsdValueRaw > 0) {
-      finalUsdPrice = Math.min(moralisUsdValueRaw, dbUsdValueRaw);
-    } else {
-      finalUsdPrice = moralisUsdValueRaw > 0 ? moralisUsdValueRaw : dbUsdValueRaw;
-    }
-
-    logger.info(`Price data - ETH: ${priceEth}, USD: ${finalUsdPrice} (Moralis: ${moralisUsdValueRaw}, DB: ${dbUsdValueRaw})`);
+    logger.info(`Price data - ${sale.currencySymbol || 'ETH'}: ${priceEth}, USD: ${finalUsdPrice}`);
 
     // Get ENS names and avatars using EthIdentityService
     const [buyerProfile, sellerProfile] = await Promise.all([

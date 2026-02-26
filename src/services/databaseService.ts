@@ -457,9 +457,9 @@ export class DatabaseService implements IDatabaseService {
           buyer_address, seller_address, price_amount, price_usd, currency_symbol,
           block_number, block_timestamp, log_index, processed_at, posted,
           collection_name, collection_logo, nft_name, nft_image,
-          nft_description, marketplace_logo, current_usd_value, verified_collection,
+          nft_description, marketplace_logo, verified_collection,
           fee_recipient_address, fee_amount_wei, fee_percent
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
         RETURNING id
       `, [
         sale.transactionHash,
@@ -482,7 +482,6 @@ export class DatabaseService implements IDatabaseService {
         sale.nftImage || null,
         sale.nftDescription || null,
         sale.marketplaceLogo || null,
-        sale.currentUsdValue || null,
         sale.verifiedCollection || false,
         sale.feeRecipientAddress || null,
         sale.feeAmountWei || null,
@@ -535,7 +534,7 @@ export class DatabaseService implements IDatabaseService {
           processed_at as "processedAt", tweet_id as "tweetId", posted,
           collection_name as "collectionName", collection_logo as "collectionLogo",
           nft_name as "nftName", nft_image as "nftImage", nft_description as "nftDescription",
-          marketplace_logo as "marketplaceLogo", current_usd_value as "currentUsdValue",
+          marketplace_logo as "marketplaceLogo",
           verified_collection as "verifiedCollection",
           fee_recipient_address as "feeRecipientAddress", fee_amount_wei as "feeAmountWei",
           fee_percent as "feePercent"
@@ -574,7 +573,7 @@ export class DatabaseService implements IDatabaseService {
           processed_at as "processedAt", tweet_id as "tweetId", posted,
           collection_name as "collectionName", collection_logo as "collectionLogo",
           nft_name as "nftName", nft_image as "nftImage", nft_description as "nftDescription",
-          marketplace_logo as "marketplaceLogo", current_usd_value as "currentUsdValue",
+          marketplace_logo as "marketplaceLogo",
           verified_collection as "verifiedCollection",
           fee_recipient_address as "feeRecipientAddress", fee_amount_wei as "feeAmountWei",
           fee_percent as "feePercent"
@@ -665,7 +664,7 @@ export class DatabaseService implements IDatabaseService {
           processed_at as "processedAt", tweet_id as "tweetId", posted,
           collection_name as "collectionName", collection_logo as "collectionLogo",
           nft_name as "nftName", nft_image as "nftImage", nft_description as "nftDescription",
-          marketplace_logo as "marketplaceLogo", current_usd_value as "currentUsdValue",
+          marketplace_logo as "marketplaceLogo",
           verified_collection as "verifiedCollection",
           fee_recipient_address as "feeRecipientAddress", fee_amount_wei as "feeAmountWei",
           fee_percent as "feePercent"
@@ -1392,7 +1391,7 @@ export class DatabaseService implements IDatabaseService {
    */
   async insertRegistrationWithSourceTracking(
     registration: Omit<ENSRegistration, 'id'>, 
-    source: 'quicknode' | 'moralis'
+    source: string
   ): Promise<number> {
     if (!this.pool) throw new Error('Database not initialized');
 
