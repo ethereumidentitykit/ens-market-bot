@@ -345,6 +345,10 @@ export class MagicEdenV4Service {
   private readonly ensContracts: string[];
   private readonly axiosInstance: AxiosInstance;
   private readonly apiToggleService: APIToggleService;
+  private readonly BLOCKED_BID_SOURCES = new Set([
+    'IXS_SERVICE',       // source field
+    'ixs_service.io',    // domain
+  ]);
   
   constructor() {
     this.baseUrl = 'https://api-mainnet.magiceden.dev/v4/evm-public';
@@ -635,11 +639,17 @@ export class MagicEdenV4Service {
       
       logger.info(`✅ Magic Eden V4 /bids API: Retrieved ${allBidsData.length} total bids (${contract1Result.bids.length} + ${contract2Result.bids.length})`);
       
-      // Transform to internal format and filter active only
+      // Transform to internal format, filter active only, and block unwanted sources
+      const isBlocked = (source: string) => 
+        this.BLOCKED_BID_SOURCES.has(source) || this.BLOCKED_BID_SOURCES.has(`${source.toLowerCase()}.io`);
+      const blockedCount = allBidsData.filter(item => item.status === 'active' && isBlocked(item.source)).length;
       const transformedBids = allBidsData
-        .filter(item => item.status === 'active') // Only active bids - direct access now
+        .filter(item => item.status === 'active' && !isBlocked(item.source))
         .map(item => this.transformV4BidToBid(item));
       
+      if (blockedCount > 0) {
+        logger.debug(`   Blocked ${blockedCount} bids from blocked sources`);
+      }
       logger.debug(`   ${transformedBids.length} active bids after filtering`);
       
       // Sort by creation date (newest first)
