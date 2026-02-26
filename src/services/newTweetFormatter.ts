@@ -1257,9 +1257,10 @@ export class NewTweetFormatter {
       sellerEns: realData.sellerEns,
       sellerAvatar: realData.sellerAvatar,
       transactionHash: sale.transactionHash,
-      timestamp: new Date(), // Use current timestamp
+      timestamp: new Date(),
       contractAddress: sale.contractAddress,
-      tokenId: sale.tokenId
+      tokenId: sale.tokenId,
+      currencySymbol: realData.currencySymbol
     };
   }
 

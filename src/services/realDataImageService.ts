@@ -83,7 +83,7 @@ export class RealDataImageService {
         return null;
       }
       
-      logger.info(`Found matching sale: ${matchingSale.transactionHash} - ${matchingSale.priceEth} ETH (Token ID: ${matchingSale.tokenId})`);
+      logger.info(`Found matching sale: ${matchingSale.transactionHash} - ${matchingSale.priceAmount} ${matchingSale.currencySymbol || 'ETH'} (Token ID: ${matchingSale.tokenId})`);
       return await this.convertSaleToImageData(matchingSale);
       
     } catch (error) {
@@ -111,7 +111,7 @@ export class RealDataImageService {
       const randomIndex = Math.floor(Math.random() * recentSales.length);
       const sale = recentSales[randomIndex];
       
-      logger.info(`Selected sale: ${sale.transactionHash} - ${sale.priceEth} ETH`);
+      logger.info(`Selected sale: ${sale.transactionHash} - ${sale.priceAmount} ${sale.currencySymbol || 'ETH'}`);
 
       return await this.convertSaleToImageData(sale);
       
@@ -153,7 +153,7 @@ export class RealDataImageService {
     logger.info(`Converting sale to image data: ${sale.transactionHash}`);
     
     // Parse prices
-    const priceEth = parseFloat(sale.priceEth);
+    const priceEth = parseFloat(sale.priceAmount);
     const priceUsd = sale.priceUsd ? parseFloat(sale.priceUsd) : 0;
     
     // Compare Moralis USD and DB USD, use the lower non-zero value for safety
@@ -190,7 +190,8 @@ export class RealDataImageService {
       saleId: sale.id,
       transactionHash: sale.transactionHash,
       contractAddress: sale.contractAddress,
-      tokenId: sale.tokenId
+      tokenId: sale.tokenId,
+      currencySymbol: sale.currencySymbol || 'ETH'
     };
 
     logger.info('Converted sale to image data:', {
@@ -253,15 +254,16 @@ export class RealDataImageService {
       priceEth: realData.priceEth,
       priceUsd: realData.priceUsd,
       ensName: realData.ensName,
-      nftImageUrl: realData.nftImageUrl, // Pass the real NFT image URL
-      buyerAddress: '0x0000000000000000000000000000000000000000', // Placeholder, not used in image generation
+      nftImageUrl: realData.nftImageUrl,
+      buyerAddress: '0x0000000000000000000000000000000000000000',
       buyerEns: realData.buyerEns,
       buyerAvatar: realData.buyerAvatar,
-      sellerAddress: '0x0000000000000000000000000000000000000000', // Placeholder, not used in image generation
+      sellerAddress: '0x0000000000000000000000000000000000000000',
       sellerEns: realData.sellerEns,
       sellerAvatar: realData.sellerAvatar,
       transactionHash: realData.transactionHash || '0x0000000000000000000000000000000000000000000000000000000000000000',
-      timestamp: new Date()
+      timestamp: new Date(),
+      currencySymbol: realData.currencySymbol
     };
 
     return await PuppeteerImageService.generateSaleImage(mockData, this.databaseService, this.openSeaService);
