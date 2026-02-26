@@ -77,7 +77,7 @@ async function startApplication(): Promise<void> {
     const siweService = new SiweService(databaseService);
     const quickNodeSalesService = new QuickNodeSalesService(databaseService, openSeaService, ensMetadataService, alchemyService);
     const quickNodeRegistrationService = new QuickNodeRegistrationService(databaseService, ensMetadataService, alchemyService, openSeaService);
-    const autoTweetService = new AutoTweetService(newTweetFormatter, twitterService, rateLimitService, databaseService, worldTimeService);
+    const autoTweetService = new AutoTweetService(newTweetFormatter, twitterService, rateLimitService, databaseService, worldTimeService, alchemyService);
     const schedulerService = new SchedulerService(salesProcessingService, bidsProcessingService, autoTweetService, databaseService);
     
     // Initialize GrailsApiService for Grails marketplace offers (if enabled)
