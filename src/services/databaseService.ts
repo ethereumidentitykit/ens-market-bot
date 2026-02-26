@@ -102,6 +102,19 @@ export class DatabaseService implements IDatabaseService {
         ALTER TABLE processed_sales ADD COLUMN IF NOT EXISTS fee_percent DECIMAL(5,2);
       `);
 
+      // Rename price_eth → price_amount and add currency_symbol for multi-currency support
+      const colCheck = await this.pool.query(`
+        SELECT column_name FROM information_schema.columns 
+        WHERE table_name = 'processed_sales' AND column_name = 'price_eth'
+      `);
+      if (colCheck.rows.length > 0) {
+        await this.pool.query(`ALTER TABLE processed_sales RENAME COLUMN price_eth TO price_amount`);
+        logger.info('Migrated processed_sales: price_eth → price_amount');
+      }
+      await this.pool.query(`
+        ALTER TABLE processed_sales ADD COLUMN IF NOT EXISTS currency_symbol VARCHAR(20) DEFAULT 'ETH';
+      `);
+
       // Create system_state table
       await this.pool.query(`
         CREATE TABLE IF NOT EXISTS system_state (
