@@ -233,10 +233,14 @@ export class QuickNodeSalesService {
         return null;
       } else if (currencySymbol !== 'ETH') {
         const ethPrice = await this.alchemyService.getETHPriceUSD();
-        const ethEquiv = ethPrice ? priceNum / ethPrice : 0;
-        if (ethEquiv < this.MIN_PRICE_ETH) {
-          logger.debug(`Sale below minimum price: ${priceAmount} ${currencySymbol} (~${ethEquiv.toFixed(4)} ETH) < ${this.MIN_PRICE_ETH} ETH`);
-          return null;
+        if (!ethPrice) {
+          logger.warn(`⚠️ ETH price unavailable — skipping min-price check for ${currencySymbol} sale (fail-open)`);
+        } else {
+          const ethEquiv = priceNum / ethPrice;
+          if (ethEquiv < this.MIN_PRICE_ETH) {
+            logger.debug(`Sale below minimum price: ${priceAmount} ${currencySymbol} (~${ethEquiv.toFixed(4)} ETH) < ${this.MIN_PRICE_ETH} ETH`);
+            return null;
+          }
         }
       }
 
@@ -402,7 +406,7 @@ export class QuickNodeSalesService {
       logger.debug(`Enriching sale data for token ${saleData.tokenId}`);
 
       // 1. Calculate USD price based on currency
-      let priceUsd: string;
+      let priceUsd: string | undefined;
       const symbol = saleData.currencySymbol.toUpperCase();
       if (symbol === 'USDC' || symbol === 'USDT') {
         priceUsd = parseFloat(saleData.priceAmount).toFixed(2);
@@ -410,7 +414,7 @@ export class QuickNodeSalesService {
         const ethPriceUsd = await this.alchemyService.getETHPriceUSD();
         priceUsd = ethPriceUsd
           ? (parseFloat(saleData.priceAmount) * ethPriceUsd).toFixed(2)
-          : '0';
+          : undefined;
       }
 
       // 2. Try OpenSea first for metadata
