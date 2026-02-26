@@ -13,7 +13,7 @@ import { RateLimitService } from './rateLimitService';
 import { WorldTimeService } from './worldTimeService';
 import { ClubService } from './clubService';
 import { AlchemyService } from './alchemyService';
-import { getClubLabel } from '../constants/clubMetadata';
+
 
 export interface TransactionSpecificSettings {
   enabled: boolean;
@@ -507,7 +507,8 @@ export class AutoTweetService {
     const nftName = sale.nftName || '';
     const clubs = await this.clubService.getClubs(nftName);
     
-    logger.info(`🔍 SALE FILTER: ${nftName} - clubs detected: [${clubs.map(c => getClubLabel(c)).join(', ') || 'none'}]`);
+    const clubLabels = await Promise.all(clubs.map(c => this.clubService.getClubLabel(c)));
+    logger.info(`🔍 SALE FILTER: ${nftName} - clubs detected: [${clubLabels.join(', ') || 'none'}]`);
     
     // Check for premium clubs with special thresholds (in priority order)
     if (clubs.includes('999')) {
@@ -531,10 +532,10 @@ export class AutoTweetService {
     
     // Return the first premium club found, or standard
     if (clubs.includes('999') || clubs.includes('10k')) {
-      return getClubLabel(clubs.find(c => c === '999' || c === '10k') || clubs[0]);
+      return await this.clubService.getClubLabel(clubs.find(c => c === '999' || c === '10k') || clubs[0]);
     }
     
-    return clubs.length > 0 ? getClubLabel(clubs[0]) : 'Standard';
+    return clubs.length > 0 ? await this.clubService.getClubLabel(clubs[0]) : 'Standard';
   }
 
   /**
@@ -564,10 +565,10 @@ export class AutoTweetService {
     // Return the first premium club found, or standard
     if (clubs.includes('999') || clubs.includes('10k')) {
       const clubSlug = clubs.find(c => c === '999' || c === '10k') || clubs[0];
-      return `${getClubLabel(clubSlug)} registration`;
+      return `${await this.clubService.getClubLabel(clubSlug)} registration`;
     }
     
-    return clubs.length > 0 ? `${getClubLabel(clubs[0])} registration` : 'Standard registration';
+    return clubs.length > 0 ? `${await this.clubService.getClubLabel(clubs[0])} registration` : 'Standard registration';
   }
 
   /**
@@ -876,10 +877,10 @@ export class AutoTweetService {
       // Return the first premium club found, or standard
       if (clubs.includes('999') || clubs.includes('10k')) {
         const clubSlug = clubs.find(c => c === '999' || c === '10k') || clubs[0];
-        return `${getClubLabel(clubSlug)} bid`;
+        return `${await this.clubService.getClubLabel(clubSlug)} bid`;
       }
       
-      return clubs.length > 0 ? `${getClubLabel(clubs[0])} bid` : 'Standard bid';
+      return clubs.length > 0 ? `${await this.clubService.getClubLabel(clubs[0])} bid` : 'Standard bid';
 
     } catch (error: any) {
       return 'Standard bid';

@@ -517,7 +517,7 @@ export class NewTweetFormatter {
     
     // Category line (show category name with handle properly paired)
     const clubs = await this.clubService.getClubs(ensName);
-    const formattedClubString = this.clubService.getFormattedClubString(clubs);
+    const formattedClubString = await this.clubService.getFormattedClubString(clubs);
     const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
     const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     
@@ -697,7 +697,7 @@ export class NewTweetFormatter {
     
     // Category line (show category name with handle properly paired)
     const clubs = await this.clubService.getClubs(ensName);
-    const formattedClubString = this.clubService.getFormattedClubString(clubs);
+    const formattedClubString = await this.clubService.getFormattedClubString(clubs);
     const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
     const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     
@@ -801,7 +801,7 @@ export class NewTweetFormatter {
     // Category line (show category name with handle properly paired)
     logger.info(`[NewTweetFormatter] Getting club info for sale: ${ensName}`);
     const clubs = await this.clubService.getClubs(ensName);
-    const formattedClubString = this.clubService.getFormattedClubString(clubs);
+    const formattedClubString = await this.clubService.getFormattedClubString(clubs);
     const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
     const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     logger.info(`[NewTweetFormatter] Sale category line result: "${categoryLine}"`);
@@ -843,7 +843,7 @@ export class NewTweetFormatter {
    * Get human-readable club name for club slugs
    * Supports multiple clubs with comma separation
    */
-  private getClubName(clubs: string[]): string | null {
+  private async getClubName(clubs: string[]): Promise<string | null> {
     return this.clubService.getClubName(clubs);
   }
 
@@ -1482,7 +1482,7 @@ export class NewTweetFormatter {
     // Check for club mention
     logger.info(`[NewTweetFormatter] Preview - Getting club info for: ${ensName}`);
     const clubs = await this.clubService.getClubs(ensName);
-    const formattedClubString = this.clubService.getFormattedClubString(clubs);
+    const formattedClubString = await this.clubService.getFormattedClubString(clubs);
     const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
     const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     logger.info(`[NewTweetFormatter] Preview category line result: "${categoryLine}"`);
@@ -1533,7 +1533,7 @@ export class NewTweetFormatter {
     
     // Check for club mention
     const clubs = await this.clubService.getClubs(ensName);
-    const formattedClubString = this.clubService.getFormattedClubString(clubs);
+    const formattedClubString = await this.clubService.getFormattedClubString(clubs);
     const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
     const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     
@@ -1688,7 +1688,7 @@ export class NewTweetFormatter {
     
     // Check for club mention
     const clubs = await this.clubService.getClubs(ensName);
-    const formattedClubString = this.clubService.getFormattedClubString(clubs);
+    const formattedClubString = await this.clubService.getFormattedClubString(clubs);
     const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
     const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     
