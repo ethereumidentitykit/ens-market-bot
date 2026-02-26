@@ -109,20 +109,12 @@ function dashboard() {
         processing: false,
         testing: false,
         schedulerLoading: false,
-        lastProcessResult: null,
         
         // Twitter state
         twitterConfig: null,
         twitterRateLimit: null,
         twitterMessage: '',
         twitterMessageType: 'info',
-
-        // Image generation state
-        generatedImage: null,
-        imageData: null,
-        imageGenerationTime: null,
-        imageGeneratedAt: null,
-        testImageToken: '',
 
         // New tweet generation state
         tweetType: 'sale', // 'sale', 'registration', or 'bid'
@@ -162,13 +154,6 @@ function dashboard() {
         aiReplySending: false,
         aiReplyMessage: '',
         aiReplyMessageType: 'info',
-
-        // Database management state
-        databaseResetting: false,
-        salesClearing: false,
-        databaseResetMessage: '',
-        databaseResetMessageType: 'info',
-        processingReset: false,
 
         // Modal state
         selectedSale: null,
@@ -436,16 +421,6 @@ function dashboard() {
             }
         },
 
-        // Historical data population state
-        historicalData: {
-            targetBlock: '23100000',
-            contractAddress: '',
-            isRunning: false,
-            lastResult: null,
-            error: null
-        },
-        contracts: [], // Will be loaded from API
-
         // Helper function for relative time
         getRelativeTime(timestamp) {
             const now = new Date();
@@ -660,97 +635,6 @@ function dashboard() {
             } catch (error) {
                 console.error('Health check failed:', error);
                 this.systemStatus = 'error';
-            }
-        },
-
-        // Process new sales manually
-        async populateHistoricalData() {
-            this.historicalData.isRunning = true;
-            this.historicalData.error = null;
-            this.historicalData.lastResult = null;
-
-            try {
-                const payload = {
-                    targetBlock: parseInt(this.historicalData.targetBlock),
-                    contractAddress: this.historicalData.contractAddress || undefined
-                };
-
-                const response = await fetch('/api/populate-historical', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(payload)
-                });
-
-                const result = await response.json();
-
-                if (result.success) {
-                    this.historicalData.lastResult = result.data;
-                    // Refresh database viewer after population
-                    if (this.dbViewer) {
-                        await this.dbViewer.loadPage(1);
-                    }
-                } else {
-                    this.historicalData.error = result.error || 'Failed to populate historical data';
-                }
-            } catch (error) {
-                this.historicalData.error = error.message;
-                console.error('Historical population error:', error);
-            } finally {
-                this.historicalData.isRunning = false;
-            }
-        },
-
-        async processSales() {
-            this.processing = true;
-            this.lastProcessResult = null;
-            
-            try {
-                const response = await fetch('/api/process-sales');
-                const data = await response.json();
-                
-                this.lastProcessResult = data;
-                
-                if (data.success) {
-                    // Refresh stats after successful processing
-                    await this.loadStats();
-                    
-                    // Show success notification
-                    this.showNotification('Sales processed successfully!', 'success');
-                } else {
-                    this.showNotification('Failed to process sales: ' + (data.error || 'Unknown error'), 'error');
-                }
-            } catch (error) {
-                console.error('Failed to process sales:', error);
-                this.lastProcessResult = {
-                    success: false,
-                    error: error.message
-                };
-                this.showNotification('Network error while processing sales', 'error');
-            } finally {
-                this.processing = false;
-            }
-        },
-
-        // Test Moralis API connection
-        async testMoralis() {
-            this.testing = true;
-            
-            try {
-                const response = await fetch('/api/test-moralis');
-                const data = await response.json();
-                
-                if (data.success) {
-                    this.showNotification('Moralis API connection successful!', 'success');
-                } else {
-                    this.showNotification('Moralis API connection failed: ' + data.message, 'error');
-                }
-            } catch (error) {
-                console.error('Failed to test Moralis API:', error);
-                this.showNotification('Network error while testing API', 'error');
-            } finally {
-                this.testing = false;
             }
         },
 
@@ -994,57 +878,6 @@ function dashboard() {
                 this.showTwitterMessage('Failed to refresh Twitter data', 'error');
             } finally {
                 this.loading = false;
-            }
-        },
-
-        // Image Generation Functions
-        async generateTestImage() {
-            this.loading = true;
-            this.clearTwitterMessage();
-
-            try {
-                const startTime = Date.now();
-                const body = this.testImageToken.trim() ? { tokenPrefix: this.testImageToken.trim() } : {};
-                const response = await fetch('/api/image/generate-test', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(body)
-                });
-
-                const result = await response.json();
-                const endTime = Date.now();
-
-                if (response.ok) {
-                    this.generatedImage = result.imageUrl;
-                    this.imageData = result.mockData;
-                    this.imageGenerationTime = endTime - startTime;
-                    this.imageGeneratedAt = new Date().toLocaleString();
-                    
-                    this.showTwitterMessage(
-                        `Test image generated successfully in ${this.imageGenerationTime}ms`, 
-                        'success'
-                    );
-                } else {
-                    throw new Error(result.error || 'Failed to generate image');
-                }
-            } catch (error) {
-                console.error('Failed to generate test image:', error);
-                this.showTwitterMessage(`Failed to generate test image: ${error.message}`, 'error');
-            } finally {
-                this.loading = false;
-            }
-        },
-
-        downloadGeneratedImage() {
-            if (this.generatedImage) {
-                const link = document.createElement('a');
-                link.href = this.generatedImage;
-                link.download = `ens-sale-test-${Date.now()}.png`;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
             }
         },
 
@@ -1461,158 +1294,6 @@ function dashboard() {
             } finally {
                 this.tweetSending = false;
             }
-        },
-
-        // Database Management Methods
-        async resetToRecentBlocks() {
-            if (!confirm('Reset processing to start from recent blocks?\n\nThis will:\n• Clear the last processed block position\n• Keep existing sales data\n• Start fetching recent sales on next sync\n\nRecommended if stuck on old blocks.')) {
-                return;
-            }
-            
-            this.processingReset = true;
-            this.clearDatabaseResetMessage();
-            
-            try {
-                const response = await fetch('/api/processing/reset-to-recent', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
-                });
-                
-                const result = await response.json();
-                
-                if (result.success) {
-                    this.showDatabaseResetMessage(`✅ Processing reset successful! Found ${result.stats?.fetched || 0} sales, ${result.stats?.newSales || 0} new.`, 'success');
-                    await this.refreshData();
-                } else {
-                    this.showDatabaseResetMessage(`❌ Reset failed: ${result.error}`, 'error');
-                }
-            } catch (error) {
-                this.showDatabaseResetMessage(`❌ Reset failed: ${error.message}`, 'error');
-            } finally {
-                this.processingReset = false;
-            }
-        },
-
-        async confirmDatabaseReset() {
-            const finalConfirm = prompt(
-                '⚠️ WARNING: This will permanently delete ALL data!\n\n' +
-                '• All sales records will be lost\n' +
-                '• All tweet history will be deleted\n' +
-                '• Last processed block will be reset\n' +
-                '• System will re-fetch historical data on next sync\n\n' +
-                'This action cannot be undone.\n\n' +
-                'Type "DELETE" to confirm:'
-            );
-            
-            if (finalConfirm === 'DELETE') {
-                await this.resetDatabase();
-            } else {
-                this.showDatabaseResetMessage('Database reset cancelled.', 'info');
-            }
-        },
-
-        async resetDatabase() {
-            this.databaseResetting = true;
-            this.clearDatabaseResetMessage();
-            
-            try {
-                const response = await fetch('/api/database/reset', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
-                });
-                
-                const result = await response.json();
-                
-                if (result.success) {
-                    this.showDatabaseResetMessage(
-                        '✅ Database reset successful! All data has been cleared and the system is ready for fresh data ingestion.',
-                        'success'
-                    );
-                    
-                    // Refresh the dashboard to show empty state
-                    await this.refreshData();
-                } else {
-                    this.showDatabaseResetMessage(
-                        `❌ Database reset failed: ${result.error}`,
-                        'error'
-                    );
-                }
-            } catch (error) {
-                console.error('Database reset error:', error);
-                this.showDatabaseResetMessage(
-                    `❌ Database reset failed: ${error.message}`,
-                    'error'
-                );
-            } finally {
-                this.databaseResetting = false;
-            }
-        },
-
-        async confirmClearSales() {
-            const confirmation = confirm(
-                '⚠️ Clear Sales Table\n\n' +
-                'This will permanently delete:\n' +
-                '• All sales records\n' +
-                '• Sales will restart from ID 1\n\n' +
-                'This will NOT delete:\n' +
-                '• Tweet history\n' +
-                '• Settings and configurations\n' +
-                '• API toggle states\n\n' +
-                'Are you sure you want to clear all sales data?'
-            );
-            
-            if (confirmation) {
-                await this.clearSalesTable();
-            }
-        },
-
-        async clearSalesTable() {
-            this.salesClearing = true;
-            this.clearDatabaseResetMessage();
-            
-            try {
-                const response = await fetch('/api/database/clear-sales', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
-                });
-
-                const result = await response.json();
-                
-                if (result.success) {
-                    this.showDatabaseResetMessage('Sales table cleared successfully! Ready for fresh sales data.', 'success');
-                    // Refresh stats to show empty sales
-                    await this.refreshData();
-                } else {
-                    this.showDatabaseResetMessage(`Failed to clear sales table: ${result.error}`, 'error');
-                }
-            } catch (error) {
-                this.showDatabaseResetMessage(`Error clearing sales table: ${error.message}`, 'error');
-            } finally {
-                this.salesClearing = false;
-            }
-        },
-
-        showDatabaseResetMessage(message, type) {
-            this.databaseResetMessage = message;
-            this.databaseResetMessageType = type;
-            
-            // Auto-clear success messages after 10 seconds
-            if (type === 'success') {
-                setTimeout(() => {
-                    this.clearDatabaseResetMessage();
-                }, 10000);
-            }
-        },
-
-        clearDatabaseResetMessage() {
-            this.databaseResetMessage = '';
-            this.databaseResetMessageType = 'info';
         },
 
         // Time calculation function

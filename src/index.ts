@@ -405,22 +405,6 @@ async function startApplication(): Promise<void> {
       });
     });
 
-    // Test API endpoint
-    app.get('/api/test-moralis', requireAuth, async (req, res) => {
-      try {
-        const isConnected = await moralisService.testConnection();
-        res.json({
-          success: isConnected,
-          message: isConnected ? 'Moralis API connection successful' : 'Moralis API connection failed'
-        });
-      } catch (error: any) {
-        res.status(500).json({
-          success: false,
-          error: error.message
-        });
-      }
-    });
-
     // Test Alchemy ETH price endpoint
     app.get('/api/test-alchemy-price', requireAuth, async (req, res) => {
       try {
@@ -907,108 +891,6 @@ async function startApplication(): Promise<void> {
       }
     });
 
-
-    // Processing endpoints
-    app.get('/api/process-sales', requireAuth, async (req, res) => {
-      try {
-        const results = await salesProcessingService.processNewSales();
-        res.json({
-          success: true,
-          data: results
-        });
-      } catch (error: any) {
-        res.status(500).json({
-          success: false,
-          error: error.message
-        });
-      }
-    });
-
-    // Historical data population endpoint
-    app.post('/api/populate-historical', async (req, res) => {
-      try {
-        const { targetBlock, contractAddress, resumeCursor } = req.body;
-        
-        // Default to 23100000 for testing
-        const target = targetBlock || 23100000;
-        
-        logger.info(`API: Starting historical population to block ${target}`);
-        
-        // Get historical trades from Moralis
-        const fetchResults = await moralisService.populateHistoricalData(
-          target,
-          contractAddress,
-          resumeCursor
-        );
-        
-        // Now process the trades through our existing logic
-        let processedSales = 0;
-        let filteredSales = 0;
-        let duplicateSales = 0;
-        let errorCount = 0;
-        
-        if (fetchResults.trades && fetchResults.trades.length > 0) {
-          logger.info(`Processing ${fetchResults.trades.length} fetched trades through sales processing logic...`);
-          
-          for (const trade of fetchResults.trades) {
-            try {
-              // Check if already processed (duplicate detection using tx hash + log index)
-              const isAlreadyProcessed = await databaseService.isSaleProcessed(
-                trade.transactionHash,
-                trade.logIndex
-              );
-              
-              if (isAlreadyProcessed) {
-                duplicateSales++;
-                logger.debug(`Skipping duplicate sale: ${trade.transactionHash} (log: ${trade.logIndex})`);
-                continue;
-              }
-
-              // Apply filters using SalesProcessingService logic
-              if (!salesProcessingService.shouldProcessSalePublic(trade)) {
-                filteredSales++;
-                const totalPriceEth = parseFloat(salesProcessingService.calculateTotalPricePublic(trade));
-                logger.debug(`Filtering out sale below 0.1 ETH: ${totalPriceEth} ETH (tx: ${trade.transactionHash})`);
-                continue;
-              }
-
-              // Convert and store the sale using SalesProcessingService logic
-              const processedSale = await salesProcessingService.convertToProcessedSalePublic(trade);
-              await databaseService.insertSale(processedSale);
-              
-              processedSales++;
-              const totalPriceEth = parseFloat(salesProcessingService.calculateTotalPricePublic(trade));
-              logger.debug(`Processed historical sale: ${trade.transactionHash} for ${totalPriceEth} ETH`);
-
-            } catch (error: any) {
-              errorCount++;
-              logger.error(`Failed to process historical sale ${trade.transactionHash}:`, error.message);
-            }
-          }
-        }
-        
-        const finalResults = {
-          ...fetchResults,
-          actualProcessed: processedSales,
-          actualFiltered: filteredSales,
-          actualDuplicates: duplicateSales,
-          actualErrors: errorCount
-        };
-        
-        logger.info(`Historical population complete: ${processedSales} processed, ${filteredSales} filtered, ${duplicateSales} duplicates, ${errorCount} errors`);
-        
-        res.json({
-          success: true,
-          data: finalResults
-        });
-      } catch (error: any) {
-        logger.error('Historical population failed:', error.message);
-        res.status(500).json({
-          success: false,
-          error: error.message
-        });
-      }
-    });
 
     app.get('/api/stats', requireAuth, async (req, res) => {
       try {
@@ -2600,11 +2482,6 @@ async function startApplication(): Promise<void> {
     });
 
     // Image Generation API endpoints
-    app.post('/api/image/generate-test', requireAuth, async (req, res) => {
-      const { ImageController } = await import('./controllers/imageController');
-      await ImageController.generateTestImage(req, res);
-    });
-
     app.post('/api/image/generate-custom-sale', requireAuth, async (req, res) => {
       const { ImageController } = await import('./controllers/imageController');
       await ImageController.generateCustomImage(req, res);
@@ -3087,25 +2964,6 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.post('/api/database/reset', requireAuth, async (req, res) => {
-      try {
-        logger.warn('Database reset requested - this will delete ALL data!');
-        
-        await databaseService.resetDatabase();
-        
-        res.json({
-          success: true,
-          message: 'Database reset completed successfully. All sales and tweets deleted, lastProcessedBlock cleared.'
-        });
-      } catch (error: any) {
-        logger.error('Database reset failed:', error.message);
-        res.status(500).json({
-          success: false,
-          error: error.message
-        });
-      }
-    });
-
     app.post('/api/database/migrate-schema', requireAuth, async (req, res) => {
       try {
         logger.warn('Database schema migration requested - this will DROP and RECREATE tables!');
@@ -3122,47 +2980,6 @@ async function startApplication(): Promise<void> {
           success: false,
           error: error.message
         });
-      }
-    });
-
-    app.post('/api/database/clear-sales', requireAuth, async (req, res) => {
-      try {
-        logger.warn('Sales table clear requested - this will delete all sales data!');
-        
-        await databaseService.clearSalesTable();
-        
-        res.json({
-          success: true,
-          message: 'Sales table cleared successfully. All sales data deleted, ready for fresh data.'
-        });
-      } catch (error: any) {
-        logger.error('Sales table clear failed:', error.message);
-        res.status(500).json({
-          success: false,
-          error: error.message
-        });
-      }
-    });
-
-    // Reset processing to start from recent blocks
-    app.post('/api/processing/reset-to-recent', requireAuth, async (req, res) => {
-      try {
-        logger.warn('Resetting processing to start from recent blocks...');
-        
-        // Clear the last processed block so we start fresh from recent sales
-        await databaseService.setSystemState('last_processed_block', '');
-        
-        // Trigger immediate processing of recent sales (without fromBlock constraint)
-        const stats = await salesProcessingService.processNewSales();
-        
-        res.json({ 
-          success: true, 
-          message: 'Processing reset to recent blocks completed successfully. Now fetching recent sales.',
-          stats: stats
-        });
-      } catch (error: any) {
-        logger.error('Failed to reset processing to recent blocks:', error.message);
-        res.status(500).json({ success: false, error: error.message });
       }
     });
 
@@ -3979,8 +3796,6 @@ async function startApplication(): Promise<void> {
         endpoints: {
           health: '/health',
           testAlchemy: '/api/test-alchemy',
-          fetchSales: '/api/fetch-sales?limit=10&contractAddress=optional',
-          processSales: '/api/process-sales',
           stats: '/api/stats',
           unpostedSales: '/api/unposted-sales?limit=10'
         },
