@@ -179,7 +179,6 @@ export interface Config {
   port: number;
   nodeEnv: string;
   logLevel: string;
-  wethPriceMultiplier: number;
   siwe: {
     adminWhitelist: string[];
     sessionSecret: string;
@@ -242,7 +241,6 @@ export interface IDatabaseService {
     totalSales: number;
     postedSales: number;
     unpostedSales: number;
-    lastProcessedBlock: string | null;
   }>;
   // Twitter rate limiting methods
   recordTweetPost(post: Omit<TwitterPost, 'id'>): Promise<number>;

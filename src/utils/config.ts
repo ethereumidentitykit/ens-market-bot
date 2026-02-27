@@ -26,7 +26,6 @@ export const config: Config = {
   port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
   logLevel: process.env.LOG_LEVEL || 'info',
-  wethPriceMultiplier: parseFloat(process.env.WETH_PRICE_MULTIPLIER || '1.0'),
   siwe: {
     adminWhitelist: process.env.ADMIN_WHITELIST?.split(',').map(addr => addr.toLowerCase().trim()) || [],
     sessionSecret: process.env.SESSION_SECRET || (() => {

@@ -79,7 +79,6 @@ export class DatabaseService implements IDatabaseService {
           nft_image TEXT,
           nft_description TEXT,
           marketplace_logo TEXT,
-          current_usd_value TEXT,
           verified_collection BOOLEAN DEFAULT FALSE,
           created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -113,6 +112,9 @@ export class DatabaseService implements IDatabaseService {
       }
       await this.pool.query(`
         ALTER TABLE processed_sales ADD COLUMN IF NOT EXISTS currency_symbol VARCHAR(20) DEFAULT 'ETH';
+      `);
+      await this.pool.query(`
+        ALTER TABLE processed_sales DROP COLUMN IF EXISTS current_usd_value;
       `);
 
       // Create system_state table
@@ -988,7 +990,6 @@ export class DatabaseService implements IDatabaseService {
     totalSales: number;
     postedSales: number;
     unpostedSales: number;
-    lastProcessedBlock: string | null;
   }> {
     if (!this.pool) throw new Error('Database not initialized');
 
@@ -996,13 +997,11 @@ export class DatabaseService implements IDatabaseService {
       const totalResult = await this.pool.query('SELECT COUNT(*) as count FROM processed_sales');
       const postedResult = await this.pool.query('SELECT COUNT(*) as count FROM processed_sales WHERE posted = TRUE');
       const unpostedResult = await this.pool.query('SELECT COUNT(*) as count FROM processed_sales WHERE posted = FALSE');
-      const lastBlock = await this.getSystemState('last_processed_block');
 
       return {
         totalSales: parseInt(totalResult.rows[0].count),
         postedSales: parseInt(postedResult.rows[0].count),
         unpostedSales: parseInt(unpostedResult.rows[0].count),
-        lastProcessedBlock: lastBlock
       };
     } catch (error: any) {
       logger.error('Failed to get database stats:', error.message);
