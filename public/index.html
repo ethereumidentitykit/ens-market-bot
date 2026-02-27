@@ -1433,7 +1433,7 @@
                                             <div class="flex items-center text-xs text-gray-500 space-x-4">
                                                 <span x-show="tweet.success">
                                                     <i class="fab fa-twitter mr-1"></i>
-                                                    <a :href="'https://twitter.com/user/status/' + tweet.tweetId" target="_blank" class="text-blue-600 hover:underline" x-text="tweet.tweetId"></a>
+                                                    <a :href="`https://twitter.com/i/web/status/${tweet.tweetId}`" target="_blank" class="text-blue-600 hover:underline" x-text="tweet.tweetId"></a>
                                                 </span>
                                                 <span>
                                                     <i class="fas fa-clock mr-1"></i>
@@ -1667,11 +1667,16 @@
 
                                 <!-- Posted Status -->
                                 <div class="col-span-1 flex items-center">
-                                    <span 
-                                        :class="sale.posted ? 'bg-green-900 text-green-300 border-green-600' : 'bg-yellow-900 text-yellow-300 border-yellow-600'"
-                                        class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium border"
-                                        x-text="sale.posted ? 'Posted' : 'Unposted'"
-                                    ></span>
+                                    <div class="flex flex-col gap-1">
+                                        <span 
+                                            :class="sale.posted ? 'bg-green-900 text-green-300 border-green-600' : 'bg-yellow-900 text-yellow-300 border-yellow-600'"
+                                            class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium border"
+                                            x-text="sale.posted ? 'Posted' : 'Unposted'"
+                                        ></span>
+                                        <a x-show="sale.tweetId" :href="`https://twitter.com/i/web/status/${sale.tweetId}`" target="_blank" class="text-blue-400 hover:text-blue-300 text-xs">
+                                            Tweet <i class="fas fa-external-link-alt text-xs"></i>
+                                        </a>
+                                    </div>
                                 </div>
 
                                 <!-- Fetched Time -->
@@ -1857,14 +1862,19 @@
                                                     <div class="text-xs text-gray-400" x-text="new Date(registration.processedAt).toLocaleString()"></div>
                                                 </td>
                                                 <td class="px-6 py-4 whitespace-nowrap">
-                                                    <span x-show="registration.posted" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-900 text-green-300">
-                                                        <i class="fas fa-check-circle mr-1"></i>
-                                                        Tweeted
-                                                    </span>
-                                                    <span x-show="!registration.posted" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-900 text-yellow-300">
-                                                        <i class="fas fa-clock mr-1"></i>
-                                                        Pending
-                                                    </span>
+                                                    <div class="flex flex-col gap-1">
+                                                        <span x-show="registration.posted" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-900 text-green-300">
+                                                            <i class="fas fa-check-circle mr-1"></i>
+                                                            Tweeted
+                                                        </span>
+                                                        <span x-show="!registration.posted" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-900 text-yellow-300">
+                                                            <i class="fas fa-clock mr-1"></i>
+                                                            Pending
+                                                        </span>
+                                                        <a x-show="registration.tweetId" :href="`https://twitter.com/i/web/status/${registration.tweetId}`" target="_blank" class="text-blue-400 hover:text-blue-300 text-xs">
+                                                            Tweet <i class="fas fa-external-link-alt text-xs"></i>
+                                                        </a>
+                                                    </div>
                                                 </td>
                                                 <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-300">
                                                     <a :href="'https://etherscan.io/tx/' + registration.transactionHash" target="_blank" class="text-green-400 hover:text-green-300">
@@ -2316,14 +2326,19 @@
                             
                             <div>
                                 <label class="block text-sm font-medium text-gray-400 mb-1">Posted Status</label>
-                                <span x-show="selectedSale?.posted" class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-900 text-green-300">
-                                    <i class="fas fa-check mr-1"></i>
-                                    Posted to Twitter
-                                </span>
-                                <span x-show="!selectedSale?.posted" class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-900 text-yellow-300">
-                                    <i class="fas fa-clock mr-1"></i>
-                                    Pending
-                                </span>
+                                <div class="flex flex-col gap-1">
+                                    <span x-show="selectedSale?.posted" class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-900 text-green-300">
+                                        <i class="fas fa-check mr-1"></i>
+                                        Posted to Twitter
+                                    </span>
+                                    <span x-show="!selectedSale?.posted" class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-900 text-yellow-300">
+                                        <i class="fas fa-clock mr-1"></i>
+                                        Pending
+                                    </span>
+                                    <a x-show="selectedSale?.tweetId" :href="`https://twitter.com/i/web/status/${selectedSale?.tweetId}`" target="_blank" class="text-blue-400 hover:text-blue-300 text-xs">
+                                        <i class="fab fa-twitter mr-1"></i>View Tweet <i class="fas fa-external-link-alt text-xs"></i>
+                                    </a>
+                                </div>
                             </div>
                             
                             <div>
@@ -2462,14 +2477,19 @@
 
                             <div>
                                 <label class="block text-sm font-medium text-gray-400 mb-1">Posted Status</label>
-                                <span x-show="selectedRegistration?.posted" class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-900 text-green-300">
-                                    <i class="fas fa-check mr-1"></i>
-                                    Posted to Twitter
-                                </span>
-                                <span x-show="!selectedRegistration?.posted" class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-900 text-yellow-300">
-                                    <i class="fas fa-clock mr-1"></i>
-                                    Pending
-                                </span>
+                                <div class="flex flex-col gap-1">
+                                    <span x-show="selectedRegistration?.posted" class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-900 text-green-300">
+                                        <i class="fas fa-check mr-1"></i>
+                                        Posted to Twitter
+                                    </span>
+                                    <span x-show="!selectedRegistration?.posted" class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-900 text-yellow-300">
+                                        <i class="fas fa-clock mr-1"></i>
+                                        Pending
+                                    </span>
+                                    <a x-show="selectedRegistration?.tweetId" :href="`https://twitter.com/i/web/status/${selectedRegistration?.tweetId}`" target="_blank" class="text-blue-400 hover:text-blue-300 text-xs">
+                                        <i class="fab fa-twitter mr-1"></i>View Tweet <i class="fas fa-external-link-alt text-xs"></i>
+                                    </a>
+                                </div>
                             </div>
 
                             <div>
