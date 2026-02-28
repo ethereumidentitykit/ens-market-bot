@@ -131,9 +131,9 @@
         <!-- Navigation Tabs -->
         <nav class="bg-gray-800 border-b border-gray-700">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="flex justify-between items-center">
+                <div class="flex flex-col gap-3 py-2 sm:py-0 sm:flex-row sm:justify-between sm:items-center">
                     <!-- Navigation Tabs -->
-                    <div class="flex space-x-8">
+                    <div class="flex w-full gap-4 overflow-x-auto whitespace-nowrap sm:w-auto sm:space-x-8 sm:gap-0">
                         <button 
                             @click="currentView = 'classic'"
                             :class="currentView === 'classic' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300'"
@@ -152,7 +152,7 @@
                     </div>
 
                     <!-- User Info & Logout -->
-                    <div class="flex items-center space-x-4">
+                    <div class="flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-normal sm:gap-4">
                         <div class="text-gray-300 text-sm">
                             <i class="fas fa-user mr-1"></i>
                             <span x-text="connectedAddress ? connectedAddress.slice(0, 6) + '...' + connectedAddress.slice(-4) : 'Unknown'"></span>
@@ -174,7 +174,7 @@
         <!-- Header -->
         <header class="bg-white shadow-sm border-b border-gray-200">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="flex justify-between items-center py-4">
+                <div class="flex flex-col gap-3 py-4 sm:flex-row sm:justify-between sm:items-center">
                     <div class="flex items-center">
                         <i class="fas fa-robot text-blue-600 text-2xl mr-3"></i>
                         <div>
@@ -182,7 +182,7 @@
                             <p class="text-sm text-gray-500">Admin Dashboard</p>
                         </div>
                     </div>
-                    <div class="flex items-center space-x-4">
+                    <div class="flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-normal sm:gap-4">
                         <div class="flex items-center">
                             <span class="relative flex h-3 w-3 mr-2">
                                 <span x-show="systemStatus === 'healthy'" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
@@ -206,12 +206,12 @@
         <!-- Master API Toggles -->
         <div class="bg-yellow-50 border-b border-yellow-200">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
-                <div class="flex items-center justify-between">
+                <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div class="flex items-center space-x-2">
                         <i class="fas fa-toggle-on text-orange-500"></i>
                         <span class="text-sm font-medium text-gray-900">Master API Controls</span>
                     </div>
-                    <div class="flex items-center space-x-4">
+                    <div class="flex flex-wrap items-center gap-3">
                         <!-- Twitter API Toggle -->
                         <div class="flex items-center space-x-2">
                             <span class="text-sm text-gray-700">Twitter API:</span>
@@ -273,7 +273,7 @@
         <div class="bg-gradient-to-r from-blue-600 to-purple-600 border-b border-gray-200 text-white">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="py-6">
-                    <div class="flex items-center justify-between mb-4">
+                    <div class="flex flex-col gap-3 mb-4 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                             <h2 class="text-xl font-semibold flex items-center">
                                 <i class="fas fa-robot mr-2"></i>
@@ -281,13 +281,13 @@
                             </h2>
                             <p class="text-blue-100 text-sm mt-1">Configure automated ENS posting and AI replies to Twitter</p>
                         </div>
-                        <div class="flex gap-3">
+                        <div class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:gap-3">
                             <!-- Master Event Auto-Posting Toggle -->
                             <button 
                                 @click="toggleAutoPosting()"
                                 :disabled="loading || !apiToggles.twitterEnabled"
                                 :class="autoPostSettings.enabled ? 'bg-green-500 hover:bg-green-600' : 'bg-red-500 hover:bg-red-600'"
-                                class="relative inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                class="relative inline-flex w-full items-center justify-center px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 <i :class="autoPostSettings.enabled ? 'fas fa-play' : 'fas fa-pause'" class="mr-2"></i>
                                 <span x-text="autoPostSettings.enabled ? 'Event auto-posting ON' : 'Event auto-posting OFF'"></span>
@@ -297,7 +297,7 @@
                                 @click="toggleAIAutoPosting()"
                                 :disabled="loading || !apiToggles.twitterEnabled || !apiToggles.openaiEnabled"
                                 :class="apiToggles.aiAutoPostingEnabled ? 'bg-purple-500 hover:bg-purple-600' : 'bg-gray-500 hover:bg-gray-600'"
-                                class="relative inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                class="relative inline-flex w-full items-center justify-center px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 <i :class="apiToggles.aiAutoPostingEnabled ? 'fas fa-brain' : 'fas fa-pause'" class="mr-2"></i>
                                 <span x-text="apiToggles.aiAutoPostingEnabled ? 'AI auto-posting ON' : 'AI auto-posting OFF'"></span>
@@ -323,7 +323,7 @@
                                     <span x-text="autoPostSettings.sales?.enabled ? 'ON' : 'OFF'"></span>
                                 </button>
                             </div>
-                            <div class="grid grid-cols-4 gap-2">
+                            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
                                 <div>
                                     <label class="block text-xs text-blue-200 mb-1">Default</label>
                                     <input type="number" step="0.01" min="0" x-model.number="autoPostSettings.sales.minEthDefault" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
@@ -360,7 +360,7 @@
                                     <span x-text="autoPostSettings.registrations?.enabled ? 'ON' : 'OFF'"></span>
                                 </button>
                             </div>
-                            <div class="grid grid-cols-4 gap-2">
+                            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
                                 <div>
                                     <label class="block text-xs text-blue-200 mb-1">Default</label>
                                     <input type="number" step="0.01" min="0" x-model.number="autoPostSettings.registrations.minEthDefault" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
@@ -397,7 +397,7 @@
                                     <span x-text="autoPostSettings.bids?.enabled ? 'ON' : 'OFF'"></span>
                                 </button>
                             </div>
-                            <div class="grid grid-cols-4 gap-2">
+                            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
                                 <div>
                                     <label class="block text-xs text-blue-200 mb-1">Default</label>
                                     <input type="number" step="0.01" min="0" x-model.number="autoPostSettings.bids.minEthDefault" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
@@ -492,12 +492,12 @@
                     </div>
                     
                     <!-- Status Info -->
-                    <div class="mt-4 flex items-center space-x-4 text-sm">
+                    <div class="mt-4 flex flex-col gap-3 text-sm sm:flex-row sm:items-center sm:gap-4">
                         <div class="flex items-center">
                             <div :class="apiToggles.twitterEnabled ? 'bg-green-400' : 'bg-red-400'" class="w-2 h-2 rounded-full mr-2"></div>
                             <span class="text-blue-100">Twitter API: <span x-text="apiToggles.twitterEnabled ? 'Connected' : 'Disabled'"></span></span>
                         </div>
-                        <div class="flex items-center space-x-4">
+                        <div class="flex flex-wrap items-center gap-3 sm:gap-4">
                             <div class="flex items-center" x-show="autoPostSettings.sales?.enabled">
                                 <div class="bg-green-400 w-2 h-2 rounded-full mr-2 animate-pulse"></div>
                                 <span class="text-blue-100">Sales active</span>
@@ -758,7 +758,7 @@
                         <!-- Tweet Type Selection -->
                         <div class="mb-4">
                             <label class="block text-sm font-medium text-gray-700 mb-2">Tweet Type</label>
-                            <div class="flex items-center space-x-4">
+                            <div class="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-4">
                                 <label class="inline-flex items-center">
                                     <input type="radio" x-model="tweetType" value="sale" class="form-radio h-4 w-4 text-blue-600" @change="clearTweetPreview(); clearSelection();">
                                     <span class="ml-2 text-sm text-gray-700">💰 Sales</span>
@@ -777,7 +777,7 @@
                         <!-- Sale Selection -->
                         <div x-show="tweetType === 'sale'" class="mb-4">
                             <label class="block text-sm font-medium text-gray-700 mb-2">Select Sale to Tweet</label>
-                            <div class="flex items-center space-x-3">
+                            <div class="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
                                 <select 
                                     x-model="selectedSaleId"
                                     @change="clearTweetPreview()"
@@ -791,7 +791,7 @@
                                 <button 
                                     @click="refreshUnpostedSales()" 
                                     :disabled="loading"
-                                    class="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                                    class="inline-flex w-full items-center justify-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:w-auto disabled:opacity-50"
                                 >
                                     <i class="fas fa-sync-alt mr-1" :class="{'loading': loading}"></i>
                                     Refresh
@@ -802,7 +802,7 @@
                         <!-- Registration Selection -->
                         <div x-show="tweetType === 'registration'" class="mb-4">
                             <label class="block text-sm font-medium text-gray-700 mb-2">Select Registration to Tweet</label>
-                            <div class="flex items-center space-x-3">
+                            <div class="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
                                 <select 
                                     x-model="selectedRegistrationId"
                                     @change="clearTweetPreview()"
@@ -816,7 +816,7 @@
                                 <button 
                                     @click="refreshUnpostedRegistrations()" 
                                     :disabled="loading"
-                                    class="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50"
+                                    class="inline-flex w-full items-center justify-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 sm:w-auto disabled:opacity-50"
                                 >
                                     <i class="fas fa-sync-alt mr-1" :class="{'loading': loading}"></i>
                                     Refresh
@@ -827,7 +827,7 @@
                         <!-- Bid Selection -->
                         <div x-show="tweetType === 'bid'" class="mb-4">
                             <label class="block text-sm font-medium text-gray-700 mb-2">Select Bid to Tweet</label>
-                            <div class="flex items-center space-x-3">
+                            <div class="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
                                 <select 
                                     x-model="selectedBidId"
                                     @change="clearTweetPreview()"
@@ -841,7 +841,7 @@
                                 <button 
                                     @click="refreshUnpostedBids()" 
                                     :disabled="loading"
-                                    class="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:opacity-50"
+                                    class="inline-flex w-full items-center justify-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 sm:w-auto disabled:opacity-50"
                                 >
                                     <i class="fas fa-sync-alt mr-1" :class="{'loading': loading}"></i>
                                     Refresh
@@ -945,7 +945,7 @@
 
                             <!-- Send Post Button -->
                             <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                                <div class="flex items-center justify-between">
+                                <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                     <div>
                                         <h5 class="text-sm font-medium text-yellow-900">Ready to Post</h5>
                                         <p class="text-xs text-yellow-700 mt-1">This will consume one Twitter API call from your daily limit</p>
@@ -953,7 +953,7 @@
                                     <button 
                                         @click="sendTweetPost()" 
                                         :disabled="!generatedTweet?.isValid || tweetSending || twitterRateLimit?.status?.limitReached"
-                                        class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        class="inline-flex w-full items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         <i class="fab fa-twitter mr-2" :class="{'loading': tweetSending}"></i>
                                         <span x-show="!tweetSending">Send Post</span>
@@ -969,13 +969,13 @@
                         <h4 class="text-sm font-medium text-gray-900 mb-2">Recent Posts (Last 24h)</h4>
                         <div class="space-y-2 max-h-40 overflow-y-auto">
                             <template x-for="post in twitterRateLimit?.recentPosts?.slice(0, 5)" :key="post.id">
-                                <div class="flex items-center justify-between p-2 bg-gray-50 rounded text-xs">
-                                    <div class="flex items-center">
+                                <div class="flex items-start justify-between gap-2 p-2 bg-gray-50 rounded text-xs">
+                                    <div class="flex min-w-0 items-start">
                                         <i x-show="post.success" class="fas fa-check-circle text-green-500 mr-2"></i>
                                         <i x-show="!post.success" class="fas fa-times-circle text-red-500 mr-2"></i>
-                                        <span class="font-mono" x-text="post.tweetContent.substring(0, 50) + '...'"></span>
+                                        <span class="font-mono break-words whitespace-pre-wrap" x-text="post.tweetContent"></span>
                                     </div>
-                                    <span class="text-gray-500" x-text="new Date(post.postedAt).toLocaleTimeString()"></span>
+                                    <span class="shrink-0 text-gray-500" x-text="new Date(post.postedAt).toLocaleTimeString()"></span>
                                 </div>
                             </template>
                         </div>
@@ -1134,7 +1134,7 @@
                         <!-- Transaction Type Selection -->
                         <div class="mb-4">
                             <label class="block text-sm font-medium text-gray-700 mb-2">Transaction Type</label>
-                            <div class="flex items-center space-x-4">
+                            <div class="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-4">
                                 <label class="inline-flex items-center">
                                     <input type="radio" x-model="aiReplyType" value="sale" class="form-radio h-4 w-4 text-purple-600" @change="clearAIReply(); aiReplyTransactionId = '';">
                                     <span class="ml-2 text-sm text-gray-700">💰 Sales</span>
@@ -1153,7 +1153,7 @@
                         <!-- Sale Selection -->
                         <div x-show="aiReplyType === 'sale'" class="mb-4">
                             <label class="block text-sm font-medium text-gray-700 mb-2">Select Sale (Posted to Twitter only)</label>
-                            <div class="flex items-center space-x-3">
+                            <div class="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
                                 <select 
                                     x-model="aiReplyTransactionId"
                                     @change="clearAIReply()"
@@ -1167,7 +1167,7 @@
                                 <button 
                                     @click="refreshPostedTransactions()" 
                                     :disabled="loading"
-                                    class="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50"
+                                    class="inline-flex w-full items-center justify-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 sm:w-auto disabled:opacity-50"
                                 >
                                     <i class="fas fa-sync-alt mr-1" :class="{'loading': loading}"></i>
                                     Refresh
@@ -1178,7 +1178,7 @@
                         <!-- Registration Selection -->
                         <div x-show="aiReplyType === 'registration'" class="mb-4">
                             <label class="block text-sm font-medium text-gray-700 mb-2">Select Registration (Posted to Twitter only)</label>
-                            <div class="flex items-center space-x-3">
+                            <div class="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
                                 <select 
                                     x-model="aiReplyTransactionId"
                                     @change="clearAIReply()"
@@ -1192,7 +1192,7 @@
                                 <button 
                                     @click="refreshPostedTransactions()" 
                                     :disabled="loading"
-                                    class="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50"
+                                    class="inline-flex w-full items-center justify-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 sm:w-auto disabled:opacity-50"
                                 >
                                     <i class="fas fa-sync-alt mr-1" :class="{'loading': loading}"></i>
                                     Refresh
@@ -1203,7 +1203,7 @@
                         <!-- Bid Selection -->
                         <div x-show="aiReplyType === 'bid'" class="mb-4">
                             <label class="block text-sm font-medium text-gray-700 mb-2">Select Bid (Posted to Twitter only)</label>
-                            <div class="flex items-center space-x-3">
+                            <div class="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
                                 <select 
                                     x-model="aiReplyTransactionId"
                                     @change="clearAIReply()"
@@ -1217,7 +1217,7 @@
                                 <button 
                                     @click="refreshPostedTransactions()" 
                                     :disabled="loading"
-                                    class="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50"
+                                    class="inline-flex w-full items-center justify-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 sm:w-auto disabled:opacity-50"
                                 >
                                     <i class="fas fa-sync-alt mr-1" :class="{'loading': loading}"></i>
                                     Refresh
@@ -1227,11 +1227,11 @@
 
                         <!-- Generate AI Reply Button -->
                         <div class="mb-4">
-                            <div class="flex items-center space-x-3">
+                            <div class="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
                                 <button 
                                     @click="generateAIReply()" 
                                     :disabled="!aiReplyTransactionId || aiReplyGenerating || !aiRepliesEnabled"
-                                    class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    class="inline-flex w-full items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     <i class="fas fa-robot mr-2" :class="{'loading': aiReplyGenerating}"></i>
                                     <span x-show="!aiReplyGenerating">Generate AI Reply</span>
@@ -1243,7 +1243,7 @@
                                     x-show="generatedAIReply?.alreadyExists"
                                     @click="regenerateAIReply()" 
                                     :disabled="aiReplyGenerating"
-                                    class="inline-flex items-center px-4 py-2 border border-orange-500 text-sm font-medium rounded-md shadow-sm text-orange-700 bg-white hover:bg-orange-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    class="inline-flex w-full items-center justify-center px-4 py-2 border border-orange-500 text-sm font-medium rounded-md shadow-sm text-orange-700 bg-white hover:bg-orange-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     <i class="fas fa-sync mr-2" :class="{'loading': aiReplyGenerating}"></i>
                                     Regenerate New Reply
@@ -1284,7 +1284,7 @@
 
                             <!-- Post Reply Button -->
                             <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                                <div class="flex items-center justify-between">
+                                <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                     <div>
                                         <h5 class="text-sm font-medium text-yellow-900">Ready to Post Reply</h5>
                                         <p class="text-xs text-yellow-700 mt-1">This will post as a threaded reply to the original tweet</p>
@@ -1292,7 +1292,7 @@
                                     <button 
                                         @click="sendAIReplyPost()" 
                                         :disabled="!generatedAIReply || aiReplySending || twitterRateLimit?.status?.limitReached"
-                                        class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        class="inline-flex w-full items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         <i class="fab fa-twitter mr-2" :class="{'loading': aiReplySending}"></i>
                                         <span x-show="!aiReplySending">Send Reply</span>
@@ -1409,7 +1409,7 @@
                         <div x-show="tweetHistory.length > 0" class="space-y-3 max-h-96 overflow-y-auto">
                             <template x-for="tweet in tweetHistory" :key="tweet.id">
                                 <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
-                                    <div class="flex items-start justify-between">
+                                    <div class="flex items-start justify-between gap-2">
                                         <div class="flex-1">
                                             <!-- Tweet Status -->
                                             <div class="flex items-center mb-2">
@@ -1427,10 +1427,10 @@
                                             </div>
                                             
                                             <!-- Tweet Content -->
-                                            <p class="text-sm text-gray-900 mb-2" x-text="tweet.tweetContent"></p>
+                                            <p class="text-sm text-gray-900 mb-2 break-words whitespace-pre-wrap" x-text="tweet.tweetContent"></p>
                                             
                                             <!-- Tweet Info -->
-                                            <div class="flex items-center text-xs text-gray-500 space-x-4">
+                                            <div class="flex flex-wrap items-center gap-3 text-xs text-gray-500">
                                                 <span x-show="tweet.success">
                                                     <i class="fab fa-twitter mr-1"></i>
                                                     <a :href="`https://twitter.com/i/web/status/${tweet.tweetId}`" target="_blank" class="text-blue-600 hover:underline" x-text="tweet.tweetId"></a>
@@ -1475,7 +1475,7 @@
             <!-- Database Header -->
             <header class="bg-gray-800 shadow-lg border-b border-gray-700">
                 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div class="flex justify-between items-center py-6">
+                    <div class="flex flex-col gap-3 py-6 sm:flex-row sm:justify-between sm:items-center">
                         <div class="flex items-center">
                             <i class="fas fa-database text-green-400 text-2xl mr-3"></i>
                             <div>
@@ -1483,7 +1483,7 @@
                                 <p class="text-sm text-gray-400">Sales & Registrations</p>
                             </div>
                         </div>
-                        <div class="flex items-center space-x-4">
+                        <div class="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center sm:gap-4">
                             <div class="flex items-center">
                                 <span class="text-sm font-medium text-gray-400 mr-2">Total Sales:</span>
                                 <span class="text-sm font-bold text-white" x-text="stats.database?.totalSales || 0"></span>
@@ -1507,7 +1507,7 @@
                 <!-- Database Sub-Navigation -->
                 <div class="mb-6">
                     <div class="border-b border-gray-700">
-                        <nav class="-mb-px flex space-x-8">
+                        <nav class="-mb-px flex space-x-6 overflow-x-auto whitespace-nowrap pb-2">
                             <button
                                 @click="databaseSubView = 'sales'"
                                 :class="databaseSubView === 'sales' ? 'border-green-500 text-green-400' : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-600'"
@@ -1621,9 +1621,9 @@
                 </div>
 
                 <!-- Sales Table -->
-                <div x-show="!databaseView.loading" class="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
+                <div x-show="!databaseView.loading" class="bg-gray-800 border border-gray-700 rounded-lg overflow-x-auto">
                     <!-- Table Header -->
-                    <div class="bg-gray-700 border-b border-gray-600 px-6 py-4">
+                    <div class="min-w-[860px] bg-gray-700 border-b border-gray-600 px-6 py-4">
                         <div class="grid grid-cols-12 gap-4 text-xs font-medium text-gray-400 uppercase tracking-wider">
                             <div class="col-span-3">ENS Name</div>
                             <div class="col-span-2">Price</div>
@@ -1635,7 +1635,7 @@
                     </div>
 
                     <!-- Table Body -->
-                    <div class="divide-y divide-gray-700">
+                    <div class="min-w-[860px] divide-y divide-gray-700">
                         <template x-for="sale in databaseView.data?.sales || []" :key="sale.id">
                             <div 
                                 @click="openSaleModal(sale)" 
@@ -1709,7 +1709,7 @@
                 </div>
 
                 <!-- Pagination -->
-                <div x-show="!databaseView.loading && databaseView.data?.pagination?.totalPages > 1" class="mt-6 flex items-center justify-between">
+                <div x-show="!databaseView.loading && databaseView.data?.pagination?.totalPages > 1" class="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div class="text-sm text-gray-400">
                         <span x-show="databaseView.data?.stats?.searchTerm">
                             Showing <span x-text="databaseView.data?.stats?.filteredResults || 0"></span> of <span x-text="databaseView.data?.stats?.totalSales || 0"></span> sales 
@@ -2248,7 +2248,7 @@
         <div x-show="selectedSale" x-transition @click="selectedSale = null" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
             <div @click.stop class="bg-gray-800 border border-gray-700 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
                 <!-- Modal Header -->
-                <div class="flex items-center justify-between p-6 border-b border-gray-700">
+                <div class="flex items-center justify-between p-4 sm:p-6 border-b border-gray-700">
                     <h2 class="text-xl font-bold text-white flex items-center">
                         <i class="fas fa-info-circle text-green-400 mr-3"></i>
                         Sale Details
@@ -2259,7 +2259,7 @@
                 </div>
 
                 <!-- Modal Content -->
-                <div x-show="selectedSale" class="p-6">
+                <div x-show="selectedSale" class="p-4 sm:p-6">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <!-- Left Column -->
                         <div class="space-y-4">
@@ -2418,7 +2418,7 @@
         <!-- Registration Details Modal -->
         <div x-show="selectedRegistration" x-transition @click="selectedRegistration = null" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
             <div @click.stop class="bg-gray-800 border border-gray-700 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-                <div class="flex items-center justify-between p-6 border-b border-gray-700">
+                <div class="flex items-center justify-between p-4 sm:p-6 border-b border-gray-700">
                     <h2 class="text-xl font-bold text-white flex items-center">
                         <i class="fas fa-file-signature text-blue-400 mr-3"></i>
                         Registration Details
@@ -2428,7 +2428,7 @@
                     </button>
                 </div>
 
-                <div x-show="selectedRegistration" class="p-6">
+                <div x-show="selectedRegistration" class="p-4 sm:p-6">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div class="space-y-4">
                             <div>
@@ -2542,7 +2542,7 @@
         <!-- Bid Details Modal -->
         <div x-show="selectedBid" x-transition @click="selectedBid = null" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
             <div @click.stop class="bg-gray-800 border border-gray-700 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-                <div class="flex items-center justify-between p-6 border-b border-gray-700">
+                <div class="flex items-center justify-between p-4 sm:p-6 border-b border-gray-700">
                     <h2 class="text-xl font-bold text-white flex items-center">
                         <i class="fas fa-gavel text-purple-400 mr-3"></i>
                         Bid Details
@@ -2552,7 +2552,7 @@
                     </button>
                 </div>
 
-                <div x-show="selectedBid" class="p-6">
+                <div x-show="selectedBid" class="p-4 sm:p-6">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div class="space-y-4">
                             <div>
