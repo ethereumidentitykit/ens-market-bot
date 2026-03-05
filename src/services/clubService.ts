@@ -178,14 +178,16 @@ export class ClubService {
 
     for (const slug of clubs) {
       const label = await this.getClubLabel(slug);
-      const handle = this.getClubHandle(slug);
-
-      if (handle && handle.trim() !== '' && !usedHandles.has(handle)) {
-        usedHandles.add(handle);
-        clubStrings.push(`${label} ${handle}`);
-      } else {
-        clubStrings.push(label);
-      }
+      // NOTE: Club @mentions temporarily disabled — Twitter API is blocking them (spam crackdown, Feb 2026)
+      // To re-enable: uncomment the handle block below and remove the plain `label` push
+      // const handle = this.getClubHandle(slug);
+      // if (handle && handle.trim() !== '' && !usedHandles.has(handle)) {
+      //   usedHandles.add(handle);
+      //   clubStrings.push(`${label} ${handle}`);
+      // } else {
+      //   clubStrings.push(label);
+      // }
+      clubStrings.push(label); // Temporary: club name only, no @mention
     }
 
     return clubStrings.join(', ');
