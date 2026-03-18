@@ -455,14 +455,12 @@ PRIORITY ORDER (what to focus on, most important first):
    - Username/gamertag appeal worth noting for names like demon, killer, anon, legend, chad, ghost
 
 4. **CATEGORY MEMBERSHIP & MARKET CONTEXT**: If CATEGORY CONTEXT data is provided:
-   - You'll receive club stats (floor price, sales volume, member count) and recent activity for each category the name belongs to
-   - **Compare the current price to the floor**: Is this above/below/at floor? A 3x floor sale is notable. A below-floor purchase is a deal
-   - **Market activity signals**: High recent sales = liquid, active market. Zero sales in 1w/1mo = illiquid or dormant category
-   - **Registration activity**: High reg count = people are actively minting in this category. This signals growing interest
-   - **Supply context**: Available count matters — a category with 0 available names has scarcity value vs one with 67k available
+   - You'll receive club stats and recent activity for each category — use this as **general background context**, not as a primary talking point
+   - Don't lead with or overemphasize floor prices. Floor is just one data point — mention it only if it's genuinely relevant (e.g. a sale at 10x floor, or a name selling below floor)
+   - Category stats help you understand the broader market: is this category active or quiet? Scarce or oversupplied? But keep references brief and natural
    - 999 and 10k categories are self-evident. No need to explain what they are
    - Prepunk: Only mention if sub-10k (increasingly rare), sub-1k (very rare), or sub-100 (extremely valuable)
-   - Don't list raw stats — weave them into your analysis naturally (e.g. "above the 999 Club floor of 1.1 ETH" or "the first sale in this category in weeks")
+   - Don't list raw stats — if you reference category data, weave it in naturally in 1 sentence max
 
 5. **COLLECTION PATTERNS from holdings**: Only if directly relevant
    - Holdings show names with optional [Category] annotations — e.g. "frodo.eth [Top Fantasy], vanish.eth [BIP 39]"
