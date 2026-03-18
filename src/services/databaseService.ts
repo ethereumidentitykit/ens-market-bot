@@ -33,6 +33,9 @@ export class DatabaseService implements IDatabaseService {
 
       // Create tables if they don't exist
       await this.createTables();
+
+      // Run pending migrations
+      await this.runMigrations();
       
       // Auto-setup database triggers for real-time processing
       await this.setupSaleNotificationTriggers();
@@ -443,6 +446,61 @@ export class DatabaseService implements IDatabaseService {
     } catch (error: any) {
       logger.error('Failed to create PostgreSQL tables:', error.message);
       throw error;
+    }
+  }
+
+  /**
+   * Run pending database migrations tracked via system_state.
+   * Each migration runs once; its key is recorded so it won't re-run.
+   */
+  private async runMigrations(): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    const migrations: { key: string; description: string; sql: string }[] = [
+      {
+        key: 'migration_bids_offer_identity_v1',
+        description: 'Add cross-pipeline dedup index on ens_bids',
+        sql: `
+          DELETE FROM ai_replies
+          WHERE bid_id IN (
+            SELECT id FROM ens_bids
+            WHERE id NOT IN (
+              SELECT MIN(id) FROM ens_bids
+              GROUP BY maker_address, token_id, price_raw, currency_contract
+            )
+          );
+          DELETE FROM ens_bids
+          WHERE id NOT IN (
+            SELECT MIN(id) FROM ens_bids
+            GROUP BY maker_address, token_id, price_raw, currency_contract
+          );
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_bids_offer_identity
+          ON ens_bids (maker_address, token_id, price_raw, currency_contract);
+        `,
+      },
+    ];
+
+    for (const migration of migrations) {
+      try {
+        const applied = await this.pool.query(
+          'SELECT 1 FROM system_state WHERE key = $1',
+          [migration.key]
+        );
+        if (applied.rows.length > 0) continue;
+
+        logger.info(`🔄 Running migration: ${migration.description}`);
+        await this.pool.query(migration.sql);
+        await this.pool.query(
+          `INSERT INTO system_state (key, value, updated_at)
+           VALUES ($1, $2, CURRENT_TIMESTAMP)
+           ON CONFLICT (key) DO NOTHING`,
+          [migration.key, new Date().toISOString()]
+        );
+        logger.info(`✅ Migration complete: ${migration.description}`);
+      } catch (error: any) {
+        logger.error(`❌ Migration failed (${migration.key}):`, error.message);
+        throw error;
+      }
     }
   }
 
