@@ -151,7 +151,7 @@ export class GrailsApiService {
       let newestTimestamp = boundaryTimestamp;
 
       while (hasMore && page <= maxPages) {
-        const url = `${this.baseUrl}?limit=${limit}&page=${page}&event_type=offer_made&platform=grails`;
+        const url = `${this.baseUrl}?limit=${limit}&page=${page}&event_type=offer_made`;
         logger.debug(`🔍 Fetching page ${page}: ${url}`);
 
         const response = await axios.get<GrailsApiResponse>(url, {
