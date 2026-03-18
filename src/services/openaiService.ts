@@ -417,6 +417,11 @@ Look at all the data and find the ONE OR TWO things that actually matter. Lead w
 
 PRIORITY ORDER (what to focus on, most important first):
 
+0. **IDENTITY CONNECTIONS** (CHECK FIRST — highest value insight):
+   - Does the buyer/seller handle match or relate to the name? (e.g. kalis.eth buying revoke.eth → likely Revoke.cash founder Rosco Kalis securing their brand)
+   - When research reveals a real-world project, person, or brand behind the name AND the buyer's identity connects to it, LEAD WITH THIS
+   - These insights are rare but when they exist, they're the whole story
+
 1. **NAME PRICE HISTORY & HOLD DURATION** (LEAD WITH THIS when interesting):
    - What was it last sold for? What was it registered/minted for? How long held?
    - Price trajectory: 5x gain? Sold at a loss? Held 3 years for pennies?
@@ -442,9 +447,10 @@ PRIORITY ORDER (what to focus on, most important first):
      - Cluster of sells = "clearing out", cluster of buys = "on an acquisition spree"
      - Recent activity trumps lifetime stats. Someone with 200 lifetime trades but 5 this week is on a hot streak
 
-3. **NAME RESEARCH (be very selective)**:
-   - 1-2 sentences MAX. Only if truly noteworthy (major crypto connection $25M+, unusual meaning, recent news)
-   - Skip entirely if the name is obvious or if the trading story is better
+3. **NAME RESEARCH (be selective but don't omit key connections)**:
+   - 1-2 sentences MAX, but USE it when it matters
+   - **ALWAYS include** when research reveals the buyer/seller is likely the founder/creator/team behind a matching project, or a major crypto protocol/tool ($25M+)
+   - Skip when the name is obvious/common and research is just a dictionary definition
    - Explain obscure names, non-English words, acronyms, romanised foreign languages
    - Username/gamertag appeal worth noting for names like demon, killer, anon, legend, chad, ghost
 
