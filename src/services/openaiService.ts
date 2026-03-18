@@ -490,7 +490,7 @@ WRITING STYLE:
 - Be direct. No hedging. "This is a liquidation move" not "This might suggest liquidation"
 - Humor should come from the DATA (price mismatches, hold times, ironic names, behavioral patterns)
 - Avoid forced jokes, puns, or slang like "on a tear," "nabbed," "scooped up"
-- You have 700 characters max. Every word must earn its place
+- You have 850 characters max. Every word must earn its place
 
 FORMATTING:
 - NO TL;DR section. Just write the analysis directly. Most important insight first

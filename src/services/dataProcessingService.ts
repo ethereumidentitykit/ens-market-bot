@@ -132,7 +132,7 @@ export interface BiddingStats {
 
 /**
  * Complete context package for LLM prompts
- * Combines data from DATABASE (event details) and Magic Eden API (historical context)
+ * Combines data from DATABASE (event details) and Grails API (historical context)
  */
 export interface LLMPromptContext {
   // Current event details (FROM DATABASE - master source of truth)
@@ -206,7 +206,7 @@ export interface LLMPromptContext {
 
 /**
  * Data Processing Service for AI Reply Feature
- * Transforms raw Magic Eden activity data into structured insights for LLM consumption
+ * Transforms raw activity data into structured insights for LLM consumption
  */
 export class DataProcessingService {
   // Category service for checking ENS name category memberships
@@ -221,7 +221,7 @@ export class DataProcessingService {
    * Analyzes price trends, volume, and trading patterns
    * Resolves proxy contracts using transfer events
    * 
-   * @param activities - Token activity history from Magic Eden (sales, mints, transfers)
+   * @param activities - Token activity history (sales, mints, transfers)
    * @param currentTxHash - Transaction hash of current sale (to exclude from history)
    * @param currentSellerAddress - Address of seller in current transaction (for PNL tracking)
    * @param currentSalePrice - Price of current sale in ETH (for PNL calculation)
@@ -771,12 +771,12 @@ export class DataProcessingService {
    * 
    * DATA SOURCES:
    * - eventData: From DATABASE sale/registration record (master source of truth)
-   * - tokenActivities: From Magic Eden API (historical token trading data)
-   * - buyerActivities: From Magic Eden API (buyer's ENS trading history)
-   * - sellerActivities: From Magic Eden API (seller's ENS trading history)
+   * - tokenActivities: From Grails API (historical token trading data)
+   * - buyerActivities: From Grails API (buyer's ENS trading history)
+   * - sellerActivities: From Grails API (seller's ENS trading history)
    * 
    * @param eventData - Current sale/registration event from DB record
-   *                    Should include: txHash (for Magic Eden filtering),
+   *                    Should include: txHash (for history filtering),
    *                    buyer/seller addresses, price (ETH + USD), timestamp
    * @param tokenActivities - Token's trading history (from Grails API)
    * @param buyerActivities - Buyer's activity history (from Grails API)

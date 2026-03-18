@@ -281,8 +281,6 @@ export class NewTweetFormatter {
    * Uses Grails API — lookup by ENS name directly (no contract/tokenId gymnastics).
    */
   private async getHistoricalContext(
-    _contractAddress: string,
-    _tokenId: string,
     ensName: string,
     currentTxHash?: string
   ): Promise<string | null> {
@@ -437,8 +435,6 @@ export class NewTweetFormatter {
     let historicalLine = '';
     if (registration.contractAddress && registration.tokenId) {
       const historical = await this.getHistoricalContext(
-        registration.contractAddress,
-        registration.tokenId,
         ensName,
         registration.transactionHash
       );
@@ -580,12 +576,7 @@ export class NewTweetFormatter {
     // Historical context line (NEW for bids)
     let historicalLine = '';
     if (bid.contractAddress && bid.tokenId) {
-      const historical = await this.getHistoricalContext(
-        bid.contractAddress,
-        bid.tokenId,
-        ensName
-        // Note: Bids don't have a transactionHash to exclude since they're offers, not completed transactions
-      );
+      const historical = await this.getHistoricalContext(ensName);
       if (historical) {
         historicalLine = historical;
       }
@@ -718,8 +709,6 @@ export class NewTweetFormatter {
     let historicalLine = '';
     if (sale.contractAddress && sale.tokenId) {
       const historical = await this.getHistoricalContext(
-        sale.contractAddress,
-        sale.tokenId,
         ensName,
         sale.transactionHash
       );
@@ -1350,8 +1339,8 @@ export class NewTweetFormatter {
       errors.push('Tweet should include "For:" label');
     }
 
-    if (!content.includes('ETH') && !content.includes('USDC') && !content.includes('USDT')) {
-      errors.push('Tweet should include price with currency (ETH, USDC, or USDT)');
+    if (!content.includes('ETH') && !content.includes('USDC') && !content.includes('USDT') && !content.includes('DAI')) {
+      errors.push('Tweet should include price with currency (ETH, USDC, USDT, or DAI)');
     }
 
     if (!content.includes('Seller:')) {

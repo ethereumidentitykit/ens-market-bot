@@ -16,9 +16,8 @@ import { IDatabaseService, ProcessedSale, ENSRegistration, ENSBid } from '../typ
 import { OpenAIService } from './openaiService';
 import { TwitterService } from './twitterService';
 import { DataProcessingService } from './dataProcessingService';
-import { MagicEdenV4Service, TokenActivity } from './magicEdenV4Service';
+import { TokenActivity } from './magicEdenV4Service';
 import { GrailsApiService } from './grailsApiService';
-import { OpenSeaService } from './openSeaService';
 import { ENSWorkerService } from './ensWorkerService';
 import { APIToggleService } from './apiToggleService';
 import { AlchemyService } from './alchemyService';
@@ -28,8 +27,6 @@ export class AIReplyService {
   private databaseService: IDatabaseService;
   private twitterService: TwitterService;
   private dataProcessingService: DataProcessingService;
-  private magicEdenV4Service: MagicEdenV4Service;
-  private openSeaService: OpenSeaService;
   private alchemyService: AlchemyService;
   private ensWorkerService: ENSWorkerService;
   private apiToggleService: APIToggleService;
@@ -44,8 +41,6 @@ export class AIReplyService {
     databaseService: IDatabaseService,
     twitterService: TwitterService,
     dataProcessingService: DataProcessingService,
-    magicEdenV4Service: MagicEdenV4Service,
-    openSeaService: OpenSeaService,
     alchemyService: AlchemyService,
     ensWorkerService: ENSWorkerService
   ) {
@@ -53,8 +48,6 @@ export class AIReplyService {
     this.databaseService = databaseService;
     this.twitterService = twitterService;
     this.dataProcessingService = dataProcessingService;
-    this.magicEdenV4Service = magicEdenV4Service;
-    this.openSeaService = openSeaService;
     this.alchemyService = alchemyService;
     this.ensWorkerService = ensWorkerService;
     this.apiToggleService = APIToggleService.getInstance();
@@ -113,6 +106,17 @@ export class AIReplyService {
         eventData
       );
 
+      // Step 3.5: Enrich activities with current ETH price (Grails API returns usd: 0)
+      logger.debug(`   [AI Reply] Step 3.5: Enriching activities with ETH price...`);
+      const ethPrice = await this.alchemyService.getETHPriceUSD();
+      if (ethPrice) {
+        this.enrichActivitiesWithUSD(contextData.tokenActivities, ethPrice);
+        this.enrichActivitiesWithUSD(contextData.buyerActivities, ethPrice);
+        if (contextData.sellerActivities) {
+          this.enrichActivitiesWithUSD(contextData.sellerActivities, ethPrice);
+        }
+      }
+
       // Step 4: Build LLM context
       logger.debug(`   [AI Reply] Step 4: Building LLM context...`);
       const llmContext = await this.dataProcessingService.buildLLMContext(
@@ -120,7 +124,7 @@ export class AIReplyService {
         contextData.tokenActivities,
         contextData.buyerActivities,
         contextData.sellerActivities,
-        this.magicEdenV4Service,
+        undefined,
         this.ensWorkerService,
         {
           tokenDataIncomplete: contextData.tokenDataIncomplete,
@@ -450,20 +454,7 @@ export class AIReplyService {
     }
     
     try {
-      // Try OpenSea first
-      logger.debug(`Resolving owner for token ${bid.tokenId} via OpenSea...`);
-      const ownerAddress = await this.openSeaService.getTokenOwner(
-        bid.contractAddress,
-        bid.tokenId
-      );
-      
-      if (ownerAddress) {
-        logger.debug(`Found owner via OpenSea: ${ownerAddress}`);
-        return ownerAddress;
-      }
-      
-      // Fallback to Alchemy
-      logger.debug(`Falling back to Alchemy for owner lookup of token ${bid.tokenId}...`);
+      logger.debug(`Resolving owner for token ${bid.tokenId} via Alchemy...`);
       const owners = await this.alchemyService.getOwnersForToken(
         bid.contractAddress,
         bid.tokenId
@@ -550,7 +541,7 @@ export class AIReplyService {
   }
 
   /**
-   * Helper: Fetch all context data in parallel (Magic Eden, OpenSea, name research)
+   * Helper: Fetch all context data in parallel (Grails API, holdings, name research)
    */
   private async fetchContextData(
     transaction: ProcessedSale | ENSRegistration | ENSBid,
@@ -580,7 +571,8 @@ export class AIReplyService {
       ).then(result => ({
         activities: result.activities,
         incomplete: result.incomplete,
-        pagesFetched: result.pagesFetched
+        pagesFetched: result.pagesFetched,
+        unavailable: false
       })).catch((error: any) => {
         logger.error('      Token activity fetch failed:', error.message);
         return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0, unavailable: true };
@@ -646,10 +638,22 @@ export class AIReplyService {
       tokenDataIncomplete: tokenResult.incomplete || false,
       buyerDataIncomplete: buyerResult.incomplete || false,
       sellerDataIncomplete: sellerResult?.incomplete || false,
-      tokenDataUnavailable: (tokenResult as any).unavailable || false,
+      tokenDataUnavailable: tokenResult.unavailable || false,
       buyerDataUnavailable: buyerResult.unavailable || false,
       sellerDataUnavailable: sellerResult?.unavailable || false
     };
+  }
+
+  /**
+   * Enrich activities with USD prices using the current ETH price.
+   * Grails API returns usd: 0 for all activities — this fills them in for ETH-denominated trades.
+   */
+  private enrichActivitiesWithUSD(activities: TokenActivity[], ethPrice: number): void {
+    for (const activity of activities) {
+      if (activity.price.amount.usd === 0 && activity.price.amount.native > 0) {
+        activity.price.amount.usd = activity.price.amount.native * ethPrice;
+      }
+    }
   }
 
   /**

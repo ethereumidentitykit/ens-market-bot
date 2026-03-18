@@ -67,7 +67,7 @@ const CURRENCY_NAMES: Record<string, string> = {
  */
 const CURRENCY_MAP: Record<string, string> = {
   '0x0000000000000000000000000000000000000000': 'ETH',
-  '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2': 'WETH',
+  '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2': 'ETH',
   '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': 'USDC',
   '0xdac17f958d2ee523a2206206994597c13d831ec7': 'USDT',
   '0x6b175474e89094c44da98b954eedeac495271d0f': 'DAI',
@@ -231,10 +231,8 @@ export class GrailsApiService {
   private async transformOffer(offer: GrailsOffer): Promise<TransformedBid> {
     const now = Math.floor(Date.now() / 1000);
     
-    // Calculate price in decimal (wei to ETH/token)
     const currencySymbol = this.getCurrencySymbol(offer.currency_address);
     const decimals = this.getCurrencyDecimals(currencySymbol);
-    const priceDecimal = (BigInt(offer.price_wei) / BigInt(10 ** decimals)).toString();
     const priceDecimalFloat = Number(offer.price_wei) / Math.pow(10, decimals);
 
     // Resolve contract address (NameWrapper first, Base Registrar fallback)
@@ -414,8 +412,8 @@ export class GrailsApiService {
   }
 
   /**
-   * Fetch activity history for an Ethereum address (sales + mints).
-   * Uses event_type=bought (not sold) to naturally deduplicate.
+   * Fetch activity history for an Ethereum address.
+   * Fetches sold, bought, and mint events; deduplicates sold+bought pairs by transaction hash.
    */
   static async getAddressActivity(
     address: string,
@@ -476,18 +474,11 @@ export class GrailsApiService {
     const results: TokenActivity[] = [];
 
     for (const record of records) {
-      if (record.event_type === 'mint') {
-        results.push(GrailsApiService.toTokenActivity(record));
-        continue;
-      }
-
       const dedupeKey = record.transaction_hash || `${record.id}`;
       if (seen.has(dedupeKey)) continue;
       seen.add(dedupeKey);
 
-      if (record.event_type === 'bought') {
-        results.push(GrailsApiService.toTokenActivity(record));
-      } else if (record.event_type === 'sold') {
+      if (record.event_type === 'mint' || record.event_type === 'bought' || record.event_type === 'sold') {
         results.push(GrailsApiService.toTokenActivity(record));
       }
     }
@@ -508,7 +499,7 @@ export class GrailsApiService {
     const decimals = CURRENCY_DECIMALS[currencySymbol] || 18;
     const priceDecimal = Number(record.price_wei) / Math.pow(10, decimals);
 
-    const isEthLike = currencySymbol === 'ETH' || currencySymbol === 'WETH';
+    const isEthLike = currencySymbol === 'ETH';
 
     let fromAddress: string;
     let toAddress: string;

@@ -97,8 +97,6 @@ async function startApplication(): Promise<void> {
       databaseService,
       twitterService,
       dataProcessingService,
-      magicEdenV4Service,
-      openSeaService,
       alchemyService,
       ethIdentityService
     );
@@ -501,32 +499,35 @@ async function startApplication(): Promise<void> {
           txHash: isBid ? undefined : (sale || registration)!.transactionHash
         };
 
-        // Step 3: Fetch Magic Eden data (use V4 API for all activity)
-        logger.debug('   Fetching token activity from Magic Eden V4...');
-        const tokenResultV4 = await magicEdenV4Service.getTokenActivityHistory(
-          transaction.contractAddress,
-          transaction.tokenId || '',
-          { limit: 10, maxPages: 120 } // 2x V3 pages to compensate for lower limit (120x10 = 1200 items)
+        // Step 3: Fetch activity data from Grails API
+        const { GrailsApiService } = await import('./services/grailsApiService');
+        
+        logger.debug('   Fetching token activity from Grails API...');
+        const tokenResult = await GrailsApiService.getNameActivity(
+          eventData.tokenName,
+          { limit: 50, maxPages: 10 }
         );
-        const tokenActivities = magicEdenV4Service.transformV4ToV3Activities(tokenResultV4.activities);
 
-        logger.debug('   Fetching buyer activity from Magic Eden V4...');
-        const buyerResultV4 = await magicEdenV4Service.getUserActivityHistory(
+        logger.debug('   Fetching buyer activity from Grails API...');
+        const buyerResult = await GrailsApiService.getAddressActivity(
           eventData.buyerAddress,
-          { types: ['TRADE', 'MINT', 'TRANSFER'], maxPages: 60 }
+          { limit: 50, maxPages: 50 }
         );
-        const buyerActivities = magicEdenV4Service.transformV4ToV3Activities(buyerResultV4.activities);
 
-        let sellerActivities: TokenActivity[] | null = null;
-        let sellerResultV4: { activities: any[]; incomplete: boolean; pagesFetched: number; unavailable?: boolean } | null = null;
+        let sellerResult: { activities: TokenActivity[]; incomplete: boolean; pagesFetched: number } | null = null;
         if (eventData.sellerAddress) {
-          logger.debug('   Fetching seller activity from Magic Eden V4...');
-          sellerResultV4 = await magicEdenV4Service.getUserActivityHistory(
+          logger.debug('   Fetching seller activity from Grails API...');
+          sellerResult = await GrailsApiService.getAddressActivity(
             eventData.sellerAddress,
-            { types: ['TRADE', 'MINT', 'TRANSFER'], maxPages: 60 }
+            { limit: 50, maxPages: 50 }
           );
-          sellerActivities = magicEdenV4Service.transformV4ToV3Activities(sellerResultV4.activities);
         }
+
+        // Fetch holdings from Grails
+        const buyerHoldings = await GrailsApiService.getENSHoldings(eventData.buyerAddress, { limit: 50, maxPages: 20 });
+        const sellerHoldings = eventData.sellerAddress
+          ? await GrailsApiService.getENSHoldings(eventData.sellerAddress, { limit: 50, maxPages: 20 })
+          : null;
 
         // Step 4: Build LLM context using DataProcessingService
         logger.debug('   Building LLM context...');
@@ -534,17 +535,22 @@ async function startApplication(): Promise<void> {
         const ensWorkerService = new ENSWorkerService();
         const llmContext = await dataProcessingService.buildLLMContext(
           eventData,
-          tokenActivities,
-          buyerActivities,
-          sellerActivities,
-          magicEdenV4Service,  // Pass V4 service for on-demand proxy resolution
-          ensWorkerService,   // Pass for ENS name resolution
+          tokenResult.activities,
+          buyerResult.activities,
+          sellerResult?.activities || null,
+          undefined,
+          ensWorkerService,
           {
-            tokenDataIncomplete: tokenResultV4.incomplete || false,
-            buyerDataIncomplete: buyerResultV4.incomplete || false,
-            sellerDataIncomplete: sellerResultV4?.incomplete || false,
-            buyerDataUnavailable: buyerResultV4.unavailable || false,
-            sellerDataUnavailable: sellerResultV4?.unavailable || false
+            tokenDataIncomplete: tokenResult.incomplete || false,
+            buyerDataIncomplete: buyerResult.incomplete || false,
+            sellerDataIncomplete: sellerResult?.incomplete || false,
+            tokenDataUnavailable: false,
+            buyerDataUnavailable: false,
+            sellerDataUnavailable: false
+          },
+          {
+            buyerHoldings: buyerHoldings || null,
+            sellerHoldings: sellerHoldings || null
           }
         );
 
@@ -564,9 +570,9 @@ async function startApplication(): Promise<void> {
               blockTimestamp: isBid ? bid!.createdAtApi : (sale || registration)!.blockTimestamp
             },
             dataFetched: {
-              tokenActivities: tokenActivities.length,
-              buyerActivities: buyerActivities.length,
-              sellerActivities: sellerActivities?.length || 0
+              tokenActivities: tokenResult.activities.length,
+              buyerActivities: buyerResult.activities.length,
+              sellerActivities: sellerResult?.activities.length || 0
             },
             llmContext: llmContext
           }
@@ -659,10 +665,8 @@ async function startApplication(): Promise<void> {
 
         // Use the unified AIReplyService pipeline (same as automatic generation)
         const { AIReplyService } = await import('./services/aiReplyService');
-        const { OpenSeaService } = await import('./services/openSeaService');
         const { dataProcessingService } = await import('./services/dataProcessingService');
         const openaiService = new OpenAIService();
-        const openSeaService = new OpenSeaService();
         const ensWorkerService = new ENSWorkerService();
         
         const aiReplyService = new AIReplyService(
@@ -670,8 +674,6 @@ async function startApplication(): Promise<void> {
           databaseService,
           twitterService,
           dataProcessingService,
-          magicEdenV4Service,
-          openSeaService,
           alchemyService,
           ensWorkerService
         );
