@@ -277,85 +277,21 @@ export class NewTweetFormatter {
   }
 
   /**
-   * Get historical context for sales and registrations
+   * Get historical context for sales and registrations.
+   * Uses Grails API — lookup by ENS name directly (no contract/tokenId gymnastics).
    */
   private async getHistoricalContext(
-    contractAddress: string,
-    tokenId: string,
     ensName: string,
     currentTxHash?: string
   ): Promise<string | null> {
-    if (!this.magicEdenV4Service) {
-      logger.debug('[NewTweetFormatter] Magic Eden V4 service not available for historical context');
-      return null;
-    }
-
     try {
-      logger.info(`🔍 Fetching historical context for ${ensName} (${contractAddress}:${tokenId})`);
-      
-      // Check if incoming contract is one of the valid ENS token contracts
-      const isNameWrapper = contractAddress.toLowerCase() === ENSTokenUtils.NAME_WRAPPER_CONTRACT.toLowerCase();
-      const isEnsRegistry = contractAddress.toLowerCase() === ENSTokenUtils.ENS_REGISTRY_CONTRACT.toLowerCase();
-      
-      // Determine primary and fallback contracts/tokenIds
-      let primaryContract: string;
-      let primaryTokenId: string;
-      let fallbackContract: string | null = null;
-      let fallbackTokenId: string | null = null;
+      logger.info(`🔍 Fetching historical context for ${ensName} (Grails API)`);
 
-      if (!isNameWrapper && !isEnsRegistry) {
-        // Contract is not an ENS token contract (e.g., old registrar controller)
-        // Default to Name Wrapper first, then fallback to ENS Registry
-        logger.debug(`⚠️ Non-ENS token contract detected: ${contractAddress}. Defaulting to Name Wrapper → ENS Registry lookup`);
-        
-        primaryContract = ENSTokenUtils.NAME_WRAPPER_CONTRACT;
-        primaryTokenId = ENSTokenUtils.ensNameToNamehash(ensName); // Wrapped tokens use namehash
-        
-        fallbackContract = ENSTokenUtils.ENS_REGISTRY_CONTRACT;
-        fallbackTokenId = ENSTokenUtils.ensNameToLabelhash(ensName); // Unwrapped tokens use labelhash
-        
-      } else if (isNameWrapper) {
-        // Valid Name Wrapper contract - use as-is with ENS Registry fallback
-        primaryContract = contractAddress;
-        primaryTokenId = tokenId;
-        
-        fallbackContract = ENSTokenUtils.ENS_REGISTRY_CONTRACT;
-        fallbackTokenId = ENSTokenUtils.ensNameToLabelhash(ensName);
-        logger.debug(`🔄 Will fallback to unwrapped lookup if no wrapped history found`);
-        
-      } else {
-        // Valid ENS Registry contract - use as-is with no fallback
-        primaryContract = contractAddress;
-        primaryTokenId = tokenId;
-        // Note: No fallback from ENS Registry to Name Wrapper (unwrapped tokens won't have wrapped history)
-      }
+      const result = await GrailsApiService.getLastSaleOrMint(ensName, currentTxHash);
 
-
-      // Try primary lookup first (V4 API)
-      const primaryResult = await this.magicEdenV4Service.getLastSaleOrRegistration(
-        primaryContract, 
-        primaryTokenId,
-        currentTxHash
-      );
-
-      if (primaryResult) {
-        logger.info(`✅ Found historical data from primary contract: ${primaryResult.priceAmount} ${primaryResult.currencySymbol || 'ETH'}`);
-        return TimeUtils.formatHistoricalEvent(Number(primaryResult.priceAmount), primaryResult.timestamp, primaryResult.type, primaryResult.currencySymbol);
-      }
-
-      // Try fallback lookup if configured (V4 API)
-      if (fallbackContract && fallbackTokenId) {
-        logger.info(`🔄 Trying fallback lookup: ${fallbackContract}:${fallbackTokenId}`);
-        const fallbackResult = await this.magicEdenV4Service.getLastSaleOrRegistration(
-          fallbackContract,
-          fallbackTokenId,
-          currentTxHash
-        );
-
-        if (fallbackResult) {
-          logger.info(`✅ Found historical data from fallback contract: ${fallbackResult.priceAmount} ${fallbackResult.currencySymbol || 'ETH'}`);
-          return TimeUtils.formatHistoricalEvent(Number(fallbackResult.priceAmount), fallbackResult.timestamp, fallbackResult.type, fallbackResult.currencySymbol);
-        }
+      if (result) {
+        logger.info(`✅ Found historical data: ${result.priceAmount} ${result.currencySymbol || 'ETH'}`);
+        return TimeUtils.formatHistoricalEvent(Number(result.priceAmount), result.timestamp, result.type, result.currencySymbol);
       }
 
       logger.info(`ℹ️ No historical context found for ${ensName}`);
@@ -499,8 +435,6 @@ export class NewTweetFormatter {
     let historicalLine = '';
     if (registration.contractAddress && registration.tokenId) {
       const historical = await this.getHistoricalContext(
-        registration.contractAddress,
-        registration.tokenId,
         ensName,
         registration.transactionHash
       );
@@ -516,8 +450,8 @@ export class NewTweetFormatter {
     const ownerLine = `Minter: ${ownerHandle}`;
     
     // Category line (show category name with handle properly paired)
-    const clubs = await this.clubService.getClubs(ensName);
-    const formattedClubString = await this.clubService.getFormattedClubString(clubs);
+    const { clubs, clubRanks } = await this.clubService.getClubs(ensName);
+    const formattedClubString = await this.clubService.getFormattedClubString(clubs, clubRanks);
     const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
     const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     
@@ -642,12 +576,7 @@ export class NewTweetFormatter {
     // Historical context line (NEW for bids)
     let historicalLine = '';
     if (bid.contractAddress && bid.tokenId) {
-      const historical = await this.getHistoricalContext(
-        bid.contractAddress,
-        bid.tokenId,
-        ensName
-        // Note: Bids don't have a transactionHash to exclude since they're offers, not completed transactions
-      );
+      const historical = await this.getHistoricalContext(ensName);
       if (historical) {
         historicalLine = historical;
       }
@@ -696,8 +625,8 @@ export class NewTweetFormatter {
     }
     
     // Category line (show category name with handle properly paired)
-    const clubs = await this.clubService.getClubs(ensName);
-    const formattedClubString = await this.clubService.getFormattedClubString(clubs);
+    const { clubs, clubRanks } = await this.clubService.getClubs(ensName);
+    const formattedClubString = await this.clubService.getFormattedClubString(clubs, clubRanks);
     const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
     const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     
@@ -780,8 +709,6 @@ export class NewTweetFormatter {
     let historicalLine = '';
     if (sale.contractAddress && sale.tokenId) {
       const historical = await this.getHistoricalContext(
-        sale.contractAddress,
-        sale.tokenId,
         ensName,
         sale.transactionHash
       );
@@ -800,8 +727,8 @@ export class NewTweetFormatter {
     
     // Category line (show category name with handle properly paired)
     logger.info(`[NewTweetFormatter] Getting club info for sale: ${ensName}`);
-    const clubs = await this.clubService.getClubs(ensName);
-    const formattedClubString = await this.clubService.getFormattedClubString(clubs);
+    const { clubs, clubRanks } = await this.clubService.getClubs(ensName);
+    const formattedClubString = await this.clubService.getFormattedClubString(clubs, clubRanks);
     const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
     const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     logger.info(`[NewTweetFormatter] Sale category line result: "${categoryLine}"`);
@@ -1412,8 +1339,8 @@ export class NewTweetFormatter {
       errors.push('Tweet should include "For:" label');
     }
 
-    if (!content.includes('ETH') && !content.includes('USDC') && !content.includes('USDT')) {
-      errors.push('Tweet should include price with currency (ETH, USDC, or USDT)');
+    if (!content.includes('ETH') && !content.includes('USDC') && !content.includes('USDT') && !content.includes('DAI')) {
+      errors.push('Tweet should include price with currency (ETH, USDC, USDT, or DAI)');
     }
 
     if (!content.includes('Seller:')) {
@@ -1485,8 +1412,8 @@ export class NewTweetFormatter {
     
     // Check for club mention
     logger.info(`[NewTweetFormatter] Preview - Getting club info for: ${ensName}`);
-    const clubs = await this.clubService.getClubs(ensName);
-    const formattedClubString = await this.clubService.getFormattedClubString(clubs);
+    const { clubs, clubRanks } = await this.clubService.getClubs(ensName);
+    const formattedClubString = await this.clubService.getFormattedClubString(clubs, clubRanks);
     const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
     const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     logger.info(`[NewTweetFormatter] Preview category line result: "${categoryLine}"`);
@@ -1536,8 +1463,8 @@ export class NewTweetFormatter {
     const ownerHandle = this.getDisplayHandle(ownerAccount, registration.ownerAddress);
     
     // Check for club mention
-    const clubs = await this.clubService.getClubs(ensName);
-    const formattedClubString = await this.clubService.getFormattedClubString(clubs);
+    const { clubs, clubRanks } = await this.clubService.getClubs(ensName);
+    const formattedClubString = await this.clubService.getFormattedClubString(clubs, clubRanks);
     const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
     const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     
@@ -1691,8 +1618,8 @@ export class NewTweetFormatter {
     }
     
     // Check for club mention
-    const clubs = await this.clubService.getClubs(ensName);
-    const formattedClubString = await this.clubService.getFormattedClubString(clubs);
+    const { clubs, clubRanks } = await this.clubService.getClubs(ensName);
+    const formattedClubString = await this.clubService.getFormattedClubString(clubs, clubRanks);
     const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
     const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     

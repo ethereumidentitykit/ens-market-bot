@@ -4,13 +4,24 @@ import { CLUB_LABELS, CLUB_TWITTER_HANDLES, getFirstClubHandle as getFirstClubHa
 const GRAILS_API_BASE = 'https://grails-api.ethid.org/api/v1';
 const CLUBS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+export interface ClubRank {
+  club: string;
+  rank: number;
+}
+
 export interface GrailsNameResponse {
   success: boolean;
   data: {
     clubs: string[];
+    club_ranks: ClubRank[] | null;
     has_numbers: boolean;
     has_emoji: boolean;
   };
+}
+
+export interface ClubsResult {
+  clubs: string[];
+  clubRanks: ClubRank[];
 }
 
 interface ClubMetadata {
@@ -27,10 +38,11 @@ export class ClubService {
   private static clubsCacheFetching = false;
 
   /**
-   * Fetch clubs for an ENS name from the Grails API
+   * Fetch clubs and club ranks for an ENS name from the Grails API
    */
-  public async getClubs(ensName: string): Promise<string[]> {
-    if (!ensName) return [];
+  public async getClubs(ensName: string): Promise<ClubsResult> {
+    const empty: ClubsResult = { clubs: [], clubRanks: [] };
+    if (!ensName) return empty;
 
     try {
       const url = `${GRAILS_API_BASE}/names/${encodeURIComponent(ensName)}`;
@@ -38,21 +50,24 @@ export class ClubService {
 
       if (!response.ok) {
         logger.warn(`[ClubService] API returned ${response.status} for ${ensName}`);
-        return this.detectClubsByPattern(ensName);
+        return { clubs: this.detectClubsByPattern(ensName), clubRanks: [] };
       }
 
       const data: GrailsNameResponse = await response.json();
 
       if (!data.success || !data.data?.clubs) {
         logger.warn(`[ClubService] API returned no clubs for ${ensName} (success: ${data.success}, clubs: ${JSON.stringify(data.data?.clubs)})`);
-        return this.detectClubsByPattern(ensName);
+        return { clubs: this.detectClubsByPattern(ensName), clubRanks: [] };
       }
 
       logger.debug(`[ClubService] Found ${data.data.clubs.length} clubs for ${ensName}: ${data.data.clubs.join(', ')}`);
-      return data.data.clubs;
+      return {
+        clubs: data.data.clubs,
+        clubRanks: data.data.club_ranks || [],
+      };
     } catch (error: any) {
       logger.error(`[ClubService] Failed to fetch clubs for ${ensName}:`, error.message);
-      return this.detectClubsByPattern(ensName);
+      return { clubs: this.detectClubsByPattern(ensName), clubRanks: [] };
     }
   }
 
@@ -166,28 +181,31 @@ export class ClubService {
   }
 
   /**
-   * Get formatted club string with names and handles properly paired
-   * Format: "999 Club @ens999club, Pokemon @PokemonENS"
+   * Get formatted club string with names, ranks, and handles properly paired
+   * Format: "Prepunks #42, 999 Club"
+   * Appends #rank for any category that has one in clubRanks
    * Deduplicates handles - only shows each handle once (on first category)
    */
-  public async getFormattedClubString(clubs: string[]): Promise<string | null> {
+  public async getFormattedClubString(clubs: string[], clubRanks: ClubRank[] = []): Promise<string | null> {
     if (!clubs || clubs.length === 0) return null;
 
-    const usedHandles = new Set<string>();
+    const rankMap = new Map(clubRanks.map(r => [r.club, r.rank]));
     const clubStrings: string[] = [];
 
     for (const slug of clubs) {
       const label = await this.getClubLabel(slug);
+      const rank = rankMap.get(slug);
+      const rankSuffix = rank ? ` #${rank.toLocaleString('en-US')}` : '';
       // NOTE: Club @mentions temporarily disabled — Twitter API is blocking them (spam crackdown, Feb 2026)
-      // To re-enable: uncomment the handle block below and remove the plain `label` push
+      // To re-enable: uncomment the handle block below and remove the plain label+rank push
       // const handle = this.getClubHandle(slug);
       // if (handle && handle.trim() !== '' && !usedHandles.has(handle)) {
       //   usedHandles.add(handle);
-      //   clubStrings.push(`${label} ${handle}`);
+      //   clubStrings.push(`${label}${rankSuffix} ${handle}`);
       // } else {
-      //   clubStrings.push(label);
+      //   clubStrings.push(`${label}${rankSuffix}`);
       // }
-      clubStrings.push(label); // Temporary: club name only, no @mention
+      clubStrings.push(`${label}${rankSuffix}`);
     }
 
     return clubStrings.join(', ');

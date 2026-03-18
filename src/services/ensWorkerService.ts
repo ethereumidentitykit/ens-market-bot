@@ -74,7 +74,7 @@ export interface ResolvedProfile {
  * API Documentation: https://ens.ethfollow.xyz/u/{address}
  */
 export class ENSWorkerService {
-  private readonly baseUrl = 'https://enstate-prod-us-east-1.up.railway.app/u';
+  private readonly baseUrl = 'https://ens.ethfollow.xyz/u';
   private readonly ethFollowDataBaseUrl = process.env.ETHFOLLOW_DATA_BASE_URL || 'https://data.ethfollow.xyz/api/v1';
   private readonly cache = new Map<string, ResolvedName>();
   private readonly profileCache = new Map<string, { data: ResolvedProfile; timestamp: number }>();
