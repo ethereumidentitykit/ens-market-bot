@@ -125,6 +125,7 @@ export class AIReplyService {
           tokenDataIncomplete: contextData.tokenDataIncomplete,
           buyerDataIncomplete: contextData.buyerDataIncomplete,
           sellerDataIncomplete: contextData.sellerDataIncomplete,
+          tokenDataUnavailable: contextData.tokenDataUnavailable,
           buyerDataUnavailable: contextData.buyerDataUnavailable,
           sellerDataUnavailable: contextData.sellerDataUnavailable
         },
@@ -565,6 +566,7 @@ export class AIReplyService {
     sellerDataIncomplete: boolean;
     buyerDataUnavailable: boolean;
     sellerDataUnavailable: boolean;
+    tokenDataUnavailable: boolean;
   }> {
     logger.debug('      Parallel fetching: Token activity, Buyer activity, Seller activity, Holdings, Name research...');
 
@@ -581,7 +583,7 @@ export class AIReplyService {
         pagesFetched: result.pagesFetched
       })).catch((error: any) => {
         logger.error('      Token activity fetch failed:', error.message);
-        return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0 };
+        return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0, unavailable: true };
       }),
       
       // Buyer activity history (V4 API) - include BID_CREATED to track bidding behavior
@@ -604,7 +606,7 @@ export class AIReplyService {
         unavailable: result.unavailable || false
       })).catch((error: any) => {
         logger.error('      Buyer activity fetch failed:', error.message);
-        return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0, unavailable: false };
+        return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0, unavailable: true };
       }),
       
       // Seller activity history (if applicable) (V4 API)
@@ -628,7 +630,7 @@ export class AIReplyService {
             unavailable: result.unavailable || false
           })).catch((error: any) => {
             logger.error('      Seller activity fetch failed:', error.message);
-            return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0, unavailable: false };
+            return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0, unavailable: true };
           })
         : Promise.resolve(null),
       
@@ -662,6 +664,7 @@ export class AIReplyService {
       tokenDataIncomplete: tokenResult.incomplete || false,
       buyerDataIncomplete: buyerResult.incomplete || false,
       sellerDataIncomplete: sellerResult?.incomplete || false,
+      tokenDataUnavailable: (tokenResult as any).unavailable || false,
       buyerDataUnavailable: buyerResult.unavailable || false,
       sellerDataUnavailable: sellerResult?.unavailable || false
     };
