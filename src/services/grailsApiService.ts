@@ -617,18 +617,19 @@ export class GrailsApiService {
   /**
    * Fetch ENS names currently held by an address via Grails search API.
    * Replaces OpenSea getENSHoldings — no API key needed, no rate limiting.
+   * Returns name + clubs for each holding (clubs come free in the search response).
    */
   static async getENSHoldings(
     address: string,
     options: { limit?: number; maxPages?: number } = {}
-  ): Promise<{ names: string[]; incomplete: boolean; totalFetched: number }> {
+  ): Promise<{ names: { name: string; clubs: string[] }[]; incomplete: boolean; totalFetched: number }> {
     const limit = Math.min(options.limit || 50, 50);
     const maxPages = options.maxPages || 20;
     const apiBase = GrailsApiService.getApiBase();
 
     logger.info(`📚 Fetching ENS holdings for ${address} (limit: ${limit}, maxPages: ${maxPages})`);
 
-    const allNames: string[] = [];
+    const allNames: { name: string; clubs: string[] }[] = [];
     let page = 1;
     let incomplete = false;
 
@@ -653,12 +654,12 @@ export class GrailsApiService {
           break;
         }
 
-        const names = results
-          .map((r: any) => r.name as string)
-          .filter((name: string) => name && name.endsWith('.eth'));
-        allNames.push(...names);
+        const holdings = results
+          .filter((r: any) => r.name && r.name.endsWith('.eth'))
+          .map((r: any) => ({ name: r.name as string, clubs: (r.clubs as string[]) || [] }));
+        allNames.push(...holdings);
 
-        logger.debug(`   Page ${page}: Fetched ${names.length} ENS names (total: ${allNames.length})`);
+        logger.debug(`   Page ${page}: Fetched ${holdings.length} ENS names (total: ${allNames.length})`);
 
         if (!response.data.data.pagination.hasNext) break;
         page++;

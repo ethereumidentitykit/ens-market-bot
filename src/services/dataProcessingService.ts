@@ -65,9 +65,9 @@ export interface UserStats {
   // Marketplace preferences
   topMarketplaces: string[]; // Most frequently used marketplaces
   
-  // Current ENS holdings (from OpenSea)
-  currentHoldings: string[] | null; // Array of ENS names they currently hold
-  holdingsIncomplete: boolean; // True if holdings fetch was incomplete
+  // Current ENS holdings (from Grails search API)
+  currentHoldings: { name: string; clubs: string[] }[] | null;
+  holdingsIncomplete: boolean;
   
   // Bidding behavior (optional - only if bid activities found)
   biddingStats?: BiddingStats;
@@ -444,7 +444,7 @@ export class DataProcessingService {
     userAddress: string,
     role: 'buyer' | 'seller',
     _magicEdenV4Service?: any,
-    currentHoldings?: { names: string[]; incomplete: boolean } | null
+    currentHoldings?: { names: { name: string; clubs: string[] }[]; incomplete: boolean } | null
   ): Promise<UserStats> {
     logger.debug(`👤 Processing user activity: ${activities.length} activities for ${userAddress.slice(0, 8)}... (${role})`);
     
@@ -809,8 +809,8 @@ export class DataProcessingService {
       sellerDataUnavailable?: boolean;
     },
     holdingsData?: {
-      buyerHoldings: { names: string[]; incomplete: boolean } | null;
-      sellerHoldings: { names: string[]; incomplete: boolean } | null;
+      buyerHoldings: { names: { name: string; clubs: string[] }[]; incomplete: boolean } | null;
+      sellerHoldings: { names: { name: string; clubs: string[] }[]; incomplete: boolean } | null;
     }
   ): Promise<LLMPromptContext> {
     logger.info(`🧠 Building LLM context for ${eventData.type}: ${eventData.tokenName}`);

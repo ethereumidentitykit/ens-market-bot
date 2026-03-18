@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { logger } from '../utils/logger';
 import { LLMPromptContext } from './dataProcessingService';
+import { CLUB_LABELS } from '../constants/clubMetadata';
 
 /**
  * Response from OpenAI containing generated tweet and metadata
@@ -94,6 +95,20 @@ export class OpenAIService {
     }
     
     return sanitized;
+  }
+
+  /**
+   * Format holdings array as comma-separated names with [Category] annotations.
+   * Names with clubs get brackets: "frodo.eth [Top Fantasy], vanish.eth [BIP 39], bergson.eth"
+   */
+  private formatHoldingsWithClubs(holdings: { name: string; clubs: string[] }[]): string {
+    return holdings.map(h => {
+      if (h.clubs.length === 0) return h.name;
+      const labels = h.clubs
+        .map(slug => CLUB_LABELS[slug] || slug)
+        .join(', ');
+      return `${h.name} [${labels}]`;
+    }).join(', ');
   }
 
   /**
@@ -351,7 +366,7 @@ Research: ${sanitizedLabel}`;
       const rawText = response.output_text?.trim() || '';
       
       // Add title/header to the tweet
-      const tweetText = `🤖 GrailsAI Insight (beta):\n\n${rawText}`;
+      const tweetText = `GrailsAI ✨\n\n${rawText}`;
       
       // Validate response (with title included)
       if (!this.validateResponse(tweetText)) {
@@ -439,6 +454,8 @@ PRIORITY ORDER (what to focus on, most important first):
    - Prepunk: Only mention if sub-10k (increasingly rare), sub-1k (very rare), or sub-100 (extremely valuable)
 
 5. **COLLECTION PATTERNS from holdings**: Only if directly relevant
+   - Holdings show names with optional [Category] annotations — e.g. "frodo.eth [Top Fantasy], vanish.eth [BIP 39]"
+   - Use categories to identify participant themes (fantasy names, dictionary words, number clubs, etc.)
    - **NAME EXAMPLES**: ONLY mention specific holdings if they're DIRECTLY SIMILAR to the purchased name
      - GOOD: Buying "aug.eth" and they own "sep.eth" and "oct.eth" (all months)
      - BAD: Buying "aug.eth" and they own "0000000002.eth" (NOT similar)
@@ -482,12 +499,20 @@ FORMATTING:
 - 4-6 sentences total. Front-load the interesting stuff
 
 🚩 **WASH TRADING DETECTION (sales/registrations ONLY, NOT bids)**:
-- Fresh buyer wallet + serial mint-flipper seller = LIKELY wash trade
-- Minted and sold same day or within days = 90% chance wash trade
-- Red flags: fresh wallets, rapid mint-flips, repeated pattern
-- If it looks unnatural, SAY SO boldly
-- 10k and 999 clubs: be more lenient, these are highly liquid
-- If NO red flags, don't mention wash trading at all
+ANY of these combinations = CALL IT A WASH TRADE. Do not hedge. Do not say "either/or." State it as fact:
+- Fresh/empty buyer wallet + seller who mints and flips = WASH TRADE. Say so directly
+- Buyer and seller are the same address = WASH TRADE. Say so directly
+- Name minted and sold same day or within days at inflated price = WASH TRADE. Say so directly
+- Seller has a pattern of minting cheap names and "selling" them to fresh wallets = WASH TRADE. Say so directly
+
+NEVER hedge with "either X happened or Y." If the signals are there, the conclusion is wash trading. Period.
+NEVER frame wash trading as clever strategy ("found a lane to print"). Call it what it is
+The word "wash" MUST appear in your response when you detect these patterns
+
+When it's NOT a wash trade:
+- 10k and 999 clubs with established buyer wallets: be more lenient, these are highly liquid
+- If buyer has real history (multiple buys, sells, diverse names) it's probably real
+- If NO red flags exist, don't mention wash trading at all
 
 CRITICAL RULES:
 - Don't state obvious things or repeat the price/name from the main tweet
@@ -619,6 +644,12 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
         prompt += `- Seller: ${sellerHandle}\n`;
       }
     }
+
+    // Programmatic wash trade flag: same buyer and seller address
+    if (event.type === 'sale' && event.sellerAddress &&
+        event.buyerAddress.toLowerCase() === event.sellerAddress.toLowerCase()) {
+      prompt += `- ⚠️ SAME ADDRESS: Buyer and seller are the SAME wallet. This is a self-trade.\n`;
+    }
     
     // Include category membership if available (sanitized)
     if (clubInfo) {
@@ -663,6 +694,10 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
       prompt += `- Buys: ${buyerStats.buysCount} (${buyerStats.buysVolume.toFixed(4)} ETH / $${buyerStats.buysVolumeUsd.toLocaleString()})\n`;
       prompt += `- Sells: ${buyerStats.sellsCount} (${buyerStats.sellsVolume.toFixed(4)} ETH / $${buyerStats.sellsVolumeUsd.toLocaleString()})\n`;
       prompt += `- Activity: ${buyerStats.transactionsPerMonth.toFixed(1)} txns/month\n`;
+
+      if (event.type !== 'bid' && buyerStats.buysCount + buyerStats.sellsCount <= 1) {
+        prompt += `- ⚠️ FRESH WALLET: Buyer has little or no ENS trading history. Wash trade signal if seller is a mint-flipper.\n`;
+      }
     }
     
     // Buyer detail sections (only if data was successfully fetched)
@@ -752,19 +787,32 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
         const tokenName = activity.tokenName ? activity.tokenName.slice(0, 20) : 'unknown';
         prompt += `- ${date}: ${activity.type} ${tokenName} for ${activity.price.toFixed(4)} ETH [${activity.role}]\n`;
       }
+
+      // Detect mint-flipper pattern: seller has mints + quick sells at much higher prices
+      if (event.type === 'sale') {
+        const sellerMints = sellerActivityHistory.filter(a => a.type === 'mint');
+        const sellerSells = sellerActivityHistory.filter(a => a.role === 'seller' && a.type === 'sale');
+        if (sellerMints.length >= 2 && sellerSells.length >= 2) {
+          const avgMintPrice = sellerMints.reduce((s, a) => s + a.price, 0) / sellerMints.length;
+          const avgSellPrice = sellerSells.reduce((s, a) => s + a.price, 0) / sellerSells.length;
+          if (avgMintPrice > 0 && avgSellPrice / avgMintPrice >= 10) {
+            prompt += `- ⚠️ MINT-FLIPPER: Seller mints at avg ${avgMintPrice.toFixed(4)} ETH and sells at avg ${avgSellPrice.toFixed(4)} ETH (${Math.round(avgSellPrice / avgMintPrice)}x markup). Wash trade signal if buyer is a fresh wallet.\n`;
+          }
+        }
+      }
     }
 
-    // Format buyer current holdings (only if buyer data was fetched)
+    // Format buyer current holdings with club annotations (only if buyer data was fetched)
     if (!metadata.buyerDataUnavailable && buyerStats.currentHoldings && buyerStats.currentHoldings.length > 0) {
       prompt += `\nBUYER CURRENT HOLDINGS (${buyerStats.currentHoldings.length} names${buyerStats.holdingsIncomplete ? ' - incomplete data' : ''}):\n`;
-      prompt += buyerStats.currentHoldings.join(', ');
+      prompt += this.formatHoldingsWithClubs(buyerStats.currentHoldings);
       prompt += `\n`;
     }
 
-    // Format seller current holdings (only if seller data was fetched)
+    // Format seller current holdings with club annotations (only if seller data was fetched)
     if (!metadata.sellerDataUnavailable && sellerStats && sellerStats.currentHoldings && sellerStats.currentHoldings.length > 0) {
       prompt += `\nSELLER CURRENT HOLDINGS (${sellerStats.currentHoldings.length} names${sellerStats.holdingsIncomplete ? ' - incomplete data' : ''}):\n`;
-      prompt += sellerStats.currentHoldings.join(', ');
+      prompt += this.formatHoldingsWithClubs(sellerStats.currentHoldings);
       prompt += `\n`;
     }
 
