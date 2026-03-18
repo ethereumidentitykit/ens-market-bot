@@ -1149,8 +1149,8 @@ export class DataProcessingService {
     
     // Step 3.75: Check category membership
     logger.debug(`   🎯 Checking category membership for ${eventData.tokenName}...`);
-    const categories = await this.clubService.getClubs(eventData.tokenName);
-    const clubInfo = await this.clubService.getFormattedClubString(categories);
+    const { clubs: categories, clubRanks: categoryRanks } = await this.clubService.getClubs(eventData.tokenName);
+    const clubInfo = await this.clubService.getFormattedClubString(categories, categoryRanks);
     if (clubInfo) {
       logger.debug(`   ✅ Category membership found: ${clubInfo}`);
     } else {

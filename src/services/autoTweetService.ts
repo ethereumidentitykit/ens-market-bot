@@ -505,7 +505,7 @@ export class AutoTweetService {
    */
   private async getEthMinimumForSale(sale: ProcessedSale, settings: TransactionSpecificSettings): Promise<number> {
     const nftName = sale.nftName || '';
-    const clubs = await this.clubService.getClubs(nftName);
+    const { clubs } = await this.clubService.getClubs(nftName);
     
     const clubLabels = await Promise.all(clubs.map(c => this.clubService.getClubLabel(c)));
     logger.info(`🔍 SALE FILTER: ${nftName} - clubs detected: [${clubLabels.join(', ') || 'none'}]`);
@@ -528,7 +528,7 @@ export class AutoTweetService {
    */
   private async getCategoryName(sale: ProcessedSale): Promise<string> {
     const nftName = sale.nftName || '';
-    const clubs = await this.clubService.getClubs(nftName);
+    const { clubs } = await this.clubService.getClubs(nftName);
     
     // Return the first premium club found, or standard
     if (clubs.includes('999') || clubs.includes('10k')) {
@@ -543,7 +543,7 @@ export class AutoTweetService {
    */
   private async getEthMinimumForRegistration(registration: ENSRegistration, settings: TransactionSpecificSettings): Promise<number> {
     const ensName = registration.fullName || registration.ensName || '';
-    const clubs = await this.clubService.getClubs(ensName);
+    const { clubs } = await this.clubService.getClubs(ensName);
     
     // Check for premium clubs with special thresholds (in priority order)
     if (clubs.includes('999')) {
@@ -560,7 +560,7 @@ export class AutoTweetService {
    */
   private async getRegistrationCategoryName(registration: ENSRegistration): Promise<string> {
     const ensName = registration.fullName || registration.ensName || '';
-    const clubs = await this.clubService.getClubs(ensName);
+    const { clubs } = await this.clubService.getClubs(ensName);
     
     // Return the first premium club found, or standard
     if (clubs.includes('999') || clubs.includes('10k')) {
@@ -801,7 +801,7 @@ export class AutoTweetService {
       }
 
       // Apply club-aware logic using ClubService
-      const clubs = await this.clubService.getClubs(ensName);
+      const { clubs } = await this.clubService.getClubs(ensName);
       
       // Check for premium clubs with special thresholds (in priority order)
       if (clubs.includes('999')) {
@@ -872,7 +872,7 @@ export class AutoTweetService {
       }
 
       // Apply club-aware logic using ClubService
-      const clubs = await this.clubService.getClubs(ensName);
+      const { clubs } = await this.clubService.getClubs(ensName);
       
       // Return the first premium club found, or standard
       if (clubs.includes('999') || clubs.includes('10k')) {

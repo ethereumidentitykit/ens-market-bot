@@ -508,7 +508,7 @@ export class BidsProcessingService {
       }
 
       // Apply club-aware logic using ClubService
-      const clubs = await this.clubService.getClubs(ensName);
+      const { clubs } = await this.clubService.getClubs(ensName);
       
       // Check for premium clubs with special thresholds (in priority order)
       if (clubs.includes('999')) {

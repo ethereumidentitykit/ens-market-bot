@@ -516,8 +516,8 @@ export class NewTweetFormatter {
     const ownerLine = `Minter: ${ownerHandle}`;
     
     // Category line (show category name with handle properly paired)
-    const clubs = await this.clubService.getClubs(ensName);
-    const formattedClubString = await this.clubService.getFormattedClubString(clubs);
+    const { clubs, clubRanks } = await this.clubService.getClubs(ensName);
+    const formattedClubString = await this.clubService.getFormattedClubString(clubs, clubRanks);
     const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
     const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     
@@ -696,8 +696,8 @@ export class NewTweetFormatter {
     }
     
     // Category line (show category name with handle properly paired)
-    const clubs = await this.clubService.getClubs(ensName);
-    const formattedClubString = await this.clubService.getFormattedClubString(clubs);
+    const { clubs, clubRanks } = await this.clubService.getClubs(ensName);
+    const formattedClubString = await this.clubService.getFormattedClubString(clubs, clubRanks);
     const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
     const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     
@@ -800,8 +800,8 @@ export class NewTweetFormatter {
     
     // Category line (show category name with handle properly paired)
     logger.info(`[NewTweetFormatter] Getting club info for sale: ${ensName}`);
-    const clubs = await this.clubService.getClubs(ensName);
-    const formattedClubString = await this.clubService.getFormattedClubString(clubs);
+    const { clubs, clubRanks } = await this.clubService.getClubs(ensName);
+    const formattedClubString = await this.clubService.getFormattedClubString(clubs, clubRanks);
     const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
     const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     logger.info(`[NewTweetFormatter] Sale category line result: "${categoryLine}"`);
@@ -1485,8 +1485,8 @@ export class NewTweetFormatter {
     
     // Check for club mention
     logger.info(`[NewTweetFormatter] Preview - Getting club info for: ${ensName}`);
-    const clubs = await this.clubService.getClubs(ensName);
-    const formattedClubString = await this.clubService.getFormattedClubString(clubs);
+    const { clubs, clubRanks } = await this.clubService.getClubs(ensName);
+    const formattedClubString = await this.clubService.getFormattedClubString(clubs, clubRanks);
     const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
     const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     logger.info(`[NewTweetFormatter] Preview category line result: "${categoryLine}"`);
@@ -1536,8 +1536,8 @@ export class NewTweetFormatter {
     const ownerHandle = this.getDisplayHandle(ownerAccount, registration.ownerAddress);
     
     // Check for club mention
-    const clubs = await this.clubService.getClubs(ensName);
-    const formattedClubString = await this.clubService.getFormattedClubString(clubs);
+    const { clubs, clubRanks } = await this.clubService.getClubs(ensName);
+    const formattedClubString = await this.clubService.getFormattedClubString(clubs, clubRanks);
     const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
     const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     
@@ -1691,8 +1691,8 @@ export class NewTweetFormatter {
     }
     
     // Check for club mention
-    const clubs = await this.clubService.getClubs(ensName);
-    const formattedClubString = await this.clubService.getFormattedClubString(clubs);
+    const { clubs, clubRanks } = await this.clubService.getClubs(ensName);
+    const formattedClubString = await this.clubService.getFormattedClubString(clubs, clubRanks);
     const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
     const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
     
