@@ -51,6 +51,7 @@ export interface GrailsApiResponse {
 const CURRENCY_DECIMALS: Record<string, number> = {
   'USDC': 6,
   'USDT': 6,
+  'DAI': 18,
 };
 
 const CURRENCY_NAMES: Record<string, string> = {
@@ -58,6 +59,7 @@ const CURRENCY_NAMES: Record<string, string> = {
   'WETH': 'Wrapped Ether',
   'USDC': 'USD Coin',
   'USDT': 'Tether',
+  'DAI': 'Dai Stablecoin',
 };
 
 /**
@@ -68,6 +70,7 @@ const CURRENCY_MAP: Record<string, string> = {
   '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2': 'WETH',
   '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': 'USDC',
   '0xdac17f958d2ee523a2206206994597c13d831ec7': 'USDT',
+  '0x6b175474e89094c44da98b954eedeac495271d0f': 'DAI',
 };
 
 /**
@@ -501,9 +504,11 @@ export class GrailsApiService {
    * "mint":   actor=minter → fromAddress=0x0, toAddress=minter
    */
   static toTokenActivity(record: GrailsActivityRecord): TokenActivity {
-    const currencySymbol = CURRENCY_MAP[record.currency_address?.toLowerCase()] || 'ETH';
+    const currencySymbol = CURRENCY_MAP[record.currency_address?.toLowerCase()] || 'UNKNOWN';
     const decimals = CURRENCY_DECIMALS[currencySymbol] || 18;
     const priceDecimal = Number(record.price_wei) / Math.pow(10, decimals);
+
+    const isEthLike = currencySymbol === 'ETH' || currencySymbol === 'WETH';
 
     let fromAddress: string;
     let toAddress: string;
@@ -539,7 +544,7 @@ export class GrailsApiService {
           raw: record.price_wei,
           decimal: priceDecimal,
           usd: 0,
-          native: priceDecimal,
+          native: isEthLike ? priceDecimal : 0,
         },
       },
       amount: 1,
@@ -702,9 +707,8 @@ export class GrailsApiService {
       const activeListings: GrailsActiveListing[] = response.data.data.listings
         .filter((l: any) => l.status === 'active')
         .map((l: any) => {
-          const currencySymbol = CURRENCY_MAP[l.currency_address?.toLowerCase()] || 'ETH';
-          // Grails API price field is in wei — convert to decimal
-          const decimals = (currencySymbol === 'USDC' || currencySymbol === 'USDT') ? 6 : 18;
+          const currencySymbol = CURRENCY_MAP[l.currency_address?.toLowerCase()] || 'UNKNOWN';
+          const decimals = CURRENCY_DECIMALS[currencySymbol] || 18;
           const priceDecimal = parseFloat(l.price) / Math.pow(10, decimals);
           return {
             price: priceDecimal,
