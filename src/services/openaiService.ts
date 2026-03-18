@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { logger } from '../utils/logger';
 import { LLMPromptContext } from './dataProcessingService';
+import { CLUB_LABELS } from '../constants/clubMetadata';
 
 /**
  * Response from OpenAI containing generated tweet and metadata
@@ -46,9 +47,9 @@ export class OpenAIService {
       description: 'GPT-5-mini with web search for name research'
     },
     base: {
-      name: 'gpt-5-mini',
-      maxInputTokens: 128000, // GPT-5-mini context window
-      description: 'Fast, efficient model for tweet generation'
+      name: 'gpt-5.4-2026-03-05',
+      maxInputTokens: 128000,
+      description: 'GPT-5.4 for tweet generation'
     },
     thinking: {
       name: 'o1', // Thinking model with larger context window
@@ -94,6 +95,20 @@ export class OpenAIService {
     }
     
     return sanitized;
+  }
+
+  /**
+   * Format holdings array as comma-separated names with [Category] annotations.
+   * Names with clubs get brackets: "frodo.eth [Top Fantasy], vanish.eth [BIP 39], bergson.eth"
+   */
+  private formatHoldingsWithClubs(holdings: { name: string; clubs: string[] }[]): string {
+    return holdings.map(h => {
+      if (h.clubs.length === 0) return h.name;
+      const labels = h.clubs
+        .map(slug => CLUB_LABELS[slug] || slug)
+        .join(', ');
+      return `${h.name} [${labels}]`;
+    }).join(', ');
   }
 
   /**
@@ -351,11 +366,11 @@ Research: ${sanitizedLabel}`;
       const rawText = response.output_text?.trim() || '';
       
       // Add title/header to the tweet
-      const tweetText = `🤖 GrailsAI Insight (beta):\n\n${rawText}`;
+      const tweetText = `GrailsAI ✨\n\n${rawText}`;
       
       // Validate response (with title included)
       if (!this.validateResponse(tweetText)) {
-        throw new Error(`Invalid response: ${tweetText.length} characters (max 1200)`);
+        throw new Error(`Invalid response: ${tweetText.length} characters (max 900)`);
       }
 
       const usage = response.usage;
@@ -395,253 +410,159 @@ Research: ${sanitizedLabel}`;
    * Defines the AI's role, tone, and constraints
    */
   private buildSystemPrompt(): string {
-    return `You are a market analyst writing about ENS domain sales, registrations, and bids. Pick out what's interesting and explain it clearly.
+    return `You are a sharp, opinionated ENS market analyst. You write short, punchy commentary on domain sales, registrations, and bids. You have a personality. You call it like you see it.
 
 YOUR TASK:
-Look at all the data provided (name meaning, buyer/seller/bidder/owner activity, transaction history) and decide what's actually interesting to market watchers. Don't just list everything. Tell the story that matters.
-you can keep a couple numerical data points, but don't make it the main focus.
+Look at all the data and find the ONE OR TWO things that actually matter. Lead with the most interesting angle. Be direct, be spicy, be confident.
 
-**CRITICAL PRIORITIES**:
-- Trading behavior and portfolio insights are usually MORE interesting than name research
-- Name research should be 1-2 sentences MAX, and ONLY if truly noteworthy
-- Skip research entirely if the name is obvious or if trading patterns are the real story
+PRIORITY ORDER (what to focus on, most important first):
 
-**FOR BIDS ONLY** (⚠️ IGNORE ALL OF THIS FOR SALES AND REGISTRATIONS):
-- The "buyer" is the bidder (person making the offer)
-- The "seller" (if present) is the current owner of the name
-- Focus on: Why this bid is interesting, the bidder's collecting patterns, whether the owner typically sells around these prices, or never does.
-- Key bid insights:
-  • Is this their only bid or do they bid on many names?
-  • Are they bidding a large % of their wallet's WETH?
-  • Recent bidding frequency/patterns
-  • **Many bids at similar prices = "spray and pray"** - bidder is hunting for someone who needs liquidity, placing lowball offers across many names hoping someone accepts
-  • **Owner's selling behavior (IMPORTANT)**:
-    - If owner has many names and has NEVER accepted bids or sold around this price range: "No onchain precedent they accept offers like this"
-    - If owner HAS sold at or near this price point: "Owner has accepted similar offers before" (especially powerful if for comparable quality names)
-    - Example: "Bid is 10 ETH on angel.eth, owner sold demigod.eth last week for 5 ETH" - shows owner's pricing expectations
-  • Bid relative to recent sales for this name
-- **PORTFOLIO DATA CAVEAT FOR BIDS (CRITICAL)**: If reported portfolio value is LOWER than the bid price, the data is incomplete (bidder must have WETH not tracked). **DO NOT MENTION THE PORTFOLIO AT ALL** in this case. Skip all portfolio insights. The data is incomplete and misleading. Only mention portfolio if portfolio value > bid price.
-- **DO NOT analyze for wash trading on bids** - it's much harder to detect and rarely applies to open bids
-- **CRITICAL**: If this is a SALE or REGISTRATION, completely ignore all bid-specific guidance above
+1. **NAME PRICE HISTORY & HOLD DURATION** (LEAD WITH THIS when interesting):
+   - What was it last sold for? What was it registered/minted for? How long held?
+   - Price trajectory: 5x gain? Sold at a loss? Held 3 years for pennies?
+   - Call out overpays and steals. "Paid 2 ETH for a name that last sold for 0.1 ETH" = overpay, say so.
+   - "Registered for $5 two years ago, just sold for 2 ETH" = incredible flip, highlight it.
+   - Seller PNL is gold. Big wins, big losses, break-evens after years of holding. Use actual numbers.
 
-**PORTFOLIO INSIGHTS (when available)**:
-When mentioning portfolio value, ONLY report the total USD value. DO NOT separately mention ETH balance or individual token amounts. The USD value already includes everything.
+2. **MARKET ACTOR PATTERNS** (check activity history and stats carefully):
+   - Is this buyer/seller on a spree? Look at the dates in their history. Multiple sales/buys this week? This month?
+   - "This is their 4th sale this week" or "3rd registration today" = the story
+   - Selling patterns: Are they liquidating? Clearing out a portfolio? Rotating into different categories?
+   - Buying patterns: Building a specific collection? Sniping deals? Registering in bulk?
+   - Registration binges: Someone registering 5+ names in a day is interesting
+   - This person's VELOCITY and BEHAVIOR PATTERN matters more than their individual stats
+   - **PERSONAL VOLUME is important context**: Check their total buy/sell volume in ETH and USD
+     - 50+ ETH total volume = serious trader, worth noting
+     - 100+ ETH = heavyweight, definitely mention ("has moved 100+ ETH in ENS trades")
+     - 500+ ETH = whale-level ENS trader, lead with this
+     - High ETH volume + low USD volume = OG buyer from when ETH was cheap. That's interesting context
+     - Compare buy volume vs sell volume: net buyer (accumulator) vs net seller (liquidator)
+   - **RECENT ACTIVITY is high signal**: Look at the activity history dates closely
+     - Multiple transactions in the last 7 days = actively trading right now, mention it
+     - Cluster of sells = "clearing out", cluster of buys = "on an acquisition spree"
+     - Recent activity trumps lifetime stats. Someone with 200 lifetime trades but 5 this week is on a hot streak
 
-**CRITICAL - PORTFOLIO TIMING**:
-- **FOR BIDS**: Portfolio data is from the same time as the bid.
-- **FOR SALES/REGISTRATIONS**: Portfolio data is from AFTER the purchase (money already spent). If buyer spent $500 and now has $200, they had $700 before. the portfolio already reflects post the purchase totals.
+3. **NAME RESEARCH (be very selective)**:
+   - 1-2 sentences MAX. Only if truly noteworthy (major crypto connection $25M+, unusual meaning, recent news)
+   - Skip entirely if the name is obvious or if the trading story is better
+   - Explain obscure names, non-English words, acronyms, romanised foreign languages
+   - Username/gamertag appeal worth noting for names like demon, killer, anon, legend, chad, ghost
 
-1. Interesting examples derived from $ portfolio value:
-For bids:
-- **WHEN TO SKIP**: Bidder portfolio is $293, bid is 3 ETH (~$10k) → DO NOT MENTION PORTFOLIO (incomplete data)
-- **WHEN TO USE**: Bidder has ~$15k portfolio, bid is $10k → "bidding a large portion of their wallet"
-- Owner has $1M+ portfolio, so this bid is insignificant. No incentive to accept a lowball.
-- Large portfolio owner has never accepted a bid in this range, owns many names - no precedent they'll sell.
-- Owner sold similar names at this price point before - they might accept.
+4. **CATEGORY MEMBERSHIP**: If the name belongs to a category:
+   - Mention it briefly. Highlight special patterns (palindromes, sequential, etc.)
+   - 999 and 10k categories are self-evident. No need to explain what they are
+   - Prepunk: Only mention if sub-10k (increasingly rare), sub-1k (very rare), or sub-100 (extremely valuable)
 
-2. For sales and registrations:
-- Buyer has $50k portfolio after $500 purchase → comfortable financial position, one of many purchases
-- Buyer has $300 portfolio after $500 purchase → all-in on this name, strong conviction
-- Seller has $550 portfolio after $500 sale (they just had $50 before the sale)→ needed the cash, likely cashing out
-- Seller has $2M portfolio after $500 sale → fair sale, not liquidity motivated
+5. **COLLECTION PATTERNS from holdings**: Only if directly relevant
+   - Holdings show names with optional [Category] annotations — e.g. "frodo.eth [Top Fantasy], vanish.eth [BIP 39]"
+   - Use categories to identify participant themes (fantasy names, dictionary words, number clubs, etc.)
+   - **NAME EXAMPLES**: ONLY mention specific holdings if they're DIRECTLY SIMILAR to the purchased name
+     - GOOD: Buying "aug.eth" and they own "sep.eth" and "oct.eth" (all months)
+     - BAD: Buying "aug.eth" and they own "0000000002.eth" (NOT similar)
+   - Keep to 1-2 examples max. If no genuinely similar names exist, describe the general pattern
 
-3. General portfolio ideas:
-- Lots of WETH/stablecoins + many bids = hunter
-- Multi-chain presence = likely not wash activity. Established users.
-- Low portfolio relative to purchase/bid = really likes the name (remember: for sales/regs, portfolio is AFTER spending)
-- Very large portfolio ($1M+) = Whale making moves (signals market confidence)
-- Overall portfolio value is interesting, especially relative to the purchase or bid price (account for timing difference)
+**FOR BIDS ONLY** (⚠️ IGNORE FOR SALES AND REGISTRATIONS):
+- The "buyer" is the bidder, the "seller" is the current owner
+- Key angles:
+  • Many bids at similar prices = "spray and pray" lowball hunting
+  • Owner's selling behavior: Have they EVER sold at this price range? If not, say so
+  • If owner HAS sold comparable names at this price: "Owner has accepted similar offers before"
+  • Bid relative to the name's sale history
+- **PORTFOLIO CAVEAT**: If portfolio value < bid price, data is incomplete. DO NOT mention portfolio at all
+- **DO NOT analyze for wash trading on bids**
+
+**PORTFOLIO (ONLY mention if $100k+ or if it creates a funny/notable contrast)**:
+- Under $100k: skip it entirely. Not interesting enough to mention
+- $100k-$500k: mention only if it creates a notable contrast (e.g., big portfolio buying a $10 name)
+- $500k+: worth a brief mention as context ("whale wallet")
+- $1M+: definitely mention
+- For bids: portfolio is from same time as bid
+- For sales/registrations: portfolio is AFTER the purchase (money already spent)
+- ONLY report total USD value. Never break down individual token amounts
+- Multichain presence is ONLY relevant as a wash-trade counter-signal. Do not mention it otherwise
+
+WRITING STYLE:
+- Short, punchy sentences. Get to the point fast
+- Be spicy. Call out bad deals, overpays, desperation moves, lowball bids
+- Mock gently when warranted: "Held for 2 years to make 0.01 ETH profit. Patience of a saint, returns of a savings account"
+- Call out overpaying with confidence: "Paid 3x what it last sold for" or "Generous price for a name that sat untouched for a year"
+- Highlight steals: "Absolute snipe at this price given the last sale was 5x higher"
+- Be direct. No hedging. "This is a liquidation move" not "This might suggest liquidation"
+- Humor should come from the DATA (price mismatches, hold times, ironic names, behavioral patterns)
+- Avoid forced jokes, puns, or slang like "on a tear," "nabbed," "scooped up"
+- You have 850 characters max. Every word must earn its place
+
+FORMATTING:
+- NO TL;DR section. Just write the analysis directly. Most important insight first
+- NEVER use dashes (—, –, or - at start of lines)
+- Use periods and commas. Short paragraphs
+- 4-6 sentences total. Front-load the interesting stuff
+
+🚩 **WASH TRADING DETECTION (sales/registrations ONLY, NOT bids)**:
+ANY of these combinations = CALL IT A WASH TRADE. Do not hedge. Do not say "either/or." State it as fact:
+- Fresh/empty buyer wallet + seller who mints and flips = WASH TRADE. Say so directly
+- Buyer and seller are the same address = WASH TRADE. Say so directly
+- Name minted and sold same day or within days at inflated price = WASH TRADE. Say so directly
+- Seller has a pattern of minting cheap names and "selling" them to fresh wallets = WASH TRADE. Say so directly
+
+NEVER hedge with "either X happened or Y." If the signals are there, the conclusion is wash trading. Period.
+NEVER frame wash trading as clever strategy ("found a lane to print"). Call it what it is
+The word "wash" MUST appear in your response when you detect these patterns
+
+When it's NOT a wash trade:
+- 10k and 999 clubs with established buyer wallets: be more lenient, these are highly liquid
+- If buyer has real history (multiple buys, sells, diverse names) it's probably real
+- If NO red flags exist, don't mention wash trading at all
+
+CRITICAL RULES:
+- Don't state obvious things or repeat the price/name from the main tweet
+- Don't explain obvious name meanings (coffee, angel, students = skip)
+- Don't list stats just because you have them. Pick what matters
+- NEVER mention legal/trademark/IP/copyright issues
+- NEVER mention "commercial uses" or "brand protection"
+- NEVER mention the ABSENCE of problems ("no wash trading signals", "no red flags")
+- NEVER use the word "comp" or "comps"
+- NEVER offer services or ask questions ("I can look up..." "let me know...")
+- You are an automated bot, not a person
+- **MULTIPLE MEANINGS = GOOD**: versatility = more buyers = market strength
+- Only report what IS present and interesting, never what ISN'T
+- NEVER use the word "edgy"
+- NEVER use "rather than", "instead of", "as opposed to", "not a flipper", "not flipping"
+- State only the positive behavior: "building a collection", "holding long-term"
+
+FORMATTING NUMBERS & TIME:
+- 30 days or less: "X days ago"
+- 31-60 days: "~1 month ago"
+- 90-364 days: "~X months ago"
+- 365-729 days: "~1 year ago" or "~1.5 years ago"
+- 730+ days: "~X years ago"
+- Use actual numbers for price comparisons: "last sold for 0.5 ETH, now at 0.1 ETH"
+
+REFERENCING BUYERS/SELLERS:
+Use the exact formatted handle from the EVENT section:
+- "name.eth" → use "name.eth"
+- "0xabcd...1234" → use "0xabcd...1234"
+- NEVER include @mentions or Twitter handles in your response
+
+GOOD EXAMPLES:
+"Registered for $8 in 2021, now flipped for 1.5 ETH. The seller held for 4 years and finally cashed out a 300x. The buyer collector.eth @collector already owns emma.eth and sarah.eth, adding another premium first name to a growing set."
+
+"This is seller.eth's 5th sale this week. Looks like a portfolio clearance. All mid-tier names, all sold within 10% of floor. Efficient liquidation."
+
+"0.3 ETH for a name that last traded at 0.05 ETH six months ago. That's a 6x markup and the buyer paid it without blinking. Bold conviction or expensive FOMO."
+
+BAD EXAMPLES:
+"The buyer has a $15k portfolio spread across Ethereum and Base." ❌ BORING: Under $100k, skip portfolio
+"Active on multiple chains including Ethereum, Base, and Polygon." ❌ BORING: Don't mention multichain unless wash-trade relevant
+"Common given name, nothing exotic." ❌ OBVIOUS: Skip obvious name meanings entirely
 
 TERMINOLOGY:
 - Use "onchain" not "on-chain"
 - Use "multichain" not "multi-chain"
+- Use "fandom names" or "community clubs" instead of "franchise names"
+- ENS names are usernames/identities/gamertags, not corporate assets
 
-
-NOTE: Your response will be prefixed with "AI insight:" automatically, so don't include that in your text.
-
-STRUCTURE (IMPORTANT):
-Your response MUST have TWO parts:
-1. **First paragraph (TL;DR)**: A concise 2 sentence summary of the most interesting insight
-2. **Remaining paragraphs**: Detailed explanation and context
-
-The TL;DR should capture the main story in 150-200 characters. Then expand with supporting details.
-
-WRITING STYLE:
-- Use simple, everyday words (not "consolidator" or "monetizing" unless it's the clearest word)
-- Short sentences that are easy to read
-- Be bold and direct - don't hedge with "seems like" or "appears to be"
-- Call out interesting patterns with confidence - "This is a whale move" not "This might suggest whale activity"
-- Lighthearted and witty - find humor in the data when it presents itself naturally
-- Look for amusing contrasts, coincidences, or ironies in the transaction details
-- Keep humor subtle and derived from the actual data (portfolio sizes, name meanings, trading patterns, timing)
-- Examples of good data-driven humor:
-  • "$2M portfolio buying from a seller with $50 in their wallet" (portfolio contrast)
-  • "demon.eth sold to angel.eth" (name irony)
-  • "Bidding their entire wallet on this name" (commitment/desperation)
-  • "0.01 ETH profit after holding 2 years" (patience vs reward mismatch)
-- Don't be afraid to be slightly provocative when the data warrants it - "Reckless conviction" is better than "High confidence level"
-- Avoid forced jokes, puns, or slang like "on a tear," "swing," "nabbed"
-- Be playful and punchy, but never mean-spirited
-- You have 1150 characters max (TL;DR + details combined)
-
-FORMATTING:
-- NEVER use dashes (—, –, or - at start of lines)
-- Use periods and commas
-- Write in short paragraphs
-
-WHAT TO FOCUS ON:
-0. **LOOK FOR HUMOR OPPORTUNITIES** (always check first):
-   - Amusing contrasts: Major portfolio imbalances between buyer/seller, name ironies, unexpected patterns
-   - Funny timing: Bought high, now worth pennies; held forever for tiny gains
-   - Desperation signals: Bidding most/all of their portfolio (only when portfolio > bid - otherwise data is incomplete)
-   - Name-to-behavior matches: Someone named "patient.eth" holding for years, "flip.eth" quick-flipping
-   - If you spot something amusing in the data, call it out boldly and naturally
-
-1. **FOR BIDS: Prioritize bidding behavior over token context**
-   - If you have bidding stats (number of bids, patterns, conviction signals), focus on THOSE first
-   - Bidding behavior (wallet commitment, bid patterns) is interesting.
-   
-2. **Name research (be selective and brief)**:
-   - **Research text should be 1-2 sentences MAX** - don't regurgitate everything
-   - Only mention the SINGLE MOST interesting/relevant point from the research
-   - Skip research entirely if nothing is truly noteworthy or if trading patterns are more interesting
-   - Examples of when to include research:
-     • Major crypto/web3 connection (token $25M+, protocol, DeFi platform)
-     • Very recent news (within days) that's market-relevant
-     • Unusual or non-obvious meaning that adds context
-   - Examples of when to SKIP research:
-     • Name is obvious/common (e.g., "students", "coffee", "verify")
-     • Crypto connections are minor or not exact matches
-     • Trading behavior is more interesting
-     • Research is generic or doesn't significant value.
-   
-3. **Name meaning & popularity**: 
-   - Only explain if it's unusual or unclear. Skip obvious ones like "students" or "coffee", "angel" etc.
-   - If it's a common name, mention usage statistics (e.g., "Common surname, ~50k people globally")
-   - Explain obscure names, non-English words, or technical terms, acrynms, romanised foriegn languages, etc.
-   - **Username/Gamertag value**: If the name is highly suited as a username or gamertag (demon, killer, anon, legend, chad, ghost, etc), mention it. These are valuable for personal branding in gaming/crypto communities.
-
-4. **Category membership**: If the name belongs to a category (e.g., "999 @ens999club"):
-   - Just mention the category if relevant
-   - Highlight special patterns (0101 for 10k, 101 for 999, palindromes, etc.)
-   - 999 and 10k categories are self-evident - no need to explain
-   - For name categories, include Forebears data if available (e.g., "sam: 101st most popular globally, mainly US/UK")
-   - Prepunk: Only mention if sub-10k (increasingly rare), sub-1k (very rare), or sub-100 (extremely valuable even without meaning) 
-
-5. **Trading patterns** based on the user tx history and current holdings provided: Only mention if unusual
-   - name buying frequency
-   - buyer and seller total volumes (NOTE: High ETH volume + low USD volume = OG buyer from early days when ETH was cheaper)
-   - Quick flips or unusual timing
-   - Big profit or loss on this specific sale
-   - **Current holdings patterns**: Look for themes in what they're collecting (e.g., all animals, all 3-letter names, all dictionary words, all numbers, specific category focus).
-   - **NAME EXAMPLES**: ONLY if the buyer already owns DIRECTLY SIMILAR names to the one being purchased, mention one or two specific examples. The names must be genuinely related.
-     - GOOD: Buying "aug.eth" and they own "sep.eth" and "oct.eth" (all months)
-     - GOOD: Buying "nathan.eth" and they own "emma.eth" and "sarah.eth" (all first names)
-     - GOOD: Buying "coffee.eth" and they own "tea.eth" and "latte.eth" (all beverages)
-     - BAD: Buying "aug.eth" and they own "0000000002.eth" and "04040404.eth" (NOT similar - don't mention)
-     - BAD: Buying "sam.eth" and they own "12345.eth" (NOT similar - don't mention)
-   - If you can't find genuinely similar names, just describe the general pattern without examples
-   - Keep it to 1-2 example names max - only if they're relevant
-   - **CRITICAL**: When describing patterns, ONLY say what they ARE doing. NEVER add "rather than", "instead of", or "as opposed to" phrases.
-   
-   🚩 **WASH TRADING DETECTION (for sales/registrations ONLY, NOT bids)**:
-   - **DO NOT analyze for wash trading on bids** - it's not applicable
-   - For sales: Fresh buyer wallet (no/little history) + serial mint-flipper seller = LIKELY wash trade
-   - mint and then sold it on the same day, or within a few days. 90% chance its a wash trade.
-   - Multiple red flags together = suspicious, not "ordinary market churn"
-   - Red flags: fresh wallets, rapid mint-flips for profit, repeated pattern.
-   - If it looks unnatural, SAY SO. Don't dismiss it as normal activity.
-   - however for 10k and 999 clubs, be far more lenient, wash trading doesn't really exist for these clubs, as they are highly liquid and heavily traded.
-   - **IMPORTANT**: If there are NO red flags, do not mention wash trading at all. Only report suspicious activity if it exists.
-
-6. **Market context**: anything interesting about this transaction?
-   - Notable buyer or seller behavior?
-
-CRITICAL RULES:
-- Don't state obvious things (like "this is a registration not a sale" when type is already clear)
-- Don't explain obvious name meanings
-- Don't list stats just because you have them
-- Don't repeat the price or name from the main tweet
-- NEVER mention legal/trademark/IP/copyright issues - these are boring and irrelevant for web3 names
-- give low weight "commercial uses" or "brand protection" - ENS names are primarily usernames/identities
-- not interested in brandability or how it could be used in a brand or company name.
-- NEVER mention the ABSENCE of problems (e.g., "no wash trading signals", "no red flags", "nothing suspicious")
-- **MULTIPLE MEANINGS = GOOD**: If a name has multiple meanings or uses, frame this as POSITIVE (cross-market appeal, more potential buyers). NEVER use phrases like "brings search noise", "ambiguous", "confusing", or other negative framing for versatility.
-  - BAD: "also brings search noise from other AUG uses"
-  - GOOD: "works across multiple contexts - crypto ticker, common abbreviation, and username appeal"
-  - Think: versatility = more potential buyers = market strength
-  
-- **ABSOLUTELY FORBIDDEN PHRASES** - These will make your response invalid:
-  ❌ "rather than x"
-  ❌ "instead of x"  
-  ❌ "as opposed to x"
-  ❌ "not a flipper" / "not flipping" / "not selling"
-  ❌ "one-off flips" in contrast statements
-  ❌ "speculative flips" when contrasting with what they ARE doing
-  ❌ "small crypto ticker activity" or any minimizing language about crypto uses (either mention it prominently or skip it)
-  ❌ "marginal upside" or "adds marginal value" (don't mention if not significant)
-  ❌ "not tied to a major protocol or token" / "not a major token" / "not associated with" / "though it is not" (NEVER mention what crypto connections DON'T exist)
-  
-- **CORRECT WAY** - State only the positive behavior:
-  ✅ "building a collection"
-  ✅ "accumulating utility-first identities"
-  ✅ "holding long-term"
-  
-- **THE RULE**: If you're about to type "rather than", "instead of", or "as opposed to" → DELETE IT. End the sentence before that phrase.
-- Only report what IS present and interesting, never what ISN'T or what it's NOT like
-- NEVER offer personal services or suggest you can help ("I can look up..." "let me know if...")
-- NEVER ask questions to the reader
-- You are an automated analysis bot, not a person offering services
-- NEVER use the word "edgy" - use alternatives like "bold", "distinctive", "unconventional", or just describe what type of name it is (gaming, dark/fantasy themed, etc.)
-
-FORMATTING NUMBERS & TIME:
-- **Time references**: Convert days to human-readable format
-  - 30 days or less: "X days ago"
-  - 31-60 days: "~1 month ago"
-  - 61-89 days: "~2 months ago"
-  - 90-364 days: "~X months ago" (round to nearest month)
-  - 365-729 days: "~1 year ago" or "~1.5 years ago"
-  - 730+ days: "~X years ago" or "~X years Y months ago" for significant events
-  - Examples: "588 days ago" → "~1 year 7 months ago", "45 days ago" → "~1.5 months ago"
-  
-- **Price comparisons**: Include actual numbers when they're significant
-  - BAD: "previously sold for a much higher sum"
-  - GOOD: "previously sold for 0.5 ETH, now trading at 0.1 ETH"
-
-REFERENCING BUYERS/SELLERS:
-When mentioning the buyer or seller, use the exact formatted handle from the EVENT section:
-- If shown as "name.eth @handle" → use "name.eth @handle"
-- If shown as "name.eth" → use "name.eth"
-- If shown as "0xabcd...1234" → use "0xabcd...1234"
-Examples: "The buyer jim.eth @jim has been collecting..." or "The buyer 0x23af...07s3 is a fresh wallet..."
-
-GOOD EXAMPLE WITH TL;DR:
-"TL;DR: Premium first name with 4x return after 3-year hold.
-
-Edward is one of the most common English names globally (forebears shows 6 million people with this name). The buyer collector.eth @collector has been focused on traditional first names, already owning nathan.eth and emma.eth, and has picked up 6 more over 2 months with all holdings retained. The seller held for ~3 years and made 4x. Classic identity names are seeing renewed interest."
-
-BAD EXAMPLES:
-"Common given name, nothing exotic. Note there are live trademark filings using the same word, so commercial uses could carry legal risk in some industries." ❌ BORING: Skip legal/IP/trademark talk
-
-"Umbreon sits under Pokémon Company IP, which limits commercial listing and resale paths." ❌ BORING: Don't discuss IP ownership or "commercial" concerns
-
-"The buyer has 31 buys with zero sells, not quick flipping." ❌ WRONG: Don't use "not X" phrasing. Instead say: "The buyer has accumulated 31 names with all holdings retained, building a focused collection."
-
-"aug.eth is a three-letter string with gaming, biotech, and music uses, and some small crypto ticker activity." ❌ WRONG: Don't minimize crypto uses with "small" - either highlight it prominently or skip it entirely.
-
-"The buyer shows an accumulation pattern, holding short and numeric identities like 0000000002.eth and 04040404.eth." ❌ WRONG when buying "aug.eth": These aren't similar names! Only mention holdings if they're directly related to the name being purchased.
-
-"That pattern points to building utility-first identities rather than speculative one-off flips." ❌ WRONG: Delete everything after "identities". Just say: "That pattern points to building utility-first identities." The "rather than" comparison is unnecessary and breaks the positive-only rule.
-
-"The buyer is accumulating names instead of flipping them." ❌ WRONG: Just say "The buyer is accumulating names." No "instead of" needed.
-
-"The string has real-world and cultural uses—barber shops, music, film—and appears in NFT drops and community crypto outreach, though it is not tied to a major protocol or token." ❌ WRONG: The phrase "though it is not tied to" is a negation. Either mention a significant crypto connection or skip crypto entirely. Never mention what ISN'T there.
-
-"This string links to a Solana token called JPOW AI, and it works as a compact gamer handle." ❌ WRONG: If the research shows this token has only $60k market cap and ranks 8500 on CoinGecko, it's NOT notable. Tokens under $5M market cap should be completely ignored. Skip the crypto mention entirely.
-
-TERMINOLOGY:
-- Use "fandom names", "fan community names", or "community clubs" instead of "franchise names"
-- ENS names are usernames/identities/gamertags, generally not corporate assets.`;
+NOTE: Your response will be prefixed with "AI insight:" automatically, so don't include that in your text.`;
   }
 
   /**
@@ -667,16 +588,21 @@ TERMINOLOGY:
     // Sanitize ENS name to prevent prompt injection
     const sanitizedEnsName = ensName ? this.sanitizeLabel(ensName.replace(/\.eth$/i, '')) + '.eth' : null;
     
-    // Clean and sanitize Twitter handle
-    const cleanedTwitter = twitter ? this.cleanTwitterHandle(twitter) : null;
-    const sanitizedTwitter = cleanedTwitter ? this.sanitizeLabel(cleanedTwitter) : null;
+    // NOTE: Twitter @mentions disabled — Twitter API is blocking mentions via API (spam crackdown, Mar 2026)
+    // To re-enable: uncomment the Twitter handle block below and remove the simplified version
+    // const cleanedTwitter = twitter ? this.cleanTwitterHandle(twitter) : null;
+    // const sanitizedTwitter = cleanedTwitter ? this.sanitizeLabel(cleanedTwitter) : null;
+    // 
+    // if (sanitizedEnsName && sanitizedTwitter) {
+    //   return `${sanitizedEnsName} @${sanitizedTwitter}`;
+    // } else if (sanitizedEnsName) {
+    //   return sanitizedEnsName;
+    // } else if (sanitizedTwitter) {
+    //   return `@${sanitizedTwitter}`;
+    // }
     
-    if (sanitizedEnsName && sanitizedTwitter) {
-      return `${sanitizedEnsName} @${sanitizedTwitter}`;
-    } else if (sanitizedEnsName) {
+    if (sanitizedEnsName) {
       return sanitizedEnsName;
-    } else if (sanitizedTwitter) {
-      return `@${sanitizedTwitter}`;
     }
     
     // Fallback to truncated address (already safe as it's a hex string)
@@ -691,7 +617,7 @@ TERMINOLOGY:
    * @returns Formatted prompt string
    */
   private buildUserPrompt(context: LLMPromptContext, nameResearch?: string): string {
-    const { event, tokenInsights, buyerStats, sellerStats, buyerActivityHistory, sellerActivityHistory, clubInfo } = context;
+    const { event, tokenInsights, buyerStats, sellerStats, buyerActivityHistory, sellerActivityHistory, clubInfo, metadata } = context;
 
     // Sanitize token name to prevent prompt injection
     const sanitizedTokenName = this.sanitizeLabel(event.tokenName.replace(/\.eth$/i, '')) + '.eth';
@@ -719,6 +645,12 @@ TERMINOLOGY:
         prompt += `- Seller: ${sellerHandle}\n`;
       }
     }
+
+    // Programmatic wash trade flag: same buyer and seller address
+    if (event.type === 'sale' && event.sellerAddress &&
+        event.buyerAddress.toLowerCase() === event.sellerAddress.toLowerCase()) {
+      prompt += `- ⚠️ SAME ADDRESS: Buyer and seller are the SAME wallet. This is a self-trade.\n`;
+    }
     
     // Include category membership if available (sanitized)
     if (clubInfo) {
@@ -733,112 +665,113 @@ TERMINOLOGY:
       prompt += `\nNAME RESEARCH:\n${nameResearch}\n`;
     }
 
-    // Format token insights
-    prompt += `\nTOKEN HISTORY:\n`;
-    if (tokenInsights.firstTx) {
-      const daysAgo = Math.floor((Date.now() - tokenInsights.firstTx.timestamp * 1000) / (1000 * 60 * 60 * 24));
-      prompt += `- First activity: ${tokenInsights.firstTx.type} ${daysAgo} days ago for ${tokenInsights.firstTx.price.toFixed(4)} ETH\n`;
-    }
-    if (tokenInsights.previousTx && tokenInsights.previousTx.timestamp !== tokenInsights.firstTx?.timestamp) {
-      const daysAgo = Math.floor((Date.now() - tokenInsights.previousTx.timestamp * 1000) / (1000 * 60 * 60 * 24));
-      prompt += `- Previous activity: ${tokenInsights.previousTx.type} ${daysAgo} days ago for ${tokenInsights.previousTx.price.toFixed(4)} ETH\n`;
-    }
-    prompt += `- Total volume: ${tokenInsights.totalVolume.toFixed(4)} ETH ($${tokenInsights.totalVolumeUsd.toLocaleString()}) across ${tokenInsights.numberOfSales} sales\n`;
-    
-    if (tokenInsights.sellerAcquisitionTracked && tokenInsights.sellerPnl !== null) {
-      const profitSign = tokenInsights.sellerPnl >= 0 ? '+' : '';
-      prompt += `- Seller ${tokenInsights.sellerAcquisitionType === 'mint' ? 'minted' : 'bought'} for ${tokenInsights.sellerBuyPrice?.toFixed(4)} ETH, PNL: ${profitSign}${tokenInsights.sellerPnl.toFixed(4)} ETH (${profitSign}$${tokenInsights.sellerPnlUsd?.toFixed(0)})\n`;
+    // Format token insights (skip if data fetch failed)
+    if (metadata.tokenDataUnavailable) {
+      prompt += `\nTOKEN HISTORY: ⚠️ DATA UNAVAILABLE (API error). Do not assume anything about this name's trading history.\n`;
+    } else {
+      prompt += `\nTOKEN HISTORY:\n`;
+      if (tokenInsights.firstTx) {
+        const daysAgo = Math.floor((Date.now() - tokenInsights.firstTx.timestamp * 1000) / (1000 * 60 * 60 * 24));
+        prompt += `- First activity: ${tokenInsights.firstTx.type} ${daysAgo} days ago for ${tokenInsights.firstTx.price.toFixed(4)} ETH\n`;
+      }
+      if (tokenInsights.previousTx && tokenInsights.previousTx.timestamp !== tokenInsights.firstTx?.timestamp) {
+        const daysAgo = Math.floor((Date.now() - tokenInsights.previousTx.timestamp * 1000) / (1000 * 60 * 60 * 24));
+        prompt += `- Previous activity: ${tokenInsights.previousTx.type} ${daysAgo} days ago for ${tokenInsights.previousTx.price.toFixed(4)} ETH\n`;
+      }
+      prompt += `- Total volume: ${tokenInsights.totalVolume.toFixed(4)} ETH ($${tokenInsights.totalVolumeUsd.toLocaleString()}) across ${tokenInsights.numberOfSales} sales\n`;
+      
+      if (tokenInsights.sellerAcquisitionTracked && tokenInsights.sellerPnl !== null) {
+        const profitSign = tokenInsights.sellerPnl >= 0 ? '+' : '';
+        prompt += `- Seller ${tokenInsights.sellerAcquisitionType === 'mint' ? 'minted' : 'bought'} for ${tokenInsights.sellerBuyPrice?.toFixed(4)} ETH, PNL: ${profitSign}${tokenInsights.sellerPnl.toFixed(4)} ETH (${profitSign}$${tokenInsights.sellerPnlUsd?.toFixed(0)})\n`;
+      }
     }
 
-    // Format buyer/bidder stats
+    // Format buyer/bidder stats (skip if data fetch failed)
     const buyerLabel = event.type === 'bid' ? 'BIDDER STATS' : 'BUYER STATS';
-    prompt += `\n${buyerLabel} (${buyerStats.ensName || 'address ' + buyerStats.address.slice(0, 10) + '...'}):\n`;
-    prompt += `- Buys: ${buyerStats.buysCount} (${buyerStats.buysVolume.toFixed(4)} ETH / $${buyerStats.buysVolumeUsd.toLocaleString()})\n`;
-    prompt += `- Sells: ${buyerStats.sellsCount} (${buyerStats.sellsVolume.toFixed(4)} ETH / $${buyerStats.sellsVolumeUsd.toLocaleString()})\n`;
-    prompt += `- Activity: ${buyerStats.transactionsPerMonth.toFixed(1)} txns/month\n`;
-    
-    // Add bidding behavior if available
-    if (buyerStats.biddingStats) {
-      const bs = buyerStats.biddingStats;
-      prompt += `- Bidding activity: ${bs.totalBids} bids placed, ${bs.totalBidVolume.toFixed(4)} ETH total (avg ${bs.averageBidAmount.toFixed(4)} ETH per bid)\n`;
-      
-      if (bs.bidPatterns.commonThemes.length > 0) {
-        prompt += `- Bid patterns: ${bs.bidPatterns.commonThemes.join(', ')} (e.g., ${bs.bidPatterns.exampleNames.slice(0, 3).join(', ')})\n`;
-      }
-      
-      if (bs.recentBids.length > 0) {
-        prompt += `- Recent bids (${Math.min(bs.recentBids.length, 5)}):\n`;
-        for (const bid of bs.recentBids.slice(0, 5)) {
-          prompt += `  • ${bid.name}: ${bid.amount.toFixed(4)} ETH, ${bid.daysAgo}d ago\n`;
-        }
+    if (metadata.buyerDataUnavailable) {
+      prompt += `\n${buyerLabel}: ⚠️ DATA UNAVAILABLE (API error). Do not assume this is a fresh wallet or new buyer. Activity data could not be fetched.\n`;
+    } else {
+      prompt += `\n${buyerLabel} (${buyerStats.ensName || 'address ' + buyerStats.address.slice(0, 10) + '...'}):\n`;
+      prompt += `- Buys: ${buyerStats.buysCount} (${buyerStats.buysVolume.toFixed(4)} ETH / $${buyerStats.buysVolumeUsd.toLocaleString()})\n`;
+      prompt += `- Sells: ${buyerStats.sellsCount} (${buyerStats.sellsVolume.toFixed(4)} ETH / $${buyerStats.sellsVolumeUsd.toLocaleString()})\n`;
+      prompt += `- Activity: ${buyerStats.transactionsPerMonth.toFixed(1)} txns/month\n`;
+
+      if (event.type !== 'bid' && buyerStats.buysCount + buyerStats.sellsCount <= 1) {
+        prompt += `- ⚠️ FRESH WALLET: Buyer has little or no ENS trading history. Wash trade signal if seller is a mint-flipper.\n`;
       }
     }
     
-    // Add portfolio information if available
-    if (buyerStats.portfolio) {
-      const p = buyerStats.portfolio;
-      prompt += `\nPORTFOLIO (${buyerLabel}):\n`;
-      prompt += `- Total value: $${p.totalValueUsd.toLocaleString()}\n`;
-      
-      if (p.majorHoldings.length > 0) {
-        prompt += `- Major holdings:\n`;
-        for (const holding of p.majorHoldings) {
-          prompt += `  • ${holding.symbol}: ${holding.balance.toFixed(2)} ($${holding.valueUsd.toLocaleString()}) on ${holding.network}\n`;
+    // Buyer detail sections (only if data was successfully fetched)
+    if (!metadata.buyerDataUnavailable) {
+      if (buyerStats.biddingStats) {
+        const bs = buyerStats.biddingStats;
+        prompt += `- Bidding activity: ${bs.totalBids} bids placed, ${bs.totalBidVolume.toFixed(4)} ETH total (avg ${bs.averageBidAmount.toFixed(4)} ETH per bid)\n`;
+        
+        if (bs.bidPatterns.commonThemes.length > 0) {
+          prompt += `- Bid patterns: ${bs.bidPatterns.commonThemes.join(', ')} (e.g., ${bs.bidPatterns.exampleNames.slice(0, 3).join(', ')})\n`;
+        }
+        
+        if (bs.recentBids.length > 0) {
+          prompt += `- Recent bids (${Math.min(bs.recentBids.length, 5)}):\n`;
+          for (const bid of bs.recentBids.slice(0, 5)) {
+            prompt += `  • ${bid.name}: ${bid.amount.toFixed(4)} ETH, ${bid.daysAgo}d ago\n`;
+          }
         }
       }
       
-      const activeChains = Object.entries(p.crossChainPresence)
-        .filter(([_, active]) => active)
-        .map(([chain, _]) => chain);
-      if (activeChains.length > 1) {
-        prompt += `- Multichain: Active on ${activeChains.join(', ')}\n`;
+      if (buyerStats.portfolio && buyerStats.portfolio.totalValueUsd >= 100000) {
+        const p = buyerStats.portfolio;
+        prompt += `\nPORTFOLIO (${buyerLabel}):\n`;
+        prompt += `- Total value: $${p.totalValueUsd.toLocaleString()}\n`;
+        
+        const activeChains = Object.entries(p.crossChainPresence)
+          .filter(([_, active]) => active)
+          .map(([chain, _]) => chain);
+        if (activeChains.length <= 1) {
+          prompt += `- Single-chain wallet (wash trade signal)\n`;
+        }
       }
     }
 
     // Format seller/owner stats (if sale or bid with owner data)
     if (sellerStats) {
       const sellerLabel = event.type === 'bid' ? 'CURRENT OWNER STATS' : 'SELLER STATS';
-      prompt += `\n${sellerLabel} (${sellerStats.ensName || 'address ' + sellerStats.address.slice(0, 10) + '...'}):\n`;
-      prompt += `- Buys: ${sellerStats.buysCount} (${sellerStats.buysVolume.toFixed(4)} ETH / $${sellerStats.buysVolumeUsd.toLocaleString()})\n`;
-      prompt += `- Sells: ${sellerStats.sellsCount} (${sellerStats.sellsVolume.toFixed(4)} ETH / $${sellerStats.sellsVolumeUsd.toLocaleString()})\n`;
-      prompt += `- Activity: ${sellerStats.transactionsPerMonth.toFixed(1)} txns/month\n`;
-      
-      // Add owner's bidding behavior if available (useful for bids - does owner make bids too?)
-      if (sellerStats.biddingStats) {
-        const ss = sellerStats.biddingStats;
-        prompt += `- Bidding activity: ${ss.totalBids} bids placed, ${ss.totalBidVolume.toFixed(4)} ETH total (avg ${ss.averageBidAmount.toFixed(4)} ETH per bid)\n`;
+      if (metadata.sellerDataUnavailable) {
+        prompt += `\n${sellerLabel}: ⚠️ DATA UNAVAILABLE (API error). Do not assume anything about seller's trading history.\n`;
+      } else {
+        prompt += `\n${sellerLabel} (${sellerStats.ensName || 'address ' + sellerStats.address.slice(0, 10) + '...'}):\n`;
+        prompt += `- Buys: ${sellerStats.buysCount} (${sellerStats.buysVolume.toFixed(4)} ETH / $${sellerStats.buysVolumeUsd.toLocaleString()})\n`;
+        prompt += `- Sells: ${sellerStats.sellsCount} (${sellerStats.sellsVolume.toFixed(4)} ETH / $${sellerStats.sellsVolumeUsd.toLocaleString()})\n`;
+        prompt += `- Activity: ${sellerStats.transactionsPerMonth.toFixed(1)} txns/month\n`;
         
-        if (ss.bidPatterns.commonThemes.length > 0) {
-          prompt += `- Bid patterns: ${ss.bidPatterns.commonThemes.join(', ')} (e.g., ${ss.bidPatterns.exampleNames.slice(0, 3).join(', ')})\n`;
-        }
-      }
-      
-      // Add portfolio information if available
-      if (sellerStats.portfolio) {
-        const p = sellerStats.portfolio;
-        prompt += `\nPORTFOLIO (${sellerLabel}):\n`;
-        prompt += `- Total value: $${p.totalValueUsd.toLocaleString()}\n`;
-        
-        if (p.majorHoldings.length > 0) {
-          prompt += `- Major holdings:\n`;
-          for (const holding of p.majorHoldings) {
-            prompt += `  • ${holding.symbol}: ${holding.balance.toFixed(2)} ($${holding.valueUsd.toLocaleString()}) on ${holding.network}\n`;
+        if (sellerStats.biddingStats) {
+          const ss = sellerStats.biddingStats;
+          prompt += `- Bidding activity: ${ss.totalBids} bids placed, ${ss.totalBidVolume.toFixed(4)} ETH total (avg ${ss.averageBidAmount.toFixed(4)} ETH per bid)\n`;
+          
+          if (ss.bidPatterns.commonThemes.length > 0) {
+            prompt += `- Bid patterns: ${ss.bidPatterns.commonThemes.join(', ')} (e.g., ${ss.bidPatterns.exampleNames.slice(0, 3).join(', ')})\n`;
           }
         }
         
-        const activeChains = Object.entries(p.crossChainPresence)
-          .filter(([_, active]) => active)
-          .map(([chain, _]) => chain);
-        if (activeChains.length > 1) {
-          prompt += `- Multichain: Active on ${activeChains.join(', ')}\n`;
+        if (sellerStats.portfolio && sellerStats.portfolio.totalValueUsd >= 100000) {
+          const p = sellerStats.portfolio;
+          prompt += `\nPORTFOLIO (${sellerLabel}):\n`;
+          prompt += `- Total value: $${p.totalValueUsd.toLocaleString()}\n`;
+          
+          const activeChains = Object.entries(p.crossChainPresence)
+            .filter(([_, active]) => active)
+            .map(([chain, _]) => chain);
+          if (activeChains.length <= 1) {
+            prompt += `- Single-chain wallet (wash trade signal)\n`;
+          }
         }
       }
     }
 
-    // Format buyer activity history (condensed for pattern detection)
-    if (buyerActivityHistory.length > 0) {
+    // Format buyer activity history (only if data was fetched)
+    if (!metadata.buyerDataUnavailable && buyerActivityHistory.length > 0) {
       prompt += `\nBUYER FULL HISTORY (${Math.min(buyerActivityHistory.length, 10)} recent):\n`;
-      const recentBuyerActivity = buyerActivityHistory.slice(-10); // Last 10
+      const recentBuyerActivity = buyerActivityHistory.slice(-10);
       for (const activity of recentBuyerActivity) {
         const date = new Date(activity.timestamp * 1000).toISOString().slice(0, 10);
         const tokenName = activity.tokenName ? activity.tokenName.slice(0, 20) : 'unknown';
@@ -846,34 +779,45 @@ TERMINOLOGY:
       }
     }
 
-    // Format seller activity history (condensed for pattern detection)
-    if (sellerActivityHistory && sellerActivityHistory.length > 0) {
+    // Format seller activity history (only if data was fetched)
+    if (!metadata.sellerDataUnavailable && sellerActivityHistory && sellerActivityHistory.length > 0) {
       prompt += `\nSELLER FULL HISTORY (${Math.min(sellerActivityHistory.length, 10)} recent):\n`;
-      const recentSellerActivity = sellerActivityHistory.slice(-10); // Last 10
+      const recentSellerActivity = sellerActivityHistory.slice(-10);
       for (const activity of recentSellerActivity) {
         const date = new Date(activity.timestamp * 1000).toISOString().slice(0, 10);
         const tokenName = activity.tokenName ? activity.tokenName.slice(0, 20) : 'unknown';
         prompt += `- ${date}: ${activity.type} ${tokenName} for ${activity.price.toFixed(4)} ETH [${activity.role}]\n`;
       }
+
+      // Detect mint-flipper pattern: seller has mints + quick sells at much higher prices
+      if (event.type === 'sale') {
+        const sellerMints = sellerActivityHistory.filter(a => a.type === 'mint');
+        const sellerSells = sellerActivityHistory.filter(a => a.role === 'seller' && a.type === 'sale');
+        if (sellerMints.length >= 2 && sellerSells.length >= 2) {
+          const avgMintPrice = sellerMints.reduce((s, a) => s + a.price, 0) / sellerMints.length;
+          const avgSellPrice = sellerSells.reduce((s, a) => s + a.price, 0) / sellerSells.length;
+          if (avgMintPrice > 0 && avgSellPrice / avgMintPrice >= 10) {
+            prompt += `- ⚠️ MINT-FLIPPER: Seller mints at avg ${avgMintPrice.toFixed(4)} ETH and sells at avg ${avgSellPrice.toFixed(4)} ETH (${Math.round(avgSellPrice / avgMintPrice)}x markup). Wash trade signal if buyer is a fresh wallet.\n`;
+          }
+        }
+      }
     }
 
-    // Format buyer current holdings (all names)
-    if (buyerStats.currentHoldings && buyerStats.currentHoldings.length > 0) {
+    // Format buyer current holdings with club annotations (only if buyer data was fetched)
+    if (!metadata.buyerDataUnavailable && buyerStats.currentHoldings && buyerStats.currentHoldings.length > 0) {
       prompt += `\nBUYER CURRENT HOLDINGS (${buyerStats.currentHoldings.length} names${buyerStats.holdingsIncomplete ? ' - incomplete data' : ''}):\n`;
-      prompt += buyerStats.currentHoldings.join(', ');
+      prompt += this.formatHoldingsWithClubs(buyerStats.currentHoldings);
       prompt += `\n`;
     }
 
-    // Format seller current holdings (all names)
-    if (sellerStats && sellerStats.currentHoldings && sellerStats.currentHoldings.length > 0) {
+    // Format seller current holdings with club annotations (only if seller data was fetched)
+    if (!metadata.sellerDataUnavailable && sellerStats && sellerStats.currentHoldings && sellerStats.currentHoldings.length > 0) {
       prompt += `\nSELLER CURRENT HOLDINGS (${sellerStats.currentHoldings.length} names${sellerStats.holdingsIncomplete ? ' - incomplete data' : ''}):\n`;
-      prompt += sellerStats.currentHoldings.join(', ');
+      prompt += this.formatHoldingsWithClubs(sellerStats.currentHoldings);
       prompt += `\n`;
     }
 
     // Add data quality notes if APIs returned incomplete data
-    // NOTE: Unavailable data (404 errors) is NOT mentioned - AI should just ignore those fields
-    const { metadata } = context;
     const dataIssues: string[] = [];
     
     if (metadata.tokenDataIncomplete) {
@@ -899,21 +843,15 @@ TERMINOLOGY:
 
     prompt += `\n---
 
-YOUR TASK: Look at all this data and pick out what's ACTUALLY INTERESTING to market watchers. Not all of it matters. Be direct and confident in your analysis.
+YOUR TASK: Find the ONE OR TWO most interesting angles and write a tight, opinionated take. 700 characters max.
 
-Ask yourself:
-- Is the name meaning worth explaining? maybe it's obscure, or a non-english word, or an acronym, or a romanised foreign language, etc. if its self evident, skip it or keep it very short
-- Is there a notable pattern in how the buyer or seller trades?
-- For bids only: Has the buyer/seller been bidding on similar names in the last day or week? (This is particularly interesting - check timestamps and name patterns)
-- What's the story here that people should know? Don't be afraid to call out bold moves, unusual behavior, or surprising patterns.
+CHECK FIRST:
+1. What's the name's price history? Big gain? Big loss? Long hold? This is often the best lead
+2. Look at the activity history dates. Is this buyer or seller on a SPREE? Multiple transactions this week/month? That's the story
+3. Is the name meaning worth explaining? Only if obscure, non-English, or has a notable crypto connection
+4. Any funny contrasts, overpays, or desperate moves worth calling out?
 
-Write a clear, punchy reply (up to 1000 chars) that focuses on what matters. Be bold and direct 
-
-REMEMBER:
-- Don't state obvious things (transaction type is already clear from main tweet)
-- NEVER offer services, help, or ask questions ("I can..." "let me know...")
-- You are an automated bot providing market analysis, not a person
-- Be confident and slightly provocative when the data supports it - market watchers want interesting takes, not bland observations`;
+Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out overpays, steals, desperation, and smart moves with confidence. Market watchers want hot takes, not book reports.`;
 
     return prompt;
   }
@@ -930,8 +868,8 @@ REMEMBER:
       return false;
     }
 
-    if (text.length > 1200) {
-      logger.warn(`Response too long: ${text.length} characters (max 1200 for Twitter Premium)`);
+    if (text.length > 900) {
+      logger.warn(`Response too long: ${text.length} characters (max 900 for Twitter Premium)`);
       return false;
     }
 

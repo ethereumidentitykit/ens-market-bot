@@ -15,6 +15,9 @@ export class CurrencyUtils {
     // USDT
     '0xdac17f958d2ee523a2206206994597c13d831ec7': 'USDT',
     
+    // DAI
+    '0x6b175474e89094c44da98b954eedeac495271d0f': 'DAI',
+    
     // Native ETH (various representations)
     '0x0000000000000000000000000000000000000000': 'ETH', // Zero address
     '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee': 'ETH', // Common placeholder for native ETH
@@ -48,11 +51,14 @@ export class CurrencyUtils {
   }
 
   /**
-   * Check if a contract address represents ETH or WETH
+   * Check if a contract address represents ETH or WETH.
+   * Only returns true for explicitly known ETH/WETH contracts — unknown contracts return false.
    */
   static isETHEquivalent(contractAddress: string): boolean {
-    const symbol = this.getCurrencySymbol(contractAddress);
-    return symbol === 'ETH';
+    if (!contractAddress) return true; // Native ETH
+    const contractLower = contractAddress.toLowerCase();
+    const knownCurrency = this.CONTRACT_TO_CURRENCY[contractLower];
+    return knownCurrency === 'ETH';
   }
 
   /**
@@ -64,6 +70,7 @@ export class CurrencyUtils {
       'WETH': 'ETH', // Display WETH as ETH
       'USDC': 'USDC',
       'USDT': 'USDT',
+      'DAI': 'DAI',
     };
     
     return displayMap[symbol.toUpperCase()] || symbol;
@@ -74,6 +81,6 @@ export class CurrencyUtils {
    */
   static isStablecoin(contractAddress: string): boolean {
     const symbol = this.getCurrencySymbol(contractAddress);
-    return ['USDC', 'USDT'].includes(symbol);
+    return ['USDC', 'USDT', 'DAI'].includes(symbol);
   }
 }
