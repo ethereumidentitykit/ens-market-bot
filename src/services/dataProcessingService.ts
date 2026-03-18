@@ -209,85 +209,11 @@ export interface LLMPromptContext {
  * Transforms raw Magic Eden activity data into structured insights for LLM consumption
  */
 export class DataProcessingService {
-  // Known marketplace proxy contracts (matches QuickNodeSalesService and MagicEdenService)
-  private readonly KNOWN_PROXY_CONTRACTS = [
-    '0x0000a26b00c1f0df003000390027140000faa719', // OpenSea WETH wrapper
-    '0xe6ee2b1eaac6520be709e77780abb50e7fffcccd', // Seaport proxy
-    '0x00ca04c45da318d5b7e7b14d5381ca59f09c73f0', // Additional proxy
-  ];
-  
   // Category service for checking ENS name category memberships
   private readonly clubService = new ClubService();
 
   constructor() {
     logger.info('🔬 DataProcessingService initialized');
-  }
-
-  /**
-   * Check if an address is a known proxy contract
-   */
-  private isKnownProxy(address: string): boolean {
-    const normalized = address.toLowerCase();
-    return this.KNOWN_PROXY_CONTRACTS.includes(normalized);
-  }
-
-  /**
-   * Resolve proxy addresses for a specific transaction by fetching token transfers
-   * Only called when a proxy is detected in user activity
-   * 
-   * @param activity - Sale/mint activity with proxy address
-   * @param magicEdenV4Service - MagicEdenV4Service instance for fetching token data
-   * @returns Resolved buyer and seller addresses
-   */
-  private async resolveProxyForActivity(
-    activity: TokenActivity,
-    magicEdenV4Service: any
-  ): Promise<{
-    resolvedBuyer: string;
-    resolvedSeller: string;
-  }> {
-    try {
-      // Fetch just this token's activity (including transfers) - limit to recent activity (V4 API)
-      const result = await magicEdenV4Service.getTokenActivityHistory(
-        activity.contract,
-        activity.token.tokenId,
-        { limit: 100, types: ['TRADE', 'MINT', 'TRANSFER'], maxPages: 2 }  // Only fetch recent pages
-      );
-      
-      // Transform V4 activities to V3 format for compatibility
-      const tokenActivities = magicEdenV4Service.transformV4ToV3Activities(result.activities);
-      
-      // Find transfers matching this transaction
-      const transfers = tokenActivities.filter((a: TokenActivity) => 
-        a.type === 'transfer' && 
-        a.txHash.toLowerCase() === activity.txHash.toLowerCase()
-      );
-      
-      if (transfers.length > 0) {
-        // Use transfer chain to resolve
-        const finalTransfer = transfers[transfers.length - 1];
-        const firstTransfer = transfers[0];
-        
-        return {
-          resolvedBuyer: finalTransfer.toAddress?.toLowerCase() || activity.toAddress.toLowerCase(),
-          resolvedSeller: firstTransfer.fromAddress?.toLowerCase() || activity.fromAddress.toLowerCase()
-        };
-      }
-      
-      // No transfers found, return original addresses
-      return {
-        resolvedBuyer: activity.toAddress.toLowerCase(),
-        resolvedSeller: activity.fromAddress.toLowerCase()
-      };
-      
-    } catch (error: any) {
-      logger.warn(`Failed to resolve proxy for tx ${activity.txHash.slice(0, 10)}...: ${error.message}`);
-      // On error, return original addresses
-      return {
-        resolvedBuyer: activity.toAddress.toLowerCase(),
-        resolvedSeller: activity.fromAddress.toLowerCase()
-      };
-    }
   }
 
   /**
@@ -314,7 +240,7 @@ export class DataProcessingService {
       logger.debug(`   Current tx to exclude: ${currentTxHash}`);
     }
     
-    // Separate sales, mints, and transfers
+    // Grails API returns proxy-resolved addresses — no transfer-based resolution needed
     const sales = activities.filter(a => 
       a.type === 'sale' && 
       a.price?.amount?.decimal !== undefined
@@ -323,69 +249,36 @@ export class DataProcessingService {
       a.type === 'mint' &&
       a.price?.amount?.decimal !== undefined
     );
-    const transfers = activities.filter(a => a.type === 'transfer');
     
-    logger.debug(`   Found ${sales.length} sales, ${mints.length} mints (before filtering), ${transfers.length} transfers`);
+    logger.debug(`   Found ${sales.length} sales, ${mints.length} mints (before filtering)`);
     
-    // Log all sale txHashes for debugging
-    if (sales.length > 0) {
-      logger.debug(`   Sale txHashes: ${sales.slice(0, 3).map(s => s.txHash.slice(0, 10) + '...').join(', ')}${sales.length > 3 ? ` (+${sales.length - 3} more)` : ''}`);
-    }
-    
-    // Resolve real buyer/seller for each sale using transfer events
-    const resolvedSales = sales.map(sale => {
-      // Skip current transaction if provided
-      if (currentTxHash && sale.txHash.toLowerCase() === currentTxHash.toLowerCase()) {
-        logger.debug(`   Filtering out current tx: ${sale.txHash.slice(0, 10)}...`);
-        return null;
-      }
-      
-      // Find transfers with same txHash
-      const saleTransfers = transfers.filter(t => 
-        t.txHash.toLowerCase() === sale.txHash.toLowerCase()
-      );
-      
-      let realBuyer = sale.toAddress.toLowerCase();
-      let realSeller = sale.fromAddress.toLowerCase();
-      
-      // If there are transfers in same tx, use them to resolve real addresses
-      if (saleTransfers.length > 0) {
-        // Find the final recipient (last toAddress in transfer chain)
-        const finalTransfer = saleTransfers[saleTransfers.length - 1];
-        if (finalTransfer.toAddress) {
-          realBuyer = finalTransfer.toAddress.toLowerCase();
+    const resolvedSales = sales
+      .filter(sale => {
+        if (currentTxHash && sale.txHash && sale.txHash.toLowerCase() === currentTxHash.toLowerCase()) {
+          logger.debug(`   Filtering out current tx: ${sale.txHash.slice(0, 10)}...`);
+          return false;
         }
-        
-        // Find the original sender (first fromAddress in transfer chain)
-        const firstTransfer = saleTransfers[0];
-        if (firstTransfer.fromAddress && firstTransfer.fromAddress !== '0x0000000000000000000000000000000000000000') {
-          realSeller = firstTransfer.fromAddress.toLowerCase();
-        }
-        
-        logger.debug(`   Resolved ${sale.txHash.slice(0, 10)}...: ${realSeller.slice(0, 8)}... → ${realBuyer.slice(0, 8)}...`);
-      }
-      
-      return {
+        return true;
+      })
+      .map(sale => ({
         ...sale,
-        resolvedBuyer: realBuyer,
-        resolvedSeller: realSeller
-      };
-    }).filter(s => s !== null); // Remove current tx if filtered
+        resolvedBuyer: sale.toAddress.toLowerCase(),
+        resolvedSeller: sale.fromAddress.toLowerCase()
+      }));
     
-    // Process mints (no proxy resolution needed, seller is always 0x0)
-    const resolvedMints = mints.map(mint => {
-      // Skip current transaction if provided
-      if (currentTxHash && mint.txHash.toLowerCase() === currentTxHash.toLowerCase()) {
-        logger.debug(`   Filtering out current tx: ${mint.txHash.slice(0, 10)}...`);
-        return null;
-      }
-      
-      return {
+    const resolvedMints = mints
+      .filter(mint => {
+        if (currentTxHash && mint.txHash && mint.txHash.toLowerCase() === currentTxHash.toLowerCase()) {
+          logger.debug(`   Filtering out current tx: ${mint.txHash.slice(0, 10)}...`);
+          return false;
+        }
+        return true;
+      })
+      .map(mint => ({
         ...mint,
         resolvedBuyer: mint.toAddress.toLowerCase(),
-        resolvedSeller: mint.fromAddress.toLowerCase() // Will be 0x0
-      };
-    }).filter(m => m !== null);
+        resolvedSeller: mint.fromAddress.toLowerCase()
+      }));
     
     logger.debug(`   ${resolvedSales.length} historical sales, ${resolvedMints.length} historical mints (after filtering current tx)`);
     
@@ -544,27 +437,19 @@ export class DataProcessingService {
   /**
    * Calculate trading statistics for a user
    * Tracks buy/sell volumes, PNL, and activity patterns
-   * Resolves proxy contracts on-demand by fetching token transfers
-   * 
-   * @param activities - User activity history from Magic Eden (sales, mints only)
-   * @param userAddress - The address of the user we're analyzing (already resolved from DB)
-   * @param role - Whether this user is the buyer or seller in current event
-   * @param magicEdenV4Service - MagicEdenV4Service instance for on-demand token data fetching
-   * @returns User trading statistics
+   * Grails API provides proxy-resolved addresses — no additional resolution needed.
    */
   async processUserActivity(
     activities: TokenActivity[],
     userAddress: string,
     role: 'buyer' | 'seller',
-    magicEdenV4Service?: any,
+    _magicEdenV4Service?: any,
     currentHoldings?: { names: string[]; incomplete: boolean } | null
   ): Promise<UserStats> {
     logger.debug(`👤 Processing user activity: ${activities.length} activities for ${userAddress.slice(0, 8)}... (${role})`);
     
-    // Normalize address for comparison (DB already resolved proxies)
     const normalizedAddress = userAddress.toLowerCase();
     
-    // Filter for sales/mints with valid prices
     const salesAndMints = activities.filter(a => 
       (a.type === 'sale' || a.type === 'mint') &&
       a.price?.amount?.decimal !== undefined
@@ -572,41 +457,14 @@ export class DataProcessingService {
     
     logger.debug(`   Found ${salesAndMints.length} sales/mints`);
     
-    // Check which activities have known proxy addresses
-    const activitiesWithProxies = salesAndMints.filter(a => 
-      this.isKnownProxy(a.fromAddress) || this.isKnownProxy(a.toAddress)
-    );
+    // Grails API returns proxy-resolved addresses — map directly
+    const resolvedActivities = salesAndMints.map(activity => ({
+      ...activity,
+      resolvedBuyer: activity.toAddress.toLowerCase(),
+      resolvedSeller: activity.fromAddress.toLowerCase()
+    }));
     
-    if (activitiesWithProxies.length > 0) {
-      logger.debug(`   ⚠️  Detected ${activitiesWithProxies.length} activities with proxies - will resolve on-demand`);
-    }
-    
-    // Process each activity - resolve proxies on-demand if magicEdenV4Service is provided
-    const resolvedActivities = await Promise.all(
-      salesAndMints.map(async (activity) => {
-        // Check if this activity has a proxy
-        const hasProxy = this.isKnownProxy(activity.fromAddress) || this.isKnownProxy(activity.toAddress);
-        
-        if (hasProxy && magicEdenV4Service) {
-          // Lazy-fetch token transfers for this specific transaction (V4 API)
-          const resolved = await this.resolveProxyForActivity(activity, magicEdenV4Service);
-          return {
-            ...activity,
-            ...resolved
-          };
-        } else {
-          // No proxy or no service provided, use addresses directly
-          return {
-            ...activity,
-            resolvedBuyer: activity.toAddress.toLowerCase(),
-            resolvedSeller: activity.fromAddress.toLowerCase()
-          };
-        }
-      })
-    );
-    
-    const proxiesResolved = magicEdenV4Service ? activitiesWithProxies.length : 0;
-    logger.debug(`   Processed ${resolvedActivities.length} activities (${proxiesResolved} proxies resolved)`);
+    logger.debug(`   Processed ${resolvedActivities.length} activities`);
     
     // Separate buys vs sells using RESOLVED addresses
     const buys = resolvedActivities.filter(a => 
@@ -920,9 +778,9 @@ export class DataProcessingService {
    * @param eventData - Current sale/registration event from DB record
    *                    Should include: txHash (for Magic Eden filtering),
    *                    buyer/seller addresses, price (ETH + USD), timestamp
-   * @param tokenActivities - Token's trading history from Magic Eden
-   * @param buyerActivities - Buyer's activity history from Magic Eden
-   * @param sellerActivities - Seller's activity history from Magic Eden (null for registrations)
+   * @param tokenActivities - Token's trading history (from Grails API)
+   * @param buyerActivities - Buyer's activity history (from Grails API)
+   * @param sellerActivities - Seller's activity history (from Grails API, null for registrations)
    * @returns Complete context for LLM prompt
    */
   async buildLLMContext(
@@ -935,12 +793,12 @@ export class DataProcessingService {
       timestamp: number;
       buyerAddress: string;
       sellerAddress?: string;
-      txHash?: string; // Optional: bids don't have txHash yet
+      txHash?: string;
     },
     tokenActivities: TokenActivity[],
     buyerActivities: TokenActivity[],
     sellerActivities: TokenActivity[] | null,
-    magicEdenV4Service?: any,
+    _magicEdenV4Service?: any,
     ensWorkerService?: ENSWorkerService,
     fetchStatus?: {
       tokenDataIncomplete: boolean;
@@ -1002,7 +860,7 @@ export class DataProcessingService {
       buyerActivities,
       eventData.buyerAddress,
       'buyer',
-      magicEdenV4Service,
+      undefined,
       holdingsData?.buyerHoldings || null
     );
     
@@ -1014,7 +872,7 @@ export class DataProcessingService {
         sellerActivities,
         eventData.sellerAddress,
         'seller',
-        magicEdenV4Service,
+        undefined,
         holdingsData?.sellerHoldings || null
       );
     } else {

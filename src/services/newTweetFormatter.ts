@@ -277,85 +277,23 @@ export class NewTweetFormatter {
   }
 
   /**
-   * Get historical context for sales and registrations
+   * Get historical context for sales and registrations.
+   * Uses Grails API — lookup by ENS name directly (no contract/tokenId gymnastics).
    */
   private async getHistoricalContext(
-    contractAddress: string,
-    tokenId: string,
+    _contractAddress: string,
+    _tokenId: string,
     ensName: string,
     currentTxHash?: string
   ): Promise<string | null> {
-    if (!this.magicEdenV4Service) {
-      logger.debug('[NewTweetFormatter] Magic Eden V4 service not available for historical context');
-      return null;
-    }
-
     try {
-      logger.info(`🔍 Fetching historical context for ${ensName} (${contractAddress}:${tokenId})`);
-      
-      // Check if incoming contract is one of the valid ENS token contracts
-      const isNameWrapper = contractAddress.toLowerCase() === ENSTokenUtils.NAME_WRAPPER_CONTRACT.toLowerCase();
-      const isEnsRegistry = contractAddress.toLowerCase() === ENSTokenUtils.ENS_REGISTRY_CONTRACT.toLowerCase();
-      
-      // Determine primary and fallback contracts/tokenIds
-      let primaryContract: string;
-      let primaryTokenId: string;
-      let fallbackContract: string | null = null;
-      let fallbackTokenId: string | null = null;
+      logger.info(`🔍 Fetching historical context for ${ensName} (Grails API)`);
 
-      if (!isNameWrapper && !isEnsRegistry) {
-        // Contract is not an ENS token contract (e.g., old registrar controller)
-        // Default to Name Wrapper first, then fallback to ENS Registry
-        logger.debug(`⚠️ Non-ENS token contract detected: ${contractAddress}. Defaulting to Name Wrapper → ENS Registry lookup`);
-        
-        primaryContract = ENSTokenUtils.NAME_WRAPPER_CONTRACT;
-        primaryTokenId = ENSTokenUtils.ensNameToNamehash(ensName); // Wrapped tokens use namehash
-        
-        fallbackContract = ENSTokenUtils.ENS_REGISTRY_CONTRACT;
-        fallbackTokenId = ENSTokenUtils.ensNameToLabelhash(ensName); // Unwrapped tokens use labelhash
-        
-      } else if (isNameWrapper) {
-        // Valid Name Wrapper contract - use as-is with ENS Registry fallback
-        primaryContract = contractAddress;
-        primaryTokenId = tokenId;
-        
-        fallbackContract = ENSTokenUtils.ENS_REGISTRY_CONTRACT;
-        fallbackTokenId = ENSTokenUtils.ensNameToLabelhash(ensName);
-        logger.debug(`🔄 Will fallback to unwrapped lookup if no wrapped history found`);
-        
-      } else {
-        // Valid ENS Registry contract - use as-is with no fallback
-        primaryContract = contractAddress;
-        primaryTokenId = tokenId;
-        // Note: No fallback from ENS Registry to Name Wrapper (unwrapped tokens won't have wrapped history)
-      }
+      const result = await GrailsApiService.getLastSaleOrMint(ensName, currentTxHash);
 
-
-      // Try primary lookup first (V4 API)
-      const primaryResult = await this.magicEdenV4Service.getLastSaleOrRegistration(
-        primaryContract, 
-        primaryTokenId,
-        currentTxHash
-      );
-
-      if (primaryResult) {
-        logger.info(`✅ Found historical data from primary contract: ${primaryResult.priceAmount} ${primaryResult.currencySymbol || 'ETH'}`);
-        return TimeUtils.formatHistoricalEvent(Number(primaryResult.priceAmount), primaryResult.timestamp, primaryResult.type, primaryResult.currencySymbol);
-      }
-
-      // Try fallback lookup if configured (V4 API)
-      if (fallbackContract && fallbackTokenId) {
-        logger.info(`🔄 Trying fallback lookup: ${fallbackContract}:${fallbackTokenId}`);
-        const fallbackResult = await this.magicEdenV4Service.getLastSaleOrRegistration(
-          fallbackContract,
-          fallbackTokenId,
-          currentTxHash
-        );
-
-        if (fallbackResult) {
-          logger.info(`✅ Found historical data from fallback contract: ${fallbackResult.priceAmount} ${fallbackResult.currencySymbol || 'ETH'}`);
-          return TimeUtils.formatHistoricalEvent(Number(fallbackResult.priceAmount), fallbackResult.timestamp, fallbackResult.type, fallbackResult.currencySymbol);
-        }
+      if (result) {
+        logger.info(`✅ Found historical data: ${result.priceAmount} ${result.currencySymbol || 'ETH'}`);
+        return TimeUtils.formatHistoricalEvent(Number(result.priceAmount), result.timestamp, result.type, result.currencySymbol);
       }
 
       logger.info(`ℹ️ No historical context found for ${ensName}`);

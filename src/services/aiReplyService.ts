@@ -17,6 +17,7 @@ import { OpenAIService } from './openaiService';
 import { TwitterService } from './twitterService';
 import { DataProcessingService } from './dataProcessingService';
 import { MagicEdenV4Service, TokenActivity } from './magicEdenV4Service';
+import { GrailsApiService } from './grailsApiService';
 import { OpenSeaService } from './openSeaService';
 import { ENSWorkerService } from './ensWorkerService';
 import { APIToggleService } from './apiToggleService';
@@ -570,64 +571,45 @@ export class AIReplyService {
   }> {
     logger.debug('      Parallel fetching: Token activity, Buyer activity, Seller activity, Holdings, Name research...');
 
-    // Execute all API calls in parallel
+    // Execute all API calls in parallel (Grails API — proxy-resolved, ENS-native data)
     const [tokenResult, buyerResult, sellerResult, buyerHoldings, sellerHoldings, nameResearch] = await Promise.all([
-      // Token activity history (V4 API)
-      this.magicEdenV4Service.getTokenActivityHistory(
-        transaction.contractAddress,
-        transaction.tokenId || '',
-        { limit: 100, maxPages: 25 } // Updated API: 100 items/page, 25 pages = 2500 items max
+      // Token activity history (Grails API — sales + mints by name)
+      GrailsApiService.getNameActivity(
+        eventData.tokenName,
+        { limit: 50, maxPages: 10 }
       ).then(result => ({
-        activities: this.magicEdenV4Service.transformV4ToV3Activities(result.activities),
+        activities: result.activities,
         incomplete: result.incomplete,
         pagesFetched: result.pagesFetched
       })).catch((error: any) => {
         logger.error('      Token activity fetch failed:', error.message);
         return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0, unavailable: true };
       }),
-      
-      // Buyer activity history (V4 API) - include BID_CREATED to track bidding behavior
-      // Filter by ENS contracts to avoid non-ENS activities (Pudgy Penguins, etc.)
-      this.magicEdenV4Service.getUserActivityHistory(
+
+      // Buyer activity history (Grails API — sales + mints by address)
+      GrailsApiService.getAddressActivity(
         eventData.buyerAddress,
-        { 
-          limit: 100, 
-          types: ['TRADE', 'MINT', 'TRANSFER', 'BID_CREATED'], 
-          maxPages: 25,
-          contracts: [
-            '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85', // ENS Base Registrar
-            '0xd4416b13d2b3a9abae7acd5d6c2bbdbe25686401'  // ENS Names
-          ]
-        }
+        { limit: 50, maxPages: 50 }
       ).then(result => ({
-        activities: this.magicEdenV4Service.transformV4ToV3Activities(result.activities),
+        activities: result.activities,
         incomplete: result.incomplete,
         pagesFetched: result.pagesFetched,
-        unavailable: result.unavailable || false
+        unavailable: false
       })).catch((error: any) => {
         logger.error('      Buyer activity fetch failed:', error.message);
         return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0, unavailable: true };
       }),
-      
-      // Seller activity history (if applicable) (V4 API)
-      // Filter by ENS contracts to avoid non-ENS activities
+
+      // Seller activity history (Grails API — sales + mints by address)
       eventData.sellerAddress
-        ? this.magicEdenV4Service.getUserActivityHistory(
+        ? GrailsApiService.getAddressActivity(
             eventData.sellerAddress,
-            { 
-              limit: 100, 
-              types: ['TRADE', 'MINT', 'TRANSFER', 'BID_CREATED'], 
-              maxPages: 25,
-              contracts: [
-                '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85', // ENS Base Registrar
-                '0xd4416b13d2b3a9abae7acd5d6c2bbdbe25686401'  // ENS Names
-              ]
-            }
+            { limit: 50, maxPages: 50 }
           ).then(result => ({
-            activities: this.magicEdenV4Service.transformV4ToV3Activities(result.activities),
+            activities: result.activities,
             incomplete: result.incomplete,
             pagesFetched: result.pagesFetched,
-            unavailable: result.unavailable || false
+            unavailable: false
           })).catch((error: any) => {
             logger.error('      Seller activity fetch failed:', error.message);
             return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0, unavailable: true };
