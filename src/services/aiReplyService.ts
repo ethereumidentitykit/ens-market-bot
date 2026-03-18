@@ -616,15 +616,15 @@ export class AIReplyService {
           })
         : Promise.resolve(null),
       
-      // Buyer's current ENS holdings
-      this.openSeaService.getENSHoldings(eventData.buyerAddress, { limit: 200, maxPages: 5 }).catch((error: any) => {
+      // Buyer's current ENS holdings (Grails search API)
+      GrailsApiService.getENSHoldings(eventData.buyerAddress, { limit: 50, maxPages: 20 }).catch((error: any) => {
         logger.error('      Buyer holdings fetch failed:', error.message);
         return { names: [], incomplete: true, totalFetched: 0 };
       }),
       
-      // Seller's current ENS holdings (if sale)
+      // Seller's current ENS holdings (Grails search API)
       eventData.sellerAddress
-        ? this.openSeaService.getENSHoldings(eventData.sellerAddress, { limit: 200, maxPages: 5 }).catch((error: any) => {
+        ? GrailsApiService.getENSHoldings(eventData.sellerAddress, { limit: 50, maxPages: 20 }).catch((error: any) => {
             logger.error('      Seller holdings fetch failed:', error.message);
             return { names: [], incomplete: true, totalFetched: 0 };
           })

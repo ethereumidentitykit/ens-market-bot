@@ -610,6 +610,70 @@ export class GrailsApiService {
   }
 
   /**
+   * Fetch ENS names currently held by an address via Grails search API.
+   * Replaces OpenSea getENSHoldings — no API key needed, no rate limiting.
+   */
+  static async getENSHoldings(
+    address: string,
+    options: { limit?: number; maxPages?: number } = {}
+  ): Promise<{ names: string[]; incomplete: boolean; totalFetched: number }> {
+    const limit = Math.min(options.limit || 50, 50);
+    const maxPages = options.maxPages || 20;
+    const apiBase = GrailsApiService.getApiBase();
+
+    logger.info(`📚 Fetching ENS holdings for ${address} (limit: ${limit}, maxPages: ${maxPages})`);
+
+    const allNames: string[] = [];
+    let page = 1;
+    let incomplete = false;
+
+    try {
+      while (page <= maxPages) {
+        const url = `${apiBase}/search?limit=${limit}&page=${page}&filters[owner]=${address.toLowerCase()}`;
+        logger.debug(`   Page ${page}: Fetching from Grails...`);
+
+        const response = await axios.get<GrailsApiResponse>(url, {
+          timeout: 15000,
+          headers: { 'Accept': 'application/json', 'User-Agent': 'ENS-TwitterBot/2.0' },
+        });
+
+        if (!response.data.success || !response.data.data?.results) {
+          logger.warn(`   Grails search returned unsuccessful response on page ${page}`);
+          break;
+        }
+
+        const results = response.data.data.results;
+        if (results.length === 0) {
+          logger.debug(`   Page ${page}: No more names, stopping pagination`);
+          break;
+        }
+
+        const names = results
+          .map((r: any) => r.name as string)
+          .filter((name: string) => name && name.endsWith('.eth'));
+        allNames.push(...names);
+
+        logger.debug(`   Page ${page}: Fetched ${names.length} ENS names (total: ${allNames.length})`);
+
+        if (!response.data.data.pagination.hasNext) break;
+        page++;
+
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+
+      if (page > maxPages) incomplete = true;
+
+      const pagesFetched = page > maxPages ? maxPages : page;
+      logger.info(`✅ ENS holdings fetch complete: ${allNames.length} names across ${pagesFetched} pages${incomplete ? ' (incomplete)' : ''}`);
+      return { names: allNames, incomplete, totalFetched: allNames.length };
+
+    } catch (error: any) {
+      logger.error(`❌ Error fetching ENS holdings for ${address}: ${error.message}`);
+      return { names: allNames, incomplete: true, totalFetched: allNames.length };
+    }
+  }
+
+  /**
    * Fetch active listings for an ENS name from Grails API
    * Uses the /names/{name} endpoint (same as grails-app frontend)
    * Static method — no service instance needed, just an HTTP call
