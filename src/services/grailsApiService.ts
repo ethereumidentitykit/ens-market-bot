@@ -90,6 +90,19 @@ export interface GrailsActiveListing {
 }
 
 /**
+ * Simplified activity entry for club/category context in LLM prompts
+ */
+export interface ClubActivityEntry {
+  name: string;
+  eventType: 'sold' | 'bought' | 'mint';
+  priceEth: number;
+  priceToken: number;
+  currencySymbol: string;
+  timestamp: number;
+  daysAgo: number;
+}
+
+/**
  * Grails service stats type
  */
 export interface GrailsServiceStats {
@@ -667,6 +680,61 @@ export class GrailsApiService {
     } catch (error: any) {
       logger.error(`❌ Error fetching ENS holdings for ${address}: ${error.message}`);
       return { names: allNames, incomplete: true, totalFetched: allNames.length };
+    }
+  }
+
+  /**
+   * Fetch recent activity for a specific club/category.
+   * Returns deduped sold+bought pairs and mints, limited to the most recent entries.
+   */
+  static async getClubActivity(
+    clubSlug: string,
+    options: { limit?: number } = {}
+  ): Promise<ClubActivityEntry[]> {
+    const limit = options.limit || 10;
+    const apiBase = GrailsApiService.getApiBase();
+    const url = `${apiBase}/activity?club=${encodeURIComponent(clubSlug)}&limit=${limit}&page=1&event_type=bought&event_type=mint&event_type=sold`;
+
+    try {
+      const response = await axios.get<GrailsApiResponse>(url, {
+        timeout: 10000,
+        headers: { 'Accept': 'application/json', 'User-Agent': 'ENS-TwitterBot/2.0' },
+      });
+
+      if (!response.data.success || !response.data.data?.results) {
+        return [];
+      }
+
+      const seen = new Set<string>();
+      const entries: ClubActivityEntry[] = [];
+
+      for (const record of response.data.data.results) {
+        const txKey = record.transaction_hash?.toLowerCase();
+        if (txKey && seen.has(txKey)) continue;
+        if (txKey) seen.add(txKey);
+
+        const currencySymbol = record.currency_address
+          ? CURRENCY_MAP[record.currency_address.toLowerCase()] || 'ETH'
+          : 'ETH';
+        const isEthLike = currencySymbol === 'ETH';
+        const decimals = CURRENCY_DECIMALS[currencySymbol] || 18;
+        const priceDecimal = Number(record.price_wei) / Math.pow(10, decimals);
+
+        entries.push({
+          name: record.name || 'unknown',
+          eventType: record.event_type as 'sold' | 'bought' | 'mint',
+          priceEth: isEthLike ? priceDecimal : 0,
+          priceToken: !isEthLike ? priceDecimal : 0,
+          currencySymbol,
+          timestamp: new Date(record.created_at).getTime(),
+          daysAgo: Math.floor((Date.now() - new Date(record.created_at).getTime()) / (1000 * 60 * 60 * 24)),
+        });
+      }
+
+      return entries;
+    } catch (error: any) {
+      logger.warn(`[GrailsApiService] Failed to fetch club activity for ${clubSlug}: ${error.message}`);
+      return [];
     }
   }
 

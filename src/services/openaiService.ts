@@ -454,10 +454,15 @@ PRIORITY ORDER (what to focus on, most important first):
    - Explain obscure names, non-English words, acronyms, romanised foreign languages
    - Username/gamertag appeal worth noting for names like demon, killer, anon, legend, chad, ghost
 
-4. **CATEGORY MEMBERSHIP**: If the name belongs to a category:
-   - Mention it briefly. Highlight special patterns (palindromes, sequential, etc.)
+4. **CATEGORY MEMBERSHIP & MARKET CONTEXT**: If CATEGORY CONTEXT data is provided:
+   - You'll receive club stats (floor price, sales volume, member count) and recent activity for each category the name belongs to
+   - **Compare the current price to the floor**: Is this above/below/at floor? A 3x floor sale is notable. A below-floor purchase is a deal
+   - **Market activity signals**: High recent sales = liquid, active market. Zero sales in 1w/1mo = illiquid or dormant category
+   - **Registration activity**: High reg count = people are actively minting in this category. This signals growing interest
+   - **Supply context**: Available count matters — a category with 0 available names has scarcity value vs one with 67k available
    - 999 and 10k categories are self-evident. No need to explain what they are
    - Prepunk: Only mention if sub-10k (increasingly rare), sub-1k (very rare), or sub-100 (extremely valuable)
+   - Don't list raw stats — weave them into your analysis naturally (e.g. "above the 999 Club floor of 1.1 ETH" or "the first sale in this category in weeks")
 
 5. **COLLECTION PATTERNS from holdings**: Only if directly relevant
    - Holdings show names with optional [Category] annotations — e.g. "frodo.eth [Top Fantasy], vanish.eth [BIP 39]"
@@ -628,7 +633,7 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
    * @returns Formatted prompt string
    */
   private buildUserPrompt(context: LLMPromptContext, nameResearch?: string): string {
-    const { event, tokenInsights, buyerStats, sellerStats, buyerActivityHistory, sellerActivityHistory, clubInfo, metadata } = context;
+    const { event, tokenInsights, buyerStats, sellerStats, buyerActivityHistory, sellerActivityHistory, clubInfo, clubContext, metadata } = context;
 
     // Sanitize token name to prevent prompt injection
     const sanitizedTokenName = this.sanitizeLabel(event.tokenName.replace(/\.eth$/i, '')) + '.eth';
@@ -669,6 +674,30 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
       // Pluralize based on comma count (multiple categories)
       const categoryLabel = clubInfo.includes(',') ? 'Categories' : 'Category';
       prompt += `- ${categoryLabel}: ${sanitizedClubInfo}\n`;
+    }
+
+    // Include club context (stats + recent activity) if available
+    if (clubContext && clubContext.length > 0) {
+      prompt += `\nCATEGORY CONTEXT:\n`;
+      for (const club of clubContext) {
+        const s = club.stats;
+        const floorStr = s.floorPriceEth !== null ? `${s.floorPriceEth.toFixed(4)} ETH` : 'N/A';
+        prompt += `\n[${s.displayName}] (${s.memberCount.toLocaleString()} members)\n`;
+        prompt += `  Floor: ${floorStr} | Holders: ${s.holdersCount.toLocaleString()} | Listed: ${s.listingsCount} | Available: ${s.availableCount.toLocaleString()}\n`;
+        prompt += `  Sales — 1w: ${s.salesCount1w} (${s.salesVolumeEth1w.toFixed(2)} ETH) | 1mo: ${s.salesCount1mo} (${s.salesVolumeEth1mo.toFixed(2)} ETH) | 1y: ${s.salesCount1y} (${s.salesVolumeEth1y.toFixed(2)} ETH)\n`;
+        prompt += `  Regs — 1w: ${s.regCount1w} | 1mo: ${s.regCount1mo} | 1y: ${s.regCount1y}\n`;
+
+        if (club.recentActivity.length > 0) {
+          prompt += `  Recent:\n`;
+          for (const a of club.recentActivity) {
+            const priceStr = a.priceEth > 0
+              ? `${a.priceEth.toFixed(4)} ETH`
+              : `${a.priceToken.toFixed(2)} ${a.currencySymbol}`;
+            const typeLabel = a.eventType === 'mint' ? 'reg' : 'sale';
+            prompt += `    ${a.name} ${typeLabel} ${priceStr} (${a.daysAgo}d ago)\n`;
+          }
+        }
+      }
     }
 
     // Include name research if available

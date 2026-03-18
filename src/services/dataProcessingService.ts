@@ -1,7 +1,8 @@
 import { logger } from '../utils/logger';
 import { TokenActivity } from './magicEdenV4Service';
 import { ENSWorkerService } from './ensWorkerService';
-import { ClubService } from './clubService';
+import { ClubService, ClubStats } from './clubService';
+import { ClubActivityEntry, GrailsApiService } from './grailsApiService';
 import { CurrencyUtils } from '../utils/currencyUtils';
 
 /**
@@ -202,6 +203,13 @@ export interface LLMPromptContext {
   
   // Category membership info (if name belongs to any categories)
   clubInfo: string | null; // Formatted category string (e.g., "999 Club @ens999club")
+
+  // Full club context: stats + recent activity for each club the name belongs to
+  clubContext: Array<{
+    slug: string;
+    stats: ClubStats;
+    recentActivity: ClubActivityEntry[];
+  }> | null;
 }
 
 /**
@@ -1007,12 +1015,30 @@ export class DataProcessingService {
       }
     }
     
-    // Step 3.75: Check category membership
+    // Step 3.75: Check category membership + fetch club stats & recent activity
     logger.debug(`   🎯 Checking category membership for ${eventData.tokenName}...`);
     const { clubs: categories, clubRanks: categoryRanks } = await this.clubService.getClubs(eventData.tokenName);
     const clubInfo = await this.clubService.getFormattedClubString(categories, categoryRanks);
-    if (clubInfo) {
+
+    let clubContext: LLMPromptContext['clubContext'] = null;
+    if (categories.length > 0) {
       logger.debug(`   ✅ Category membership found: ${clubInfo}`);
+      logger.debug(`   📊 Fetching club stats and activity for ${categories.length} clubs...`);
+
+      const statsMap = await this.clubService.getMultipleClubStats(categories);
+      const activityResults = await Promise.all(
+        categories.map(slug => GrailsApiService.getClubActivity(slug, { limit: 10 }))
+      );
+
+      clubContext = categories
+        .map((slug, i) => {
+          const stats = statsMap.get(slug);
+          if (!stats) return null;
+          return { slug, stats, recentActivity: activityResults[i] };
+        })
+        .filter((c): c is NonNullable<typeof c> => c !== null);
+
+      logger.debug(`   ✅ Club context built for ${clubContext.length} clubs`);
     } else {
       logger.debug(`   ℹ️  No category membership found`);
     }
@@ -1055,7 +1081,8 @@ export class DataProcessingService {
         sellerBidsTruncated,
         sellerBidsTruncatedCount
       },
-      clubInfo
+      clubInfo,
+      clubContext
     };
     
     const processingTime = Date.now() - startTime;

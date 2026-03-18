@@ -24,8 +24,25 @@ export interface ClubsResult {
   clubRanks: ClubRank[];
 }
 
-interface ClubMetadata {
+export interface ClubStats {
   displayName: string;
+  slug: string;
+  description: string;
+  memberCount: number;
+  floorPriceEth: number | null;
+  holdersCount: number;
+  registeredCount: number;
+  availableCount: number;
+  listingsCount: number;
+  salesCount1y: number;
+  salesCount1mo: number;
+  salesCount1w: number;
+  salesVolumeEth1y: number;
+  salesVolumeEth1mo: number;
+  salesVolumeEth1w: number;
+  regCount1y: number;
+  regCount1mo: number;
+  regCount1w: number;
 }
 
 /**
@@ -33,7 +50,7 @@ interface ClubMetadata {
  * Display names are fetched dynamically from /api/v1/clubs with a 5-min TTL cache.
  */
 export class ClubService {
-  private static clubsCache: Map<string, ClubMetadata> | null = null;
+  private static clubsCache: Map<string, ClubStats> | null = null;
   private static clubsCacheTimestamp = 0;
   private static clubsCacheFetching = false;
 
@@ -120,10 +137,34 @@ export class ClubService {
         return;
       }
 
-      const newCache = new Map<string, ClubMetadata>();
+      const weiToEth = (wei: string | null | undefined): number => {
+        if (!wei) return 0;
+        return Number(BigInt(wei)) / 1e18;
+      };
+
+      const newCache = new Map<string, ClubStats>();
       for (const club of data.data.clubs) {
         if (club.name && club.display_name) {
-          newCache.set(club.name, { displayName: club.display_name });
+          newCache.set(club.name, {
+            displayName: club.display_name,
+            slug: club.name,
+            description: club.description || '',
+            memberCount: club.member_count || 0,
+            floorPriceEth: club.floor_price_wei ? weiToEth(club.floor_price_wei) : null,
+            holdersCount: club.holders_count || 0,
+            registeredCount: club.registered_count || 0,
+            availableCount: club.available_count || 0,
+            listingsCount: club.listings_count || 0,
+            salesCount1y: club.sales_count_1y || 0,
+            salesCount1mo: club.sales_count_1mo || 0,
+            salesCount1w: club.sales_count_1w || 0,
+            salesVolumeEth1y: weiToEth(club.sales_volume_wei_1y),
+            salesVolumeEth1mo: weiToEth(club.sales_volume_wei_1mo),
+            salesVolumeEth1w: weiToEth(club.sales_volume_wei_1w),
+            regCount1y: club.reg_count_1y || 0,
+            regCount1mo: club.reg_count_1mo || 0,
+            regCount1w: club.reg_count_1w || 0,
+          });
         }
       }
 
@@ -146,6 +187,27 @@ export class ClubService {
     const cached = ClubService.clubsCache?.get(slug);
     if (cached) return cached.displayName;
     return CLUB_LABELS[slug] || slug;
+  }
+
+  /**
+   * Get full stats for a club slug from the cached /clubs data.
+   */
+  public async getClubStats(slug: string): Promise<ClubStats | null> {
+    await this.ensureClubsCache();
+    return ClubService.clubsCache?.get(slug) || null;
+  }
+
+  /**
+   * Get stats for multiple club slugs at once.
+   */
+  public async getMultipleClubStats(slugs: string[]): Promise<Map<string, ClubStats>> {
+    await this.ensureClubsCache();
+    const result = new Map<string, ClubStats>();
+    for (const slug of slugs) {
+      const stats = ClubService.clubsCache?.get(slug);
+      if (stats) result.set(slug, stats);
+    }
+    return result;
   }
 
   /**
