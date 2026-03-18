@@ -455,6 +455,11 @@ For bids:
 TERMINOLOGY:
 - Use "onchain" not "on-chain"
 - Use "multichain" not "multi-chain"
+- Registrations and mints ARE market activity and price history. A name minted for 2 ETH has a cost basis. Don't say "no prior sale history" or "zero market activity" when there's a registration — the mint IS the prior event.
+
+NUMERICAL FORMATTING:
+- Round all ETH values to 2 decimal places (e.g. "2.17 ETH" not "2.1721 ETH", "0.83 ETH" not "0.8279 ETH")
+- Only use more precision for very small values under 0.01 ETH
 
 
 NOTE: Your response will be prefixed with "AI insight:" automatically, so don't include that in your text.
