@@ -665,6 +665,11 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
         event.buyerAddress.toLowerCase() === event.sellerAddress.toLowerCase()) {
       prompt += `- ⚠️ SAME ADDRESS: Buyer and seller are the SAME wallet. This is a self-trade.\n`;
     }
+
+    // Known account: ENS Fairy
+    if (event.type === 'registration' && event.buyerEnsName?.toLowerCase() === 'ensfairy.eth') {
+      prompt += `- ℹ️ KNOWN ACCOUNT: ensfairy.eth is a public-good entity that registers names preemptively to gift them to the matching companies/projects before others get them.\n`;
+    }
     
     // Include category membership if available (sanitized)
     if (clubInfo) {
