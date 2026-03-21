@@ -480,6 +480,14 @@ PRIORITY ORDER (what to focus on, most important first):
 - **PORTFOLIO CAVEAT**: If portfolio value < bid price, data is incomplete. DO NOT mention portfolio at all
 - **DO NOT analyze for wash trading on bids**
 
+**FOR REGISTRATIONS WITH EXECUTOR** (when EXECUTOR STATS section is present):
+- The "executor" is the wallet that sent the transaction and paid for the registration
+- The "buyer" (owner) is the wallet that received the name — they may or may not be related
+- Do NOT assume the relationship. Could be: gifting a name, minting to own vault, a registration service, etc.
+- The executor's trading history and holdings may reveal WHY they chose this name
+- If the executor has interesting ENS activity (big portfolio, on a spree, known collector), lead with that
+- If both parties are interesting, cover both briefly
+
 **PORTFOLIO (ONLY mention if $100k+ or if it creates a funny/notable contrast)**:
 - Under $100k: skip it entirely. Not interesting enough to mention
 - $100k-$500k: mention only if it creates a notable contrast (e.g., big portfolio buying a $10 name)
@@ -631,15 +639,18 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
    * @returns Formatted prompt string
    */
   private buildUserPrompt(context: LLMPromptContext, nameResearch?: string): string {
-    const { event, tokenInsights, buyerStats, sellerStats, buyerActivityHistory, sellerActivityHistory, clubInfo, clubContext, metadata } = context;
+    const { event, tokenInsights, buyerStats, sellerStats, executorStats, buyerActivityHistory, sellerActivityHistory, executorActivityHistory, clubInfo, clubContext, metadata } = context;
 
     // Sanitize token name to prevent prompt injection
     const sanitizedTokenName = this.sanitizeLabel(event.tokenName.replace(/\.eth$/i, '')) + '.eth';
 
-    // Format display handles for buyer and seller
+    // Format display handles for buyer, seller, and executor
     const buyerHandle = this.formatDisplayHandle(event.buyerEnsName, event.buyerTwitter, event.buyerAddress);
     const sellerHandle = event.sellerAddress 
       ? this.formatDisplayHandle(event.sellerEnsName, event.sellerTwitter, event.sellerAddress)
+      : null;
+    const executorHandle = event.executorAddress
+      ? this.formatDisplayHandle(event.executorEnsName, event.executorTwitter, event.executorAddress)
       : null;
 
     // Format event details
@@ -669,6 +680,11 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
     // Known account: ENS Fairy
     if (event.type === 'registration' && event.buyerEnsName?.toLowerCase() === 'ensfairy.eth') {
       prompt += `- ℹ️ KNOWN ACCOUNT: ensfairy.eth is a public-good entity that registers names preemptively to gift them to the matching companies/projects before others get them.\n`;
+    }
+
+    // Executor context: when a different address executed the registration
+    if (event.type === 'registration' && executorHandle) {
+      prompt += `- Executor: ${executorHandle} (registered this name to ${buyerHandle}'s wallet)\n`;
     }
     
     // Include category membership if available (sanitized)
@@ -858,6 +874,54 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
       prompt += `\nSELLER CURRENT HOLDINGS (${sellerStats.currentHoldings.length} names${sellerStats.holdingsIncomplete ? ' - incomplete data' : ''}):\n`;
       prompt += this.formatHoldingsWithClubs(sellerStats.currentHoldings);
       prompt += `\n`;
+    }
+
+    // Executor sections (only when executor ≠ owner for registrations)
+    if (executorStats) {
+      if (metadata.executorDataUnavailable) {
+        prompt += `\nEXECUTOR STATS: ⚠️ DATA UNAVAILABLE (API error). Activity data could not be fetched.\n`;
+      } else {
+        prompt += `\nEXECUTOR STATS (${executorStats.ensName || 'address ' + executorStats.address.slice(0, 10) + '...'}):\n`;
+        prompt += `- Buys: ${executorStats.buysCount} (${executorStats.buysVolume.toFixed(4)} ETH / $${executorStats.buysVolumeUsd.toLocaleString()})\n`;
+        prompt += `- Sells: ${executorStats.sellsCount} (${executorStats.sellsVolume.toFixed(4)} ETH / $${executorStats.sellsVolumeUsd.toLocaleString()})\n`;
+        prompt += `- Activity: ${executorStats.transactionsPerMonth.toFixed(1)} txns/month\n`;
+
+        if (executorStats.biddingStats) {
+          const es = executorStats.biddingStats;
+          prompt += `- Bidding activity: ${es.totalBids} bids placed, ${es.totalBidVolume.toFixed(4)} ETH total (avg ${es.averageBidAmount.toFixed(4)} ETH per bid)\n`;
+          if (es.bidPatterns.commonThemes.length > 0) {
+            prompt += `- Bid themes: ${es.bidPatterns.commonThemes.join(', ')}\n`;
+          }
+        }
+
+        if (executorStats.portfolio && executorStats.portfolio.totalValueUsd >= 100000) {
+          const p = executorStats.portfolio;
+          prompt += `\nPORTFOLIO (EXECUTOR):\n`;
+          prompt += `- Total value: $${p.totalValueUsd.toLocaleString()}\n`;
+          const activeChains = Object.entries(p.crossChainPresence)
+            .filter(([_, active]) => active)
+            .map(([chain, _]) => chain);
+          if (activeChains.length > 1) {
+            prompt += `- Cross-chain: ${activeChains.join(', ')}\n`;
+          }
+        }
+      }
+
+      if (!metadata.executorDataUnavailable && executorActivityHistory && executorActivityHistory.length > 0) {
+        prompt += `\nEXECUTOR FULL HISTORY (${Math.min(executorActivityHistory.length, 10)} recent):\n`;
+        const recentExecutorActivity = executorActivityHistory.slice(-10);
+        for (const activity of recentExecutorActivity) {
+          const date = new Date(activity.timestamp * 1000).toISOString().slice(0, 10);
+          const tokenName = activity.tokenName ? activity.tokenName.slice(0, 20) : 'unknown';
+          prompt += `- ${date}: ${activity.type} ${tokenName} for ${activity.price.toFixed(4)} ETH [${activity.role}]\n`;
+        }
+      }
+
+      if (!metadata.executorDataUnavailable && executorStats.currentHoldings && executorStats.currentHoldings.length > 0) {
+        prompt += `\nEXECUTOR CURRENT HOLDINGS (${executorStats.currentHoldings.length} names${executorStats.holdingsIncomplete ? ' - incomplete data' : ''}):\n`;
+        prompt += this.formatHoldingsWithClubs(executorStats.currentHoldings);
+        prompt += `\n`;
+      }
     }
 
     // Add data quality notes if APIs returned incomplete data

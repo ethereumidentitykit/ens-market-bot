@@ -115,6 +115,9 @@ export class AIReplyService {
         if (contextData.sellerActivities) {
           this.enrichActivitiesWithUSD(contextData.sellerActivities, ethPrice);
         }
+        if (contextData.executorActivities) {
+          this.enrichActivitiesWithUSD(contextData.executorActivities, ethPrice);
+        }
       }
 
       // Step 4: Build LLM context
@@ -132,12 +135,16 @@ export class AIReplyService {
           sellerDataIncomplete: contextData.sellerDataIncomplete,
           tokenDataUnavailable: contextData.tokenDataUnavailable,
           buyerDataUnavailable: contextData.buyerDataUnavailable,
-          sellerDataUnavailable: contextData.sellerDataUnavailable
+          sellerDataUnavailable: contextData.sellerDataUnavailable,
+          executorDataIncomplete: contextData.executorDataIncomplete,
+          executorDataUnavailable: contextData.executorDataUnavailable
         },
         {
           buyerHoldings: contextData.buyerHoldings,
-          sellerHoldings: contextData.sellerHoldings
-        }
+          sellerHoldings: contextData.sellerHoldings,
+          executorHoldings: contextData.executorHoldings
+        },
+        contextData.executorActivities
       );
 
       // Step 4.5: Enrich with portfolio data (wallet financial analysis)
@@ -153,6 +160,14 @@ export class AIReplyService {
         if (llmContext.sellerStats) {
           await this.dataProcessingService.enrichWithPortfolioData(
             llmContext.sellerStats,
+            this.alchemyService
+          );
+        }
+
+        // Enrich executor stats with portfolio (if applicable)
+        if (llmContext.executorStats) {
+          await this.dataProcessingService.enrichWithPortfolioData(
+            llmContext.executorStats,
             this.alchemyService
           );
         }
@@ -405,6 +420,7 @@ export class AIReplyService {
     timestamp: number;
     buyerAddress: string;
     sellerAddress?: string;
+    executorAddress?: string;
     txHash?: string;
   }> {
     const isSale = type === 'sale';
@@ -440,6 +456,10 @@ export class AIReplyService {
         : new Date((sale || registration)!.blockTimestamp).getTime() / 1000,
       buyerAddress: isSale ? sale!.buyerAddress : isRegistration ? registration!.ownerAddress : bid!.makerAddress,
       sellerAddress,
+      executorAddress: isRegistration && registration!.executorAddress &&
+        registration!.executorAddress.toLowerCase() !== registration!.ownerAddress.toLowerCase()
+        ? registration!.executorAddress
+        : undefined,
       txHash: isBid ? undefined : (sale || registration)!.transactionHash
     };
   }
@@ -559,11 +579,15 @@ export class AIReplyService {
     buyerDataUnavailable: boolean;
     sellerDataUnavailable: boolean;
     tokenDataUnavailable: boolean;
+    executorActivities: TokenActivity[] | null;
+    executorHoldings: any;
+    executorDataIncomplete: boolean;
+    executorDataUnavailable: boolean;
   }> {
     logger.debug('      Parallel fetching: Token activity, Buyer activity, Seller activity, Holdings, Name research...');
 
     // Execute all API calls in parallel (Grails API — proxy-resolved, ENS-native data)
-    const [tokenResult, buyerResult, sellerResult, buyerHoldings, sellerHoldings, nameResearch] = await Promise.all([
+    const [tokenResult, buyerResult, sellerResult, buyerHoldings, sellerHoldings, nameResearch, executorResult, executorHoldings] = await Promise.all([
       // Token activity history (Grails API — sales + mints by name)
       GrailsApiService.getNameActivity(
         eventData.tokenName,
@@ -623,10 +647,34 @@ export class AIReplyService {
         : Promise.resolve(null),
       
       // Name research - check cache first, fetch if needed
-      this.getOrFetchNameResearch(eventData.tokenName)
+      this.getOrFetchNameResearch(eventData.tokenName),
+
+      // Executor activity history (only when executor ≠ owner)
+      eventData.executorAddress
+        ? GrailsApiService.getAddressActivity(
+            eventData.executorAddress,
+            { limit: 50, maxPages: 50 }
+          ).then(result => ({
+            activities: result.activities,
+            incomplete: result.incomplete,
+            pagesFetched: result.pagesFetched,
+            unavailable: false
+          })).catch((error: any) => {
+            logger.error('      Executor activity fetch failed:', error.message);
+            return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0, unavailable: true };
+          })
+        : Promise.resolve(null),
+
+      // Executor's current ENS holdings (only when executor ≠ owner)
+      eventData.executorAddress
+        ? GrailsApiService.getENSHoldings(eventData.executorAddress, { limit: 50, maxPages: 20 }).catch((error: any) => {
+            logger.error('      Executor holdings fetch failed:', error.message);
+            return { names: [], incomplete: true, totalFetched: 0 };
+          })
+        : Promise.resolve(null)
     ]);
 
-    logger.debug(`      Data fetched: Token=${tokenResult.activities.length}, Buyer=${buyerResult.activities.length}, Seller=${sellerResult?.activities.length || 0}, Name research=${nameResearch ? 'Yes' : 'No'}`);
+    logger.debug(`      Data fetched: Token=${tokenResult.activities.length}, Buyer=${buyerResult.activities.length}, Seller=${sellerResult?.activities.length || 0}, Executor=${executorResult?.activities.length || 0}, Name research=${nameResearch ? 'Yes' : 'No'}`);
 
     return {
       tokenActivities: tokenResult.activities,
@@ -640,7 +688,11 @@ export class AIReplyService {
       sellerDataIncomplete: sellerResult?.incomplete || false,
       tokenDataUnavailable: tokenResult.unavailable || false,
       buyerDataUnavailable: buyerResult.unavailable || false,
-      sellerDataUnavailable: sellerResult?.unavailable || false
+      sellerDataUnavailable: sellerResult?.unavailable || false,
+      executorActivities: executorResult?.activities || null,
+      executorHoldings: executorHoldings || null,
+      executorDataIncomplete: executorResult?.incomplete || false,
+      executorDataUnavailable: executorResult?.unavailable || false
     };
   }
 

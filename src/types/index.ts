@@ -104,7 +104,8 @@ export interface ENSRegistration {
   tokenId: string;         // keccak256 hash of ENS name
   ensName: string;         // The ENS name (e.g., "hsueh")
   fullName: string;        // Full ENS name (e.g., "hsueh.eth")
-  ownerAddress: string;    // Address that registered the ENS
+  ownerAddress: string;    // Address that received the ENS name
+  executorAddress?: string; // Transaction executor (may differ from owner for gifted registrations)
   costWei: string;         // Cost in wei
   costEth?: string;        // Cost in ETH (calculated)
   costUsd?: string;        // Cost in USD (if available)

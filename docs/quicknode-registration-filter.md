@@ -101,6 +101,7 @@ totalCost = (baseCost !== undefined || premium !== undefined)
     {
       "txHash": "0x...",
       "blockNumber": "0x...",
+      "from": "0x...",
       "logIndex": 0,
       "contract": "0x253553366da8546fc250f225fe3d25d0c782303b",
       "contractLabel": "ens_controller_current",
@@ -235,6 +236,7 @@ function main(stream) {
       out.push({
         txHash: r.transactionHash,
         blockNumber: r.blockNumber,
+        from: r.from,
         logIndex: log.logIndex,
         contract,
         contractLabel: CONTRACT_LABELS.get(contract) || null,
@@ -278,7 +280,8 @@ The webhook sends data to `/webhook/quicknode-registrations` on your server, whi
 | `name` | `ens_name` | Label only (without .eth) |
 | `name + ".eth"` | `full_name` | Full ENS name |
 | `label` | `token_id` | bytes32 hash |
-| `owner` | `owner_address` | |
+| `owner` | `owner_address` | Name recipient |
+| `from` | `executor_address` | Transaction sender (may differ from owner) |
 | `totalCostWei` | `cost_wei` | |
 | `totalCostEth` | `cost_eth` | Calculated |
 | `expires` | `expires_at` | Unix timestamp |

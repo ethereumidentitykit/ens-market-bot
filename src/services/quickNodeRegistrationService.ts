@@ -29,6 +29,7 @@ export interface QuickNodeRegistrationEvent {
   totalCostEth: string;   // All contracts (consistent field)
   totalCostWei: string;   // All contracts (consistent field)
   referrer?: string;      // NEW contract only
+  from?: string;          // Transaction executor (tx sender) address
 }
 
 export class QuickNodeRegistrationService {
@@ -121,6 +122,7 @@ export class QuickNodeRegistrationService {
         ensName: event.name,
         fullName: fullName,
         ownerAddress: event.owner,
+        executorAddress: event.from || undefined,
         costWei: costWei,
         costEth: costEth,
         costUsd: costUsd,
@@ -137,6 +139,7 @@ export class QuickNodeRegistrationService {
         ensName: registrationData.ensName,
         fullName: registrationData.fullName,
         owner: registrationData.ownerAddress,
+        executor: registrationData.executorAddress,
         costEth: registrationData.costEth,
         costUsd: registrationData.costUsd,
         hasImage: !!registrationData.image,

@@ -153,6 +153,7 @@ export class DatabaseService implements IDatabaseService {
           ens_name VARCHAR(255) NOT NULL,
           full_name VARCHAR(255) NOT NULL,
           owner_address VARCHAR(42) NOT NULL,
+          executor_address VARCHAR(42),
           cost_wei VARCHAR(100) NOT NULL,
           cost_eth DECIMAL(18,8),
           cost_usd DECIMAL(12,2),
@@ -355,6 +356,19 @@ export class DatabaseService implements IDatabaseService {
             (sale_id IS NULL AND registration_id IS NULL AND bid_id IS NOT NULL)
           )
         )
+      `);
+
+      // Migration: add executor_address to ens_registrations
+      await this.pool.query(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'ens_registrations' AND column_name = 'executor_address'
+          ) THEN
+            ALTER TABLE ens_registrations ADD COLUMN executor_address VARCHAR(42);
+          END IF;
+        END $$;
       `);
 
       // Migrations for existing databases
@@ -670,7 +684,8 @@ export class DatabaseService implements IDatabaseService {
         SELECT 
           id, transaction_hash as "transactionHash", contract_address as "contractAddress",
           token_id as "tokenId", ens_name as "ensName", full_name as "fullName",
-          owner_address as "ownerAddress", cost_wei as "costWei", cost_eth as "costEth",
+          owner_address as "ownerAddress", executor_address as "executorAddress",
+          cost_wei as "costWei", cost_eth as "costEth",
           cost_usd as "costUsd", block_number as "blockNumber", block_timestamp as "blockTimestamp",
           processed_at as "processedAt", image, description, tweet_id as "tweetId", 
           posted, expires_at as "expiresAt", created_at as "createdAt", updated_at as "updatedAt"
@@ -1412,9 +1427,9 @@ export class DatabaseService implements IDatabaseService {
       const result = await this.pool.query(`
         INSERT INTO ens_registrations (
           transaction_hash, contract_address, token_id, ens_name, full_name,
-          owner_address, cost_wei, cost_eth, cost_usd, block_number, 
+          owner_address, executor_address, cost_wei, cost_eth, cost_usd, block_number,
           block_timestamp, processed_at, image, description, expires_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
         RETURNING id
       `, [
         registration.transactionHash,
@@ -1423,6 +1438,7 @@ export class DatabaseService implements IDatabaseService {
         registration.ensName,
         registration.fullName,
         registration.ownerAddress,
+        registration.executorAddress || null,
         registration.costWei,
         registration.costEth || null,
         registration.costUsd || null,
@@ -1447,7 +1463,7 @@ export class DatabaseService implements IDatabaseService {
    * Insert registration with source tracking and detailed duplicate logging
    */
   async insertRegistrationWithSourceTracking(
-    registration: Omit<ENSRegistration, 'id'>, 
+    registration: Omit<ENSRegistration, 'id'>,
     source: string
   ): Promise<number> {
     if (!this.pool) throw new Error('Database not initialized');
@@ -1455,22 +1471,22 @@ export class DatabaseService implements IDatabaseService {
     try {
       // Check if already exists and get details for duplicate logging
       const existingResult = await this.pool.query(`
-        SELECT 
-          id, ens_name, processed_at, transaction_hash, 
+        SELECT
+          id, ens_name, processed_at, transaction_hash,
           EXTRACT(EPOCH FROM (NOW() - processed_at)) as seconds_ago
-        FROM ens_registrations 
+        FROM ens_registrations
         WHERE token_id = $1
       `, [registration.tokenId]);
 
       if (existingResult.rows.length > 0) {
         const existing = existingResult.rows[0];
         const secondsAgo = Math.round(existing.seconds_ago);
-        
+
         // Determine original source based on transaction patterns or timing
         const originalSource = this.inferRegistrationSource(existing.transaction_hash, secondsAgo);
-        
+
         logger.warn(`🔄 DUPLICATE REGISTRATION ATTEMPT: ${source.toUpperCase()} tried to add ${existing.ens_name}.eth, but it was already processed ${this.formatTimeAgo(secondsAgo)} ago by ${originalSource.toUpperCase()} (Original ID: ${existing.id})`);
-        
+
         // Return the existing ID instead of throwing error
         return existing.id;
       }
@@ -1479,9 +1495,9 @@ export class DatabaseService implements IDatabaseService {
       const result = await this.pool.query(`
         INSERT INTO ens_registrations (
           transaction_hash, contract_address, token_id, ens_name, full_name,
-          owner_address, cost_wei, cost_eth, cost_usd, block_number, 
+          owner_address, executor_address, cost_wei, cost_eth, cost_usd, block_number,
           block_timestamp, processed_at, image, description, expires_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
         RETURNING id
       `, [
         registration.transactionHash,
@@ -1490,6 +1506,7 @@ export class DatabaseService implements IDatabaseService {
         registration.ensName,
         registration.fullName,
         registration.ownerAddress,
+        registration.executorAddress || null,
         registration.costWei,
         registration.costEth || null,
         registration.costUsd || null,
@@ -1644,6 +1661,7 @@ export class DatabaseService implements IDatabaseService {
       ensName: row.ens_name,
       fullName: row.full_name,
       ownerAddress: row.owner_address,
+      executorAddress: row.executor_address || undefined,
       costWei: row.cost_wei,
       costEth: row.cost_eth,
       costUsd: row.cost_usd,

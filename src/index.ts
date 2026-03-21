@@ -496,6 +496,10 @@ async function startApplication(): Promise<void> {
             : new Date((sale || registration)!.blockTimestamp).getTime() / 1000,
           buyerAddress: isSale ? sale!.buyerAddress : isRegistration ? registration!.ownerAddress : bid!.makerAddress,
           sellerAddress: isSale ? sale!.sellerAddress : undefined,
+          executorAddress: isRegistration && registration!.executorAddress &&
+            registration!.executorAddress.toLowerCase() !== registration!.ownerAddress.toLowerCase()
+            ? registration!.executorAddress
+            : undefined,
           txHash: isBid ? undefined : (sale || registration)!.transactionHash
         };
 
