@@ -480,6 +480,10 @@ PRIORITY ORDER (what to focus on, most important first):
 - **PORTFOLIO CAVEAT**: If portfolio value < bid price, data is incomplete. DO NOT mention portfolio at all
 - **DO NOT analyze for wash trading on bids**
 
+**FOR REGISTRATIONS ONLY** (⚠️ CRITICAL):
+- There is NO seller. NEVER reference a "seller" for registrations. The registrant obtained the name from the ENS protocol
+- If TOKEN HISTORY shows prior sales or mints, this is a RE-REGISTRATION of an expired name. The previous owner let it expire — they threw away whatever they originally paid. That's the story
+
 **FOR REGISTRATIONS WITH RECIPIENT** (when RECIPIENT STATS section is present):
 - The "buyer" (minter) is the wallet that sent the transaction and paid for the registration
 - The "recipient" is the wallet that received the name — they may or may not be related
@@ -746,6 +750,19 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
       if (tokenInsights.sellerAcquisitionTracked && tokenInsights.sellerPnl !== null) {
         const profitSign = tokenInsights.sellerPnl >= 0 ? '+' : '';
         prompt += `- Seller ${tokenInsights.sellerAcquisitionType === 'mint' ? 'minted' : 'bought'} for ${tokenInsights.sellerBuyPrice?.toFixed(4)} ETH, PNL: ${profitSign}${tokenInsights.sellerPnl.toFixed(4)} ETH (${profitSign}$${tokenInsights.sellerPnlUsd?.toFixed(0)})\n`;
+      }
+
+      // Flag re-registrations of expired names
+      if (event.type === 'registration' && (tokenInsights.firstTx || tokenInsights.previousTx)) {
+        prompt += `- ⚠️ EXPIRED NAME: This is a re-registration. The previous owner let this name expire. There is no seller.\n`;
+      }
+
+      // Add ENS registration base price as background context
+      if (event.type === 'registration') {
+        const label = event.tokenName.replace(/\.eth$/i, '');
+        const charCount = [...label].length;
+        const basePriceNote = charCount === 3 ? '$640/yr' : charCount === 4 ? '$160/yr' : '$5/yr';
+        prompt += `- (background: ENS base price for ${charCount}-char names is ${basePriceNote}, don't lead with this)\n`;
       }
     }
 
