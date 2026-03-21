@@ -182,6 +182,15 @@ export class AIReplyService {
         logger.debug(`   [AI Reply] Step 4.75: ${contextData.activeListings.length} active listing(s) attached`);
       }
 
+      // Step 4.8: Attach previous replies for context
+      llmContext.previousReplies = {
+        recent: contextData.recentReplies,
+        buyer: contextData.buyerPreviousReplies,
+        seller: contextData.sellerPreviousReplies
+      };
+      logger.debug(`   [AI Reply] Step 4.8: Previous replies attached (recent=${contextData.recentReplies.length}, buyer=${contextData.buyerPreviousReplies.length}, seller=${contextData.sellerPreviousReplies.length})`);
+
+
       // Step 5: Generate AI reply (5-minute timeout)
       logger.debug(`   [AI Reply] Step 5: Generating AI reply with OpenAI...`);
       const generatedReply = await this.withTimeout(
@@ -590,11 +599,14 @@ export class AIReplyService {
     recipientDataIncomplete: boolean;
     recipientDataUnavailable: boolean;
     activeListings: import('./grailsApiService').GrailsActiveListing[];
+    recentReplies: import('../types').PreviousReply[];
+    buyerPreviousReplies: import('../types').PreviousReply[];
+    sellerPreviousReplies: import('../types').PreviousReply[];
   }> {
     logger.debug('      Parallel fetching: Token activity, Buyer activity, Seller activity, Holdings, Name research...');
 
     // Execute all API calls in parallel (Grails API — proxy-resolved, ENS-native data)
-    const [tokenResult, buyerResult, sellerResult, buyerHoldings, sellerHoldings, nameResearch, recipientResult, recipientHoldings, activeListings] = await Promise.all([
+    const [tokenResult, buyerResult, sellerResult, buyerHoldings, sellerHoldings, nameResearch, recipientResult, recipientHoldings, activeListings, recentReplies, buyerPreviousReplies, sellerPreviousReplies] = await Promise.all([
       // Token activity history (Grails API — sales + mints by name)
       GrailsApiService.getNameActivity(
         eventData.tokenName,
@@ -686,6 +698,15 @@ export class AIReplyService {
             logger.warn('      Listing fetch failed:', error.message);
             return [];
           })
+        : Promise.resolve([]),
+
+      // Previous AI replies for context (avoid repetition)
+      this.databaseService.getRecentPostedReplies(10),
+
+      this.databaseService.getRepliesByAddress(eventData.buyerAddress, 5),
+
+      eventData.sellerAddress
+        ? this.databaseService.getRepliesByAddress(eventData.sellerAddress, 5)
         : Promise.resolve([])
     ]);
 
@@ -708,7 +729,10 @@ export class AIReplyService {
       recipientHoldings: recipientHoldings || null,
       recipientDataIncomplete: recipientResult?.incomplete || false,
       recipientDataUnavailable: recipientResult?.unavailable || false,
-      activeListings: activeListings || []
+      activeListings: activeListings || [],
+      recentReplies: recentReplies || [],
+      buyerPreviousReplies: buyerPreviousReplies || [],
+      sellerPreviousReplies: sellerPreviousReplies || []
     };
   }
 

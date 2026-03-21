@@ -2368,6 +2368,82 @@ export class DatabaseService implements IDatabaseService {
   }
 
   /**
+   * Get recent posted AI replies with the ENS name they were about.
+   * Used to give the AI context about its own recent output.
+   */
+  async getRecentPostedReplies(limit: number = 10): Promise<import('../types').PreviousReply[]> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        SELECT
+          ar.reply_text as "replyText",
+          ar.transaction_type as "transactionType",
+          ar.created_at as "createdAt",
+          COALESCE(
+            ps.nft_name,
+            er.full_name,
+            eb.ens_name
+          ) as "tokenName"
+        FROM ai_replies ar
+        LEFT JOIN processed_sales ps ON ar.sale_id = ps.id
+        LEFT JOIN ens_registrations er ON ar.registration_id = er.id
+        LEFT JOIN ens_bids eb ON ar.bid_id = eb.id
+        WHERE ar.status = 'posted'
+        ORDER BY ar.created_at DESC
+        LIMIT $1
+      `, [limit]);
+
+      return result.rows;
+    } catch (error: any) {
+      logger.error('Failed to get recent posted replies:', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Get posted AI replies involving a specific address (as buyer, seller, owner, executor, or bidder).
+   * Used to give the AI context about previous interactions with this address.
+   */
+  async getRepliesByAddress(address: string, limit: number = 5): Promise<import('../types').PreviousReply[]> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const addr = address.toLowerCase();
+      const result = await this.pool.query(`
+        SELECT DISTINCT ON (ar.id)
+          ar.reply_text as "replyText",
+          ar.transaction_type as "transactionType",
+          ar.created_at as "createdAt",
+          COALESCE(
+            ps.nft_name,
+            er.full_name,
+            eb.ens_name
+          ) as "tokenName"
+        FROM ai_replies ar
+        LEFT JOIN processed_sales ps ON ar.sale_id = ps.id
+        LEFT JOIN ens_registrations er ON ar.registration_id = er.id
+        LEFT JOIN ens_bids eb ON ar.bid_id = eb.id
+        WHERE ar.status = 'posted'
+          AND (
+            LOWER(ps.buyer_address) = $1
+            OR LOWER(ps.seller_address) = $1
+            OR LOWER(er.owner_address) = $1
+            OR LOWER(er.executor_address) = $1
+            OR LOWER(eb.maker_address) = $1
+          )
+        ORDER BY ar.id, ar.created_at DESC
+        LIMIT $2
+      `, [addr, limit]);
+
+      return result.rows;
+    } catch (error: any) {
+      logger.error('Failed to get replies by address:', error.message);
+      return [];
+    }
+  }
+
+  /**
    * Update AI reply tweet ID (after posting)
    */
   async updateAIReplyTweetId(id: number, replyTweetId: string): Promise<void> {

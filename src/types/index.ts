@@ -159,6 +159,13 @@ export interface AIReply {
   postedAt?: string;
 }
 
+export interface PreviousReply {
+  replyText: string;
+  transactionType: 'sale' | 'registration' | 'bid';
+  tokenName: string | null;
+  createdAt: string;
+}
+
 // Configuration
 export interface Config {
   alchemy: {
@@ -313,6 +320,8 @@ export interface IDatabaseService {
   getAIReplyByBidId(bidId: number): Promise<AIReply | null>;
   getAIReplyById(replyId: number): Promise<AIReply | null>;
   getRecentAIReplies(limit?: number): Promise<AIReply[]>;
+  getRecentPostedReplies(limit?: number): Promise<PreviousReply[]>;
+  getRepliesByAddress(address: string, limit?: number): Promise<PreviousReply[]>;
   updateAIReplyTweetId(id: number, replyTweetId: string): Promise<void>;
   updateAIReplyStatus(id: number, status: AIReply['status'], errorMessage?: string): Promise<void>;
   

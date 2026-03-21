@@ -228,6 +228,13 @@ export interface LLMPromptContext {
 
   // Active marketplace listings for this name (from Grails API, aggregates across marketplaces)
   activeListings: GrailsActiveListing[];
+
+  // Previous AI replies for context (avoid repetition, maintain voice consistency)
+  previousReplies: {
+    recent: import('../types').PreviousReply[];
+    buyer: import('../types').PreviousReply[];
+    seller: import('../types').PreviousReply[];
+  };
 }
 
 /**
@@ -1178,7 +1185,8 @@ export class DataProcessingService {
       },
       clubInfo,
       clubContext,
-      activeListings: []
+      activeListings: [],
+      previousReplies: { recent: [], buyer: [], seller: [] }
     };
     
     const processingTime = Date.now() - startTime;

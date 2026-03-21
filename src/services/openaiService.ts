@@ -503,6 +503,13 @@ PRIORITY ORDER (what to focus on, most important first):
 - ONLY report total USD value. Never break down individual token amounts
 - Multichain presence is ONLY relevant as a wash-trade counter-signal. Do not mention it otherwise
 
+**YOUR PREVIOUS TWEETS** (when provided):
+- You may receive your own recent tweets and past tweets about the same buyer/seller
+- DO NOT repeat the same phrasing, sentence structure, metaphors, or jokes you've already used
+- Vary your opening style, tone, and angle with every tweet
+- If you've tweeted about this person before, you can reference continuity ("back again", "still at it") but keep it brief
+- Your audience reads all your tweets — sounding like a broken record kills credibility
+
 WRITING STYLE:
 - Short, punchy sentences. Get to the point fast
 - Be spicy. Call out bad deals, overpays, desperation moves, lowball bids
@@ -644,7 +651,7 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
    * @returns Formatted prompt string
    */
   private buildUserPrompt(context: LLMPromptContext, nameResearch?: string): string {
-    const { event, tokenInsights, buyerStats, sellerStats, recipientStats, buyerActivityHistory, sellerActivityHistory, recipientActivityHistory, clubInfo, clubContext, activeListings, metadata } = context;
+    const { event, tokenInsights, buyerStats, sellerStats, recipientStats, buyerActivityHistory, sellerActivityHistory, recipientActivityHistory, clubInfo, clubContext, activeListings, previousReplies, metadata } = context;
 
     // Sanitize token name to prevent prompt injection
     const sanitizedTokenName = this.sanitizeLabel(event.tokenName.replace(/\.eth$/i, '')) + '.eth';
@@ -958,6 +965,34 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
         prompt += `\nRECIPIENT CURRENT HOLDINGS (${recipientStats.currentHoldings.length} names${recipientStats.holdingsIncomplete ? ' - incomplete data' : ''}):\n`;
         prompt += this.formatHoldingsWithClubs(recipientStats.currentHoldings);
         prompt += `\n`;
+      }
+    }
+
+    // Previous replies for context (avoid repetition)
+    if (previousReplies.recent.length > 0) {
+      prompt += `\n--- YOUR RECENT TWEETS (last ${previousReplies.recent.length}) ---\n`;
+      prompt += `DO NOT repeat phrasing, structure, or jokes from these. Vary your tone and approach.\n\n`;
+      for (const reply of previousReplies.recent) {
+        const label = reply.tokenName ? `[${reply.transactionType}: ${reply.tokenName}]` : `[${reply.transactionType}]`;
+        prompt += `${label} ${reply.replyText}\n\n`;
+      }
+    }
+
+    if (previousReplies.buyer.length > 0) {
+      prompt += `\n--- PREVIOUS TWEETS ABOUT THIS BUYER/MINTER ---\n`;
+      prompt += `You've tweeted about this address before. Reference continuity if interesting, but don't repeat yourself.\n\n`;
+      for (const reply of previousReplies.buyer) {
+        const label = reply.tokenName ? `[${reply.transactionType}: ${reply.tokenName}]` : `[${reply.transactionType}]`;
+        prompt += `${label} ${reply.replyText}\n\n`;
+      }
+    }
+
+    if (previousReplies.seller.length > 0) {
+      prompt += `\n--- PREVIOUS TWEETS ABOUT THIS SELLER ---\n`;
+      prompt += `You've tweeted about this address before. Reference continuity if interesting, but don't repeat yourself.\n\n`;
+      for (const reply of previousReplies.seller) {
+        const label = reply.tokenName ? `[${reply.transactionType}: ${reply.tokenName}]` : `[${reply.transactionType}]`;
+        prompt += `${label} ${reply.replyText}\n\n`;
       }
     }
 
