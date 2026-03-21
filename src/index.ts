@@ -591,7 +591,26 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    // AI Reply Generation Endpoint (uses unified pipeline)
+    // In-memory tracking for background AI reply generation tasks.
+    // Prevents Railway proxy timeouts by returning immediately and letting the dashboard poll.
+    const aiGenerationTasks = new Map<string, {
+      status: 'generating' | 'completed' | 'failed';
+      startedAt: number;
+      replyId?: number;
+      error?: string;
+    }>();
+
+    const AI_TASK_TTL = 30 * 60 * 1000; // clean up finished tasks after 30 min
+    function cleanupStaleTasks() {
+      const now = Date.now();
+      for (const [key, task] of aiGenerationTasks) {
+        if (task.status !== 'generating' && now - task.startedAt > AI_TASK_TTL) {
+          aiGenerationTasks.delete(key);
+        }
+      }
+    }
+
+    // AI Reply Generation Endpoint — fires off generation in the background
     app.post('/api/ai-reply-generate', requireAuth, async (req, res) => {
       try {
         const { type, id, forceRegenerate } = req.body;
@@ -619,6 +638,7 @@ async function startApplication(): Promise<void> {
           });
         }
 
+        const taskKey = `${type}-${transactionId}`;
         logger.info(`🤖 AI Reply Generation requested: ${type} ${transactionId}${forceRegenerate ? ' (regenerate)' : ''}`);
 
         // Check if AI replies are enabled
@@ -667,50 +687,52 @@ async function startApplication(): Promise<void> {
           );
         }
 
-        // Use the unified AIReplyService pipeline (same as automatic generation)
-        const { AIReplyService } = await import('./services/aiReplyService');
-        const { dataProcessingService } = await import('./services/dataProcessingService');
-        const openaiService = new OpenAIService();
-        const ensWorkerService = new ENSWorkerService();
-        
-        const aiReplyService = new AIReplyService(
-          openaiService,
-          databaseService,
-          twitterService,
-          dataProcessingService,
-          alchemyService,
-          ensWorkerService
-        );
-
-        // Generate reply (stores as 'pending', does NOT auto-post)
-        const replyId = await aiReplyService.generateReply(
-          type as 'sale' | 'registration' | 'bid',
-          transactionId
-        );
-
-        // Fetch the generated reply to return details
-        const generatedReply = await databaseService.getAIReplyById(replyId);
-
-        if (!generatedReply) {
-          throw new Error('Reply generation completed but reply not found in database');
+        // Prevent duplicate background tasks
+        const existingTask = aiGenerationTasks.get(taskKey);
+        if (existingTask && existingTask.status === 'generating') {
+          logger.info(`   Generation already in progress for ${taskKey}`);
+          return res.json({
+            success: true,
+            status: 'generating',
+            message: 'Generation already in progress. Poll /api/ai-reply-status for updates.'
+          });
         }
 
-        // Return response
+        // Mark task as generating
+        aiGenerationTasks.set(taskKey, { status: 'generating', startedAt: Date.now() });
+        cleanupStaleTasks();
+
+        // Fire off generation in the background (do NOT await)
+        const { AIReplyService: AIReplySvc } = await import('./services/aiReplyService');
+        const { dataProcessingService: dps } = await import('./services/dataProcessingService');
+        const bgOpenaiService = new OpenAIService();
+        const bgEnsWorkerService = new ENSWorkerService();
+
+        const bgAiReplyService = new AIReplySvc(
+          bgOpenaiService,
+          databaseService,
+          twitterService,
+          dps,
+          alchemyService,
+          bgEnsWorkerService
+        );
+
+        bgAiReplyService.generateReply(
+          type as 'sale' | 'registration' | 'bid',
+          transactionId
+        ).then(async (replyId) => {
+          aiGenerationTasks.set(taskKey, { status: 'completed', startedAt: Date.now(), replyId });
+          logger.info(`✅ Background AI generation completed for ${taskKey} → reply ${replyId}`);
+        }).catch((error: any) => {
+          aiGenerationTasks.set(taskKey, { status: 'failed', startedAt: Date.now(), error: error.message });
+          logger.error(`❌ Background AI generation failed for ${taskKey}: ${error.message}`);
+        });
+
+        // Return immediately — dashboard will poll /api/ai-reply-status
         res.json({
           success: true,
-          message: forceRegenerate ? 'AI reply regenerated successfully' : 'AI reply generated successfully',
-          reply: {
-            id: generatedReply.id,
-            text: generatedReply.replyText,
-            tokens: {
-              prompt: generatedReply.promptTokens,
-              completion: generatedReply.completionTokens,
-              total: generatedReply.totalTokens
-            },
-            modelUsed: generatedReply.modelUsed,
-            status: generatedReply.status,
-            createdAt: generatedReply.createdAt
-          }
+          status: 'generating',
+          message: 'AI reply generation started. Poll /api/ai-reply-status for updates.'
         });
 
       } catch (error: any) {
@@ -720,6 +742,72 @@ async function startApplication(): Promise<void> {
           success: false,
           error: error.message
         });
+      }
+    });
+
+    // AI Reply Status Endpoint — dashboard polls this while generation runs in background
+    app.get('/api/ai-reply-status', requireAuth, async (req, res) => {
+      try {
+        const { type, id } = req.query;
+
+        if (!type || !id) {
+          return res.status(400).json({ success: false, error: 'Missing type and id query params' });
+        }
+
+        const transactionId = parseInt(id as string, 10);
+        if (isNaN(transactionId)) {
+          return res.status(400).json({ success: false, error: 'Invalid id' });
+        }
+
+        const taskKey = `${type}-${transactionId}`;
+
+        // 1. Check in-memory task map first (covers in-progress and recently finished tasks)
+        const task = aiGenerationTasks.get(taskKey);
+
+        if (task?.status === 'generating') {
+          const elapsed = Math.round((Date.now() - task.startedAt) / 1000);
+          return res.json({ success: true, status: 'generating', elapsedSeconds: elapsed });
+        }
+
+        if (task?.status === 'failed') {
+          return res.json({ success: true, status: 'failed', error: task.error });
+        }
+
+        // 2. Check database for a completed reply (covers task map already cleaned up,
+        //    or generation that finished between polls)
+        const reply = type === 'sale'
+          ? await databaseService.getAIReplyBySaleId(transactionId)
+          : type === 'registration'
+          ? await databaseService.getAIReplyByRegistrationId(transactionId)
+          : type === 'bid'
+          ? await databaseService.getAIReplyByBidId(transactionId)
+          : null;
+
+        if (reply) {
+          return res.json({
+            success: true,
+            status: 'completed',
+            reply: {
+              id: reply.id,
+              text: reply.replyText,
+              tokens: {
+                prompt: reply.promptTokens,
+                completion: reply.completionTokens,
+                total: reply.totalTokens
+              },
+              modelUsed: reply.modelUsed,
+              status: reply.status,
+              createdAt: reply.createdAt
+            }
+          });
+        }
+
+        // 3. Nothing found — no task running and no reply in DB
+        return res.json({ success: true, status: 'idle' });
+
+      } catch (error: any) {
+        logger.error('❌ AI Reply Status error:', error.message);
+        res.status(500).json({ success: false, error: error.message });
       }
     });
 

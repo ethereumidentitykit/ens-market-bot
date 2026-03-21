@@ -153,6 +153,7 @@ function dashboard() {
         aiReplySending: false,
         aiReplyMessage: '',
         aiReplyMessageType: 'info',
+        _aiReplyPollTimer: null,
 
         // Modal state
         selectedSale: null,
@@ -2025,6 +2026,64 @@ Issued At: ${issuedAt}`;
         clearAIReply() {
             this.generatedAIReply = null;
             this.aiReplyMessage = '';
+            if (this._aiReplyPollTimer) {
+                clearInterval(this._aiReplyPollTimer);
+                this._aiReplyPollTimer = null;
+            }
+        },
+
+        _stopPolling() {
+            if (this._aiReplyPollTimer) {
+                clearInterval(this._aiReplyPollTimer);
+                this._aiReplyPollTimer = null;
+            }
+        },
+
+        _pollForReply(type, id, forceRegenerate) {
+            const pollInterval = 4000; // 4 seconds
+            const maxPollTime = 15 * 60 * 1000; // give up after 15 min
+            const startedAt = Date.now();
+
+            this._aiReplyPollTimer = setInterval(async () => {
+                try {
+                    const elapsed = Math.round((Date.now() - startedAt) / 1000);
+                    this.aiReplyMessage = `Generating AI reply… ${elapsed}s elapsed`;
+                    this.aiReplyMessageType = 'info';
+
+                    const resp = await this.fetch(`/api/ai-reply-status?type=${type}&id=${id}`);
+                    if (!resp.ok) return; // transient error, retry next tick
+
+                    const data = await resp.json();
+
+                    if (data.status === 'completed' && data.reply) {
+                        this._stopPolling();
+                        this.generatedAIReply = data.reply;
+                        this.generatedAIReply.alreadyExists = false;
+                        this.aiReplyGenerating = false;
+                        this.showAIReplyMessage(
+                            forceRegenerate ? 'New AI reply generated successfully' : 'AI reply generated successfully',
+                            'success'
+                        );
+                        return;
+                    }
+
+                    if (data.status === 'failed') {
+                        this._stopPolling();
+                        this.aiReplyGenerating = false;
+                        this.showAIReplyMessage(data.error || 'AI reply generation failed', 'error');
+                        return;
+                    }
+
+                    if (Date.now() - startedAt > maxPollTime) {
+                        this._stopPolling();
+                        this.aiReplyGenerating = false;
+                        this.showAIReplyMessage('Generation is taking unusually long. Check back later.', 'error');
+                        return;
+                    }
+                } catch (err) {
+                    console.error('Poll error:', err);
+                }
+            }, pollInterval);
         },
 
         async generateAIReply(forceRegenerate = false) {
@@ -2044,44 +2103,46 @@ Issued At: ${issuedAt}`;
                     this.clearAIReply();
                 }
 
+                const type = this.aiReplyType;
+                const id = parseInt(this.aiReplyTransactionId);
+
                 const response = await this.fetch('/api/ai-reply-generate', {
                     method: 'POST',
-                    body: JSON.stringify({
-                        type: this.aiReplyType,
-                        id: parseInt(this.aiReplyTransactionId),
-                        forceRegenerate: forceRegenerate
-                    }),
-                    timeout: 10 * 60 * 1000 // 10 minute timeout for AI generation
+                    body: JSON.stringify({ type, id, forceRegenerate })
                 });
 
-                if (response.ok) {
+                if (!response.ok) {
                     const data = await response.json();
-                    this.generatedAIReply = data.reply;
-                    
-                    if (data.alreadyExists && !forceRegenerate) {
-                        this.generatedAIReply.alreadyExists = true;
-                        this.showAIReplyMessage(
-                            'Reply already exists. Click "Regenerate" to create a new one.',
-                            'info'
-                        );
-                    } else {
-                        this.generatedAIReply.alreadyExists = false;
-                        this.showAIReplyMessage(
-                            forceRegenerate ? 'New AI reply generated successfully' : 'AI reply generated successfully',
-                            'success'
-                        );
-                    }
-                } else {
-                    const data = await response.json();
-                    this.showAIReplyMessage(
-                        data.error || 'Failed to generate AI reply',
-                        'error'
-                    );
+                    this.showAIReplyMessage(data.error || 'Failed to start AI reply generation', 'error');
+                    this.aiReplyGenerating = false;
+                    return;
                 }
+
+                const data = await response.json();
+
+                // Reply already exists — returned synchronously
+                if (data.alreadyExists && data.reply) {
+                    this.generatedAIReply = data.reply;
+                    this.generatedAIReply.alreadyExists = true;
+                    this.aiReplyGenerating = false;
+                    this.showAIReplyMessage(
+                        'Reply already exists. Click "Regenerate" to create a new one.',
+                        'info'
+                    );
+                    return;
+                }
+
+                // Generation kicked off in background — start polling
+                if (data.status === 'generating') {
+                    this.aiReplyMessage = 'Generating AI reply… 0s elapsed';
+                    this.aiReplyMessageType = 'info';
+                    this._pollForReply(type, id, forceRegenerate);
+                    return;
+                }
+
             } catch (error) {
                 console.error('Generate AI reply failed:', error);
                 this.showAIReplyMessage(error.message, 'error');
-            } finally {
                 this.aiReplyGenerating = false;
             }
         },
@@ -2138,11 +2199,6 @@ Issued At: ${issuedAt}`;
         showAIReplyMessage(message, type = 'info') {
             this.aiReplyMessage = message;
             this.aiReplyMessageType = type;
-            
-            // Auto-hide message after 5 seconds
-            setTimeout(() => {
-                this.aiReplyMessage = '';
-            }, 5000);
         }
     };
 }
