@@ -678,9 +678,9 @@ async function startApplication(): Promise<void> {
           });
         }
 
-        // If forceRegenerate and reply already posted, delete it first
-        if (forceRegenerate && existingReply && existingReply.status === 'posted') {
-          logger.info(`   Deleting existing posted reply (ID: ${existingReply.id}) before regenerating...`);
+        // If forceRegenerate, delete existing reply so the new one is the only row
+        if (forceRegenerate && existingReply) {
+          logger.info(`   Deleting existing reply (ID: ${existingReply.id}, status: ${existingReply.status}) before regenerating...`);
           await databaseService.pgPool.query(
             'DELETE FROM ai_replies WHERE id = $1',
             [existingReply.id]
@@ -773,7 +773,30 @@ async function startApplication(): Promise<void> {
           return res.json({ success: true, status: 'failed', error: task.error });
         }
 
-        // 2. Check database for a completed reply (covers task map already cleaned up,
+        // 2. If task completed, fetch the specific reply by ID (avoids returning a stale row)
+        if (task?.status === 'completed' && task.replyId) {
+          const taskReply = await databaseService.getAIReplyById(task.replyId);
+          if (taskReply) {
+            return res.json({
+              success: true,
+              status: 'completed',
+              reply: {
+                id: taskReply.id,
+                text: taskReply.replyText,
+                tokens: {
+                  prompt: taskReply.promptTokens,
+                  completion: taskReply.completionTokens,
+                  total: taskReply.totalTokens
+                },
+                modelUsed: taskReply.modelUsed,
+                status: taskReply.status,
+                createdAt: taskReply.createdAt
+              }
+            });
+          }
+        }
+
+        // 3. Fallback: check database by transaction ID (covers task map already cleaned up,
         //    or generation that finished between polls)
         const reply = type === 'sale'
           ? await databaseService.getAIReplyBySaleId(transactionId)
