@@ -494,11 +494,11 @@ async function startApplication(): Promise<void> {
           timestamp: isBid 
             ? new Date(bid!.createdAtApi).getTime() / 1000 
             : new Date((sale || registration)!.blockTimestamp).getTime() / 1000,
-          buyerAddress: isSale ? sale!.buyerAddress : isRegistration ? registration!.ownerAddress : bid!.makerAddress,
+          buyerAddress: isSale ? sale!.buyerAddress : isRegistration ? (registration!.executorAddress || registration!.ownerAddress) : bid!.makerAddress,
           sellerAddress: isSale ? sale!.sellerAddress : undefined,
-          executorAddress: isRegistration && registration!.executorAddress &&
+          recipientAddress: isRegistration && registration!.executorAddress &&
             registration!.executorAddress.toLowerCase() !== registration!.ownerAddress.toLowerCase()
-            ? registration!.executorAddress
+            ? registration!.ownerAddress
             : undefined,
           txHash: isBid ? undefined : (sale || registration)!.transactionHash
         };

@@ -480,12 +480,12 @@ PRIORITY ORDER (what to focus on, most important first):
 - **PORTFOLIO CAVEAT**: If portfolio value < bid price, data is incomplete. DO NOT mention portfolio at all
 - **DO NOT analyze for wash trading on bids**
 
-**FOR REGISTRATIONS WITH EXECUTOR** (when EXECUTOR STATS section is present):
-- The "executor" is the wallet that sent the transaction and paid for the registration
-- The "buyer" (owner) is the wallet that received the name — they may or may not be related
+**FOR REGISTRATIONS WITH RECIPIENT** (when RECIPIENT STATS section is present):
+- The "buyer" (minter) is the wallet that sent the transaction and paid for the registration
+- The "recipient" is the wallet that received the name — they may or may not be related
 - Do NOT assume the relationship. Could be: gifting a name, minting to own vault, a registration service, etc.
-- The executor's trading history and holdings may reveal WHY they chose this name
-- If the executor has interesting ENS activity (big portfolio, on a spree, known collector), lead with that
+- The minter's trading history and holdings may reveal WHY they chose this name
+- If the minter has interesting ENS activity (big portfolio, on a spree, known collector), lead with that
 - If both parties are interesting, cover both briefly
 
 **PORTFOLIO (ONLY mention if $100k+ or if it creates a funny/notable contrast)**:
@@ -639,18 +639,18 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
    * @returns Formatted prompt string
    */
   private buildUserPrompt(context: LLMPromptContext, nameResearch?: string): string {
-    const { event, tokenInsights, buyerStats, sellerStats, executorStats, buyerActivityHistory, sellerActivityHistory, executorActivityHistory, clubInfo, clubContext, metadata } = context;
+    const { event, tokenInsights, buyerStats, sellerStats, recipientStats, buyerActivityHistory, sellerActivityHistory, recipientActivityHistory, clubInfo, clubContext, metadata } = context;
 
     // Sanitize token name to prevent prompt injection
     const sanitizedTokenName = this.sanitizeLabel(event.tokenName.replace(/\.eth$/i, '')) + '.eth';
 
-    // Format display handles for buyer, seller, and executor
+    // Format display handles for buyer, seller, and recipient
     const buyerHandle = this.formatDisplayHandle(event.buyerEnsName, event.buyerTwitter, event.buyerAddress);
     const sellerHandle = event.sellerAddress 
       ? this.formatDisplayHandle(event.sellerEnsName, event.sellerTwitter, event.sellerAddress)
       : null;
-    const executorHandle = event.executorAddress
-      ? this.formatDisplayHandle(event.executorEnsName, event.executorTwitter, event.executorAddress)
+    const recipientHandle = event.recipientAddress
+      ? this.formatDisplayHandle(event.recipientEnsName, event.recipientTwitter, event.recipientAddress)
       : null;
 
     // Format event details
@@ -677,14 +677,18 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
       prompt += `- ⚠️ SAME ADDRESS: Buyer and seller are the SAME wallet. This is a self-trade.\n`;
     }
 
-    // Known account: ENS Fairy
-    if (event.type === 'registration' && event.buyerEnsName?.toLowerCase() === 'ensfairy.eth') {
+    // Known account: ENS Fairy (check both buyer/minter and recipient)
+    const ensFairyName = 'ensfairy.eth';
+    if (event.type === 'registration' && (
+      event.buyerEnsName?.toLowerCase() === ensFairyName ||
+      event.recipientEnsName?.toLowerCase() === ensFairyName
+    )) {
       prompt += `- ℹ️ KNOWN ACCOUNT: ensfairy.eth is a public-good entity that registers names preemptively to gift them to the matching companies/projects before others get them.\n`;
     }
 
-    // Executor context: when a different address executed the registration
-    if (event.type === 'registration' && executorHandle) {
-      prompt += `- Executor: ${executorHandle} (registered this name to ${buyerHandle}'s wallet)\n`;
+    // Recipient context: when the name was registered to a different wallet
+    if (event.type === 'registration' && recipientHandle) {
+      prompt += `- Recipient: ${recipientHandle} (${buyerHandle} registered this name to ${recipientHandle}'s wallet)\n`;
     }
     
     // Include category membership if available (sanitized)
@@ -876,27 +880,27 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
       prompt += `\n`;
     }
 
-    // Executor sections (only when executor ≠ owner for registrations)
-    if (executorStats) {
-      if (metadata.executorDataUnavailable) {
-        prompt += `\nEXECUTOR STATS: ⚠️ DATA UNAVAILABLE (API error). Activity data could not be fetched.\n`;
+    // Recipient sections (only when minter ≠ recipient for registrations)
+    if (recipientStats) {
+      if (metadata.recipientDataUnavailable) {
+        prompt += `\nRECIPIENT STATS: ⚠️ DATA UNAVAILABLE (API error). Activity data could not be fetched.\n`;
       } else {
-        prompt += `\nEXECUTOR STATS (${executorStats.ensName || 'address ' + executorStats.address.slice(0, 10) + '...'}):\n`;
-        prompt += `- Buys: ${executorStats.buysCount} (${executorStats.buysVolume.toFixed(4)} ETH / $${executorStats.buysVolumeUsd.toLocaleString()})\n`;
-        prompt += `- Sells: ${executorStats.sellsCount} (${executorStats.sellsVolume.toFixed(4)} ETH / $${executorStats.sellsVolumeUsd.toLocaleString()})\n`;
-        prompt += `- Activity: ${executorStats.transactionsPerMonth.toFixed(1)} txns/month\n`;
+        prompt += `\nRECIPIENT STATS (${recipientStats.ensName || 'address ' + recipientStats.address.slice(0, 10) + '...'}):\n`;
+        prompt += `- Buys: ${recipientStats.buysCount} (${recipientStats.buysVolume.toFixed(4)} ETH / $${recipientStats.buysVolumeUsd.toLocaleString()})\n`;
+        prompt += `- Sells: ${recipientStats.sellsCount} (${recipientStats.sellsVolume.toFixed(4)} ETH / $${recipientStats.sellsVolumeUsd.toLocaleString()})\n`;
+        prompt += `- Activity: ${recipientStats.transactionsPerMonth.toFixed(1)} txns/month\n`;
 
-        if (executorStats.biddingStats) {
-          const es = executorStats.biddingStats;
+        if (recipientStats.biddingStats) {
+          const es = recipientStats.biddingStats;
           prompt += `- Bidding activity: ${es.totalBids} bids placed, ${es.totalBidVolume.toFixed(4)} ETH total (avg ${es.averageBidAmount.toFixed(4)} ETH per bid)\n`;
           if (es.bidPatterns.commonThemes.length > 0) {
             prompt += `- Bid themes: ${es.bidPatterns.commonThemes.join(', ')}\n`;
           }
         }
 
-        if (executorStats.portfolio && executorStats.portfolio.totalValueUsd >= 100000) {
-          const p = executorStats.portfolio;
-          prompt += `\nPORTFOLIO (EXECUTOR):\n`;
+        if (recipientStats.portfolio && recipientStats.portfolio.totalValueUsd >= 100000) {
+          const p = recipientStats.portfolio;
+          prompt += `\nPORTFOLIO (RECIPIENT):\n`;
           prompt += `- Total value: $${p.totalValueUsd.toLocaleString()}\n`;
           const activeChains = Object.entries(p.crossChainPresence)
             .filter(([_, active]) => active)
@@ -907,19 +911,19 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
         }
       }
 
-      if (!metadata.executorDataUnavailable && executorActivityHistory && executorActivityHistory.length > 0) {
-        prompt += `\nEXECUTOR FULL HISTORY (${Math.min(executorActivityHistory.length, 10)} recent):\n`;
-        const recentExecutorActivity = executorActivityHistory.slice(-10);
-        for (const activity of recentExecutorActivity) {
+      if (!metadata.recipientDataUnavailable && recipientActivityHistory && recipientActivityHistory.length > 0) {
+        prompt += `\nRECIPIENT FULL HISTORY (${Math.min(recipientActivityHistory.length, 10)} recent):\n`;
+        const recentRecipientActivity = recipientActivityHistory.slice(-10);
+        for (const activity of recentRecipientActivity) {
           const date = new Date(activity.timestamp * 1000).toISOString().slice(0, 10);
           const tokenName = activity.tokenName ? activity.tokenName.slice(0, 20) : 'unknown';
           prompt += `- ${date}: ${activity.type} ${tokenName} for ${activity.price.toFixed(4)} ETH [${activity.role}]\n`;
         }
       }
 
-      if (!metadata.executorDataUnavailable && executorStats.currentHoldings && executorStats.currentHoldings.length > 0) {
-        prompt += `\nEXECUTOR CURRENT HOLDINGS (${executorStats.currentHoldings.length} names${executorStats.holdingsIncomplete ? ' - incomplete data' : ''}):\n`;
-        prompt += this.formatHoldingsWithClubs(executorStats.currentHoldings);
+      if (!metadata.recipientDataUnavailable && recipientStats.currentHoldings && recipientStats.currentHoldings.length > 0) {
+        prompt += `\nRECIPIENT CURRENT HOLDINGS (${recipientStats.currentHoldings.length} names${recipientStats.holdingsIncomplete ? ' - incomplete data' : ''}):\n`;
+        prompt += this.formatHoldingsWithClubs(recipientStats.currentHoldings);
         prompt += `\n`;
       }
     }

@@ -150,9 +150,9 @@ export interface LLMPromptContext {
     sellerAddress?: string; // Not present for registrations
     sellerEnsName?: string | null; // Resolved ENS name for seller (if applicable)
     sellerTwitter?: string | null; // Twitter handle from ENS records (if applicable)
-    executorAddress?: string; // Transaction executor when different from owner (registrations only)
-    executorEnsName?: string | null;
-    executorTwitter?: string | null;
+    recipientAddress?: string; // Name recipient when different from minter/executor (registrations only)
+    recipientEnsName?: string | null;
+    recipientTwitter?: string | null;
     txHash?: string; // Transaction hash from DB (optional for bids)
   };
   
@@ -162,7 +162,7 @@ export interface LLMPromptContext {
   // User activity context (FROM MAGIC EDEN API)
   buyerStats: UserStats;
   sellerStats: UserStats | null; // Null for registrations
-  executorStats: UserStats | null; // Executor stats when executor ≠ owner (registrations only)
+  recipientStats: UserStats | null; // Recipient stats when minter ≠ recipient (registrations only)
   
   // Full user activity histories for pattern detection (condensed)
   buyerActivityHistory: Array<{
@@ -183,7 +183,7 @@ export interface LLMPromptContext {
     priceUsd: number;    // USD
     txHash: string;
   }> | null; // Null for registrations
-  executorActivityHistory: Array<{
+  recipientActivityHistory: Array<{
     type: 'mint' | 'sale' | 'bid';
     timestamp: number;
     tokenName?: string;
@@ -207,8 +207,8 @@ export interface LLMPromptContext {
     tokenDataUnavailable: boolean;
     buyerDataUnavailable: boolean;
     sellerDataUnavailable: boolean;
-    executorDataIncomplete: boolean;
-    executorDataUnavailable: boolean;
+    recipientDataIncomplete: boolean;
+    recipientDataUnavailable: boolean;
     // Bid truncation tracking (bids limited to prevent token overflow)
     buyerBidsTruncated: boolean;
     buyerBidsTruncatedCount: number;
@@ -816,7 +816,7 @@ export class DataProcessingService {
       timestamp: number;
       buyerAddress: string;
       sellerAddress?: string;
-      executorAddress?: string;
+      recipientAddress?: string;
       txHash?: string;
     },
     tokenActivities: TokenActivity[],
@@ -831,15 +831,15 @@ export class DataProcessingService {
       tokenDataUnavailable?: boolean;
       buyerDataUnavailable?: boolean;
       sellerDataUnavailable?: boolean;
-      executorDataIncomplete?: boolean;
-      executorDataUnavailable?: boolean;
+      recipientDataIncomplete?: boolean;
+      recipientDataUnavailable?: boolean;
     },
     holdingsData?: {
       buyerHoldings: { names: { name: string; clubs: string[] }[]; incomplete: boolean } | null;
       sellerHoldings: { names: { name: string; clubs: string[] }[]; incomplete: boolean } | null;
-      executorHoldings?: { names: { name: string; clubs: string[] }[]; incomplete: boolean } | null;
+      recipientHoldings?: { names: { name: string; clubs: string[] }[]; incomplete: boolean } | null;
     },
-    executorActivities?: TokenActivity[] | null
+    recipientActivities?: TokenActivity[] | null
   ): Promise<LLMPromptContext> {
     logger.info(`🧠 Building LLM context for ${eventData.type}: ${eventData.tokenName}`);
     logger.debug(`   Event from DB: ${eventData.price} ETH ($${eventData.priceUsd})${eventData.txHash ? `, txHash: ${eventData.txHash.slice(0, 10)}...` : ''}`);
@@ -852,8 +852,8 @@ export class DataProcessingService {
     let sellerEnsName: string | null = null;
     let buyerTwitter: string | null = null;
     let sellerTwitter: string | null = null;
-    let executorEnsName: string | null = null;
-    let executorTwitter: string | null = null;
+    let recipientEnsName: string | null = null;
+    let recipientTwitter: string | null = null;
     
     if (ensWorkerService) {
       logger.debug(`   🔍 Resolving ENS names and Twitter handles...`);
@@ -868,13 +868,13 @@ export class DataProcessingService {
           sellerTwitter = sellerAccount?.records?.['com.twitter'] || null;
         }
 
-        if (eventData.executorAddress) {
-          const executorAccount = await ensWorkerService.getFullAccountData(eventData.executorAddress);
-          executorEnsName = executorAccount?.name || null;
-          executorTwitter = executorAccount?.records?.['com.twitter'] || null;
+        if (eventData.recipientAddress) {
+          const recipientAccount = await ensWorkerService.getFullAccountData(eventData.recipientAddress);
+          recipientEnsName = recipientAccount?.name || null;
+          recipientTwitter = recipientAccount?.records?.['com.twitter'] || null;
         }
         
-        logger.debug(`   ✅ Buyer: ${buyerEnsName || eventData.buyerAddress.slice(0, 8) + '...'}, Seller: ${sellerEnsName || (eventData.sellerAddress?.slice(0, 8) + '...') || 'N/A'}${eventData.executorAddress ? `, Executor: ${executorEnsName || eventData.executorAddress.slice(0, 8) + '...'}` : ''}`);
+        logger.debug(`   ✅ Buyer: ${buyerEnsName || eventData.buyerAddress.slice(0, 8) + '...'}, Seller: ${sellerEnsName || (eventData.sellerAddress?.slice(0, 8) + '...') || 'N/A'}${eventData.recipientAddress ? `, Recipient: ${recipientEnsName || eventData.recipientAddress.slice(0, 8) + '...'}` : ''}`);
       } catch (error: any) {
         logger.warn(`   ⚠️  ENS resolution failed: ${error.message}`);
       }
@@ -915,16 +915,16 @@ export class DataProcessingService {
       logger.debug(`   ⏭️  No seller data (registration)`);
     }
 
-    // Step 3a: Process executor activity (registrations where executor ≠ owner)
-    let executorStats: UserStats | null = null;
-    if (eventData.executorAddress && executorActivities) {
-      logger.debug(`   👤 Processing executor activity...`);
-      executorStats = await this.processUserActivity(
-        executorActivities,
-        eventData.executorAddress,
+    // Step 3a: Process recipient activity (registrations where minter ≠ recipient)
+    let recipientStats: UserStats | null = null;
+    if (eventData.recipientAddress && recipientActivities) {
+      logger.debug(`   👤 Processing recipient activity...`);
+      recipientStats = await this.processUserActivity(
+        recipientActivities,
+        eventData.recipientAddress,
         'buyer',
         undefined,
-        holdingsData?.executorHoldings || null
+        holdingsData?.recipientHoldings || null
       );
     }
     
@@ -933,8 +933,8 @@ export class DataProcessingService {
     if (sellerStats) {
       sellerStats.ensName = sellerEnsName;
     }
-    if (executorStats) {
-      executorStats.ensName = executorEnsName;
+    if (recipientStats) {
+      recipientStats.ensName = recipientEnsName;
     }
     
     // Step 3.5: Build condensed user activity histories for pattern detection
@@ -1048,18 +1048,18 @@ export class DataProcessingService {
         .sort((a, b) => a.timestamp - b.timestamp); // Chronological order
     }
     
-    // Executor's full trading history (registrations where executor ≠ owner)
-    let executorActivityHistory: typeof buyerActivityHistory | null = null;
-    if (executorActivities && eventData.executorAddress) {
-      const allExecutorActivities = executorActivities
+    // Recipient's full trading history (registrations where minter ≠ recipient)
+    let recipientActivityHistory: typeof buyerActivityHistory | null = null;
+    if (recipientActivities && eventData.recipientAddress) {
+      const allRecipientActivities = recipientActivities
         .filter(a => (a.type === 'mint' || a.type === 'sale' || a.type === 'bid') && a.price?.amount?.decimal !== undefined)
         .map(a => {
-          const normalizedExecutorAddress = eventData.executorAddress!.toLowerCase();
+          const normalizedRecipientAddress = eventData.recipientAddress!.toLowerCase();
           let role: 'buyer' | 'seller' | 'bidder';
           if (a.type === 'bid') {
             role = 'bidder';
           } else {
-            role = a.toAddress.toLowerCase() === normalizedExecutorAddress ? 'buyer' : 'seller';
+            role = a.toAddress.toLowerCase() === normalizedRecipientAddress ? 'buyer' : 'seller';
           }
           const currencyContract = a.price.currency.contract;
           const isEth = CurrencyUtils.isETHEquivalent(currencyContract);
@@ -1076,13 +1076,13 @@ export class DataProcessingService {
           };
         });
 
-      const executorBids = allExecutorActivities.filter(a => a.type === 'bid');
-      const executorSalesMints = allExecutorActivities.filter(a => a.type !== 'bid');
-      const executorBidsLimited = executorBids
+      const recipientBids = allRecipientActivities.filter(a => a.type === 'bid');
+      const recipientSalesMints = allRecipientActivities.filter(a => a.type !== 'bid');
+      const recipientBidsLimited = recipientBids
         .sort((a, b) => b.timestamp - a.timestamp)
         .slice(0, MAX_BIDS_FOR_LLM);
 
-      executorActivityHistory = [...executorSalesMints, ...executorBidsLimited]
+      recipientActivityHistory = [...recipientSalesMints, ...recipientBidsLimited]
         .sort((a, b) => a.timestamp - b.timestamp);
     }
 
@@ -1096,8 +1096,8 @@ export class DataProcessingService {
         logger.info(`   ⚠️ Seller bids truncated: showing latest 500, hiding ${sellerBidsTruncatedCount} older bids`);
       }
     }
-    if (executorActivityHistory) {
-      logger.debug(`   ✅ Executor activity history: ${executorActivityHistory.length} entries`);
+    if (recipientActivityHistory) {
+      logger.debug(`   ✅ Recipient activity history: ${recipientActivityHistory.length} entries`);
     }
     
     // Step 3.75: Check category membership + fetch club stats & recent activity
@@ -1143,18 +1143,18 @@ export class DataProcessingService {
         sellerAddress: eventData.sellerAddress,
         sellerEnsName,
         sellerTwitter,
-        executorAddress: eventData.executorAddress,
-        executorEnsName,
-        executorTwitter,
+        recipientAddress: eventData.recipientAddress,
+        recipientEnsName,
+        recipientTwitter,
         txHash: eventData.txHash
       },
       tokenInsights,
       buyerStats,
       sellerStats,
-      executorStats,
+      recipientStats,
       buyerActivityHistory,
       sellerActivityHistory,
-      executorActivityHistory,
+      recipientActivityHistory,
       metadata: {
         dataFetchedAt: Date.now(),
         tokenActivityCount: tokenActivities.length,
@@ -1166,8 +1166,8 @@ export class DataProcessingService {
         tokenDataUnavailable: fetchStatus?.tokenDataUnavailable || false,
         buyerDataUnavailable: fetchStatus?.buyerDataUnavailable || false,
         sellerDataUnavailable: fetchStatus?.sellerDataUnavailable || false,
-        executorDataIncomplete: fetchStatus?.executorDataIncomplete || false,
-        executorDataUnavailable: fetchStatus?.executorDataUnavailable || false,
+        recipientDataIncomplete: fetchStatus?.recipientDataIncomplete || false,
+        recipientDataUnavailable: fetchStatus?.recipientDataUnavailable || false,
         buyerBidsTruncated,
         buyerBidsTruncatedCount,
         sellerBidsTruncated,
@@ -1184,8 +1184,8 @@ export class DataProcessingService {
     if (sellerStats) {
       logger.debug(`   Seller: ${sellerStats.buysCount} buys (${sellerStats.buysVolume.toFixed(4)} ETH), ${sellerStats.sellsCount} sells (${sellerStats.sellsVolume.toFixed(4)} ETH)`);
     }
-    if (executorStats) {
-      logger.debug(`   Executor: ${executorStats.buysCount} buys (${executorStats.buysVolume.toFixed(4)} ETH), ${executorStats.sellsCount} sells (${executorStats.sellsVolume.toFixed(4)} ETH)`);
+    if (recipientStats) {
+      logger.debug(`   Recipient: ${recipientStats.buysCount} buys (${recipientStats.buysVolume.toFixed(4)} ETH), ${recipientStats.sellsCount} sells (${recipientStats.sellsVolume.toFixed(4)} ETH)`);
     }
     
     return context;

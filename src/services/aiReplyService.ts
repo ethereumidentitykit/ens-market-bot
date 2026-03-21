@@ -115,8 +115,8 @@ export class AIReplyService {
         if (contextData.sellerActivities) {
           this.enrichActivitiesWithUSD(contextData.sellerActivities, ethPrice);
         }
-        if (contextData.executorActivities) {
-          this.enrichActivitiesWithUSD(contextData.executorActivities, ethPrice);
+        if (contextData.recipientActivities) {
+          this.enrichActivitiesWithUSD(contextData.recipientActivities, ethPrice);
         }
       }
 
@@ -136,15 +136,15 @@ export class AIReplyService {
           tokenDataUnavailable: contextData.tokenDataUnavailable,
           buyerDataUnavailable: contextData.buyerDataUnavailable,
           sellerDataUnavailable: contextData.sellerDataUnavailable,
-          executorDataIncomplete: contextData.executorDataIncomplete,
-          executorDataUnavailable: contextData.executorDataUnavailable
+          recipientDataIncomplete: contextData.recipientDataIncomplete,
+          recipientDataUnavailable: contextData.recipientDataUnavailable
         },
         {
           buyerHoldings: contextData.buyerHoldings,
           sellerHoldings: contextData.sellerHoldings,
-          executorHoldings: contextData.executorHoldings
+          recipientHoldings: contextData.recipientHoldings
         },
-        contextData.executorActivities
+        contextData.recipientActivities
       );
 
       // Step 4.5: Enrich with portfolio data (wallet financial analysis)
@@ -164,10 +164,10 @@ export class AIReplyService {
           );
         }
 
-        // Enrich executor stats with portfolio (if applicable)
-        if (llmContext.executorStats) {
+        // Enrich recipient stats with portfolio (if applicable)
+        if (llmContext.recipientStats) {
           await this.dataProcessingService.enrichWithPortfolioData(
-            llmContext.executorStats,
+            llmContext.recipientStats,
             this.alchemyService
           );
         }
@@ -420,7 +420,7 @@ export class AIReplyService {
     timestamp: number;
     buyerAddress: string;
     sellerAddress?: string;
-    executorAddress?: string;
+    recipientAddress?: string;
     txHash?: string;
   }> {
     const isSale = type === 'sale';
@@ -454,11 +454,11 @@ export class AIReplyService {
       timestamp: isBid 
         ? new Date(bid!.createdAtApi).getTime() / 1000 
         : new Date((sale || registration)!.blockTimestamp).getTime() / 1000,
-      buyerAddress: isSale ? sale!.buyerAddress : isRegistration ? registration!.ownerAddress : bid!.makerAddress,
+      buyerAddress: isSale ? sale!.buyerAddress : isRegistration ? (registration!.executorAddress || registration!.ownerAddress) : bid!.makerAddress,
       sellerAddress,
-      executorAddress: isRegistration && registration!.executorAddress &&
+      recipientAddress: isRegistration && registration!.executorAddress &&
         registration!.executorAddress.toLowerCase() !== registration!.ownerAddress.toLowerCase()
-        ? registration!.executorAddress
+        ? registration!.ownerAddress
         : undefined,
       txHash: isBid ? undefined : (sale || registration)!.transactionHash
     };
@@ -579,15 +579,15 @@ export class AIReplyService {
     buyerDataUnavailable: boolean;
     sellerDataUnavailable: boolean;
     tokenDataUnavailable: boolean;
-    executorActivities: TokenActivity[] | null;
-    executorHoldings: any;
-    executorDataIncomplete: boolean;
-    executorDataUnavailable: boolean;
+    recipientActivities: TokenActivity[] | null;
+    recipientHoldings: any;
+    recipientDataIncomplete: boolean;
+    recipientDataUnavailable: boolean;
   }> {
     logger.debug('      Parallel fetching: Token activity, Buyer activity, Seller activity, Holdings, Name research...');
 
     // Execute all API calls in parallel (Grails API — proxy-resolved, ENS-native data)
-    const [tokenResult, buyerResult, sellerResult, buyerHoldings, sellerHoldings, nameResearch, executorResult, executorHoldings] = await Promise.all([
+    const [tokenResult, buyerResult, sellerResult, buyerHoldings, sellerHoldings, nameResearch, recipientResult, recipientHoldings] = await Promise.all([
       // Token activity history (Grails API — sales + mints by name)
       GrailsApiService.getNameActivity(
         eventData.tokenName,
@@ -649,10 +649,10 @@ export class AIReplyService {
       // Name research - check cache first, fetch if needed
       this.getOrFetchNameResearch(eventData.tokenName),
 
-      // Executor activity history (only when executor ≠ owner)
-      eventData.executorAddress
+      // Recipient activity history (only when executor ≠ owner)
+      eventData.recipientAddress
         ? GrailsApiService.getAddressActivity(
-            eventData.executorAddress,
+            eventData.recipientAddress,
             { limit: 50, maxPages: 50 }
           ).then(result => ({
             activities: result.activities,
@@ -660,21 +660,21 @@ export class AIReplyService {
             pagesFetched: result.pagesFetched,
             unavailable: false
           })).catch((error: any) => {
-            logger.error('      Executor activity fetch failed:', error.message);
+            logger.error('      Recipient activity fetch failed:', error.message);
             return { activities: [] as TokenActivity[], incomplete: true, pagesFetched: 0, unavailable: true };
           })
         : Promise.resolve(null),
 
-      // Executor's current ENS holdings (only when executor ≠ owner)
-      eventData.executorAddress
-        ? GrailsApiService.getENSHoldings(eventData.executorAddress, { limit: 50, maxPages: 20 }).catch((error: any) => {
-            logger.error('      Executor holdings fetch failed:', error.message);
+      // Recipient's current ENS holdings (only when minter ≠ recipient)
+      eventData.recipientAddress
+        ? GrailsApiService.getENSHoldings(eventData.recipientAddress, { limit: 50, maxPages: 20 }).catch((error: any) => {
+            logger.error('      Recipient holdings fetch failed:', error.message);
             return { names: [], incomplete: true, totalFetched: 0 };
           })
         : Promise.resolve(null)
     ]);
 
-    logger.debug(`      Data fetched: Token=${tokenResult.activities.length}, Buyer=${buyerResult.activities.length}, Seller=${sellerResult?.activities.length || 0}, Executor=${executorResult?.activities.length || 0}, Name research=${nameResearch ? 'Yes' : 'No'}`);
+    logger.debug(`      Data fetched: Token=${tokenResult.activities.length}, Buyer=${buyerResult.activities.length}, Seller=${sellerResult?.activities.length || 0}, Recipient=${recipientResult?.activities.length || 0}, Name research=${nameResearch ? 'Yes' : 'No'}`);
 
     return {
       tokenActivities: tokenResult.activities,
@@ -689,10 +689,10 @@ export class AIReplyService {
       tokenDataUnavailable: tokenResult.unavailable || false,
       buyerDataUnavailable: buyerResult.unavailable || false,
       sellerDataUnavailable: sellerResult?.unavailable || false,
-      executorActivities: executorResult?.activities || null,
-      executorHoldings: executorHoldings || null,
-      executorDataIncomplete: executorResult?.incomplete || false,
-      executorDataUnavailable: executorResult?.unavailable || false
+      recipientActivities: recipientResult?.activities || null,
+      recipientHoldings: recipientHoldings || null,
+      recipientDataIncomplete: recipientResult?.incomplete || false,
+      recipientDataUnavailable: recipientResult?.unavailable || false
     };
   }
 

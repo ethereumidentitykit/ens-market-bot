@@ -55,11 +55,12 @@ export class NewTweetFormatter {
     try {
       logger.info(`Generating registration tweet for: ${registration.transactionHash}`);
 
-      // Get account data for the new owner
-      const ownerAccount = await this.getAccountData(registration.ownerAddress);
+      // Get account data for the minter (executor if available, otherwise owner)
+      const minterAddress = registration.executorAddress || registration.ownerAddress;
+      const minterAccount = await this.getAccountData(minterAddress);
 
       // Generate the tweet text
-      const tweetText = await this.formatRegistrationTweetText(registration, ownerAccount);
+      const tweetText = await this.formatRegistrationTweetText(registration, minterAccount, minterAddress);
       
       // Generate image if database service is available
       let imageBuffer: Buffer | undefined;
@@ -71,7 +72,7 @@ export class NewTweetFormatter {
           logger.info(`Generating registration image for: ${registration.transactionHash}`);
           
           // Convert registration to image data format
-          const registrationImageData = await this.convertRegistrationToImageData(registration, ownerAccount);
+          const registrationImageData = await this.convertRegistrationToImageData(registration, minterAccount, minterAddress);
           
           // Generate image buffer using Puppeteer (registration-specific)
           imageBuffer = await PuppeteerImageService.generateRegistrationImage(registrationImageData, this.databaseService, this.openSeaService);
@@ -402,7 +403,8 @@ export class NewTweetFormatter {
    */
   private async formatRegistrationTweetText(
     registration: ENSRegistration, 
-    ownerAccount: ENSWorkerAccount | null
+    minterAccount: ENSWorkerAccount | null,
+    minterAddress: string
   ): Promise<string> {
     // Header: 🏛️ REGISTERED: name.eth
     const rawEnsName = registration.fullName || registration.ensName || 'Unknown ENS';
@@ -445,9 +447,9 @@ export class NewTweetFormatter {
       logger.warn(`⚠️ Missing required data for historical context: contractAddress=${registration.contractAddress}, tokenId=${registration.tokenId}`);
     }
     
-    // Minter line
-    const ownerHandle = this.getDisplayHandle(ownerAccount, registration.ownerAddress);
-    const ownerLine = `Minter: ${ownerHandle}`;
+    // Minter line (executor is the minter)
+    const minterHandle = this.getDisplayHandle(minterAccount, minterAddress);
+    const ownerLine = `Minter: ${minterHandle}`;
     
     // Category line (show category name with handle properly paired)
     const { clubs, clubRanks } = await this.clubService.getClubs(ensName);
@@ -929,7 +931,7 @@ export class NewTweetFormatter {
   /**
    * Convert ENS registration to image data format for image generation
    */
-  private async convertRegistrationToImageData(registration: ENSRegistration, ownerAccount: ENSWorkerAccount | null): Promise<RealImageData> {
+  private async convertRegistrationToImageData(registration: ENSRegistration, minterAccount: ENSWorkerAccount | null, minterAddress: string): Promise<RealImageData> {
     logger.info(`Converting registration to image data: ${registration.transactionHash}`);
     
     // Parse ETH price
@@ -956,17 +958,17 @@ export class NewTweetFormatter {
     const rawEnsName = registration.fullName || registration.ensName || 'Unknown ENS';
     const ensName = this.cleanEnsName(rawEnsName);
     
-    // Get owner display info (ENS only for images)
-    const ownerHandle = this.getImageDisplayHandle(ownerAccount, registration.ownerAddress);
-    const ownerAvatar = ownerAccount?.avatar || ownerAccount?.records?.avatar;
+    // Get minter display info (ENS only for images)
+    const minterHandle = this.getImageDisplayHandle(minterAccount, minterAddress);
+    const minterAvatar = minterAccount?.avatar || minterAccount?.records?.avatar;
     
     const imageData: RealImageData = {
       priceEth,
       priceUsd,
       ensName,
-      buyerEns: ownerHandle, // New owner is the "buyer"
+      buyerEns: minterHandle, // Executor/minter is the "buyer"
       sellerEns: 'ENS DAO', // ENS DAO is the "seller"
-      buyerAvatar: ownerAvatar,
+      buyerAvatar: minterAvatar,
       sellerAvatar: undefined, // Will be handled by PuppeteerImageService with dao-profile.png
       nftImageUrl: registration.image, // Use ENS NFT image if available
       saleId: registration.id,
@@ -1453,14 +1455,15 @@ export class NewTweetFormatter {
     const tweet = await this.generateRegistrationTweet(registration);
     const validation = this.validateRegistrationTweet(tweet.text);
     
-    // Get account data for breakdown
-    const ownerAccount = await this.getAccountData(registration.ownerAddress);
+    // Get account data for breakdown (minter = executor if available)
+    const minterAddress = registration.executorAddress || registration.ownerAddress;
+    const minterAccount = await this.getAccountData(minterAddress);
 
     const rawEnsName = registration.fullName || registration.ensName || 'Unknown ENS';
     const ensName = this.cleanEnsName(rawEnsName);
     const priceEth = parseFloat(registration.costEth || '0').toFixed(2);
     const priceUsd = registration.costUsd ? `($${parseFloat(registration.costUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})` : '';
-    const ownerHandle = this.getDisplayHandle(ownerAccount, registration.ownerAddress);
+    const minterHandle = this.getDisplayHandle(minterAccount, minterAddress);
     
     // Check for club mention
     const { clubs, clubRanks } = await this.clubService.getClubs(ensName);
@@ -1472,10 +1475,10 @@ export class NewTweetFormatter {
       header: `🏛️ REGISTERED: ${ensName}`,
       ensName: ensName,
       priceLine: priceUsd ? `For: ${priceUsd.replace(/[()]/g, '')} (${priceEth} ETH)` : `For: ${priceEth} ETH`,
-      ownerLine: `Minter: ${ownerHandle}`,
+      ownerLine: `Minter: ${minterHandle}`,
       categoryLine: categoryLine,
       marketplaceUrl: this.buildMarketplaceUrl(ensName),
-      ownerHandle: ownerHandle
+      ownerHandle: minterHandle
     };
 
     return { tweet, validation, breakdown };
