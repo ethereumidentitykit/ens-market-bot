@@ -176,6 +176,12 @@ export class AIReplyService {
         logger.warn(`   Portfolio enrichment failed: ${error.message}`);
       }
 
+      // Step 4.75: Attach active listings to context
+      if (contextData.activeListings.length > 0) {
+        llmContext.activeListings = contextData.activeListings;
+        logger.debug(`   [AI Reply] Step 4.75: ${contextData.activeListings.length} active listing(s) attached`);
+      }
+
       // Step 5: Generate AI reply (5-minute timeout)
       logger.debug(`   [AI Reply] Step 5: Generating AI reply with OpenAI...`);
       const generatedReply = await this.withTimeout(
@@ -583,11 +589,12 @@ export class AIReplyService {
     recipientHoldings: any;
     recipientDataIncomplete: boolean;
     recipientDataUnavailable: boolean;
+    activeListings: import('./grailsApiService').GrailsActiveListing[];
   }> {
     logger.debug('      Parallel fetching: Token activity, Buyer activity, Seller activity, Holdings, Name research...');
 
     // Execute all API calls in parallel (Grails API — proxy-resolved, ENS-native data)
-    const [tokenResult, buyerResult, sellerResult, buyerHoldings, sellerHoldings, nameResearch, recipientResult, recipientHoldings] = await Promise.all([
+    const [tokenResult, buyerResult, sellerResult, buyerHoldings, sellerHoldings, nameResearch, recipientResult, recipientHoldings, activeListings] = await Promise.all([
       // Token activity history (Grails API — sales + mints by name)
       GrailsApiService.getNameActivity(
         eventData.tokenName,
@@ -671,7 +678,15 @@ export class AIReplyService {
             logger.error('      Recipient holdings fetch failed:', error.message);
             return { names: [], incomplete: true, totalFetched: 0 };
           })
-        : Promise.resolve(null)
+        : Promise.resolve(null),
+
+      // Active listings for this name (bids only — shows bid vs ask spread)
+      eventData.type === 'bid'
+        ? GrailsApiService.getListingsForName(eventData.tokenName).catch((error: any) => {
+            logger.warn('      Listing fetch failed:', error.message);
+            return [];
+          })
+        : Promise.resolve([])
     ]);
 
     logger.debug(`      Data fetched: Token=${tokenResult.activities.length}, Buyer=${buyerResult.activities.length}, Seller=${sellerResult?.activities.length || 0}, Recipient=${recipientResult?.activities.length || 0}, Name research=${nameResearch ? 'Yes' : 'No'}`);
@@ -692,7 +707,8 @@ export class AIReplyService {
       recipientActivities: recipientResult?.activities || null,
       recipientHoldings: recipientHoldings || null,
       recipientDataIncomplete: recipientResult?.incomplete || false,
-      recipientDataUnavailable: recipientResult?.unavailable || false
+      recipientDataUnavailable: recipientResult?.unavailable || false,
+      activeListings: activeListings || []
     };
   }
 

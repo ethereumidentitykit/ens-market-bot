@@ -2,7 +2,7 @@ import { logger } from '../utils/logger';
 import { TokenActivity } from './magicEdenV4Service';
 import { ENSWorkerService } from './ensWorkerService';
 import { ClubService, ClubStats } from './clubService';
-import { ClubActivityEntry, GrailsApiService } from './grailsApiService';
+import { ClubActivityEntry, GrailsActiveListing, GrailsApiService } from './grailsApiService';
 import { CurrencyUtils } from '../utils/currencyUtils';
 
 /**
@@ -225,6 +225,9 @@ export interface LLMPromptContext {
     stats: ClubStats;
     recentActivity: ClubActivityEntry[];
   }> | null;
+
+  // Active marketplace listings for this name (from Grails API, aggregates across marketplaces)
+  activeListings: GrailsActiveListing[];
 }
 
 /**
@@ -1174,7 +1177,8 @@ export class DataProcessingService {
         sellerBidsTruncatedCount
       },
       clubInfo,
-      clubContext
+      clubContext,
+      activeListings: []
     };
     
     const processingTime = Date.now() - startTime;

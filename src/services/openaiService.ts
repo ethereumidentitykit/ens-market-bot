@@ -470,10 +470,15 @@ PRIORITY ORDER (what to focus on, most important first):
      - BAD: Buying "aug.eth" and they own "0000000002.eth" (NOT similar)
    - Keep to 1-2 examples max. If no genuinely similar names exist, describe the general pattern
 
+**LISTING CONTEXT** (when a "Listed" price appears in the event data):
+- Compare bid price to listing price. Bid at or above listing = serious/aggressive
+- Listing prices can also be dreamy, they're not authoritative.
+
 **FOR BIDS ONLY** (⚠️ IGNORE FOR SALES AND REGISTRATIONS):
 - The "buyer" is the bidder, the "seller" is the current owner
 - Key angles:
   • Many bids at similar prices = "spray and pray" lowball hunting
+  • If the name is listed: bid vs ask spread tells a story, near ask = serious buyer
   • Owner's selling behavior: Have they EVER sold at this price range? If not, say so
   • If owner HAS sold comparable names at this price: "Owner has accepted similar offers before"
   • Bid relative to the name's sale history
@@ -487,15 +492,11 @@ PRIORITY ORDER (what to focus on, most important first):
 **FOR REGISTRATIONS WITH RECIPIENT** (when RECIPIENT STATS section is present):
 - The "buyer" (minter) is the wallet that sent the transaction and paid for the registration
 - The "recipient" is the wallet that received the name — they may or may not be related
-- Do NOT assume the relationship. Could be: gifting a name, minting to own vault, a registration service, etc.
-- The minter's trading history and holdings may reveal WHY they chose this name
-- If the minter has interesting ENS activity (big portfolio, on a spree, known collector), lead with that
-- If both parties are interesting, cover both briefly
 
 **PORTFOLIO (ONLY mention if $100k+ or if it creates a funny/notable contrast)**:
-- Under $100k: skip it entirely. Not interesting enough to mention
-- $100k-$500k: mention only if it creates a notable contrast (e.g., big portfolio buying a $10 name)
-- $500k+: worth a brief mention as context ("whale wallet")
+- Under $50k: skip it entirely. Not interesting enough to mention
+- $50k-$500k: mention only if it seems relevant.
+- $500k+: worth a mention as context ("whale wallet")
 - $1M+: definitely mention
 - For bids: portfolio is from same time as bid
 - For sales/registrations: portfolio is AFTER the purchase (money already spent)
@@ -643,7 +644,7 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
    * @returns Formatted prompt string
    */
   private buildUserPrompt(context: LLMPromptContext, nameResearch?: string): string {
-    const { event, tokenInsights, buyerStats, sellerStats, recipientStats, buyerActivityHistory, sellerActivityHistory, recipientActivityHistory, clubInfo, clubContext, metadata } = context;
+    const { event, tokenInsights, buyerStats, sellerStats, recipientStats, buyerActivityHistory, sellerActivityHistory, recipientActivityHistory, clubInfo, clubContext, activeListings, metadata } = context;
 
     // Sanitize token name to prevent prompt injection
     const sanitizedTokenName = this.sanitizeLabel(event.tokenName.replace(/\.eth$/i, '')) + '.eth';
@@ -701,6 +702,21 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
       // Pluralize based on comma count (multiple categories)
       const categoryLabel = clubInfo.includes(',') ? 'Categories' : 'Category';
       prompt += `- ${categoryLabel}: ${sanitizedClubInfo}\n`;
+    }
+
+    // Include active listing data if available
+    if (activeListings && activeListings.length > 0) {
+      const sorted = [...activeListings].sort((a, b) => a.price - b.price);
+      const lowest = sorted[0];
+      const displaySymbol = lowest.currencySymbol === 'WETH' ? 'ETH' : lowest.currencySymbol;
+      prompt += `- Listed: ${lowest.price.toFixed(2)} ${displaySymbol}`;
+      if (sorted.length > 1) {
+        prompt += ` (${sorted.length} listings across marketplaces)`;
+      }
+      if (lowest.source) {
+        prompt += ` [${lowest.source}]`;
+      }
+      prompt += `\n`;
     }
 
     // Include club context (stats + recent activity) if available
