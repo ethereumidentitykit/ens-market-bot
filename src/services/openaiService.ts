@@ -971,15 +971,17 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
     // Previous replies for context (avoid repetition)
     if (previousReplies.recent.length > 0) {
       prompt += `\n--- YOUR RECENT TWEETS (last ${previousReplies.recent.length}) ---\n`;
-      prompt += `DO NOT repeat phrasing, structure, or jokes from these. Vary your tone and approach.\n\n`;
+      prompt += `NOTE: Older tweets may use a different style/format than your current instructions.\n`;
+      prompt += `Try to avoid repeating phrasing, structure, or jokes from these. Vary your tone and approach.\n\n`;
       for (const reply of previousReplies.recent) {
         const label = reply.tokenName ? `[${reply.transactionType}: ${reply.tokenName}]` : `[${reply.transactionType}]`;
         prompt += `${label} ${reply.replyText}\n\n`;
       }
     }
 
+    const prevBuyerLabel = event.type === 'registration' ? 'MINTER' : 'BUYER';
     if (previousReplies.buyer.length > 0) {
-      prompt += `\n--- PREVIOUS TWEETS ABOUT THIS BUYER/MINTER ---\n`;
+      prompt += `\n--- PREVIOUS TWEETS ABOUT THIS ${prevBuyerLabel} ---\n`;
       prompt += `You've tweeted about this address before. Reference continuity if interesting, but don't repeat yourself.\n\n`;
       for (const reply of previousReplies.buyer) {
         const label = reply.tokenName ? `[${reply.transactionType}: ${reply.tokenName}]` : `[${reply.transactionType}]`;
@@ -987,8 +989,9 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
       }
     }
 
-    if (previousReplies.seller.length > 0) {
-      prompt += `\n--- PREVIOUS TWEETS ABOUT THIS SELLER ---\n`;
+    const prevSellerLabel = event.type === 'bid' ? 'OWNER' : 'SELLER';
+    if (event.type !== 'registration' && previousReplies.seller.length > 0) {
+      prompt += `\n--- PREVIOUS TWEETS ABOUT THIS ${prevSellerLabel} ---\n`;
       prompt += `You've tweeted about this address before. Reference continuity if interesting, but don't repeat yourself.\n\n`;
       for (const reply of previousReplies.seller) {
         const label = reply.tokenName ? `[${reply.transactionType}: ${reply.tokenName}]` : `[${reply.transactionType}]`;
