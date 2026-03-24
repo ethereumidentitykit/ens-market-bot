@@ -508,7 +508,9 @@ export class GrailsApiService {
    * "mint":   actor=minter → fromAddress=0x0, toAddress=minter
    */
   static toTokenActivity(record: GrailsActivityRecord): TokenActivity {
-    const currencySymbol = CURRENCY_MAP[record.currency_address?.toLowerCase()] || 'UNKNOWN';
+    const currencySymbol = record.event_type === 'mint'
+      ? 'ETH'
+      : CURRENCY_MAP[record.currency_address?.toLowerCase()] || 'UNKNOWN';
     const decimals = CURRENCY_DECIMALS[currencySymbol] || 18;
     const priceDecimal = Number(record.price_wei) / Math.pow(10, decimals);
 
@@ -713,9 +715,9 @@ export class GrailsApiService {
         if (txKey && seen.has(txKey)) continue;
         if (txKey) seen.add(txKey);
 
-        const currencySymbol = record.currency_address
-          ? CURRENCY_MAP[record.currency_address.toLowerCase()] || 'ETH'
-          : 'ETH';
+        const currencySymbol = record.event_type === 'mint'
+          ? 'ETH'
+          : CURRENCY_MAP[record.currency_address?.toLowerCase()] || 'UNKNOWN';
         const isEthLike = currencySymbol === 'ETH';
         const decimals = CURRENCY_DECIMALS[currencySymbol] || 18;
         const priceDecimal = Number(record.price_wei) / Math.pow(10, decimals);
