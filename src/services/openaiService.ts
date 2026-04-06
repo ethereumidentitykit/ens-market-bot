@@ -571,8 +571,8 @@ FORMATTING NUMBERS & TIME:
 REFERENCING BUYERS/SELLERS:
 Use the exact formatted handle from the EVENT section:
 - "name.eth" → use "name.eth"
+- "name.eth @handle" → use "name.eth @handle"
 - "0xabcd...1234" → use "0xabcd...1234"
-- NEVER include @mentions or Twitter handles in your response
 
 GOOD EXAMPLES:
 "Registered for $8 in 2021, now flipped for 1.5 ETH. The seller held for 4 years and finally cashed out a 300x. The buyer collector.eth @collector already owns emma.eth and sarah.eth, adding another premium first name to a growing set."
@@ -623,21 +623,15 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
     // Sanitize ENS name to prevent prompt injection
     const sanitizedEnsName = ensName ? this.sanitizeLabel(ensName.replace(/\.eth$/i, '')) + '.eth' : null;
     
-    // NOTE: Twitter @mentions disabled — Twitter API is blocking mentions via API (spam crackdown, Mar 2026)
-    // To re-enable: uncomment the Twitter handle block below and remove the simplified version
-    // const cleanedTwitter = twitter ? this.cleanTwitterHandle(twitter) : null;
-    // const sanitizedTwitter = cleanedTwitter ? this.sanitizeLabel(cleanedTwitter) : null;
-    // 
-    // if (sanitizedEnsName && sanitizedTwitter) {
-    //   return `${sanitizedEnsName} @${sanitizedTwitter}`;
-    // } else if (sanitizedEnsName) {
-    //   return sanitizedEnsName;
-    // } else if (sanitizedTwitter) {
-    //   return `@${sanitizedTwitter}`;
-    // }
-    
-    if (sanitizedEnsName) {
+    const cleanedTwitter = twitter ? this.cleanTwitterHandle(twitter) : null;
+    const sanitizedTwitter = cleanedTwitter ? this.sanitizeLabel(cleanedTwitter) : null;
+
+    if (sanitizedEnsName && sanitizedTwitter) {
+      return `${sanitizedEnsName} @${sanitizedTwitter}`;
+    } else if (sanitizedEnsName) {
       return sanitizedEnsName;
+    } else if (sanitizedTwitter) {
+      return `@${sanitizedTwitter}`;
     }
     
     // Fallback to truncated address (already safe as it's a hex string)

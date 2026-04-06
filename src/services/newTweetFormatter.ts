@@ -865,19 +865,12 @@ export class NewTweetFormatter {
     const cleanedTwitter = twitterRecord ? this.cleanTwitterHandle(twitterRecord) : null;
     
     // Build the display string based on what's available
-    // NOTE: @mentions temporarily disabled — Twitter API is blocking them (spam crackdown, Feb 2026)
-    // To re-enable: uncomment the two return statements below and remove the ensName-only fallback
     if (ensName && cleanedTwitter) {
-      // Both ENS and Twitter: show both
-      // return `${ensName} @${cleanedTwitter}`;
-      return ensName; // Temporary: ENS name only, no @mention
+      return `${ensName} @${cleanedTwitter}`;
     } else if (ensName) {
-      // Only ENS name
       return ensName;
     } else if (cleanedTwitter) {
-      // Only Twitter (edge case, but handle it)
-      // return `@${cleanedTwitter}`;
-      // Temporary: fall through to address since @mentions are disabled
+      return `@${cleanedTwitter}`;
     }
 
     // Fallback to shortened address

@@ -253,21 +253,19 @@ export class ClubService {
 
     const rankMap = new Map(clubRanks.map(r => [r.club, r.rank]));
     const clubStrings: string[] = [];
+    const usedHandles = new Set<string>();
 
     for (const slug of clubs) {
       const label = await this.getClubLabel(slug);
       const rank = rankMap.get(slug);
       const rankSuffix = rank ? ` #${rank.toLocaleString('en-US')}` : '';
-      // NOTE: Club @mentions temporarily disabled — Twitter API is blocking them (spam crackdown, Feb 2026)
-      // To re-enable: uncomment the handle block below and remove the plain label+rank push
-      // const handle = this.getClubHandle(slug);
-      // if (handle && handle.trim() !== '' && !usedHandles.has(handle)) {
-      //   usedHandles.add(handle);
-      //   clubStrings.push(`${label}${rankSuffix} ${handle}`);
-      // } else {
-      //   clubStrings.push(`${label}${rankSuffix}`);
-      // }
-      clubStrings.push(`${label}${rankSuffix}`);
+      const handle = this.getClubHandle(slug);
+      if (handle && handle.trim() !== '' && !usedHandles.has(handle)) {
+        usedHandles.add(handle);
+        clubStrings.push(`${label}${rankSuffix} ${handle}`);
+      } else {
+        clubStrings.push(`${label}${rankSuffix}`);
+      }
     }
 
     return clubStrings.join(', ');

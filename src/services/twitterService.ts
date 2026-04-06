@@ -100,7 +100,21 @@ export class TwitterService {
   }
 
   /**
-   * Post a tweet to Twitter
+   * Strip @mentions from tweet text, preserving the surrounding content.
+   * Handles patterns like "name.eth @handle" → "name.eth" and standalone "@handle" → removed.
+   */
+  private stripMentions(text: string): string {
+    return text
+      .replace(/\s@\w+/g, '')   // " @handle" after other text
+      .replace(/^@\w+\s?/gm, '') // "@handle" at start of a line
+      .replace(/\n{3,}/g, '\n\n') // collapse excessive blank lines
+      .trim();
+  }
+
+  /**
+   * Post a tweet to Twitter.
+   * If the tweet contains @mentions and the API rejects it, automatically
+   * retries once with mentions stripped (Twitter spam crackdown workaround).
    */
   async postTweet(content: string, imageBuffer?: Buffer): Promise<TwitterPostResult> {
     if (!this.checkApiEnabled()) {
@@ -130,48 +144,21 @@ export class TwitterService {
         mediaId = uploadedMediaId;
       }
 
-      const requestData = {
-        url: 'https://api.twitter.com/2/tweets',
-        method: 'POST',
-      };
+      const result = await this.postTweetRequest(content, mediaId);
 
-      const token = {
-        key: config.twitter.accessToken,
-        secret: config.twitter.accessTokenSecret,
-      };
+      if (result.success) {
+        return result;
+      }
 
-      const authHeader = this.oauth.toHeader(this.oauth.authorize(requestData, token));
-      
-      const tweetData: any = { text: content };
-      if (mediaId) {
-        tweetData.media = { media_ids: [mediaId] };
+      // If the tweet contained @mentions, retry without them
+      const hasMentions = /@\w/.test(content);
+      if (hasMentions) {
+        const strippedContent = this.stripMentions(content);
+        logger.warn(`Tweet with @mentions was rejected, retrying without mentions: "${strippedContent.substring(0, 50)}..."`);
+        return await this.postTweetRequest(strippedContent, mediaId);
       }
-      
-      const postData = JSON.stringify(tweetData);
-      
-      const response = await this.makeRequest(
-        requestData.url, 
-        'POST', 
-        authHeader.Authorization,
-        postData,
-        { 'Content-Type': 'application/json' }
-      );
-      
-      if (response.success && response.data) {
-        const responseData = JSON.parse(response.data);
-        
-        if (responseData.data && responseData.data.id) {
-          const tweetId = responseData.data.id;
-          logger.info(`Tweet posted successfully - ID: ${tweetId}`);
-          return { success: true, tweetId };
-        } else {
-          logger.error('Unexpected Twitter API response format:', response.data);
-          return { success: false, error: 'Unexpected API response format' };
-        }
-      } else {
-        logger.error('Failed to post tweet:', response.error);
-        return { success: false, error: response.error };
-      }
+
+      return result;
     } catch (error: any) {
       logger.error('Error posting tweet:', error.message);
       return { success: false, error: error.message };
@@ -179,8 +166,57 @@ export class TwitterService {
   }
 
   /**
-   * Post a threaded reply to an existing tweet
-   * Phase 3.3: AI Reply functionality
+   * Internal: send a single tweet POST request
+   */
+  private async postTweetRequest(content: string, mediaId?: string): Promise<TwitterPostResult> {
+    const requestData = {
+      url: 'https://api.twitter.com/2/tweets',
+      method: 'POST',
+    };
+
+    const token = {
+      key: config.twitter.accessToken,
+      secret: config.twitter.accessTokenSecret,
+    };
+
+    const authHeader = this.oauth.toHeader(this.oauth.authorize(requestData, token));
+    
+    const tweetData: any = { text: content };
+    if (mediaId) {
+      tweetData.media = { media_ids: [mediaId] };
+    }
+    
+    const postData = JSON.stringify(tweetData);
+    
+    const response = await this.makeRequest(
+      requestData.url, 
+      'POST', 
+      authHeader.Authorization,
+      postData,
+      { 'Content-Type': 'application/json' }
+    );
+    
+    if (response.success && response.data) {
+      const responseData = JSON.parse(response.data);
+      
+      if (responseData.data && responseData.data.id) {
+        const tweetId = responseData.data.id;
+        logger.info(`Tweet posted successfully - ID: ${tweetId}`);
+        return { success: true, tweetId };
+      } else {
+        logger.error('Unexpected Twitter API response format:', response.data);
+        return { success: false, error: 'Unexpected API response format' };
+      }
+    } else {
+      logger.error('Failed to post tweet:', response.error);
+      return { success: false, error: response.error };
+    }
+  }
+
+  /**
+   * Post a threaded reply to an existing tweet.
+   * If the reply contains @mentions and the API rejects it, automatically
+   * retries once with mentions stripped.
    */
   async postReply(content: string, inReplyToTweetId: string): Promise<TwitterPostResult> {
     if (!this.checkApiEnabled()) {
@@ -207,54 +243,74 @@ export class TwitterService {
 
       logger.info(`Posting reply to tweet ${inReplyToTweetId}: "${content.substring(0, 50)}..."`);
 
-      const requestData = {
-        url: 'https://api.twitter.com/2/tweets',
-        method: 'POST',
-      };
+      const result = await this.postReplyRequest(content, inReplyToTweetId);
 
-      const token = {
-        key: config.twitter.accessToken,
-        secret: config.twitter.accessTokenSecret,
-      };
-
-      const authHeader = this.oauth.toHeader(this.oauth.authorize(requestData, token));
-      
-      // Build tweet data with reply parameter
-      const tweetData: any = {
-        text: content,
-        reply: {
-          in_reply_to_tweet_id: inReplyToTweetId
-        }
-      };
-      
-      const postData = JSON.stringify(tweetData);
-      
-      const response = await this.makeRequest(
-        requestData.url, 
-        'POST', 
-        authHeader.Authorization,
-        postData,
-        { 'Content-Type': 'application/json' }
-      );
-      
-      if (response.success && response.data) {
-        const responseData = JSON.parse(response.data);
-        
-        if (responseData.data && responseData.data.id) {
-          const tweetId = responseData.data.id;
-          logger.info(`Reply posted successfully - ID: ${tweetId} (in reply to: ${inReplyToTweetId})`);
-          return { success: true, tweetId };
-        } else {
-          logger.error('Unexpected Twitter API response format:', response.data);
-          return { success: false, error: 'Unexpected API response format' };
-        }
-      } else {
-        logger.error('Failed to post reply:', response.error);
-        return { success: false, error: response.error };
+      if (result.success) {
+        return result;
       }
+
+      // If the reply contained @mentions, retry without them
+      const hasMentions = /@\w/.test(content);
+      if (hasMentions) {
+        const strippedContent = this.stripMentions(content);
+        logger.warn(`Reply with @mentions was rejected, retrying without mentions: "${strippedContent.substring(0, 50)}..."`);
+        return await this.postReplyRequest(strippedContent, inReplyToTweetId);
+      }
+
+      return result;
     } catch (error: any) {
       logger.error('Error posting reply:', error.message);
       return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Internal: send a single reply POST request
+   */
+  private async postReplyRequest(content: string, inReplyToTweetId: string): Promise<TwitterPostResult> {
+    const requestData = {
+      url: 'https://api.twitter.com/2/tweets',
+      method: 'POST',
+    };
+
+    const token = {
+      key: config.twitter.accessToken,
+      secret: config.twitter.accessTokenSecret,
+    };
+
+    const authHeader = this.oauth.toHeader(this.oauth.authorize(requestData, token));
+    
+    const tweetData: any = {
+      text: content,
+      reply: {
+        in_reply_to_tweet_id: inReplyToTweetId
+      }
+    };
+    
+    const postData = JSON.stringify(tweetData);
+    
+    const response = await this.makeRequest(
+      requestData.url, 
+      'POST', 
+      authHeader.Authorization,
+      postData,
+      { 'Content-Type': 'application/json' }
+    );
+    
+    if (response.success && response.data) {
+      const responseData = JSON.parse(response.data);
+      
+      if (responseData.data && responseData.data.id) {
+        const tweetId = responseData.data.id;
+        logger.info(`Reply posted successfully - ID: ${tweetId} (in reply to: ${inReplyToTweetId})`);
+        return { success: true, tweetId };
+      } else {
+        logger.error('Unexpected Twitter API response format:', response.data);
+        return { success: false, error: 'Unexpected API response format' };
+      }
+    } else {
+      logger.error('Failed to post reply:', response.error);
+      return { success: false, error: response.error };
     }
   }
 
