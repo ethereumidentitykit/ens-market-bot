@@ -308,10 +308,10 @@ export class AutoTweetService {
       );
 
       if (postResult.success && postResult.tweetId) {
-        // Record successful post
+        // Record successful post (use postedText which reflects any mention-stripping)
         await this.rateLimitService.recordTweetPost(
           postResult.tweetId,
-          tweetData.text,
+          postResult.postedText || tweetData.text,
           saleId
         );
 
@@ -430,10 +430,10 @@ export class AutoTweetService {
       );
 
       if (postResult.success && postResult.tweetId) {
-        // Record successful post
+        // Record successful post (use postedText which reflects any mention-stripping)
         await this.rateLimitService.recordTweetPost(
           postResult.tweetId,
-          tweetData.text
+          postResult.postedText || tweetData.text
         );
 
         // Mark registration as posted
@@ -726,10 +726,10 @@ export class AutoTweetService {
       );
 
       if (postResult.success && postResult.tweetId) {
-        // Record successful post in rate limiter
+        // Record successful post in rate limiter (use postedText which reflects any mention-stripping)
         await this.rateLimitService.recordTweetPost(
           postResult.tweetId,
-          tweetData.text
+          postResult.postedText || tweetData.text
         );
 
         // Mark bid as posted

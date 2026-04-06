@@ -8,6 +8,7 @@ import { APIToggleService } from './apiToggleService';
 export interface TwitterPostResult {
   success: boolean;
   tweetId?: string;
+  postedText?: string;
   error?: string;
 }
 
@@ -147,7 +148,7 @@ export class TwitterService {
       const result = await this.postTweetRequest(content, mediaId);
 
       if (result.success) {
-        return result;
+        return { ...result, postedText: content };
       }
 
       // If the tweet contained @mentions, retry without them
@@ -155,7 +156,8 @@ export class TwitterService {
       if (hasMentions) {
         const strippedContent = this.stripMentions(content);
         logger.warn(`Tweet with @mentions was rejected, retrying without mentions: "${strippedContent.substring(0, 50)}..."`);
-        return await this.postTweetRequest(strippedContent, mediaId);
+        const retryResult = await this.postTweetRequest(strippedContent, mediaId);
+        return retryResult.success ? { ...retryResult, postedText: strippedContent } : retryResult;
       }
 
       return result;
@@ -246,7 +248,7 @@ export class TwitterService {
       const result = await this.postReplyRequest(content, inReplyToTweetId);
 
       if (result.success) {
-        return result;
+        return { ...result, postedText: content };
       }
 
       // If the reply contained @mentions, retry without them
@@ -254,7 +256,8 @@ export class TwitterService {
       if (hasMentions) {
         const strippedContent = this.stripMentions(content);
         logger.warn(`Reply with @mentions was rejected, retrying without mentions: "${strippedContent.substring(0, 50)}..."`);
-        return await this.postReplyRequest(strippedContent, inReplyToTweetId);
+        const retryResult = await this.postReplyRequest(strippedContent, inReplyToTweetId);
+        return retryResult.success ? { ...retryResult, postedText: strippedContent } : retryResult;
       }
 
       return result;

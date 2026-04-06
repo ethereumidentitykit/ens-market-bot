@@ -1821,7 +1821,7 @@ async function startApplication(): Promise<void> {
         
         if (tweetResult.success && tweetResult.tweetId) {
           // Record successful post in rate limiter
-          await rateLimitService.recordTweetPost(tweetResult.tweetId, formattedTweet.text, sale.id);
+          await rateLimitService.recordTweetPost(tweetResult.tweetId, tweetResult.postedText || formattedTweet.text, sale.id);
           
           // Mark sale as posted in database
           await databaseService.markAsPosted(sale.id!, tweetResult.tweetId);
@@ -1833,7 +1833,7 @@ async function startApplication(): Promise<void> {
             success: true,
             data: {
               tweetId: tweetResult.tweetId,
-              tweetContent: formattedTweet.text,
+              tweetContent: tweetResult.postedText || formattedTweet.text,
               characterCount: formattedTweet.characterCount,
               saleId: sale.id,
               rateLimitStatus
@@ -1983,7 +1983,7 @@ async function startApplication(): Promise<void> {
         
         if (tweetResult.success && tweetResult.tweetId) {
           // Record successful post in rate limiter
-          await rateLimitService.recordTweetPost(tweetResult.tweetId, formattedTweet.text, saleId);
+          await rateLimitService.recordTweetPost(tweetResult.tweetId, tweetResult.postedText || formattedTweet.text, saleId);
           
           // Mark as posted in database
           await databaseService.markAsPosted(saleId, tweetResult.tweetId);
@@ -2150,7 +2150,7 @@ async function startApplication(): Promise<void> {
         
         if (tweetResult.success && tweetResult.tweetId) {
           // Record successful post in rate limiter
-          await rateLimitService.recordTweetPost(tweetResult.tweetId, generatedTweet.text, saleId);
+          await rateLimitService.recordTweetPost(tweetResult.tweetId, tweetResult.postedText || generatedTweet.text, saleId);
           
           // Mark as posted in database
           await databaseService.markAsPosted(saleId, tweetResult.tweetId);
@@ -2162,7 +2162,7 @@ async function startApplication(): Promise<void> {
             success: true,
             data: {
               tweetId: tweetResult.tweetId,
-              tweetContent: generatedTweet.text,
+              tweetContent: tweetResult.postedText || generatedTweet.text,
               characterCount: generatedTweet.characterCount,
               saleId: saleId,
               rateLimitStatus,
@@ -2301,7 +2301,7 @@ async function startApplication(): Promise<void> {
         
         if (tweetResult.success && tweetResult.tweetId) {
           // Record successful post in rate limiter
-          await rateLimitService.recordTweetPost(tweetResult.tweetId, generatedTweet.text);
+          await rateLimitService.recordTweetPost(tweetResult.tweetId, tweetResult.postedText || generatedTweet.text);
           
           // Mark registration as posted in database
           await databaseService.markRegistrationAsPosted(registrationId, tweetResult.tweetId);
@@ -2313,7 +2313,7 @@ async function startApplication(): Promise<void> {
             success: true,
             data: {
               tweetId: tweetResult.tweetId,
-              tweetContent: generatedTweet.text,
+              tweetContent: tweetResult.postedText || generatedTweet.text,
               characterCount: generatedTweet.characterCount,
               registrationId: registrationId,
               rateLimitStatus,
@@ -2433,7 +2433,7 @@ async function startApplication(): Promise<void> {
         
         if (tweetResult.success && tweetResult.tweetId) {
           // Record successful post in rate limiter
-          await rateLimitService.recordTweetPost(tweetResult.tweetId, generatedTweet.text);
+          await rateLimitService.recordTweetPost(tweetResult.tweetId, tweetResult.postedText || generatedTweet.text);
           
           // Mark bid as posted in database
           await databaseService.markBidAsPosted(bidId, tweetResult.tweetId);
