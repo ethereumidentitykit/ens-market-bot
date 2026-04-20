@@ -475,16 +475,23 @@ export class DatabaseService implements IDatabaseService {
         CREATE INDEX IF NOT EXISTS idx_admin_sessions_session_id ON admin_sessions(session_id);
       `);
 
-      // Create ai_replies table for AI-generated contextual replies
+      // Create ai_replies table for AI-generated contextual replies.
+      //
+      // NOTE: renewal AI replies are tx-keyed (renewal_tx_hash) rather than row-keyed
+      // (a single bulk-renewal tx may contain 100+ rows in ens_renewals; the AI reply
+      // is generated per tx, not per row). The transaction_type CHECK and
+      // check_transaction_ref exclusivity constraint enforce 4-way mutually-exclusive
+      // foreign keys: sale_id XOR registration_id XOR bid_id XOR renewal_tx_hash.
       await this.pool.query(`
         CREATE TABLE IF NOT EXISTS ai_replies (
           id SERIAL PRIMARY KEY,
           sale_id INTEGER REFERENCES processed_sales(id),
           registration_id INTEGER REFERENCES ens_registrations(id),
           bid_id INTEGER REFERENCES ens_bids(id),
+          renewal_tx_hash VARCHAR(66),
           original_tweet_id VARCHAR(255) NOT NULL,
           reply_tweet_id VARCHAR(255),
-          transaction_type VARCHAR(20) NOT NULL CHECK (transaction_type IN ('sale', 'registration', 'bid')),
+          transaction_type VARCHAR(20) NOT NULL CHECK (transaction_type IN ('sale', 'registration', 'bid', 'renewal')),
           transaction_hash VARCHAR(66),
           model_used VARCHAR(50) NOT NULL,
           prompt_tokens INTEGER NOT NULL,
@@ -499,9 +506,10 @@ export class DatabaseService implements IDatabaseService {
           created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
           posted_at TIMESTAMP,
           CONSTRAINT check_transaction_ref CHECK (
-            (sale_id IS NOT NULL AND registration_id IS NULL AND bid_id IS NULL) OR
-            (sale_id IS NULL AND registration_id IS NOT NULL AND bid_id IS NULL) OR
-            (sale_id IS NULL AND registration_id IS NULL AND bid_id IS NOT NULL)
+            (sale_id IS NOT NULL AND registration_id IS NULL AND bid_id IS NULL AND renewal_tx_hash IS NULL) OR
+            (sale_id IS NULL AND registration_id IS NOT NULL AND bid_id IS NULL AND renewal_tx_hash IS NULL) OR
+            (sale_id IS NULL AND registration_id IS NULL AND bid_id IS NOT NULL AND renewal_tx_hash IS NULL) OR
+            (sale_id IS NULL AND registration_id IS NULL AND bid_id IS NULL AND renewal_tx_hash IS NOT NULL)
           )
         )
       `);
@@ -519,7 +527,10 @@ export class DatabaseService implements IDatabaseService {
         END $$;
       `);
 
-      // Migrations for existing databases
+      // Migrations for existing databases — ai_replies schema additions.
+      // Idempotent: column adds are guarded by IF NOT EXISTS, constraints are dropped
+      // and re-added to ensure they reflect the latest 4-way (sale/registration/bid/renewal)
+      // mutual-exclusivity rules.
       await this.pool.query(`
         DO $$ 
         BEGIN
@@ -538,7 +549,16 @@ export class DatabaseService implements IDatabaseService {
           ) THEN
             ALTER TABLE ai_replies ADD COLUMN bid_id INTEGER REFERENCES ens_bids(id);
           END IF;
-          
+
+          -- Add renewal_tx_hash column if it doesn't exist (renewals are tx-keyed, not row-keyed:
+          -- a single bulk-renewal tx may contain 100+ ens_renewals rows but only one AI reply).
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'ai_replies' AND column_name = 'renewal_tx_hash'
+          ) THEN
+            ALTER TABLE ai_replies ADD COLUMN renewal_tx_hash VARCHAR(66);
+          END IF;
+
           -- Add name_research_id column if it doesn't exist
           IF NOT EXISTS (
             SELECT 1 FROM information_schema.columns 
@@ -549,22 +569,22 @@ export class DatabaseService implements IDatabaseService {
           
           -- Make transaction_hash nullable (for bids that don't have txHash yet)
           ALTER TABLE ai_replies ALTER COLUMN transaction_hash DROP NOT NULL;
-          
-          -- Drop old check constraint if it exists
+
+          -- Drop old check constraint if it exists, then re-add the 4-way version
+          -- including 'renewal'.
           ALTER TABLE ai_replies DROP CONSTRAINT IF EXISTS ai_replies_transaction_type_check;
-          
-          -- Add updated check constraint for transaction_type to include 'bid'
           ALTER TABLE ai_replies ADD CONSTRAINT ai_replies_transaction_type_check 
-            CHECK (transaction_type IN ('sale', 'registration', 'bid'));
-          
-          -- Drop old transaction reference constraint if it exists
+            CHECK (transaction_type IN ('sale', 'registration', 'bid', 'renewal'));
+
+          -- Drop old transaction-reference constraint if it exists, then re-add the
+          -- 4-way exclusivity version: exactly one of sale_id / registration_id /
+          -- bid_id / renewal_tx_hash must be non-null.
           ALTER TABLE ai_replies DROP CONSTRAINT IF EXISTS check_transaction_ref;
-          
-          -- Add updated transaction reference constraint to include bid_id
           ALTER TABLE ai_replies ADD CONSTRAINT check_transaction_ref CHECK (
-            (sale_id IS NOT NULL AND registration_id IS NULL AND bid_id IS NULL) OR
-            (sale_id IS NULL AND registration_id IS NOT NULL AND bid_id IS NULL) OR
-            (sale_id IS NULL AND registration_id IS NULL AND bid_id IS NOT NULL)
+            (sale_id IS NOT NULL AND registration_id IS NULL AND bid_id IS NULL AND renewal_tx_hash IS NULL) OR
+            (sale_id IS NULL AND registration_id IS NOT NULL AND bid_id IS NULL AND renewal_tx_hash IS NULL) OR
+            (sale_id IS NULL AND registration_id IS NULL AND bid_id IS NOT NULL AND renewal_tx_hash IS NULL) OR
+            (sale_id IS NULL AND registration_id IS NULL AND bid_id IS NULL AND renewal_tx_hash IS NOT NULL)
           );
         END $$;
       `);
@@ -574,6 +594,7 @@ export class DatabaseService implements IDatabaseService {
         CREATE INDEX IF NOT EXISTS idx_ai_replies_sale_id ON ai_replies(sale_id);
         CREATE INDEX IF NOT EXISTS idx_ai_replies_registration_id ON ai_replies(registration_id);
         CREATE INDEX IF NOT EXISTS idx_ai_replies_bid_id ON ai_replies(bid_id);
+        CREATE INDEX IF NOT EXISTS idx_ai_replies_renewal_tx_hash ON ai_replies(renewal_tx_hash);
         CREATE INDEX IF NOT EXISTS idx_ai_replies_name_research_id ON ai_replies(name_research_id);
         CREATE INDEX IF NOT EXISTS idx_ai_replies_original_tweet ON ai_replies(original_tweet_id);
         CREATE INDEX IF NOT EXISTS idx_ai_replies_reply_tweet ON ai_replies(reply_tweet_id);
@@ -2594,18 +2615,23 @@ export class DatabaseService implements IDatabaseService {
     if (!this.pool) throw new Error('Database not initialized');
 
     try {
+      // Renewals key by tx_hash; sales/regs/bids by numeric row id. Exactly one of
+      // sale_id / registration_id / bid_id / renewal_tx_hash must be non-null —
+      // enforced at the DB layer by check_transaction_ref.
       const result = await this.pool.query(`
         INSERT INTO ai_replies (
-          sale_id, registration_id, bid_id, original_tweet_id, reply_tweet_id,
+          sale_id, registration_id, bid_id, renewal_tx_hash,
+          original_tweet_id, reply_tweet_id,
           transaction_type, transaction_hash, model_used,
           prompt_tokens, completion_tokens, total_tokens, cost_usd,
           reply_text, name_research_id, name_research, status, error_message
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         RETURNING id
       `, [
         reply.saleId || null,
         reply.registrationId || null,
         reply.bidId || null,
+        reply.renewalTxHash || null,
         reply.originalTweetId,
         reply.replyTweetId || null,
         reply.transactionType,
@@ -2630,6 +2656,21 @@ export class DatabaseService implements IDatabaseService {
     }
   }
 
+  // Common SELECT column list for all getAIReply* helpers — keeps them in sync as
+  // the schema evolves. All FK columns (sale_id, registration_id, bid_id, renewal_tx_hash)
+  // are returned so downstream code can inspect the AIReply object completely.
+  private static readonly AI_REPLY_SELECT_COLUMNS = `
+    id, sale_id as "saleId", registration_id as "registrationId", bid_id as "bidId",
+    renewal_tx_hash as "renewalTxHash",
+    original_tweet_id as "originalTweetId", reply_tweet_id as "replyTweetId",
+    transaction_type as "transactionType", transaction_hash as "transactionHash",
+    model_used as "modelUsed", prompt_tokens as "promptTokens",
+    completion_tokens as "completionTokens", total_tokens as "totalTokens",
+    cost_usd as "costUsd", reply_text as "replyText", name_research as "nameResearch", status,
+    error_message as "errorMessage", created_at as "createdAt",
+    posted_at as "postedAt"
+  `;
+
   /**
    * Get AI reply by sale ID
    */
@@ -2638,15 +2679,7 @@ export class DatabaseService implements IDatabaseService {
 
     try {
       const result = await this.pool.query(`
-        SELECT 
-          id, sale_id as "saleId", registration_id as "registrationId", bid_id as "bidId",
-          original_tweet_id as "originalTweetId", reply_tweet_id as "replyTweetId",
-          transaction_type as "transactionType", transaction_hash as "transactionHash",
-          model_used as "modelUsed", prompt_tokens as "promptTokens",
-          completion_tokens as "completionTokens", total_tokens as "totalTokens",
-          cost_usd as "costUsd", reply_text as "replyText", name_research as "nameResearch", status,
-          error_message as "errorMessage", created_at as "createdAt",
-          posted_at as "postedAt"
+        SELECT ${DatabaseService.AI_REPLY_SELECT_COLUMNS}
         FROM ai_replies
         WHERE sale_id = $1
       `, [saleId]);
@@ -2666,15 +2699,7 @@ export class DatabaseService implements IDatabaseService {
 
     try {
       const result = await this.pool.query(`
-        SELECT 
-          id, sale_id as "saleId", registration_id as "registrationId", bid_id as "bidId",
-          original_tweet_id as "originalTweetId", reply_tweet_id as "replyTweetId",
-          transaction_type as "transactionType", transaction_hash as "transactionHash",
-          model_used as "modelUsed", prompt_tokens as "promptTokens",
-          completion_tokens as "completionTokens", total_tokens as "totalTokens",
-          cost_usd as "costUsd", reply_text as "replyText", name_research as "nameResearch", status,
-          error_message as "errorMessage", created_at as "createdAt",
-          posted_at as "postedAt"
+        SELECT ${DatabaseService.AI_REPLY_SELECT_COLUMNS}
         FROM ai_replies
         WHERE registration_id = $1
       `, [registrationId]);
@@ -2694,15 +2719,7 @@ export class DatabaseService implements IDatabaseService {
 
     try {
       const result = await this.pool.query(`
-        SELECT 
-          id, sale_id as "saleId", registration_id as "registrationId", bid_id as "bidId",
-          original_tweet_id as "originalTweetId", reply_tweet_id as "replyTweetId",
-          transaction_type as "transactionType", transaction_hash as "transactionHash",
-          model_used as "modelUsed", prompt_tokens as "promptTokens",
-          completion_tokens as "completionTokens", total_tokens as "totalTokens",
-          cost_usd as "costUsd", reply_text as "replyText", name_research as "nameResearch", status,
-          error_message as "errorMessage", created_at as "createdAt",
-          posted_at as "postedAt"
+        SELECT ${DatabaseService.AI_REPLY_SELECT_COLUMNS}
         FROM ai_replies
         WHERE bid_id = $1
       `, [bidId]);
@@ -2715,6 +2732,27 @@ export class DatabaseService implements IDatabaseService {
   }
 
   /**
+   * Get AI reply by renewal tx_hash. Renewals are tx-keyed (not row-keyed) because
+   * a single bulk-renewal tx may contain 100+ ens_renewals rows but only one AI reply.
+   */
+  async getAIReplyByRenewalTxHash(txHash: string): Promise<AIReply | null> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        SELECT ${DatabaseService.AI_REPLY_SELECT_COLUMNS}
+        FROM ai_replies
+        WHERE renewal_tx_hash = $1
+      `, [txHash]);
+
+      return result.rows.length > 0 ? result.rows[0] : null;
+    } catch (error: any) {
+      logger.error('Failed to get AI reply by renewal tx_hash:', error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Get AI reply by ID
    */
   async getAIReplyById(replyId: number): Promise<AIReply | null> {
@@ -2722,15 +2760,7 @@ export class DatabaseService implements IDatabaseService {
 
     try {
       const result = await this.pool.query(`
-        SELECT 
-          id, sale_id as "saleId", registration_id as "registrationId", bid_id as "bidId",
-          original_tweet_id as "originalTweetId", reply_tweet_id as "replyTweetId",
-          transaction_type as "transactionType", transaction_hash as "transactionHash",
-          model_used as "modelUsed", prompt_tokens as "promptTokens",
-          completion_tokens as "completionTokens", total_tokens as "totalTokens",
-          cost_usd as "costUsd", reply_text as "replyText", name_research as "nameResearch", status,
-          error_message as "errorMessage", created_at as "createdAt",
-          posted_at as "postedAt"
+        SELECT ${DatabaseService.AI_REPLY_SELECT_COLUMNS}
         FROM ai_replies
         WHERE id = $1
       `, [replyId]);
@@ -2750,15 +2780,7 @@ export class DatabaseService implements IDatabaseService {
 
     try {
       const result = await this.pool.query(`
-        SELECT 
-          id, sale_id as "saleId", registration_id as "registrationId",
-          original_tweet_id as "originalTweetId", reply_tweet_id as "replyTweetId",
-          transaction_type as "transactionType", transaction_hash as "transactionHash",
-          model_used as "modelUsed", prompt_tokens as "promptTokens",
-          completion_tokens as "completionTokens", total_tokens as "totalTokens",
-          cost_usd as "costUsd", reply_text as "replyText", name_research as "nameResearch", status,
-          error_message as "errorMessage", created_at as "createdAt",
-          posted_at as "postedAt"
+        SELECT ${DatabaseService.AI_REPLY_SELECT_COLUMNS}
         FROM ai_replies
         ORDER BY created_at DESC
         LIMIT $1
@@ -2779,6 +2801,8 @@ export class DatabaseService implements IDatabaseService {
     if (!this.pool) throw new Error('Database not initialized');
 
     try {
+      // For renewals: token name = the highest-cost name in the tx (representative).
+      // The LATERAL subquery finds the row with the largest cost_eth for that tx_hash.
       const result = await this.pool.query(`
         SELECT
           ar.reply_text as "replyText",
@@ -2787,12 +2811,19 @@ export class DatabaseService implements IDatabaseService {
           COALESCE(
             ps.nft_name,
             er.full_name,
-            eb.ens_name
+            eb.ens_name,
+            ren.full_name
           ) as "tokenName"
         FROM ai_replies ar
         LEFT JOIN processed_sales ps ON ar.sale_id = ps.id
         LEFT JOIN ens_registrations er ON ar.registration_id = er.id
         LEFT JOIN ens_bids eb ON ar.bid_id = eb.id
+        LEFT JOIN LATERAL (
+          SELECT full_name FROM ens_renewals
+          WHERE transaction_hash = ar.renewal_tx_hash
+          ORDER BY cost_eth DESC NULLS LAST, log_index ASC
+          LIMIT 1
+        ) ren ON ar.renewal_tx_hash IS NOT NULL
         WHERE ar.status = 'posted'
         ORDER BY ar.created_at DESC
         LIMIT $1
@@ -2814,6 +2845,8 @@ export class DatabaseService implements IDatabaseService {
 
     try {
       const addr = address.toLowerCase();
+      // Renewals match if the address was the renewer OR the owner of any name in the tx.
+      // The EXISTS subquery checks all rows of the renewal tx for either condition.
       const result = await this.pool.query(`
         SELECT DISTINCT ON (ar.id)
           ar.reply_text as "replyText",
@@ -2822,12 +2855,19 @@ export class DatabaseService implements IDatabaseService {
           COALESCE(
             ps.nft_name,
             er.full_name,
-            eb.ens_name
+            eb.ens_name,
+            ren.full_name
           ) as "tokenName"
         FROM ai_replies ar
         LEFT JOIN processed_sales ps ON ar.sale_id = ps.id
         LEFT JOIN ens_registrations er ON ar.registration_id = er.id
         LEFT JOIN ens_bids eb ON ar.bid_id = eb.id
+        LEFT JOIN LATERAL (
+          SELECT full_name FROM ens_renewals
+          WHERE transaction_hash = ar.renewal_tx_hash
+          ORDER BY cost_eth DESC NULLS LAST, log_index ASC
+          LIMIT 1
+        ) ren ON ar.renewal_tx_hash IS NOT NULL
         WHERE ar.status = 'posted'
           AND (
             LOWER(ps.buyer_address) = $1
@@ -2835,6 +2875,11 @@ export class DatabaseService implements IDatabaseService {
             OR LOWER(er.owner_address) = $1
             OR LOWER(er.executor_address) = $1
             OR LOWER(eb.maker_address) = $1
+            OR (ar.renewal_tx_hash IS NOT NULL AND EXISTS (
+              SELECT 1 FROM ens_renewals enr
+              WHERE enr.transaction_hash = ar.renewal_tx_hash
+                AND (LOWER(enr.renewer_address) = $1 OR LOWER(enr.owner_address) = $1)
+            ))
           )
         ORDER BY ar.id, ar.created_at DESC
         LIMIT $2

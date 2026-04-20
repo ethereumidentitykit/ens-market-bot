@@ -4,8 +4,15 @@ import { AutoTweetService } from './autoTweetService';
 import { IDatabaseService } from '../types';
 
 // Forward declaration - will be created in Phase 3.3
+//
+// recordIdOrTxHash: numeric row id for sale/registration/bid; tx_hash string for renewal.
+// Renewals are keyed per-tx because a single bulk-renewal tx may contain 100+ rows in
+// ens_renewals but produces one tweet and one AI reply.
 export interface IAIReplyService {
-  generateAndPostAIReply(type: 'sale' | 'registration' | 'bid', recordId: number): Promise<void>;
+  generateAndPostAIReply(
+    type: 'sale' | 'registration' | 'bid' | 'renewal',
+    recordIdOrTxHash: number | string
+  ): Promise<void>;
 }
 
 export class DatabaseEventService {

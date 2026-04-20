@@ -170,14 +170,22 @@ export interface NameResearch {
 }
 
 // AI Reply Record
+//
+// Renewals are tx-keyed (renewalTxHash) instead of row-keyed because a single
+// bulk-renewal tx may contain 100+ rows in ens_renewals, but only one AI reply
+// is generated per tx (matching the per-tx tweet model).
+//
+// Exactly one of: saleId, registrationId, bidId, renewalTxHash must be non-null.
+// This is enforced at the DB layer by the check_transaction_ref CHECK constraint.
 export interface AIReply {
   id?: number;
   saleId?: number;                    // Reference to processed_sales
   registrationId?: number;            // Reference to ens_registrations
   bidId?: number;                     // Reference to ens_bids
+  renewalTxHash?: string;             // Tx hash for renewals (per-tx, not per-row)
   originalTweetId: string;            // The tweet we're replying to
   replyTweetId?: string;              // The AI-generated reply tweet ID
-  transactionType: 'sale' | 'registration' | 'bid';
+  transactionType: 'sale' | 'registration' | 'bid' | 'renewal';
   transactionHash?: string;           // Optional: bids don't have txHash until accepted
   modelUsed: string;                  // e.g., "gpt-4o", "gpt-4o-mini"
   promptTokens: number;
@@ -195,7 +203,7 @@ export interface AIReply {
 
 export interface PreviousReply {
   replyText: string;
-  transactionType: 'sale' | 'registration' | 'bid';
+  transactionType: 'sale' | 'registration' | 'bid' | 'renewal';
   tokenName: string | null;
   createdAt: string;
 }
@@ -363,6 +371,7 @@ export interface IDatabaseService {
   getAIReplyBySaleId(saleId: number): Promise<AIReply | null>;
   getAIReplyByRegistrationId(registrationId: number): Promise<AIReply | null>;
   getAIReplyByBidId(bidId: number): Promise<AIReply | null>;
+  getAIReplyByRenewalTxHash(txHash: string): Promise<AIReply | null>;
   getAIReplyById(replyId: number): Promise<AIReply | null>;
   getRecentAIReplies(limit?: number): Promise<AIReply[]>;
   getRecentPostedReplies(limit?: number): Promise<PreviousReply[]>;
