@@ -380,7 +380,7 @@ export class PuppeteerImageService {
             }
           });
         };
-        fitText('.renewer-name', 26, 14);
+        fitText('.renewer-name', 24, 16);
       });
 
       const screenshot = await page.screenshot({
@@ -577,17 +577,20 @@ export class PuppeteerImageService {
                 font-weight: normal;
             }
 
-            /* Owner profile (avatar + ENS name) — sits next to the baked-in "Owner" label.
-               The "Owner" label in the background PNG ends at roughly x=148px, so we start
-               the avatar at x=165px to leave a small gap. */
+            /* Owner profile (avatar + ENS name) — positioned to mirror the Figma reference
+               for the renewal layout (NOT the registration .buyer-section, which is
+               right-anchored). The "Owner" label is baked into the background PNG and
+               ends around x=145; the avatar+name flow rightward starting just after.
+               Layout: [avatar] [name] (avatar on the left, name following). */
             .renewer-section {
                 position: absolute;
-                left: 165px;
-                top: 478px;
+                left: 162px;
+                top: 477px;
+                transform: translateY(-50%);
                 display: flex;
                 align-items: center;
                 gap: 10px;
-                max-width: 320px;
+                max-width: 320px;  /* Cap width so really long names don't run off the canvas */
             }
 
             .renewer-avatar {
@@ -600,10 +603,11 @@ export class PuppeteerImageService {
 
             .renewer-name {
                 color: white;
-                font-size: 26px;
+                font-size: 24px;
                 font-weight: normal;
                 white-space: nowrap;
                 overflow: hidden;
+                font-family: 'Inter', 'Noto Sans KR', 'Noto Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif;
             }
 
             /* ----- Cards container (right side of the image) -----
@@ -703,7 +707,7 @@ export class PuppeteerImageService {
             <div class="renewer-section">
                 <img src="${renewerAvatarPath}" alt="Renewer" class="renewer-avatar"
                      onerror="this.src='data:image/png;base64,${userPlaceholderBase64}'">
-                <span class="renewer-name">${renewerEnsWithEmojis}</span>
+                <div class="renewer-name">${renewerEnsWithEmojis}</div>
             </div>
 
             <div class="cards-container">
