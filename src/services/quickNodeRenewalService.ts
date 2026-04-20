@@ -13,7 +13,7 @@ export interface QuickNodeRenewalData {
 }
 
 export interface QuickNodeRenewalEvent {
-  blockNumber: string;       // hex
+  blockNumber: string;       // hex 0x-prefixed (from receipt-level)
   contract: string;          // controller address (lowercase)
   contractLabel: string | null;
   name: string;              // ENS label (without .eth)
@@ -23,7 +23,9 @@ export interface QuickNodeRenewalEvent {
   referrer?: string;         // bytes32 (newest controller only)
   totalCostWei: string;      // decimal wei
   totalCostEth: string;      // decimal ETH string
-  logIndex: number;
+  // logIndex from QuickNode's decoded log is a hex string like "0x66".
+  // Some sources also send decimal numbers, so accept either and normalize downstream.
+  logIndex: string | number;
   txHash: string;
   from?: string;             // tx.from (= renewer)
 }
@@ -165,6 +167,15 @@ export class QuickNodeRenewalService {
     try {
       // Basic field coercion
       const blockNumber = parseInt(event.blockNumber, 16);
+      // logIndex can come through as either a hex string ("0x66") from QuickNode's
+      // decoded log shape, or a plain decimal number/string. Normalize both cases.
+      const logIndex = typeof event.logIndex === 'number'
+        ? event.logIndex
+        : (event.logIndex.startsWith('0x') ? parseInt(event.logIndex, 16) : parseInt(event.logIndex, 10));
+      if (!Number.isFinite(logIndex)) {
+        logger.warn(`Renewal event has malformed logIndex: ${event.logIndex} (tx ${event.txHash})`);
+        return null;
+      }
       const tokenId = event.label;                        // bytes32 hex (matches BaseRegistrar labelhash)
       const tokenIdDecimal = BigInt(tokenId).toString();  // decimal form for OpenSea / metadata API
       const costWei = event.totalCostWei || event.cost || '0';
@@ -214,7 +225,7 @@ export class QuickNodeRenewalService {
 
       return {
         transactionHash: event.txHash,
-        logIndex: event.logIndex,
+        logIndex,
         contractAddress: event.contract,
         tokenId: tokenIdDecimal,
         ensName,

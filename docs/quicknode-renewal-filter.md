@@ -131,17 +131,13 @@ The `from` field carries the transaction sender (= renewer). The bot uses this a
 ```javascript
 function main(stream) {
   // --- ABIs (exact per controllers) ---
+  // IMPORTANT: only TWO ABI entries are needed for the three controllers because the
+  // legacy and current controllers emit the IDENTICAL 4-arg event signature. Solidity
+  // event signature hashes are computed from the type tuple only (names are ignored),
+  // so adding both as separate entries produces a duplicate-signature collision that
+  // QuickNode's decoder silently rejects, returning zero matches across all logs.
   const ENS_RENEWAL_ABI = [
-    // Legacy controller (4 args, no owner)
-    { type: 'event', name: 'NameRenewed', anonymous: false, inputs: [
-      { indexed: false, name: 'name',    type: 'string'  },
-      { indexed: true,  name: 'label',   type: 'bytes32' },
-      { indexed: false, name: 'cost',    type: 'uint256' },
-      { indexed: false, name: 'expires', type: 'uint256' }
-    ]},
-    // Current controller (4 args, no owner — same shape)
-    // Note: same ABI as legacy; included separately for clarity but decodeEVMReceipts
-    // will match either signature against the 4-arg form.
+    // Legacy + Current controllers (same signature: NameRenewed(string,bytes32,uint256,uint256))
     { type: 'event', name: 'NameRenewed', anonymous: false, inputs: [
       { indexed: false, name: 'name',    type: 'string'  },
       { indexed: true,  name: 'label',   type: 'bytes32' },
@@ -177,16 +173,11 @@ function main(stream) {
     (typeof v === 'string' && v.startsWith('0x')) ? BigInt(v).toString() : String(v);
   const isBytes32 = (s) => typeof s === 'string' && /^0x[0-9a-fA-F]{64}$/.test(s);
 
-  const getArg = (log, key) => {
-    if (log?.args && typeof log.args === 'object' && Object.prototype.hasOwnProperty.call(log.args, key)) return log.args[key];
-    if (log && Object.prototype.hasOwnProperty.call(log, key)) return log[key];
-    if (Array.isArray(log?.params)) {
-      const p = log.params.find((x) => x.name === key);
-      if (p) return p.value;
-    }
-    return undefined;
-  };
-
+  // QuickNode's decodeEVMReceipts attaches decoded params as TOP-LEVEL fields on each
+  // entry of receipt.decodedLogs (not nested under .args). So `log.cost`, `log.label`,
+  // etc. are direct properties. There is NO event-name field on the decoded log — the
+  // only way we know it's a NameRenewed event is that we only registered NameRenewed
+  // in our ABI, so anything decoded must be one.
   const ethStr = (wei) => {
     const w = toBI(wei), int = w / 1000000000000000000n, frac = (w % 1000000000000000000n).toString().padStart(18,'0').replace(/0+$/,'');
     return frac ? `${int}.${frac}` : `${int}`;
@@ -204,30 +195,34 @@ function main(stream) {
   const out = [];
   for (const r of decoded) {
     for (const log of (r.decodedLogs || [])) {
-      // Only NameRenewed events
-      if (log.name !== 'NameRenewed') continue;
+      // Only ABI we registered is NameRenewed, so any decoded log here IS one.
+      // (QuickNode's decoded log shape is flat — there's no `log.name === 'NameRenewed'`
+      // event-name field to check; the parameter `name` value lives in log.name instead.)
 
       const contract = lc(log.address || '');
       if (LIMIT_TO_LABELLED && !CONTRACT_LABELS.has(contract)) continue;
 
-      // robust field extraction (handles naming differences across versions)
-      const nameCandidate  = getArg(log, 'name');       // string on first/current
-      const labelStr       = getArg(log, 'label');      // string (newest) OR bytes32 (first/current)
-      const labelHashField = getArg(log, 'labelhash');  // bytes32 (newest)
+      // Field name differs between controller versions:
+      //   legacy/current:  log.name (string), log.label (bytes32)
+      //   newest:          log.label (string), log.labelhash (bytes32), log.referrer (bytes32)
+      // Disambiguate by inspecting whether `log.label` is a bytes32 hash or a label string.
+      const nameCandidate  = log.name;       // string on legacy/current
+      const labelField     = log.label;      // bytes32 on legacy/current; string on newest
+      const labelHashField = log.labelhash;  // bytes32 on newest only
 
       const nameStr =
-        (typeof labelStr === 'string' && !isBytes32(labelStr)) ? labelStr :
-        (typeof nameCandidate === 'string' && !isBytes32(nameCandidate) && nameCandidate !== 'NameRenewed') ? nameCandidate :
+        (typeof labelField === 'string' && !isBytes32(labelField)) ? labelField :
+        (typeof nameCandidate === 'string' && !isBytes32(nameCandidate)) ? nameCandidate :
         undefined;
 
       const labelHash =
-        isBytes32(labelStr) ? labelStr :
+        isBytes32(labelField) ? labelField :
         isBytes32(labelHashField) ? labelHashField :
         undefined;
 
-      const cost     = getArg(log, 'cost');
-      const expires  = getArg(log, 'expires');
-      const referrer = getArg(log, 'referrer'); // bytes32 on newest only
+      const cost     = log.cost;
+      const expires  = log.expires;
+      const referrer = log.referrer; // bytes32 on newest only
 
       const costWei = cost !== undefined ? toBI(cost) : 0n;
       if (costWei < MIN_PER_EVENT_WEI) continue;
