@@ -1,4 +1,4 @@
-import { ProcessedSale, ENSRegistration, ENSBid } from '../types';
+import { ProcessedSale, ENSRegistration, ENSBid, ENSRenewal } from '../types';
 import { logger } from '../utils/logger';
 import { ENSWorkerService, ENSWorkerAccount } from './ensWorkerService';
 import { RealDataImageService, RealImageData } from './realDataImageService';
@@ -189,6 +189,67 @@ export class NewTweetFormatter {
     } catch (error: any) {
       logger.error(`Failed to generate bid tweet: ${error.message}`);
       throw error;
+    }
+  }
+
+  /**
+   * Generate a complete tweet with text (and image, when Phase 5 lands) for a renewal transaction.
+   *
+   * NOTE: This is a Phase 2 placeholder — text only, no image, no historical context, no profile lookup.
+   * Phase 5 will replace this with the full implementation (top 3 by cost, +X more, image template,
+   * renewer profile, etc.). The placeholder lets us wire the auto-tweet path end-to-end now.
+   *
+   * @param renewals All renewal rows belonging to a single transaction.
+   */
+  async generateRenewalTweet(renewals: ENSRenewal[]): Promise<GeneratedTweet> {
+    if (renewals.length === 0) {
+      return { text: '', characterCount: 0, isValid: false };
+    }
+
+    try {
+      const sample = renewals[0];
+      logger.info(`Generating renewal tweet for tx: ${sample.transactionHash} (${renewals.length} name(s))`);
+
+      // Sort by per-name cost desc; top 3 used for the breakdown.
+      const sorted = [...renewals].sort((a, b) => {
+        const ae = parseFloat(a.costEth || '0');
+        const be = parseFloat(b.costEth || '0');
+        return be - ae;
+      });
+
+      const totalEth = sorted.reduce((sum, r) => sum + parseFloat(r.costEth || '0'), 0);
+      const totalUsd = sorted.reduce((sum, r) => sum + parseFloat(r.costUsd || '0'), 0);
+      const nameCount = sorted.length;
+      const top3 = sorted.slice(0, 3);
+      const extra = nameCount - top3.length;
+
+      const renewerShort = sample.renewerAddress.slice(0, 6) + '…' + sample.renewerAddress.slice(-4);
+      const usdSuffix = totalUsd > 0
+        ? ` ($${totalUsd.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })})`
+        : '';
+
+      let text: string;
+      if (nameCount === 1) {
+        // Single-name case
+        text = `${renewerShort} just renewed ${top3[0].fullName} for ${totalEth.toFixed(4)} ETH${usdSuffix}`;
+      } else {
+        // Bulk case
+        const topLine = top3
+          .map(r => `${r.fullName} (${parseFloat(r.costEth || '0').toFixed(4)} ETH)`)
+          .join(', ');
+        const extraSuffix = extra > 0 ? `, +${extra} more` : '';
+        text = `${renewerShort} just renewed ${nameCount} names for ${totalEth.toFixed(4)} ETH${usdSuffix}\n\nTop: ${topLine}${extraSuffix}`;
+      }
+
+      // No image generation in the Phase 2 placeholder. Phase 5 wires the image template.
+      return {
+        text,
+        characterCount: text.length,
+        isValid: text.length > 0
+      };
+    } catch (error: any) {
+      logger.error('Error generating renewal tweet (placeholder):', error.message);
+      return { text: '', characterCount: 0, isValid: false };
     }
   }
 

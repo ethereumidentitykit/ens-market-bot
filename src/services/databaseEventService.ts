@@ -22,13 +22,17 @@ export class DatabaseEventService {
   private databaseService: IDatabaseService;
   private aiReplyService: IAIReplyService | null = null;
 
-  // Separate queues for handling sales, registrations, and bids
+  // Separate queues for handling sales, registrations, bids, and renewals.
+  // Renewals are tx-keyed (string), not row-keyed (number) — the unit-of-work for renewals
+  // is the transaction (a single tx may have 100+ name renewals → one tweet).
   private saleNotificationQueue: number[] = [];
   private registrationNotificationQueue: number[] = [];
   private bidNotificationQueue: number[] = [];
+  private renewalTxQueue: string[] = [];
   private isProcessingSales = false;
   private isProcessingRegistrations = false;
   private isProcessingBids = false;
+  private isProcessingRenewals = false;
 
   // AI Reply queues (Phase 3.2 + Phase 4.6)
   private aiReplySaleQueue: number[] = [];

@@ -91,6 +91,7 @@ OPENAI_API_KEY=your_openai_api_key
 # QuickNode Webhooks (Required)
 QUICKNODE_SECRET_SALES=your_quicknode_sales_secret
 QUICKNODE_SECRET_REGISTRATIONS=your_quicknode_registration_secret
+QUICKNODE_SECRET_RENEWALS=your_quicknode_renewals_secret
 
 # Alchemy (Required - for portfolio data and price lookups)
 ALCHEMY_API_KEY=your_alchemy_api_key

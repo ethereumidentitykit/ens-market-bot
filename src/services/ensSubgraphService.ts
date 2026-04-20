@@ -244,6 +244,108 @@ export class EnsSubgraphService {
   }
 
   /**
+   * Look up the current owner of an ENS name by token ID.
+   *
+   * For unwrapped names (BaseRegistrar contract), returns `registrant.id` — the holder
+   * of the .eth NFT. For wrapped names (NameWrapper contract), prefers `wrappedOwner.id`,
+   * falls back to `registrant.id`.
+   *
+   * Returns null on any failure (subgraph unreachable, name not found, etc.) so the
+   * caller can degrade gracefully (renewer-only display still works).
+   *
+   * @param tokenId - ENS token ID (numeric string)
+   * @param contractAddress - Contract address (determines hash type: labelhash for registry, namehash for wrapper)
+   * @returns Lowercase owner address (0x...) or null if not found
+   */
+  async getOwnerByTokenId(tokenId: string, contractAddress?: string): Promise<string | null> {
+    const hexHash = this.tokenIdToHex(tokenId);
+    const isWrapper = contractAddress?.toLowerCase() === ENSTokenUtils.NAME_WRAPPER_CONTRACT.toLowerCase();
+
+    logger.debug(`🔍 Querying ENS subgraph for owner: tokenId ${tokenId}, contract ${contractAddress}, hex: ${hexHash}, wrapper: ${isWrapper}`);
+
+    // For wrapper names, query by ID (namehash). For registry names, query by labelhash
+    // and filter to 2nd-level .eth domains (parent = node hash of "eth").
+    const query = isWrapper
+      ? `
+        query GetOwnerByNamehash($id: String!) {
+          domains(where: { id: $id }, first: 1) {
+            id
+            registrant { id }
+            wrappedOwner { id }
+            owner { id }
+          }
+        }
+      `
+      : `
+        query GetOwnerByLabelhash($labelhash: String!) {
+          domains(
+            where: {
+              labelhash: $labelhash
+              parent: "0x93cdeb708b7545dc668eb9280176169d1c33cfd8ed6f04690a0bcc88a93fc4ae"
+            }
+            first: 1
+          ) {
+            id
+            registrant { id }
+            wrappedOwner { id }
+            owner { id }
+          }
+        }
+      `;
+
+    const variables = isWrapper ? { id: hexHash } : { labelhash: hexHash };
+
+    const endpoints = [this.primaryUrl, this.backupUrl];
+
+    for (let i = 0; i < endpoints.length; i++) {
+      const endpoint = endpoints[i];
+      const isPrimary = i === 0;
+
+      try {
+        const response = await axios.post(
+          endpoint,
+          { query, variables },
+          {
+            timeout: 10000,
+            headers: { 'Content-Type': 'application/json' }
+          }
+        );
+
+        const domains = response.data?.data?.domains;
+        if (!domains || domains.length === 0) {
+          logger.debug(`⚠️ ENS subgraph: no domain found for owner lookup ${hexHash} at ${isPrimary ? 'primary' : 'backup'}`);
+          // Don't fall back if endpoint responded successfully with no data
+          return null;
+        }
+
+        const domain = domains[0];
+        // For wrapped names, the wrappedOwner is the user-facing holder.
+        // For unwrapped, registrant (owner of the BaseRegistrar NFT) is the canonical owner.
+        // Order: wrappedOwner > registrant > owner (last-resort fallback to resolver-level owner).
+        const ownerAddress: string | undefined =
+          domain.wrappedOwner?.id ||
+          domain.registrant?.id ||
+          domain.owner?.id;
+
+        if (ownerAddress) {
+          logger.debug(`✅ ENS subgraph owner resolved: ${ownerAddress} for token ${tokenId} via ${isPrimary ? 'primary' : 'backup'}`);
+          return ownerAddress.toLowerCase();
+        }
+
+        logger.debug(`⚠️ ENS subgraph: domain found but no owner field populated for ${hexHash}`);
+        return null;
+
+      } catch (error: any) {
+        logger.debug(`⚠️ ENS subgraph owner query ${isPrimary ? 'primary' : 'backup'} failed: ${error.message}`);
+        if (isPrimary) continue;
+        return null;
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Health check for the subgraph service
    * Tests both primary and backup endpoints
    * 

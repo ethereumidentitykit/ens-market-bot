@@ -229,6 +229,7 @@ export interface Config {
   quicknode: {
     salesWebhookSecret: string;
     registrationsWebhookSecret: string;
+    renewalsWebhookSecret: string;
   };
   opensea?: {
     apiKey: string;
