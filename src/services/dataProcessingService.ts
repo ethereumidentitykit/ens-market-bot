@@ -615,50 +615,69 @@ export class DataProcessingService {
   }
 
   /**
-   * Process bidding behavior from user activities
-   * Extracts bid statistics and patterns from BID_CREATED activities
-   * Note: We only fetch BID_CREATED, not BID_CANCELLED, so we can't accurately track status
+   * Process bidding behavior from user activities.
+   * Extracts bid statistics and patterns from offer_made (type='bid') activities.
+   *
+   * Note: Grails only exposes offer creation events, not status transitions, so
+   * lifecycle counts (active/filled/cancelled/expired) remain `null`.
+   * Volumes are normalized to ETH-equivalent: ETH/WETH use the decimal price as-is,
+   * stablecoin bids (USDC/USDT/DAI) are converted via the per-activity USD value
+   * (set by enrichActivitiesWithUSD upstream).
    */
   private processBiddingStats(activities: TokenActivity[], userAddress: string): BiddingStats | null {
-    // Filter for bid activities where user is the maker (bidder)
-    const bidActivities = activities.filter(a => 
-      a.type === 'bid' && 
+    const bidActivities = activities.filter(a =>
+      a.type === 'bid' &&
       a.fromAddress.toLowerCase() === userAddress
     );
-    
+
     if (bidActivities.length === 0) {
       return null;
     }
-    
+
     logger.debug(`   🤝 Processing ${bidActivities.length} bid creation activities...`);
-    
-    // Calculate volume
-    let totalBidVolume = 0;
+
+    let totalBidVolume = 0;     // ETH-equivalent
     let totalBidVolumeUsd = 0;
-    
+
     bidActivities.forEach(bid => {
-      if (bid.price?.amount?.decimal) {
-        totalBidVolume += bid.price.amount.decimal;
-        if (bid.price.amount.usd) {
-          totalBidVolumeUsd += bid.price.amount.usd;
-        }
+      const symbol = bid.price?.currency?.symbol?.toUpperCase();
+      const isEthLike = symbol === 'ETH' || symbol === 'WETH';
+      const decimal = bid.price?.amount?.decimal || 0;
+      const usd = bid.price?.amount?.usd || 0;
+
+      // Use the price's `native` field (set to ETH-equivalent for ETH/WETH, 0 otherwise);
+      // for stablecoins, fall back to USD-derived ETH equivalent if available.
+      if (isEthLike) {
+        totalBidVolume += decimal;
+      } else if (bid.price?.amount?.native > 0) {
+        totalBidVolume += bid.price.amount.native;
       }
+      // Else (unknown currency or no native): contribute 0 to ETH volume; USD still counted.
+
+      totalBidVolumeUsd += usd;
     });
-    
+
     const averageBidAmount = bidActivities.length > 0 ? totalBidVolume / bidActivities.length : 0;
-    
-    // Get recent bids (last 10, sorted by most recent)
+
     const sortedBids = [...bidActivities].sort((a, b) => b.timestamp - a.timestamp).slice(0, 10);
     const now = Math.floor(Date.now() / 1000);
-    
-    const recentBids = sortedBids.map(bid => ({
-      name: bid.token?.tokenName || 'Unknown',
-      amount: bid.price?.amount?.decimal || 0,
-      amountUsd: bid.price?.amount?.usd || 0,
-      status: 'created', // We only know they created the bid
-      timestamp: bid.timestamp,
-      daysAgo: Math.floor((now - bid.timestamp) / (60 * 60 * 24))
-    }));
+
+    const recentBids = sortedBids.map(bid => {
+      const symbol = bid.price?.currency?.symbol?.toUpperCase();
+      const isEthLike = symbol === 'ETH' || symbol === 'WETH';
+      const decimal = bid.price?.amount?.decimal || 0;
+      // Normalize amount to ETH-equivalent for the LLM prompt
+      const ethAmount = isEthLike ? decimal : (bid.price?.amount?.native || 0);
+
+      return {
+        name: bid.token?.tokenName || 'Unknown',
+        amount: ethAmount,
+        amountUsd: bid.price?.amount?.usd || 0,
+        status: 'created', // Grails only exposes creation; later status transitions unknown
+        timestamp: bid.timestamp,
+        daysAgo: Math.floor((now - bid.timestamp) / (60 * 60 * 24))
+      };
+    });
     
     // Analyze patterns in bid names
     const bidNames = recentBids.map(b => b.name.replace(/\.eth$/i, '').toLowerCase());

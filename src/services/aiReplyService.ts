@@ -736,22 +736,34 @@ export class AIReplyService {
   }
 
   /**
-   * Enrich activities with USD prices using the current ETH price.
-   * Grails API returns usd: 0 for all activities — this fills them in.
-   * - ETH/WETH: usd = native × ethPrice
-   * - USDC/USDT/DAI: usd = decimal (1:1 to USD)
+   * Enrich activities with USD and ETH-equivalent prices using the current ETH price.
+   * Grails API returns usd: 0 for all activities and native: 0 for non-ETH currencies.
+   *
+   * Mutates the input array in place. Idempotent — already-set values are preserved.
+   *
+   * Pricing rules:
+   * - ETH/WETH:        usd = native × ethPrice           (native already populated upstream)
+   * - USDC/USDT/DAI:   usd = decimal (1:1)               and native = decimal / ethPrice
+   *                                                      (so ETH-volume aggregations work)
    */
   private enrichActivitiesWithUSD(activities: TokenActivity[], ethPrice: number): void {
     for (const activity of activities) {
-      if (activity.price.amount.usd !== 0) continue;
-
       const symbol = activity.price.currency.symbol?.toUpperCase();
       const isStablecoin = symbol === 'USDC' || symbol === 'USDT' || symbol === 'DAI';
 
-      if (isStablecoin && activity.price.amount.decimal > 0) {
-        activity.price.amount.usd = activity.price.amount.decimal;
-      } else if (activity.price.amount.native > 0) {
-        activity.price.amount.usd = activity.price.amount.native * ethPrice;
+      if (activity.price.amount.usd === 0) {
+        if (isStablecoin && activity.price.amount.decimal > 0) {
+          activity.price.amount.usd = activity.price.amount.decimal;
+        } else if (activity.price.amount.native > 0) {
+          activity.price.amount.usd = activity.price.amount.native * ethPrice;
+        }
+      }
+
+      // Backfill ETH-equivalent for stablecoin activities so ETH-volume aggregations
+      // (e.g. processBiddingStats.totalBidVolume) include them rather than treating
+      // them as zero-ETH contributions.
+      if (isStablecoin && activity.price.amount.native === 0 && ethPrice > 0 && activity.price.amount.decimal > 0) {
+        activity.price.amount.native = activity.price.amount.decimal / ethPrice;
       }
     }
   }

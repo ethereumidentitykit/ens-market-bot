@@ -206,16 +206,24 @@ export class GrailsApiService {
    * Transform Grails offer to internal TransformedBid format.
    * Throws if the offer lacks a usable identifier — caller should catch
    * and skip the offer rather than store a malformed row.
+   *
+   * Validation rules for offer_id:
+   * - Must be a positive integer (rejects undefined, null, '', 0, NaN, floats, negatives).
+   * - Reason: bidId becomes `grails-{offer_id}` and is the dedup key. Loose values
+   *   like '' or 0 would collide across distinct offers and silently drop bids.
    */
   private async transformOffer(offer: GrailsOffer): Promise<TransformedBid> {
     const now = Math.floor(Date.now() / 1000);
 
-    const offerId = offer.metadata?.offer_id;
-    if (offerId === undefined || offerId === null) {
+    const offerIdRaw = offer.metadata?.offer_id;
+    const offerIdNum = typeof offerIdRaw === 'number' ? offerIdRaw : Number(offerIdRaw);
+    if (!Number.isInteger(offerIdNum) || offerIdNum <= 0) {
       throw new Error(
-        `Grails offer missing metadata.offer_id (activity_id=${offer.id}, name=${offer.name}, created_at=${offer.created_at})`
+        `Grails offer has invalid metadata.offer_id (raw=${JSON.stringify(offerIdRaw)}, ` +
+        `activity_id=${offer.id}, name=${offer.name}, created_at=${offer.created_at})`
       );
     }
+    const offerId = offerIdNum;
 
     const currencySymbol = this.getCurrencySymbol(offer.currency_address);
     const decimals = this.getCurrencyDecimals(currencySymbol);
@@ -320,7 +328,9 @@ export class GrailsApiService {
   }
 
   /**
-   * Get service status for admin dashboard
+   * Get service status for admin dashboard.
+   * `enabled` is always true here — if the service was disabled, this instance
+   * wouldn't have been constructed (see index.ts startup gate).
    */
   getStatus(): {
     enabled: boolean;
@@ -329,7 +339,7 @@ export class GrailsApiService {
     stats: GrailsServiceStats;
   } {
     return {
-      enabled: !!process.env.GRAILS_API_URL,
+      enabled: true,
       baseUrl: this.baseUrl,
       lastFetchTime: this.stats.lastFetchTime,
       stats: this.getStats(),
@@ -398,7 +408,13 @@ export class GrailsApiService {
 
   /**
    * Fetch activity history for an Ethereum address.
-   * Fetches sold, bought, and mint events; deduplicates sold+bought pairs by transaction hash.
+   *
+   * Fetches sold, bought, mint, and offer_made events:
+   * - sold/bought: deduplicated by tx hash so each sale appears once
+   * - mint:        deduplicated by tx hash (or activity row id fallback)
+   * - offer_made:  deduplicated by offer_id (off-chain orders, no tx hash);
+   *                used by processBiddingStats to derive bidding behavior signals
+   *                (totals, recent bids, theme detection) for LLM context
    */
   static async getAddressActivity(
     address: string,
@@ -417,7 +433,7 @@ export class GrailsApiService {
 
     try {
       while (page <= maxPages) {
-        const url = `${apiBase}/activity/address/${address}?limit=${limit}&page=${page}&event_type=sold&event_type=bought&event_type=mint`;
+        const url = `${apiBase}/activity/address/${address}?limit=${limit}&page=${page}&event_type=sold&event_type=bought&event_type=mint&event_type=offer_made`;
         logger.debug(`   Page ${page}: ${url}`);
 
         const response = await axios.get<GrailsApiResponse>(url, {
@@ -454,16 +470,34 @@ export class GrailsApiService {
   /**
    * Deduplicate sold+bought pairs by transaction_hash, keeping one TokenActivity per sale.
    * For address queries we get both "sold" and "bought" for each sale the address is involved in.
+   *
+   * Bid (offer_made) records are deduplicated by their offer_id (no transaction_hash since
+   * offers are off-chain orders, not on-chain transactions).
    */
   private static deduplicateAndTransform(records: GrailsActivityRecord[], seen: Set<string> = new Set()): TokenActivity[] {
     const results: TokenActivity[] = [];
 
     for (const record of records) {
-      const dedupeKey = record.transaction_hash || `${record.id}`;
+      // Pick a stable dedupe key based on event type:
+      // - sold/bought: tx_hash (same sale appears as both events for involved address)
+      // - offer_made: offer_id (off-chain, no tx hash)
+      // - mint: tx_hash or activity row id as fallback
+      let dedupeKey: string;
+      if (record.event_type === 'offer_made') {
+        const offerId = record.metadata?.offer_id;
+        dedupeKey = offerId !== undefined && offerId !== null ? `offer-${offerId}` : `id-${record.id}`;
+      } else {
+        dedupeKey = record.transaction_hash || `id-${record.id}`;
+      }
       if (seen.has(dedupeKey)) continue;
       seen.add(dedupeKey);
 
-      if (record.event_type === 'mint' || record.event_type === 'bought' || record.event_type === 'sold') {
+      if (
+        record.event_type === 'mint' ||
+        record.event_type === 'bought' ||
+        record.event_type === 'sold' ||
+        record.event_type === 'offer_made'
+      ) {
         results.push(GrailsApiService.toTokenActivity(record));
       }
     }
@@ -475,9 +509,12 @@ export class GrailsApiService {
    * Transform a Grails activity record into the shared TokenActivity format.
    * Grails already resolves proxy contracts — addresses are truth.
    *
-   * "bought": actor=buyer, counterparty=seller → fromAddress=seller, toAddress=buyer
-   * "sold":   actor=seller, counterparty=buyer → fromAddress=seller, toAddress=buyer
-   * "mint":   actor=minter → fromAddress=0x0, toAddress=minter
+   * Address conventions per event_type:
+   * - "bought":     actor=buyer,    counterparty=seller   → from=seller, to=buyer,   type='sale'
+   * - "sold":       actor=seller,   counterparty=buyer    → from=seller, to=buyer,   type='sale'
+   * - "mint":       actor=minter                          → from=0x0,    to=minter,  type='mint'
+   * - "offer_made": actor=bidder    (no counterparty)     → from=bidder, to=0x0,     type='bid'
+   *                 (Off-chain order; no on-chain tx hash. Used for bidding-stats analysis.)
    */
   static toTokenActivity(record: GrailsActivityRecord): TokenActivity {
     const currencySymbol = record.event_type === 'mint'
@@ -500,6 +537,11 @@ export class GrailsApiService {
       fromAddress = record.counterparty_address || '0x0000000000000000000000000000000000000000';
       toAddress = record.actor_address;
       activityType = 'sale';
+    } else if (record.event_type === 'offer_made') {
+      // Bidder is the actor; no recipient (off-chain order)
+      fromAddress = record.actor_address;
+      toAddress = '0x0000000000000000000000000000000000000000';
+      activityType = 'bid';
     } else {
       // "sold": actor is the seller
       fromAddress = record.actor_address;

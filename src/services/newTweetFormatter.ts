@@ -313,6 +313,14 @@ export class NewTweetFormatter {
    * Get current listing price context for bids.
    * Queries Grails (aggregator) for active listings across all marketplaces.
    * Shows source(s) in parentheses, e.g. "(Grails)" or "(Grails + OpenSea)"
+   *
+   * KNOWN LIMITATION: Listings are sorted by raw decimal price without
+   * cross-currency normalization. If a single name has listings in both ETH
+   * and a stablecoin (e.g. 0.5 ETH and 100 USDC), the comparison will be
+   * arithmetically wrong (0.5 < 100 even though 0.5 ETH ≫ 100 USDC).
+   * In practice ENS listings are virtually always ETH/WETH, so this rarely
+   * surfaces. Fix path: convert candidates to ETH-equivalent via
+   * `alchemyService.getETHPriceUSD()` before sorting.
    */
   private async getListingContext(
     contractAddress: string,
