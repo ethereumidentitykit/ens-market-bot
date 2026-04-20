@@ -1,5 +1,5 @@
 import { logger } from '../utils/logger';
-import { ImageData } from '../types/imageTypes';
+import { ImageData, RenewalImageData, RenewalNameCard } from '../types/imageTypes';
 import { IDatabaseService } from '../types';
 import { emojiMappingService } from './emojiMappingService';
 import { RealImageData } from './realDataImageService';
@@ -52,6 +52,24 @@ export class PuppeteerImageService {
    */
   public static async generateBidImage(data: ImageData, databaseService?: IDatabaseService, openSeaService?: OpenSeaService): Promise<Buffer> {
     return await this.generateImageWithBackground(data, 'bid', databaseService, openSeaService);
+  }
+
+  /**
+   * Generate ENS renewal image using Puppeteer.
+   *
+   * Renewals use a fundamentally different layout from sales/regs/bids:
+   * - Left side: total tx cost (USD + ETH) and "Owner" profile (renewer)
+   * - Right side: dynamic grid of name cards (1, 2, 3, or 4+ layouts)
+   *
+   * Tier background (renewal-t1..t4.png) is selected by total USD cost via DB price tiers.
+   * The "RENEWED" badge and "Owner" label are baked into the background PNGs.
+   */
+  public static async generateRenewalImage(
+    data: RenewalImageData,
+    databaseService?: IDatabaseService,
+    openSeaService?: OpenSeaService
+  ): Promise<Buffer> {
+    return await this.generateRenewalImageInternal(data, databaseService, openSeaService);
   }
 
   /**
@@ -239,6 +257,466 @@ export class PuppeteerImageService {
     } finally {
       await browser.close();
     }
+  }
+
+  // ============================================================================
+  // Renewal image generation (separate pipeline from generateImageWithBackground
+  // because the layout — dynamic 1/2/3/4+ card grid — is fundamentally different).
+  // ============================================================================
+
+  /**
+   * Pick the renewal background tier (renewal-t1.png .. renewal-t4.png) based on
+   * the total tx USD cost. Mirrors getTemplatePath() but for the 'renewals'
+   * transaction type. Falls back to T1 if no DB or unparseable USD.
+   */
+  private static async getRenewalTemplatePath(
+    totalCostUsd: number,
+    databaseService?: IDatabaseService
+  ): Promise<string> {
+    let tier = 1;
+    if (databaseService && totalCostUsd > 0) {
+      try {
+        const priceTier = await databaseService.getPriceTierForAmount('renewals', totalCostUsd);
+        if (priceTier) {
+          tier = priceTier.tierLevel;
+          logger.info(`Selected renewals tier ${tier} for $${totalCostUsd.toFixed(2)} USD`);
+        }
+      } catch (error) {
+        logger.error('Error determining renewal price tier:', error);
+      }
+    }
+    const templatePath = `assets/image-templates/renewals/renewal-t${tier}.png`;
+    logger.info(`Using renewal template: ${templatePath}`);
+    return templatePath;
+  }
+
+  /**
+   * Internal: launches Puppeteer, builds the renewal HTML, takes the screenshot.
+   * Same Vercel/local launch dance as generateImageWithBackground(), so kept
+   * separate but parallel — no shared method because the HTML differs heavily.
+   */
+  private static async generateRenewalImageInternal(
+    data: RenewalImageData,
+    databaseService?: IDatabaseService,
+    openSeaService?: OpenSeaService
+  ): Promise<Buffer> {
+    const isVercel = process.env.VERCEL === '1';
+
+    let browser: any;
+    if (isVercel) {
+      const puppeteer = await import('puppeteer-core');
+      const chromium = await import('@sparticuz/chromium');
+      browser = await puppeteer.default.launch({
+        args: chromium.default.args,
+        executablePath: await chromium.default.executablePath(),
+        headless: true,
+        ignoreDefaultArgs: ['--disable-extensions'],
+      });
+    } else {
+      const puppeteer = await import('puppeteer');
+      browser = await puppeteer.default.launch({
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',
+          '--disable-gpu'
+        ]
+      });
+    }
+
+    try {
+      const page: Page = await browser.newPage();
+      await page.setViewport({
+        width: this.IMAGE_WIDTH,
+        height: this.IMAGE_HEIGHT,
+        deviceScaleFactor: 1
+      });
+
+      const htmlContent = await this.generateRenewalHTML(data, databaseService, openSeaService);
+      logger.debug(`Generated renewal HTML content length: ${htmlContent.length} chars`);
+
+      await page.setContent(htmlContent, {
+        waitUntil: 'domcontentloaded',
+        timeout: 30000
+      });
+
+      // Wait for fonts to load (same pattern as generateImageWithBackground)
+      try {
+        await Promise.race([
+          page.evaluate(() => {
+            return new Promise<void>((resolve) => {
+              if (document.fonts.status === 'loaded') {
+                resolve();
+              } else {
+                document.fonts.addEventListener('loadingdone', () => resolve());
+                document.fonts.ready.then(() => resolve());
+              }
+            });
+          }),
+          new Promise(resolve => setTimeout(resolve, 2000))
+        ]);
+      } catch {
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+
+      // Auto-shrink long renewer names so they fit next to the avatar.
+      // (Card names are baked into the NFT art itself — no HTML name labels to fit.)
+      await page.evaluate(() => {
+        const fitText = (selector: string, maxSize: number, minSize: number) => {
+          const elements = document.querySelectorAll(selector);
+          elements.forEach((element: any) => {
+            const parent = element.parentElement;
+            if (!parent) return;
+            let size = maxSize;
+            element.style.fontSize = size + 'px';
+            while (element.scrollWidth > parent.clientWidth - 16 && size > minSize) {
+              size -= 0.5;
+              element.style.fontSize = size + 'px';
+            }
+          });
+        };
+        fitText('.renewer-name', 26, 14);
+      });
+
+      const screenshot = await page.screenshot({
+        type: 'png',
+        clip: { x: 0, y: 0, width: this.IMAGE_WIDTH, height: this.IMAGE_HEIGHT }
+      });
+
+      logger.info('Successfully generated renewal image with Puppeteer');
+      return screenshot as Buffer;
+
+    } catch (error) {
+      logger.error('Error generating renewal image with Puppeteer:', error);
+      throw error;
+    } finally {
+      await browser.close();
+    }
+  }
+
+  /**
+   * Build the HTML for a renewal image.
+   *
+   * Layout strategy (option b — dynamic grid):
+   *   1 name  → 1 large card (445×475px) filling the right half
+   *   2 names → 2 tall cards (215×475px) side by side
+   *   3 names → 3 slim cards (145×475px) in a row
+   *   4+ names → 2×2 grid of 215×215px cards (top 3 + "+N more" overflow)
+   *
+   * Each card shows: ENS NFT image (or placeholder) on top, full name on bottom.
+   * The "+N more" overflow card is a visually distinct variant in the bottom-right slot.
+   */
+  private static async generateRenewalHTML(
+    data: RenewalImageData,
+    databaseService?: IDatabaseService,
+    openSeaService?: OpenSeaService
+  ): Promise<string> {
+    const templatePath = await this.getRenewalTemplatePath(data.totalCostUsd, databaseService);
+    const backgroundImageBase64 = this.loadAsBase64(templatePath);
+    const userPlaceholderBase64 = this.loadAsBase64('assets/image-templates/user.png');
+    const ensPlaceholderBase64 = this.loadAsBase64('assets/image-templates/ens.png');
+
+    const templateImagePath = `data:image/png;base64,${backgroundImageBase64}`;
+    const ensPlaceholderDataUri = `data:image/png;base64,${ensPlaceholderBase64}`;
+
+    // ----- Left side: prices and renewer profile -----
+
+    const formattedUsdPrice = this.formatPrice(data.totalCostUsd);
+    const formattedEthPrice = this.formatEthPrice(data.totalCostEth);
+
+    // Renewer avatar
+    let renewerAvatarPath = `data:image/png;base64,${userPlaceholderBase64}`;
+    if (data.renewerAvatar) {
+      const remote = await this.loadRemoteImageAsBase64(data.renewerAvatar);
+      if (remote) renewerAvatarPath = remote;
+    }
+
+    // Emoji-process the renewer name (display name may include emojis like 'vitalik.eth')
+    let renewerEnsWithEmojis = data.renewerEns || 'unknown';
+    try {
+      renewerEnsWithEmojis = await emojiMappingService.replaceEmojisWithSvg(renewerEnsWithEmojis);
+    } catch (error) {
+      logger.warn(`Failed to process emojis in renewer name: ${error}`);
+    }
+
+    // ----- Right side: cards -----
+    //
+    // Each card's visual is THE NFT IMAGE ITSELF — not an HTML overlay. This matches
+    // the existing registration/sale/bid pipeline where `.ens-nft` uses the resolved
+    // NFT image as a full-bleed background. The ENS NFT art already contains the logo
+    // and name (it's part of the rendered .eth NFT), so no HTML label is needed.
+    //
+    // Resolution order per card (same as `processNftImageUrl` + OpenSea fallback used elsewhere):
+    //   1. Provided nftImageUrl → run through processNftImageUrl (handles raster + SVG)
+    //   2. If that fails and we have contract+tokenId → try OpenSea metadata as fallback
+    //   3. If everything fails → use the ens.png placeholder (already includes logo + ".eth" text)
+    const resolvedCards = await Promise.all(
+      data.topNames.map(async (card) => {
+        let imageDataUri = ensPlaceholderDataUri;
+        if (card.nftImageUrl) {
+          try {
+            const result = await this.processNftImageUrl(card.nftImageUrl);
+            if (result) imageDataUri = result;
+          } catch (error: any) {
+            logger.debug(`NFT image fetch failed for ${card.ensName}: ${error.message}`);
+          }
+        }
+        // OpenSea fallback if URL processing failed (or no URL was provided)
+        if (imageDataUri === ensPlaceholderDataUri && openSeaService && card.contractAddress && card.tokenId) {
+          try {
+            const metadata = await openSeaService.getSimplifiedMetadata(card.contractAddress, card.tokenId);
+            if (metadata?.image) {
+              const fallback = await this.processNftImageUrl(metadata.image);
+              if (fallback) imageDataUri = fallback;
+            }
+          } catch {
+            // Already using placeholder; nothing to do
+          }
+        }
+        return { imageDataUri };
+      })
+    );
+
+    // Layout selection — based on TOTAL visible cards (NFT cards + overflow card if any).
+    //
+    //   visibleCards = topNames.length + (extraCount > 0 ? 1 : 0)
+    //
+    // Layouts:
+    //   1 visible      → single big square card (~445×445)
+    //   2 visible      → 2 squares side-by-side, vertically centered
+    //   3 visible (3 NFTs, no overflow) → 2x2 grid with bottom-right empty
+    //   4 visible (3 NFTs + overflow, OR 4 NFTs)  → 2x2 grid with all cells filled
+    //
+    // All cards are SQUARE (aspect-ratio 1:1) so that background-size: cover doesn't
+    // crop important parts of the NFT art (the .eth NFT itself is square).
+    const visibleCards = data.topNames.length + (data.extraCount > 0 ? 1 : 0);
+    const layoutClass =
+      visibleCards === 1 ? 'layout-1' :
+      visibleCards === 2 ? 'layout-2' :
+      'layout-2x2'; // 3 or 4 visible cards → 2x2 grid (3-card case leaves bottom-right empty)
+
+    // Render the NFT-image cards. Background-image gives us proper cover/scale behaviour
+    // for both raster (PNG/JPG) and converted SVG (PNG via SvgConverter).
+    const dataCardsHtml = resolvedCards.map((card) => `
+      <div class="renewal-card" style="background-image: url('${card.imageDataUri}')"></div>
+    `).join('');
+
+    // Overflow card ("+N more") is the ONLY HTML-rendered card — it's not an NFT, just a count.
+    // It always lands in the bottom-right cell of the 2x2 grid because it's appended last.
+    const overflowCardHtml = data.extraCount > 0 ? `
+      <div class="renewal-card renewal-card-overflow">
+        <div class="renewal-card-overflow-text">+${data.extraCount}<br>more</div>
+      </div>
+    ` : '';
+
+    const html = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>ENS Renewal Image</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+
+            body {
+                width: ${this.IMAGE_WIDTH}px;
+                height: ${this.IMAGE_HEIGHT}px;
+                font-family: 'Inter', 'Noto Sans KR', 'Noto Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif;
+                overflow: hidden;
+                position: relative;
+                background: #1E1E1E;
+            }
+
+            .canvas {
+                position: relative;
+                width: ${this.IMAGE_WIDTH}px;
+                height: ${this.IMAGE_HEIGHT}px;
+            }
+
+            /* Background Template (RENEWED badge + Owner label baked in) */
+            .background {
+                position: absolute;
+                top: 0; left: 0;
+                width: 100%; height: 100%;
+                background-image: url("${templateImagePath}");
+                background-size: cover;
+                background-position: center;
+                background-repeat: no-repeat;
+            }
+
+            /* USD Price (left side, centred horizontally on left half) */
+            .usd-price {
+                position: absolute;
+                left: 250px;
+                top: 210px;
+                transform: translate(-50%, -50%);
+                text-align: center;
+                color: white;
+                font-size: 85px;
+                font-weight: 600;
+            }
+
+            /* ETH Price */
+            .eth-price {
+                position: absolute;
+                left: 250px;
+                top: 305px;
+                transform: translate(-50%, -50%);
+                text-align: center;
+                color: white;
+                font-size: 48px;
+                font-weight: normal;
+            }
+
+            /* Owner profile (avatar + ENS name) — sits next to the baked-in "Owner" label.
+               The "Owner" label in the background PNG ends at roughly x=148px, so we start
+               the avatar at x=165px to leave a small gap. */
+            .renewer-section {
+                position: absolute;
+                left: 165px;
+                top: 478px;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                max-width: 320px;
+            }
+
+            .renewer-avatar {
+                width: 36px;
+                height: 36px;
+                border-radius: 50%;
+                object-fit: cover;
+                flex-shrink: 0;
+            }
+
+            .renewer-name {
+                color: white;
+                font-size: 26px;
+                font-weight: normal;
+                white-space: nowrap;
+                overflow: hidden;
+            }
+
+            /* ----- Cards container (right side of the image) -----
+               Anchored to the same area as the registration template's .ens-nft
+               (which uses 500/45 with 455×455). We use a flex layout so we can
+               vertically/horizontally center smaller card configurations within the
+               available right-half region instead of stretching them. */
+            .cards-container {
+                position: absolute;
+                top: 35px;
+                left: 500px;
+                width: 460px;
+                height: 475px;
+                display: flex;
+                align-items: center;     /* vertically center the inner grid */
+                justify-content: center; /* horizontally center the inner grid */
+            }
+
+            /* Inner grid — actual cells live here. Sizing varies per layout. */
+            .cards-grid {
+                display: grid;
+                gap: 18px;
+            }
+
+            /* Layout: 1 visible card → single big square (~445×445) */
+            .cards-grid.layout-1 {
+                grid-template-columns: 445px;
+                grid-template-rows: 445px;
+            }
+
+            /* Layout: 2 visible cards → 2 squares side-by-side (each ~221×221) */
+            .cards-grid.layout-2 {
+                grid-template-columns: 221px 221px;
+                grid-template-rows: 221px;
+            }
+
+            /* Layout: 3 OR 4 visible cards → 2x2 grid of squares (each ~221×221).
+               Total: 460×460 (which fits the 460×475 container with vertical breathing room).
+               When only 3 cards are present (3 NFTs, no overflow), the bottom-right cell is
+               left empty — matching the design intent (visually consistent square grid). */
+            .cards-grid.layout-2x2 {
+                grid-template-columns: 221px 221px;
+                grid-template-rows: 221px 221px;
+            }
+
+            /* Each renewal card IS the NFT image (background-image set inline).
+               No HTML overlay — the NFT art already contains the ENS logo + name (it's
+               part of the rendered .eth NFT artwork, same as the registration template).
+               aspect-ratio is enforced by the explicit cell sizing above so cover-cropping
+               doesn't distort the square NFT art. */
+            .renewal-card {
+                background-color: #2a3990;  /* Faint fallback while image loads */
+                background-size: cover;
+                background-position: center;
+                background-repeat: no-repeat;
+                border-radius: 19px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            }
+
+            /* Overflow card ("+N more") — only HTML-styled card. Placed last in the cards
+               array so the row-major grid puts it in the bottom-right cell of the 2x2 layout.
+               (For 3-NFT/no-overflow case, this element isn't rendered → bottom-right stays empty.) */
+            .renewal-card-overflow {
+                background-color: transparent;
+                background-image: linear-gradient(135deg, #5a8ee0 0%, #7aabff 100%);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+
+            .renewal-card-overflow-text {
+                color: white;
+                font-size: 38px;
+                font-weight: 700;
+                line-height: 1.05;
+                text-align: center;
+                text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+            }
+
+            /* Emoji SVG styling (inline emojis in names) */
+            .emoji-inline {
+                display: inline-block !important;
+                vertical-align: middle !important;
+                width: 1.2em !important;
+                height: 1.2em !important;
+                margin: 0 0.1em !important;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="canvas">
+            <div class="background"></div>
+
+            <div class="usd-price">${formattedUsdPrice}</div>
+            <div class="eth-price">${formattedEthPrice} ETH</div>
+
+            <div class="renewer-section">
+                <img src="${renewerAvatarPath}" alt="Renewer" class="renewer-avatar"
+                     onerror="this.src='data:image/png;base64,${userPlaceholderBase64}'">
+                <span class="renewer-name">${renewerEnsWithEmojis}</span>
+            </div>
+
+            <div class="cards-container">
+                <div class="cards-grid ${layoutClass}">
+                    ${dataCardsHtml}
+                    ${overflowCardHtml}
+                </div>
+            </div>
+        </div>
+    </body>
+    </html>`;
+
+    return html;
   }
 
   /**

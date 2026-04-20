@@ -2488,6 +2488,145 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    // ────────────────────────────────────────────────────────────────────────
+    // Renewal Tweet Generation API endpoints
+    // Renewals are tx-keyed (not row-keyed) — a single tx may contain 100+ rows.
+    // The dashboard fetches all rows for a given tx_hash before generating/posting.
+    // ────────────────────────────────────────────────────────────────────────
+
+    app.get('/api/renewal/tweet/generate/:txHash', requireAuth, async (req, res) => {
+      try {
+        const txHash = req.params.txHash;
+        if (!txHash || !txHash.startsWith('0x')) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid transaction hash (must start with 0x)'
+          });
+        }
+
+        const renewals = await databaseService.getRenewalsByTxHash(txHash);
+        if (renewals.length === 0) {
+          return res.status(404).json({
+            success: false,
+            error: `No renewal rows found for tx ${txHash.slice(0, 12)}…`
+          });
+        }
+
+        const preview = await newTweetFormatter.previewRenewalTweet(renewals);
+        const sample = renewals[0];
+
+        res.json({
+          success: true,
+          data: {
+            renewal: {
+              txHash,
+              renewerAddress: sample.renewerAddress,
+              blockNumber: sample.blockNumber,
+              blockTimestamp: sample.blockTimestamp,
+              nameCount: renewals.length,
+              posted: sample.posted,
+              tweetId: sample.tweetId || null
+            },
+            tweet: preview.tweet,
+            validation: preview.validation,
+            breakdown: preview.breakdown,
+            imageUrl: preview.tweet.imageUrl,
+            hasImage: !!preview.tweet.imageBuffer
+          }
+        });
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.post('/api/renewal/tweet/send/:txHash', requireAuth, async (req, res) => {
+      try {
+        const configValidation = twitterService.validateConfig();
+        if (!configValidation.valid) {
+          return res.status(400).json({
+            success: false,
+            error: 'Twitter API configuration incomplete',
+            missingFields: configValidation.missingFields
+          });
+        }
+
+        const txHash = req.params.txHash;
+        if (!txHash || !txHash.startsWith('0x')) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid transaction hash (must start with 0x)'
+          });
+        }
+
+        const renewals = await databaseService.getRenewalsByTxHash(txHash);
+        if (renewals.length === 0) {
+          return res.status(404).json({
+            success: false,
+            error: `No renewal rows found for tx ${txHash.slice(0, 12)}…`
+          });
+        }
+
+        // Allow re-posting (matches the registration endpoint behaviour — testing/preview friendly)
+
+        // Rate limit gate
+        await rateLimitService.validateTweetPost();
+
+        // Generate
+        const generatedTweet = await newTweetFormatter.generateRenewalTweet(renewals);
+        if (!generatedTweet.isValid) {
+          return res.status(400).json({
+            success: false,
+            error: 'Unable to generate valid renewal tweet',
+            details: generatedTweet
+          });
+        }
+
+        // Post to Twitter (with image)
+        const tweetResult = await twitterService.postTweet(generatedTweet.text, generatedTweet.imageBuffer);
+
+        if (tweetResult.success && tweetResult.tweetId) {
+          await rateLimitService.recordTweetPost(tweetResult.tweetId, tweetResult.postedText || generatedTweet.text);
+
+          // Mark ALL rows for the tx as posted in a single SQL statement.
+          // The statement-level posted_renewal_tx trigger fires once → one AI reply queued (Phase 6).
+          await databaseService.markRenewalTxAsPosted(txHash, tweetResult.tweetId);
+
+          const rateLimitStatus = await rateLimitService.canPostTweet();
+          res.json({
+            success: true,
+            data: {
+              tweetId: tweetResult.tweetId,
+              tweetContent: tweetResult.postedText || generatedTweet.text,
+              characterCount: generatedTweet.characterCount,
+              txHash,
+              nameCount: renewals.length,
+              rateLimitStatus,
+              hasImage: !!generatedTweet.imageBuffer
+            }
+          });
+        } else {
+          await rateLimitService.recordFailedTweetPost(
+            generatedTweet.text,
+            tweetResult.error || 'Unknown error'
+          );
+          res.status(500).json({
+            success: false,
+            error: 'Failed to post renewal tweet',
+            twitterError: tweetResult.error,
+            tweetContent: generatedTweet.text
+          });
+        }
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     app.get('/api/unposted-bids', requireAuth, async (req, res) => {
       try {
         const limit = parseInt(req.query.limit as string) || 500; // Increased for testing
