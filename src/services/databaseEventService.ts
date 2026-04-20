@@ -143,21 +143,26 @@ export class DatabaseEventService {
       this.client.on('error', this.handleConnectionError.bind(this));
       this.client.on('end', this.handleConnectionEnd.bind(this));
 
-      // Connect and start listening for sales, registrations, and bids
+      // Connect and start listening for sales, registrations, bids, and renewals.
+      // Renewals use a STATEMENT-level trigger that emits one notification per distinct
+      // tx_hash (not per row) — payload is a tx_hash string instead of a numeric row id.
+      // Note: posted_renewal_tx LISTEN is deferred to Phase 6 when AIReplyService gains
+      // 'renewal' support — wiring it now would emit error logs on every renewal tweet.
       await this.client.connect();
       await this.client.query('LISTEN new_sale');
       await this.client.query('LISTEN new_registration');
       await this.client.query('LISTEN new_bid');
-      
+      await this.client.query('LISTEN new_renewal_tx');
+
       // Phase 3.2 + 4.6: Listen for AI reply triggers (posted sales/registrations/bids)
       await this.client.query('LISTEN posted_sale');
       await this.client.query('LISTEN posted_registration');
       await this.client.query('LISTEN posted_bid');
-      
+
       this.isListening = true;
       this.reconnectAttempts = 0; // Reset on successful connection
-      
-      logger.info('✅ Database listener connected and listening for new_sale, new_registration, new_bid, posted_sale, posted_registration, and posted_bid notifications');
+
+      logger.info('✅ Database listener connected and listening for new_sale, new_registration, new_bid, new_renewal_tx, posted_sale, posted_registration, and posted_bid notifications');
 
     } catch (error: any) {
       this.isListening = false;
@@ -203,7 +208,22 @@ export class DatabaseEventService {
 
         logger.info(`🚨 NEW BID NOTIFICATION: ID ${bidId} - adding to bids queue`);
         this.addBidToQueue(bidId);
-        
+
+      } else if (msg.channel === 'new_renewal_tx' && msg.payload) {
+        // Payload is a tx_hash string (real ones are 66 chars, 0x-prefixed) instead of
+        // the numeric ids carried by the other channels. The statement-level trigger
+        // emits one notify per distinct tx_hash inserted.
+        // We do a soft sanity check (non-empty + 0x prefix) — strict length is enforced
+        // upstream by the VARCHAR(66) column. Anything weirder than this is a DB bug.
+        const txHash = msg.payload;
+        if (!txHash.startsWith('0x') || txHash.length < 4) {
+          logger.warn(`Invalid tx_hash in new_renewal_tx notification: ${txHash}`);
+          return;
+        }
+
+        logger.info(`🚨 NEW RENEWAL TX NOTIFICATION: ${txHash.slice(0, 12)}… - adding to renewals queue`);
+        this.addRenewalTxToQueue(txHash);
+
       } else if (msg.channel === 'posted_sale' && msg.payload) {
         // Phase 3.2: AI Reply trigger for posted sale
         const saleId = parseInt(msg.payload);
@@ -290,6 +310,23 @@ export class DatabaseEventService {
     // Start processing if not already running
     if (!this.isProcessingBids) {
       this.processBidsQueue();
+    }
+  }
+
+  /**
+   * Add renewal tx_hash to processing queue.
+   * Renewals are tx-keyed (string) rather than row-keyed (number) — the statement-level
+   * trigger emits one notification per distinct tx_hash, and the unit-of-work for tweets
+   * is the tx (a single bulk-renewal tx may contain 100+ name renewal events).
+   */
+  private addRenewalTxToQueue(txHash: string): void {
+    if (!this.renewalTxQueue.includes(txHash)) {
+      this.renewalTxQueue.push(txHash);
+      logger.info(`📦 Added renewal tx ${txHash.slice(0, 12)}… to renewals queue (queue length: ${this.renewalTxQueue.length})`);
+    }
+
+    if (!this.isProcessingRenewals) {
+      this.processRenewalTxQueue();
     }
   }
 
@@ -432,6 +469,33 @@ export class DatabaseEventService {
 
     this.isProcessingBids = false;
     logger.info('✅ Bids queue processing complete');
+  }
+
+  /**
+   * Process the renewal tx queue. One iteration = one tx (which may contain many rows).
+   * AutoTweetService.processNewRenewals handles the per-tx aggregation, threshold check
+   * on total cost, and posts a single tweet for the tx.
+   */
+  private async processRenewalTxQueue(): Promise<void> {
+    if (this.isProcessingRenewals || this.renewalTxQueue.length === 0) {
+      return;
+    }
+
+    this.isProcessingRenewals = true;
+    logger.info(`🔄 Starting renewals queue processing (${this.renewalTxQueue.length} tx(es))`);
+
+    while (this.renewalTxQueue.length > 0 && !this.isShuttingDown) {
+      const txHash = this.renewalTxQueue.shift()!;
+
+      try {
+        await this.processSingleRenewalTx(txHash);
+      } catch (error: any) {
+        logger.error(`Failed to process renewal tx ${txHash}:`, error.message);
+      }
+    }
+
+    this.isProcessingRenewals = false;
+    logger.info('✅ Renewals queue processing complete');
   }
 
   /**
@@ -663,6 +727,64 @@ export class DatabaseEventService {
   }
 
   /**
+   * Process a single renewal tx notification. Fetches all rows for the tx, then
+   * delegates to AutoTweetService.processNewRenewals which applies the per-tx
+   * threshold (sum of all cost_eth in the tx) and posts a single tweet.
+   *
+   * If any row in the tx is already posted, the AutoTweetService skips it cleanly.
+   */
+  private async processSingleRenewalTx(txHash: string): Promise<void> {
+    try {
+      const renewals = await this.databaseService.getRenewalsByTxHash(txHash);
+
+      if (renewals.length === 0) {
+        logger.warn(`Renewal tx ${txHash.slice(0, 12)}… has no rows in database`);
+        return;
+      }
+
+      // Defensive: if any row is already marked posted (e.g., re-delivery race),
+      // assume the tx has been handled and skip — AutoTweetService also checks this.
+      if (renewals.every(r => r.posted)) {
+        logger.info(`Renewal tx ${txHash.slice(0, 12)}… already posted, skipping`);
+        return;
+      }
+
+      const totalEth = renewals.reduce((sum, r) => sum + parseFloat(r.costEth || '0'), 0);
+      const renewerShort = renewals[0].renewerAddress.slice(0, 6) + '…' + renewals[0].renewerAddress.slice(-4);
+      logger.info(
+        `🚀 INSTANT PROCESSING: ${renewals.length} name(s) renewed by ${renewerShort} for ${totalEth.toFixed(4)} ETH ` +
+        `(tx: ${txHash.slice(0, 12)}…)`
+      );
+
+      const settings = await this.autoTweetService.getSettings();
+
+      if (!settings.enabled || !settings.renewals.enabled) {
+        logger.info(`Auto-posting disabled, skipping renewal tx ${txHash.slice(0, 12)}…`);
+        return;
+      }
+
+      // Pass the tx as a Map<txHash, rows>; AutoTweetService.processNewRenewals iterates
+      // the map and applies all per-tx gating (threshold on total cost, age, rate-limit).
+      const results = await this.autoTweetService.processNewRenewals(
+        new Map([[txHash, renewals]]),
+        settings
+      );
+
+      const result = results[0];
+      if (result?.success) {
+        logger.info(`✅ Successfully posted renewal tweet for tx ${txHash.slice(0, 12)}… - Tweet ID: ${result.tweetId}`);
+      } else if (result?.skipped) {
+        logger.info(`⏭️ Skipped renewal tx ${txHash.slice(0, 12)}…: ${result.reason}`);
+      } else {
+        logger.warn(`❌ Failed to post renewal tx ${txHash.slice(0, 12)}…: ${result?.error || 'Unknown error'}`);
+      }
+
+    } catch (error: any) {
+      logger.error(`Error processing renewal tx ${txHash}:`, error.message);
+    }
+  }
+
+  /**
    * Handle database connection errors
    */
   private handleConnectionError(error: Error): void {
@@ -744,7 +866,7 @@ export class DatabaseEventService {
       // Get auto-post settings to use the same time filters
       const autoPostSettings = await this.autoTweetService.getSettings();
       
-      logger.info(`🔍 Using auto-posting time window: Sales ${autoPostSettings.sales.maxAgeHours}h, Registrations ${autoPostSettings.registrations.maxAgeHours}h, Bids ${autoPostSettings.bids.maxAgeHours}h (Global enabled: ${autoPostSettings.enabled})`);
+      logger.info(`🔍 Using auto-posting time window: Sales ${autoPostSettings.sales.maxAgeHours}h, Registrations ${autoPostSettings.registrations.maxAgeHours}h, Bids ${autoPostSettings.bids.maxAgeHours}h, Renewals ${autoPostSettings.renewals.maxAgeHours}h (Global enabled: ${autoPostSettings.enabled})`);
       
       // === SALES RECOVERY ===
       const unpostedSales = await this.databaseService.getUnpostedSales(5, autoPostSettings.sales.maxAgeHours);
@@ -803,12 +925,30 @@ export class DatabaseEventService {
         logger.info(`⏰ Found ${allUnpostedBids.length} unposted bids but they're older than ${autoPostSettings.bids.maxAgeHours}h - outside auto-posting window`);
       }
 
+      // === RENEWALS RECOVERY ===
+      // Renewals are queued by tx_hash, not row id — one queue entry per renewal tx.
+      const unpostedRenewalTxs = await this.databaseService.getUnpostedRenewalTxHashes(5, autoPostSettings.renewals.maxAgeHours);
+      const allUnpostedRenewalTxs = await this.databaseService.getUnpostedRenewalTxHashes(5, 999); // Debug check
+
+      logger.info(`🔍 Renewals recovery: Found ${allUnpostedRenewalTxs.length} unposted renewal tx(es) total (any age), ${unpostedRenewalTxs.length} within ${autoPostSettings.renewals.maxAgeHours}h window`);
+
+      if (unpostedRenewalTxs.length > 0) {
+        logger.info(`🔄 Renewals startup recovery: Found ${unpostedRenewalTxs.length} unposted renewal tx(es), adding to processing queue`);
+
+        for (const txHash of unpostedRenewalTxs) {
+          this.addRenewalTxToQueue(txHash);
+          logger.info(`🔄 Recovered unposted renewal tx: ${txHash.slice(0, 12)}…`);
+        }
+      } else if (allUnpostedRenewalTxs.length > 0) {
+        logger.info(`⏰ Found ${allUnpostedRenewalTxs.length} unposted renewal tx(es) but they're older than ${autoPostSettings.renewals.maxAgeHours}h - outside auto-posting window`);
+      }
+
       // === SUMMARY ===
-      const totalRecovered = unpostedSales.length + unpostedRegistrations.length + unpostedBids.length;
+      const totalRecovered = unpostedSales.length + unpostedRegistrations.length + unpostedBids.length + unpostedRenewalTxs.length;
       if (totalRecovered === 0) {
         logger.info('✅ No unposted items found within time windows - clean startup');
       } else {
-        logger.info(`✅ Startup recovery complete - ${unpostedSales.length} sales, ${unpostedRegistrations.length} registrations, and ${unpostedBids.length} bids added to processing queues`);
+        logger.info(`✅ Startup recovery complete - ${unpostedSales.length} sales, ${unpostedRegistrations.length} registrations, ${unpostedBids.length} bids, and ${unpostedRenewalTxs.length} renewal tx(es) added to processing queues`);
       }
 
     } catch (error: any) {
@@ -824,8 +964,12 @@ export class DatabaseEventService {
     isListening: boolean;
     salesQueueLength: number;
     registrationsQueueLength: number;
+    bidsQueueLength: number;
+    renewalsQueueLength: number;
     isProcessingSales: boolean;
     isProcessingRegistrations: boolean;
+    isProcessingBids: boolean;
+    isProcessingRenewals: boolean;
     reconnectAttempts: number;
     aiReplySalesQueueLength: number;
     aiReplyRegistrationsQueueLength: number;
@@ -837,8 +981,12 @@ export class DatabaseEventService {
       isListening: this.isListening,
       salesQueueLength: this.saleNotificationQueue.length,
       registrationsQueueLength: this.registrationNotificationQueue.length,
+      bidsQueueLength: this.bidNotificationQueue.length,
+      renewalsQueueLength: this.renewalTxQueue.length,
       isProcessingSales: this.isProcessingSales,
       isProcessingRegistrations: this.isProcessingRegistrations,
+      isProcessingBids: this.isProcessingBids,
+      isProcessingRenewals: this.isProcessingRenewals,
       reconnectAttempts: this.reconnectAttempts,
       aiReplySalesQueueLength: this.aiReplySaleQueue.length,
       aiReplyRegistrationsQueueLength: this.aiReplyRegistrationQueue.length,
