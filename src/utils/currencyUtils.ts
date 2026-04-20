@@ -1,51 +1,33 @@
 import { logger } from './logger';
+import { CURRENCY_MAP } from './currencyConstants';
+import { getCurrencyDisplayName } from './bidUtils';
 
 /**
- * Currency utilities for secure contract address to symbol mapping
+ * Currency utilities for secure contract address → symbol mapping.
+ *
+ * Address/symbol/decimals data lives in {@link CURRENCY_MAP} (./currencyConstants).
+ * This class provides higher-level helpers with logging and fail-safe defaults.
  */
 export class CurrencyUtils {
-  // Known contract addresses (lowercase for consistent matching)
-  private static readonly CONTRACT_TO_CURRENCY: { [contract: string]: string } = {
-    // USDC
-    '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': 'USDC',
-    
-    // WETH (maps to ETH for display since they're essentially the same)
-    '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2': 'ETH',
-    
-    // USDT
-    '0xdac17f958d2ee523a2206206994597c13d831ec7': 'USDT',
-    
-    // DAI
-    '0x6b175474e89094c44da98b954eedeac495271d0f': 'DAI',
-    
-    // Native ETH (various representations)
-    '0x0000000000000000000000000000000000000000': 'ETH', // Zero address
-    '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee': 'ETH', // Common placeholder for native ETH
-    '': 'ETH', // Empty contract also means native ETH
-  };
-
   /**
-   * Get currency symbol from contract address (secure mapping)
-   * Falls back to API symbol only if contract is unknown
+   * Get currency symbol from contract address (secure mapping).
+   * Falls back to API-provided symbol if contract is unknown, logs a warning either way.
    */
   static getCurrencySymbol(contractAddress: string, apiSymbol?: string): string {
     if (!contractAddress) {
-      return 'ETH'; // Native ETH
+      return 'ETH'; // Native ETH (empty contract)
     }
 
-    const contractLower = contractAddress.toLowerCase();
-    const knownCurrency = this.CONTRACT_TO_CURRENCY[contractLower];
-    
+    const knownCurrency = CURRENCY_MAP[contractAddress.toLowerCase()];
     if (knownCurrency) {
       return knownCurrency;
     }
-    
-    // Unknown contract - log warning and fallback to API symbol
+
     if (apiSymbol) {
       logger.warn(`⚠️ Unknown currency contract: ${contractAddress}, using API symbol: ${apiSymbol}`);
       return apiSymbol;
     }
-    
+
     logger.warn(`⚠️ Unknown currency contract: ${contractAddress}, defaulting to ETH`);
     return 'ETH';
   }
@@ -56,24 +38,15 @@ export class CurrencyUtils {
    */
   static isETHEquivalent(contractAddress: string): boolean {
     if (!contractAddress) return true; // Native ETH
-    const contractLower = contractAddress.toLowerCase();
-    const knownCurrency = this.CONTRACT_TO_CURRENCY[contractLower];
-    return knownCurrency === 'ETH';
+    return CURRENCY_MAP[contractAddress.toLowerCase()] === 'ETH';
   }
 
   /**
-   * Get user-friendly currency display name
+   * Get user-friendly currency display name.
+   * Delegates to the canonical {@link getCurrencyDisplayName} in bidUtils.
    */
   static getDisplayName(symbol: string): string {
-    const displayMap: { [key: string]: string } = {
-      'ETH': 'ETH',
-      'WETH': 'ETH', // Display WETH as ETH
-      'USDC': 'USDC',
-      'USDT': 'USDT',
-      'DAI': 'DAI',
-    };
-    
-    return displayMap[symbol.toUpperCase()] || symbol;
+    return getCurrencyDisplayName(symbol);
   }
 
   /**

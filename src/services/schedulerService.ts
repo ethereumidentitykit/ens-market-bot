@@ -310,25 +310,49 @@ export class SchedulerService {
     logger.info('🍷 Starting Grails API sync...');
 
     try {
-      const offers = await this.grailsApiService.fetchNewOffers();
-      
+      const fetchResult = await this.grailsApiService.fetchNewOffers();
+      const { offers, newestTimestamp, boundaryTimestamp, hitPageCap, oldestFetchedTimestamp } = fetchResult;
+
       if (offers.length === 0) {
+        // No new offers — safe to advance cursor to bookmark progress
+        // (e.g., quiet period) but only when we DIDN'T hit the page cap.
+        if (!hitPageCap && newestTimestamp > boundaryTimestamp) {
+          await this.grailsApiService.advanceCursor(newestTimestamp);
+        }
         logger.info('🍷 Grails sync complete - no new offers');
       } else {
         const stats = await this.bidsProcessingService.processBids(offers);
-        
+
+        // Cursor advancement strategy:
+        // - If we hit the page cap, only advance to the OLDEST fetched offer's
+        //   timestamp. This guarantees the next poll re-reads anything past
+        //   the cap that we couldn't fit in this batch.
+        // - Otherwise, advance to the NEWEST timestamp seen. The boundary was
+        //   reached naturally so there's nothing older to recover.
+        // Either way, advance only AFTER processBids resolves successfully so
+        // a downstream crash leaves the cursor pointing at unprocessed offers.
+        const cursorTarget = hitPageCap && oldestFetchedTimestamp !== null
+          ? oldestFetchedTimestamp
+          : newestTimestamp;
+
+        if (cursorTarget > boundaryTimestamp) {
+          await this.grailsApiService.advanceCursor(cursorTarget);
+        }
+
         const duration = Date.now() - startTime.getTime();
         logger.info(`🍷 Grails sync completed in ${duration}ms:`, {
           fetched: offers.length,
           stored: stats.newBids,
           duplicates: stats.duplicates,
           filtered: stats.filtered,
-          errors: stats.errors
+          errors: stats.errors,
+          hitPageCap,
         });
       }
 
     } catch (error: any) {
       logger.error(`🍷 Grails sync failed:`, error.message);
+      // Cursor intentionally NOT advanced on error — next run will retry the same window.
     } finally {
       this.isProcessingGrails = false;
     }

@@ -1911,25 +1911,6 @@ export class DatabaseService implements IDatabaseService {
   }
 
   /**
-   * Get last processed bid timestamp for incremental fetching
-   */
-  async getLastProcessedBidTimestamp(): Promise<number> {
-    const result = await this.getSystemState('last_processed_bid_timestamp');
-    if (!result) {
-      // Default to current time (boundary logic will apply 1-hour cap)
-      return Date.now();
-    }
-    return parseInt(result, 10);
-  }
-
-  /**
-   * Set last processed bid timestamp
-   */
-  async setLastProcessedBidTimestamp(timestamp: number): Promise<void> {
-    await this.setSystemState('last_processed_bid_timestamp', timestamp.toString());
-  }
-
-  /**
    * Map database rows to ENSBid objects
    */
   private mapBidRows(rows: any[]): ENSBid[] {

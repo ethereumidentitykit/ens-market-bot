@@ -1,11 +1,15 @@
 import { IDatabaseService, BidProcessingStats } from '../types';
+import { TransformedBid } from '../types/bids';
 import { logger } from '../utils/logger';
 import { isTokenIdHash, isSubdomain } from '../utils/nameUtils';
 import { AlchemyService } from './alchemyService';
 import { ClubService } from './clubService';
 import { ensSubgraphService } from './ensSubgraphService';
-import { calculateBidDuration, getCurrencyDisplayName } from '../utils/bidUtils';
+import { GrailsApiService } from './grailsApiService';
 import axios from 'axios';
+
+// Re-export for backward compatibility with any external callers
+export type { TransformedBid };
 
 interface ENSMetadata {
   name: string;
@@ -13,33 +17,6 @@ interface ENSMetadata {
   image: string;
   image_url: string;
   attributes: any[];
-}
-
-/**
- * Internal bid format produced by GrailsApiService and consumed by this service.
- */
-export interface TransformedBid {
-  bidId: string;
-  contractAddress: string;
-  tokenId: string | null;
-  makerAddress: string;
-  takerAddress: string;
-  status: string;
-  priceRaw: string;
-  priceDecimal: string;
-  priceUsd: string | null;
-  currencyContract: string;
-  currencySymbol: string;
-  sourceDomain: string;
-  sourceName: string;
-  marketplaceFee: number;
-  createdAtApi: string;
-  updatedAtApi: string;
-  validFrom: number;
-  validUntil: number;
-  processedAt: string;
-  ensName?: string;
-  nftImage?: string;
 }
 
 export class BidsProcessingService {
@@ -130,6 +107,22 @@ export class BidsProcessingService {
           logger.debug(`🚫 Skipping subdomain bid: ${enrichedBid.ensName}`);
           stats.filtered++;
           return;
+        }
+      }
+
+      // Enrich with real Seaport order validity (startTime/endTime) by hitting
+      // /offers/{id}. Only done after all filters pass to avoid wasted requests
+      // on offers that won't be stored. Falls back to the synthetic 7-day default
+      // baked into transformOffer() if the lookup fails.
+      const offerIdMatch = bid.bidId.match(/^grails-(\d+)$/);
+      if (offerIdMatch) {
+        const validity = await GrailsApiService.getOfferValidity(offerIdMatch[1]);
+        if (validity) {
+          enrichedBid.validFrom = validity.validFrom;
+          enrichedBid.validUntil = validity.validUntil;
+          logger.debug(`📅 Enriched bid ${bid.bidId} with real validity: ${new Date(validity.validFrom * 1000).toISOString()} → ${new Date(validity.validUntil * 1000).toISOString()}`);
+        } else {
+          logger.debug(`📅 Bid ${bid.bidId} using fallback 7-day validity (Grails order lookup failed)`);
         }
       }
 
@@ -402,11 +395,4 @@ export class BidsProcessingService {
     }
   }
 
-  calculateBidDuration(validFrom: number, validUntil: number): string {
-    return calculateBidDuration(validFrom, validUntil);
-  }
-
-  getCurrencyDisplayName(symbol: string): string {
-    return getCurrencyDisplayName(symbol);
-  }
 }

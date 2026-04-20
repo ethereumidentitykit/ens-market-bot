@@ -12,6 +12,7 @@ import { ClubService } from './clubService';
 import { GrailsApiService } from './grailsApiService';
 import { ENSTokenUtils } from './ensTokenUtils';
 import { TimeUtils } from '../utils/timeUtils';
+import { calculateBidDuration, getCurrencyDisplayName } from '../utils/bidUtils';
 import { isKnownMarketplaceFee } from '../config/contracts';
 
 export interface GeneratedTweet {
@@ -286,7 +287,13 @@ export class NewTweetFormatter {
     try {
       logger.info(`🔍 Fetching historical context for ${ensName} (Grails API)`);
 
-      const result = await GrailsApiService.getLastSaleOrMint(ensName, currentTxHash);
+      const ethPriceUsd = this.alchemyService ? await this.alchemyService.getETHPriceUSD() : undefined;
+      const result = await GrailsApiService.getLastSaleOrMint(
+        ensName,
+        currentTxHash,
+        0.01,
+        ethPriceUsd ?? undefined
+      );
 
       if (result) {
         logger.info(`✅ Found historical data: ${result.priceAmount} ${result.currencySymbol || 'ETH'}`);
@@ -505,7 +512,7 @@ export class NewTweetFormatter {
     const header = `✋ OFFER: ${ensName}`;
     
     // Price line: For: $X (Y ETH) (recalculate USD with fresh ETH rate)
-    const currencyDisplay = this.getCurrencyDisplayName(bid.currencySymbol);
+    const currencyDisplay = getCurrencyDisplayName(bid.currencySymbol);
     const priceDecimal = parseFloat(bid.priceDecimal).toFixed(2);
     
     let priceUsd = '';
@@ -620,38 +627,6 @@ export class NewTweetFormatter {
   }
 
 
-
-  /**
-   * Get user-friendly currency display name
-   */
-  private getCurrencyDisplayName(symbol: string): string {
-    const currencyMap: { [key: string]: string } = {
-      'WETH': 'ETH',
-      'USDC': 'USDC',
-      'USDT': 'USDT'
-    };
-    return currencyMap[symbol.toUpperCase()] || symbol;
-  }
-
-  /**
-   * Calculate human-readable duration from timestamps
-   */
-  private calculateBidDuration(validFrom: number, validUntil: number): string {
-    const durationMs = (validUntil - validFrom) * 1000;
-    const minutes = Math.floor(durationMs / (1000 * 60));
-    const hours = Math.floor(minutes / 60);
-    const days = Math.floor(hours / 24);
-    const weeks = Math.floor(days / 7);
-    const months = Math.floor(days / 30);
-    
-    if (months >= 6) return `${months} months`;
-    if (months >= 1) return `${months} month${months > 1 ? 's' : ''}`;
-    if (weeks >= 1) return `${weeks} week${weeks > 1 ? 's' : ''}`;
-    if (days >= 1) return `${days} day${days > 1 ? 's' : ''}`;
-    if (hours >= 1) return `${hours} hour${hours > 1 ? 's' : ''}`;
-    if (minutes >= 1) return `${minutes} minute${minutes > 1 ? 's' : ''}`;
-    return 'less than 1 minute';
-  }
 
   /**
    * Format the tweet text according to the new specification
@@ -1504,7 +1479,7 @@ export class NewTweetFormatter {
     if (!ensName) {
       ensName = `Token: ${bid.tokenId?.slice(-6) || 'Unknown'}...`;
     }
-    const currencyDisplay = this.getCurrencyDisplayName(bid.currencySymbol);
+    const currencyDisplay = getCurrencyDisplayName(bid.currencySymbol);
     const priceDecimal = parseFloat(bid.priceDecimal).toFixed(2);
     
     // Recalculate USD price with fresh ETH rate for breakdown (2 decimal places for tweets)
@@ -1525,7 +1500,7 @@ export class NewTweetFormatter {
     }
     
     const bidderHandle = this.getDisplayHandle(bidderAccount, bid.makerAddress);
-    const duration = this.calculateBidDuration(bid.validFrom, bid.validUntil);
+    const duration = calculateBidDuration(bid.validFrom, bid.validUntil);
     const marketplaceUrl = this.buildMarketplaceUrl(ensName);
     
     // Fetch Owner for breakdown (using OpenSea first, Alchemy fallback)

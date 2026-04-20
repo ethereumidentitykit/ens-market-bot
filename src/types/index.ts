@@ -299,8 +299,6 @@ export interface IDatabaseService {
   getPriceTiers(transactionType?: string): Promise<PriceTier[]>;
   updatePriceTier(transactionType: string, tierLevel: number, minUsd: number, maxUsd: number | null): Promise<void>;
   getPriceTierForAmount(transactionType: string, usdAmount: number): Promise<PriceTier | null>;
-  getLastProcessedBidTimestamp(): Promise<number>;
-  setLastProcessedBidTimestamp(timestamp: number): Promise<void>;
   
   // SIWE admin session methods
   createAdminSession(session: Omit<SiweSession, 'id'>): Promise<void>;

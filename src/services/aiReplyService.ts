@@ -737,11 +737,20 @@ export class AIReplyService {
 
   /**
    * Enrich activities with USD prices using the current ETH price.
-   * Grails API returns usd: 0 for all activities — this fills them in for ETH-denominated trades.
+   * Grails API returns usd: 0 for all activities — this fills them in.
+   * - ETH/WETH: usd = native × ethPrice
+   * - USDC/USDT/DAI: usd = decimal (1:1 to USD)
    */
   private enrichActivitiesWithUSD(activities: TokenActivity[], ethPrice: number): void {
     for (const activity of activities) {
-      if (activity.price.amount.usd === 0 && activity.price.amount.native > 0) {
+      if (activity.price.amount.usd !== 0) continue;
+
+      const symbol = activity.price.currency.symbol?.toUpperCase();
+      const isStablecoin = symbol === 'USDC' || symbol === 'USDT' || symbol === 'DAI';
+
+      if (isStablecoin && activity.price.amount.decimal > 0) {
+        activity.price.amount.usd = activity.price.amount.decimal;
+      } else if (activity.price.amount.native > 0) {
         activity.price.amount.usd = activity.price.amount.native * ethPrice;
       }
     }

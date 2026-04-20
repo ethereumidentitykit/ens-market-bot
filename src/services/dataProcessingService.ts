@@ -105,11 +105,14 @@ export interface UserStats {
  */
 export interface BiddingStats {
   totalBids: number; // Total number of bids made
-  activeBids: number; // Currently active bids
-  filledBids: number; // Bids that were accepted/filled
-  cancelledBids: number; // Bids that were cancelled
-  expiredBids: number; // Bids that expired
-  
+  // Lifecycle counts: null when not derivable from current data source
+  // (Grails activity feed only exposes BID_CREATED events, not status transitions).
+  // Treat null as "unknown" — do not display as zero in prompts/UI.
+  activeBids: number | null;
+  filledBids: number | null;
+  cancelledBids: number | null;
+  expiredBids: number | null;
+
   totalBidVolume: number; // Total ETH bid across all bids
   totalBidVolumeUsd: number; // Total USD value of bids
   averageBidAmount: number; // Average bid amount in ETH
@@ -663,10 +666,12 @@ export class DataProcessingService {
     
     return {
       totalBids: bidActivities.length,
-      activeBids: 0, // Unknown - would need to fetch current bid status
-      filledBids: 0, // Unknown - would need BID_CANCELLED or trade data
-      cancelledBids: 0, // Unknown - would need BID_CANCELLED activities
-      expiredBids: 0, // Unknown - would need to check expiry timestamps
+      // Status counts are NOT derivable from Grails BID_CREATED activities alone.
+      // Mark as null so prompts/UI can show "unknown" rather than misleading zeros.
+      activeBids: null,
+      filledBids: null,
+      cancelledBids: null,
+      expiredBids: null,
       totalBidVolume,
       totalBidVolumeUsd,
       averageBidAmount,

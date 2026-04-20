@@ -72,14 +72,20 @@ async function startApplication(): Promise<void> {
     const autoTweetService = new AutoTweetService(newTweetFormatter, twitterService, rateLimitService, databaseService, worldTimeService, alchemyService);
     const schedulerService = new SchedulerService(bidsProcessingService, autoTweetService, databaseService);
     
-    // Initialize GrailsApiService for Grails marketplace offers (if enabled)
+    // Initialize GrailsApiService — sole bid ingestion source.
+    // Defaults to production URL when GRAILS_API_URL is unset.
+    // Set GRAILS_API_URL='' (empty string) to explicitly disable bid ingestion.
+    const grailsUrlEnv = process.env.GRAILS_API_URL;
+    const grailsExplicitlyDisabled = grailsUrlEnv === '';
     let grailsApiService: GrailsApiService | null = null;
-    if (process.env.GRAILS_API_URL) {
-      grailsApiService = new GrailsApiService(databaseService, alchemyService);
-      schedulerService.setGrailsApiService(grailsApiService);
-      logger.info('🍷 Grails API Service enabled');
+
+    if (grailsExplicitlyDisabled) {
+      logger.warn('⚠️  Grails API Service DISABLED (GRAILS_API_URL is empty) — NO BID INGESTION will occur');
     } else {
-      logger.info('🍷 Grails API Service disabled (GRAILS_API_URL not set)');
+      grailsApiService = new GrailsApiService(databaseService);
+      schedulerService.setGrailsApiService(grailsApiService);
+      const sourceLabel = grailsUrlEnv ? 'env' : 'default';
+      logger.info(`🍷 Grails API Service enabled (URL from ${sourceLabel})`);
     }
     
     // Phase 3.4: Initialize AI Reply Service for automated contextual replies

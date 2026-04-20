@@ -20,9 +20,11 @@ export function calculateBidDuration(validFrom: number, validUntil: number): str
 }
 
 const CURRENCY_DISPLAY: Record<string, string> = {
+  'ETH': 'ETH',
   'WETH': 'ETH',
   'USDC': 'USDC',
   'USDT': 'USDT',
+  'DAI': 'DAI',
 };
 
 export function getCurrencyDisplayName(symbol: string): string {

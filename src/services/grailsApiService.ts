@@ -1,117 +1,33 @@
 import axios from 'axios';
 import { IDatabaseService } from '../types';
 import { logger } from '../utils/logger';
-import { TransformedBid } from './bidsProcessingService';
-import { AlchemyService } from './alchemyService';
 import { TokenActivity } from '../types/activity';
+import {
+  TransformedBid,
+  GrailsActivityRecord,
+  GrailsOffer,
+  GrailsApiResponse,
+  GrailsActiveListing,
+  ClubActivityEntry,
+  GrailsServiceStats,
+} from '../types/bids';
+import {
+  CURRENCY_MAP,
+  CURRENCY_DECIMALS,
+  CURRENCY_NAMES,
+  ENS_NAMEWRAPPER,
+  ENS_BASE_REGISTRAR,
+} from '../utils/currencyConstants';
 
-/**
- * Grails API Response Types
- */
-export interface GrailsActivityRecord {
-  id: number;
-  ens_name_id: number;
-  event_type: string;
-  actor_address: string;
-  counterparty_address: string | null;
-  platform: string;
-  chain_id: number;
-  price_wei: string;
-  currency_address: string;
-  transaction_hash: string | null;
-  block_number: string | null;
-  metadata: Record<string, any>;
-  created_at: string;
-  name: string;
-  token_id: string;
-  clubs?: string[];
-}
-
-export type GrailsOffer = GrailsActivityRecord;
-
-export interface GrailsApiResponse {
-  success: boolean;
-  data: {
-    results: GrailsActivityRecord[];
-    pagination: {
-      page: number;
-      limit: number;
-      total: number;
-      totalPages: number;
-      hasNext: boolean;
-      hasPrev: boolean;
-    };
-  };
-  meta: {
-    timestamp: string;
-    version: string;
-  };
-}
-
-const CURRENCY_DECIMALS: Record<string, number> = {
-  'USDC': 6,
-  'USDT': 6,
-  'DAI': 18,
+// Re-export for backward compatibility with any external callers
+export type {
+  GrailsActivityRecord,
+  GrailsOffer,
+  GrailsApiResponse,
+  GrailsActiveListing,
+  ClubActivityEntry,
+  GrailsServiceStats,
 };
-
-const CURRENCY_NAMES: Record<string, string> = {
-  'ETH': 'Ether',
-  'WETH': 'Wrapped Ether',
-  'USDC': 'USD Coin',
-  'USDT': 'Tether',
-  'DAI': 'Dai Stablecoin',
-};
-
-/**
- * Currency address to symbol mapping
- */
-const CURRENCY_MAP: Record<string, string> = {
-  '0x0000000000000000000000000000000000000000': 'ETH',
-  '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2': 'ETH',
-  '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': 'USDC',
-  '0xdac17f958d2ee523a2206206994597c13d831ec7': 'USDT',
-  '0x6b175474e89094c44da98b954eedeac495271d0f': 'DAI',
-};
-
-/**
- * ENS Contract Addresses
- */
-const ENS_NAMEWRAPPER = '0xd4416b13d2b3a9abae7acd5d6c2bbdbe25686401';
-const ENS_BASE_REGISTRAR = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
-
-/**
- * Active listing returned by getListingsForName()
- */
-export interface GrailsActiveListing {
-  price: number;          // Decimal price (e.g. 0.5)
-  priceWei: string;
-  currencySymbol: string; // ETH, WETH, USDC, etc.
-  source: string;         // e.g. "grails", "opensea"
-}
-
-/**
- * Simplified activity entry for club/category context in LLM prompts
- */
-export interface ClubActivityEntry {
-  name: string;
-  eventType: 'sold' | 'bought' | 'mint';
-  priceEth: number;
-  priceToken: number;
-  currencySymbol: string;
-  timestamp: number;
-  daysAgo: number;
-}
-
-/**
- * Grails service stats type
- */
-export interface GrailsServiceStats {
-  totalFetched: number;
-  totalStored: number;
-  duplicates: number;
-  errors: number;
-  lastFetchTime: Date | null;
-}
 
 /**
  * GrailsApiService
@@ -120,10 +36,8 @@ export interface GrailsServiceStats {
  */
 export class GrailsApiService {
   private databaseService: IDatabaseService;
-  private alchemyService: AlchemyService;
   private baseUrl: string;
-  
-  // Stats tracking
+
   private stats: GrailsServiceStats = {
     totalFetched: 0,
     totalStored: 0,
@@ -132,37 +46,52 @@ export class GrailsApiService {
     lastFetchTime: null,
   };
 
-  constructor(databaseService: IDatabaseService, alchemyService: AlchemyService) {
+  constructor(databaseService: IDatabaseService) {
     this.databaseService = databaseService;
-    this.alchemyService = alchemyService;
     this.baseUrl = process.env.GRAILS_API_URL || 'https://grails-api.ethid.org/api/v1/activity';
     
     logger.info(`🍷 GrailsApiService initialized (endpoint: ${this.baseUrl})`);
   }
 
   /**
-   * Fetch new offers from Grails API with timestamp-based cursor
-   * Uses 1-hour lookback cap and max 200 results (4 pages)
+   * Fetch new offers from Grails API with timestamp-based cursor.
+   * Uses 4-hour lookback cap and max 500 results (10 pages × 50).
+   *
+   * Returns offers plus the newest timestamp seen and a flag indicating whether
+   * we hit the page cap. The CALLER is responsible for advancing the cursor
+   * (via {@link setLastProcessedTimestamp}) only after offers have been
+   * successfully processed — this prevents data loss on crash/processing failure.
+   *
+   * If the page cap is hit, the caller should advance the cursor only to the
+   * OLDEST timestamp among offers actually processed, not the newest, to avoid
+   * silently skipping offers that were past the cap.
    */
-  async fetchNewOffers(): Promise<TransformedBid[]> {
+  async fetchNewOffers(): Promise<{
+    offers: TransformedBid[];
+    newestTimestamp: number;
+    boundaryTimestamp: number;
+    hitPageCap: boolean;
+    oldestFetchedTimestamp: number | null;
+  }> {
     const startTime = Date.now();
     logger.info('🍷 Starting Grails API fetch...');
 
+    const lastTimestamp = await this.getLastProcessedTimestamp();
+    const fourHoursAgo = Date.now() - (4 * 60 * 60 * 1000);
+    const boundaryTimestamp = Math.max(lastTimestamp, fourHoursAgo);
+
+    logger.info(`📈 Fetching offers newer than: ${new Date(boundaryTimestamp).toISOString()}`);
+
+    const allOffers: GrailsOffer[] = [];
+    let page = 1;
+    const maxPages = 10; // Max 500 results (10 × 50)
+    const limit = 50;
+    let hasMore = true;
+    let newestTimestamp = boundaryTimestamp;
+    let oldestFetchedTimestamp: number | null = null;
+    let hitBoundary = false;
+
     try {
-      // Get last processed timestamp (with 1-hour lookback cap)
-      const lastTimestamp = await this.getLastProcessedTimestamp();
-      const fourHoursAgo = Date.now() - (4 * 60 * 60 * 1000);
-      const boundaryTimestamp = Math.max(lastTimestamp, fourHoursAgo);
-      
-      logger.info(`📈 Fetching offers newer than: ${new Date(boundaryTimestamp).toISOString()}`);
-
-      const allOffers: GrailsOffer[] = [];
-      let page = 1;
-      const maxPages = 4; // Max 200 results (4 × 50)
-      const limit = 50;
-      let hasMore = true;
-      let newestTimestamp = boundaryTimestamp;
-
       while (hasMore && page <= maxPages) {
         const url = `${this.baseUrl}?limit=${limit}&page=${page}&event_type=offer_made`;
         logger.debug(`🔍 Fetching page ${page}: ${url}`);
@@ -183,45 +112,60 @@ export class GrailsApiService {
         const offers = response.data.data.results;
         logger.debug(`📄 Page ${page}: Retrieved ${offers.length} offers`);
 
-        // Filter to only offers newer than our cursor
         const newOffers = offers.filter(offer => {
           const offerTime = new Date(offer.created_at).getTime();
-          
-          // Track newest timestamp seen
+
           if (offerTime > newestTimestamp) {
             newestTimestamp = offerTime;
           }
-          
+          if (oldestFetchedTimestamp === null || offerTime < oldestFetchedTimestamp) {
+            oldestFetchedTimestamp = offerTime;
+          }
+
           return offerTime > boundaryTimestamp;
         });
 
         allOffers.push(...newOffers);
 
-        // Stop if we hit older offers (API returns newest first)
+        // Stop if we hit older offers (API returns newest first → reached boundary)
         if (newOffers.length < offers.length) {
           logger.debug(`🛑 Hit boundary timestamp, stopping pagination`);
+          hitBoundary = true;
           hasMore = false;
         } else {
-          hasMore = response.data.data.pagination.hasNext;
+          hasMore = response.data.data.pagination?.hasNext ?? false;
           page++;
         }
 
-        // Rate limiting between pages
         if (hasMore && page <= maxPages) {
           await new Promise(resolve => setTimeout(resolve, 500));
         }
       }
 
-      // Update cursor timestamp
-      if (newestTimestamp > boundaryTimestamp) {
-        await this.setLastProcessedTimestamp(newestTimestamp);
-        logger.info(`📍 Updated cursor to: ${new Date(newestTimestamp).toISOString()}`);
+      const hitPageCap = !hitBoundary && page > maxPages;
+      if (hitPageCap) {
+        logger.warn(
+          `⚠️  Hit page cap (${maxPages} pages, ${allOffers.length} offers) before reaching boundary timestamp. ` +
+          `Cursor will only advance to oldest fetched offer to avoid skipping older data.`
+        );
       }
 
-      // Transform offers to internal format
-      const transformedBids = await Promise.all(
+      const transformResults = await Promise.allSettled(
         allOffers.map(offer => this.transformOffer(offer))
       );
+      const transformedBids: TransformedBid[] = [];
+      let transformFailures = 0;
+      for (const result of transformResults) {
+        if (result.status === 'fulfilled') {
+          transformedBids.push(result.value);
+        } else {
+          transformFailures++;
+          logger.warn(`⚠️ Skipping malformed offer: ${result.reason?.message || result.reason}`);
+        }
+      }
+      if (transformFailures > 0) {
+        logger.warn(`⚠️ ${transformFailures} offer(s) skipped due to malformed data`);
+      }
 
       const duration = Date.now() - startTime;
       this.stats.totalFetched += allOffers.length;
@@ -229,30 +173,58 @@ export class GrailsApiService {
 
       logger.info(`✅ Grails fetch complete in ${duration}ms: ${allOffers.length} new offers from ${page} page(s)`);
 
-      return transformedBids;
+      return {
+        offers: transformedBids,
+        newestTimestamp,
+        boundaryTimestamp,
+        hitPageCap,
+        oldestFetchedTimestamp,
+      };
 
     } catch (error: any) {
       this.stats.errors++;
       logger.error('❌ Grails API fetch failed:', error.message);
-      return [];
+      return {
+        offers: [],
+        newestTimestamp: boundaryTimestamp,
+        boundaryTimestamp,
+        hitPageCap: false,
+        oldestFetchedTimestamp: null,
+      };
     }
   }
 
   /**
-   * Transform Grails offer to internal TransformedBid format
+   * Public method for the scheduler to advance the cursor after successful processing.
+   */
+  async advanceCursor(timestamp: number): Promise<void> {
+    await this.setLastProcessedTimestamp(timestamp);
+    logger.info(`📍 Cursor advanced to: ${new Date(timestamp).toISOString()}`);
+  }
+
+  /**
+   * Transform Grails offer to internal TransformedBid format.
+   * Throws if the offer lacks a usable identifier — caller should catch
+   * and skip the offer rather than store a malformed row.
    */
   private async transformOffer(offer: GrailsOffer): Promise<TransformedBid> {
     const now = Math.floor(Date.now() / 1000);
-    
+
+    const offerId = offer.metadata?.offer_id;
+    if (offerId === undefined || offerId === null) {
+      throw new Error(
+        `Grails offer missing metadata.offer_id (activity_id=${offer.id}, name=${offer.name}, created_at=${offer.created_at})`
+      );
+    }
+
     const currencySymbol = this.getCurrencySymbol(offer.currency_address);
     const decimals = this.getCurrencyDecimals(currencySymbol);
     const priceDecimalFloat = Number(offer.price_wei) / Math.pow(10, decimals);
 
-    // Resolve contract address (NameWrapper first, Base Registrar fallback)
     const contractAddress = await this.resolveContractAddress(offer.token_id);
 
     return {
-      bidId: `grails-${offer.metadata.offer_id}`, // Prefixed for deduplication
+      bidId: `grails-${offerId}`, // Prefixed for deduplication
       contractAddress,
       tokenId: offer.token_id,
       makerAddress: offer.actor_address,
@@ -584,11 +556,18 @@ export class GrailsApiService {
   /**
    * Get last sale or mint for an ENS name via Grails API.
    * Looks up by name directly (no contract+tokenId needed).
+   *
+   * @param thresholdEth Minimum ETH-equivalent price below which historical events are filtered out.
+   *                     For non-ETH currencies (USDC/USDT/DAI), `ethPriceUsd` MUST be provided to
+   *                     convert to ETH-equivalent for comparison; otherwise stablecoin events bypass
+   *                     the filter (fail-open).
+   * @param ethPriceUsd  Current ETH/USD price for converting stablecoin amounts to ETH-equivalent.
    */
   static async getLastSaleOrMint(
     ensName: string,
     currentTxHash?: string,
-    thresholdEth: number = 0.01
+    thresholdEth: number = 0.01,
+    ethPriceUsd?: number
   ): Promise<{ type: 'sale' | 'mint'; priceAmount: string; priceUsd: string; timestamp: number; daysAgo: number; currencySymbol: string; currencyContract: string; priceDecimal: number } | null> {
     try {
       const result = await GrailsApiService.getNameActivity(ensName, { limit: 50, maxPages: 2 });
@@ -598,7 +577,22 @@ export class GrailsApiService {
         if (!activity.price?.amount?.decimal || activity.price.amount.decimal <= 0) continue;
 
         const priceDecimal = activity.price.amount.decimal;
-        if (priceDecimal < thresholdEth) return null;
+        const symbol = activity.price.currency.symbol?.toUpperCase();
+        const isEthLike = symbol === 'ETH' || symbol === 'WETH';
+        const isStablecoin = symbol === 'USDC' || symbol === 'USDT' || symbol === 'DAI';
+
+        // Convert to ETH-equivalent for threshold comparison.
+        // - ETH/WETH: use price directly
+        // - Stablecoins: divide by ETH/USD price (if available)
+        // - Unknown currencies: skip threshold check (fail-open)
+        let ethEquivalent: number | null = priceDecimal;
+        if (isStablecoin) {
+          ethEquivalent = ethPriceUsd && ethPriceUsd > 0 ? priceDecimal / ethPriceUsd : null;
+        } else if (!isEthLike) {
+          ethEquivalent = null;
+        }
+
+        if (ethEquivalent !== null && ethEquivalent < thresholdEth) return null;
 
         const daysAgo = Math.floor((Date.now() / 1000 - activity.timestamp) / 86400);
         return {
@@ -786,6 +780,50 @@ export class GrailsApiService {
     } catch (error: any) {
       logger.warn(`🍷 Failed to fetch Grails listings for ${name}:`, error.message);
       return [];
+    }
+  }
+
+  /**
+   * Fetch an offer's full Seaport order data to extract real validity timestamps.
+   * The /activity?event_type=offer_made feed only provides created_at — actual
+   * order startTime/endTime live on the /offers/{id} endpoint.
+   *
+   * @param offerId Numeric Grails offer ID (NOT the prefixed bidId)
+   * @returns Unix timestamps in seconds, or null if unavailable
+   */
+  static async getOfferValidity(
+    offerId: number | string
+  ): Promise<{ validFrom: number; validUntil: number } | null> {
+    try {
+      const apiBase = GrailsApiService.getApiBase();
+      const url = `${apiBase}/offers/${offerId}`;
+
+      const response = await axios.get(url, {
+        timeout: 8000,
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'ENS-TwitterBot/2.0',
+        },
+      });
+
+      const params = response.data?.data?.order_data?.parameters;
+      if (!params?.startTime || !params?.endTime) {
+        logger.debug(`🍷 Offer ${offerId} has no order_data.parameters.startTime/endTime`);
+        return null;
+      }
+
+      const validFrom = parseInt(params.startTime, 10);
+      const validUntil = parseInt(params.endTime, 10);
+
+      if (!Number.isFinite(validFrom) || !Number.isFinite(validUntil)) {
+        logger.warn(`🍷 Offer ${offerId} has non-numeric startTime/endTime: ${params.startTime}, ${params.endTime}`);
+        return null;
+      }
+
+      return { validFrom, validUntil };
+    } catch (error: any) {
+      logger.debug(`🍷 Failed to fetch validity for offer ${offerId}: ${error.message}`);
+      return null;
     }
   }
 }
