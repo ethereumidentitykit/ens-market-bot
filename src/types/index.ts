@@ -124,6 +124,40 @@ export interface ENSRegistration {
   updatedAt?: string;
 }
 
+// ENS Renewal Record
+// Renewals follow the same pattern as sales (dedup on transaction_hash + log_index)
+// rather than registrations (dedup on token_id), because the same name can be
+// renewed many times. A single bulk-renewal transaction emits many NameRenewed
+// events; we store one row per name and aggregate at the tx level for tweets.
+export interface ENSRenewal {
+  id?: number;
+  transactionHash: string;
+  contractAddress: string;  // ENS ETH Registrar Controller address
+  tokenId: string;          // keccak256 hash of ENS name
+  logIndex: number;         // Event index within transaction (for unique identification)
+  ensName: string;          // The ENS name (e.g., "hsueh")
+  fullName: string;         // Full ENS name (e.g., "hsueh.eth")
+  ownerAddress?: string;    // Current owner at time of renewal (lookup may fail → null)
+  renewerAddress: string;   // Address that paid for the renewal (= tx.from); may differ from owner for gift renewals
+  costWei: string;          // Cost in wei
+  costEth?: string;         // Cost in ETH (calculated)
+  costUsd?: string;         // Cost in USD (if available)
+  durationSeconds?: number; // Renewal length added (nullable — derived from new vs. previous expires if available)
+  blockNumber: number;
+  blockTimestamp: string;
+  processedAt: string;
+  // ENS Metadata
+  image?: string;           // ENS NFT image URL
+  description?: string;     // ENS description
+  // Tweet tracking — set on ALL rows for a tx when the tx is tweeted, sharing the same tweet_id
+  tweetId?: string;
+  posted: boolean;
+  // Timestamps
+  expiresAt?: string;       // When the renewal expires (new expiry after this renewal)
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 // Name Research Record (cached research for ENS names)
 export interface NameResearch {
   id?: number;
@@ -271,7 +305,19 @@ export interface IDatabaseService {
   getRegistrationById(id: number): Promise<ENSRegistration | null>;
   getUnpostedRegistrations(limit?: number, maxAgeHours?: number): Promise<ENSRegistration[]>;
   markRegistrationAsPosted(id: number, tweetId: string): Promise<void>;
-  
+
+  // ENS renewal methods
+  // Tx-aware: a single bulk-renewal tx contains many rows (one per name renewed),
+  // and the unit-of-work for tweets/AI replies is the tx, not the row.
+  insertRenewal(renewal: Omit<ENSRenewal, 'id'>): Promise<number>;
+  insertRenewalsBatch(renewals: Omit<ENSRenewal, 'id'>[]): Promise<number[]>; // Batched per-tx; fires statement-level trigger once
+  isRenewalProcessed(transactionHash: string, logIndex: number): Promise<boolean>;
+  getRenewalById(id: number): Promise<ENSRenewal | null>;
+  getRenewalsByTxHash(txHash: string): Promise<ENSRenewal[]>;       // All rows for a tx
+  getRecentRenewals(limit?: number): Promise<ENSRenewal[]>;
+  getUnpostedRenewalTxHashes(limit?: number, maxAgeHours?: number): Promise<string[]>; // Distinct tx_hashes with at least one unposted row in window
+  markRenewalTxAsPosted(txHash: string, tweetId: string): Promise<void>;            // Updates ALL rows for the tx in one statement
+
   // ENS bids methods
   insertBid(bid: Omit<ENSBid, 'id'>): Promise<number>;
   isBidProcessed(bidId: string): Promise<boolean>;
@@ -327,6 +373,7 @@ export interface IDatabaseService {
   setupSaleNotificationTriggers(): Promise<void>;
   setupRegistrationNotificationTriggers(): Promise<void>;
   setupBidNotificationTriggers(): Promise<void>;
+  setupRenewalNotificationTriggers(): Promise<void>; // Statement-level triggers; one notify per tx_hash
   setupAIReplyNotificationTriggers(): Promise<void>; // Phase 3.4
   checkSaleNotificationTriggers(): Promise<boolean>;
 }
