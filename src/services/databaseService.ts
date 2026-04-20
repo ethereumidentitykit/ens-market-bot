@@ -19,6 +19,24 @@ export class DatabaseService implements IDatabaseService {
   }
 
   /**
+   * Postgres advisory-lock key used to serialize trigger-function setup across
+   * concurrent app instances (e.g., overlapping nodemon restarts in dev).
+   *
+   * `CREATE OR REPLACE FUNCTION` modifies a row in the `pg_proc` system catalog,
+   * and Postgres throws "tuple concurrently updated" (XX000) if two sessions hit
+   * the same function row simultaneously. Even though `IF NOT EXISTS` guards the
+   * triggers themselves, the function bodies are unconditionally re-created on
+   * every startup, which is where the race lives.
+   *
+   * This is a pure cooperative app-level lock — only matters when two instances
+   * of *this* app race. Production never sees this (single instance starts at a
+   * time); dev with rapid file-saves does, and this fixes it cleanly.
+   *
+   * Key chosen as an arbitrary 64-bit constant (must match across all instances).
+   */
+  private static readonly TRIGGER_SETUP_ADVISORY_LOCK_KEY = 7456120942165173000n;
+
+  /**
    * Initialize the PostgreSQL connection
    */
   async initialize(): Promise<void> {
@@ -36,18 +54,65 @@ export class DatabaseService implements IDatabaseService {
 
       // Run pending migrations
       await this.runMigrations();
-      
-      // Auto-setup database triggers for real-time processing
-      await this.setupSaleNotificationTriggers();
-      await this.setupRegistrationNotificationTriggers();
-      await this.setupBidNotificationTriggers();
-      await this.setupRenewalNotificationTriggers();
-      await this.setupAIReplyNotificationTriggers();
-      
+
+      // Auto-setup database triggers for real-time processing.
+      // Wrapped in a session-level advisory lock so two overlapping app instances
+      // (e.g., during nodemon restart in dev) don't race on `CREATE OR REPLACE FUNCTION`.
+      await this.withTriggerSetupLock(async () => {
+        await this.setupSaleNotificationTriggers();
+        await this.setupRegistrationNotificationTriggers();
+        await this.setupBidNotificationTriggers();
+        await this.setupRenewalNotificationTriggers();
+        await this.setupAIReplyNotificationTriggers();
+      });
+
       logger.info('PostgreSQL database initialized successfully');
     } catch (error: any) {
       logger.error('Failed to initialize PostgreSQL database:', error.message);
       throw error;
+    }
+  }
+
+  /**
+   * Hold a session-level Postgres advisory lock for the duration of the callback.
+   *
+   * Instances racing on startup will serialize here: the second instance's
+   * `pg_advisory_lock()` blocks until the first releases, by which point the
+   * trigger functions already exist as `CREATE OR REPLACE` and the second
+   * instance is just no-op'ing its own `CREATE OR REPLACE` (which is now safe
+   * because no other session is touching `pg_proc` rows for these functions).
+   *
+   * Uses a dedicated client (not `pool.query`) because advisory locks are
+   * session-scoped — they release when the connection closes, so we need to
+   * hold the same connection across lock/work/unlock.
+   *
+   * Lock acquisition has a defensive 30s timeout via statement_timeout; if
+   * something is genuinely stuck we'd rather crash with a clear error than
+   * hang indefinitely.
+   */
+  private async withTriggerSetupLock<T>(fn: () => Promise<T>): Promise<T> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    const client = await this.pool.connect();
+    try {
+      // Defensive timeout in case the lock is somehow held indefinitely.
+      await client.query(`SET LOCAL statement_timeout = '30s'`);
+      const acquireStart = Date.now();
+      await client.query('SELECT pg_advisory_lock($1)', [DatabaseService.TRIGGER_SETUP_ADVISORY_LOCK_KEY.toString()]);
+      const waited = Date.now() - acquireStart;
+      if (waited > 50) {
+        // Only worth logging if we actually had to wait (i.e., another instance held it).
+        logger.info(`🔒 Acquired trigger-setup advisory lock after waiting ${waited}ms (another instance was setting up triggers)`);
+      }
+
+      try {
+        return await fn();
+      } finally {
+        // Release the lock no matter what happened in the callback.
+        await client.query('SELECT pg_advisory_unlock($1)', [DatabaseService.TRIGGER_SETUP_ADVISORY_LOCK_KEY.toString()]);
+      }
+    } finally {
+      client.release();
     }
   }
 
