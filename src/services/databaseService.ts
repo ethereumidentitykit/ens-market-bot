@@ -492,6 +492,14 @@ export class DatabaseService implements IDatabaseService {
           ON ens_bids (maker_address, token_id, price_raw, currency_contract);
         `,
       },
+      {
+        key: 'migration_magic_eden_cleanup_v1',
+        description: 'Remove orphaned Magic Eden system_state rows after Grails migration',
+        sql: `
+          DELETE FROM system_state WHERE key = 'api_toggle_magic_eden';
+          DELETE FROM system_state WHERE key = 'last_processed_bid_timestamp';
+        `,
+      },
     ];
 
     for (const migration of migrations) {
