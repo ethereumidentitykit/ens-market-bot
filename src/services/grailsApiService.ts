@@ -3,7 +3,7 @@ import { IDatabaseService } from '../types';
 import { logger } from '../utils/logger';
 import { TransformedBid } from './bidsProcessingService';
 import { AlchemyService } from './alchemyService';
-import { TokenActivity } from './magicEdenV4Service';
+import { TokenActivity } from '../types/activity';
 
 /**
  * Grails API Response Types
@@ -116,7 +116,7 @@ export interface GrailsServiceStats {
 /**
  * GrailsApiService
  * Fetches ENS offers from Grails marketplace REST API
- * Runs every 5 minutes to catch offers that Magic Eden doesn't pick up
+ * Runs every minute to fetch aggregated offers from all marketplaces
  */
 export class GrailsApiService {
   private databaseService: IDatabaseService;
@@ -583,7 +583,7 @@ export class GrailsApiService {
 
   /**
    * Get last sale or mint for an ENS name via Grails API.
-   * Replaces Magic Eden's getLastSaleOrRegistration — lookup by name, not contract+tokenId.
+   * Looks up by name directly (no contract+tokenId needed).
    */
   static async getLastSaleOrMint(
     ensName: string,

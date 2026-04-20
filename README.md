@@ -8,7 +8,7 @@ An automated Twitter bot that monitors and tweets about Ethereum Name Service (E
 - **AI-Powered Insights**: Generates contextual market analysis using OpenAI GPT-5
 - **Twitter Integration**: Automatically posts formatted tweets with generated images
 - **Web Dashboard**: SIWE-authenticated admin interface for bot management
-- **Multi-Source Data**: Aggregates data from Magic Eden, OpenSea, Alchemy, and QuickNode
+- **Multi-Source Data**: Aggregates data from Grails, OpenSea, Alchemy, and QuickNode
 - **Portfolio Analysis**: Enriches transactions with buyer/seller portfolio data and trading patterns
 - **Club Detection**: Identifies membership in ENS clubs (999 Club, 10k Club, etc.)
 - **Bidding Intelligence**: Tracks bidding patterns and conviction signals
@@ -17,7 +17,7 @@ An automated Twitter bot that monitors and tweets about Ethereum Name Service (E
 
 ### Core Services
 
-- **MagicEdenV4Service**: Primary data source for NFT activity (V4 API)
+- **GrailsApiService**: Primary data source for ENS marketplace activity (aggregator)
 - **OpenAIService**: Generates AI-powered market commentary
 - **TwitterService**: Handles tweet posting and formatting
 - **AlchemyService**: Provides portfolio and token balance data
@@ -87,8 +87,6 @@ TWITTER_CALLBACK_URL=https://your-domain.com/auth/twitter/callback
 # OpenAI (Required)
 OPENAI_API_KEY=your_openai_api_key
 
-# Magic Eden (Required)
-MAGIC_EDEN_API_KEY=your_magic_eden_api_key
 
 # QuickNode Webhooks (Required)
 QUICKNODE_SECRET_SALES=your_quicknode_sales_secret
@@ -252,7 +250,7 @@ For issues, questions, or feature requests, please open a GitHub issue.
 ## Acknowledgments
 
 - Built with TypeScript, Express, and OpenAI
-- Uses Magic Eden, OpenSea, Alchemy, and QuickNode APIs
+- Uses Grails, OpenSea, Alchemy, and QuickNode APIs
 - ENS infrastructure by ENS Labs
 - Web3 libraries by viem and ethers
 

@@ -46,7 +46,6 @@ function dashboard() {
         // Master API Toggles
         apiToggles: {
             twitterEnabled: true,
-            magicEdenEnabled: true,
             openaiEnabled: true,
             aiAutoPostingEnabled: false
         },
@@ -552,7 +551,6 @@ function dashboard() {
                 if (response.ok) {
                     const data = await response.json();
                     this.apiToggles.twitterEnabled = data.twitterEnabled;
-                    this.apiToggles.magicEdenEnabled = data.magicEdenEnabled;
                     this.apiToggles.openaiEnabled = data.openaiEnabled;
                     this.autoPostSettings.enabled = data.autoPostingEnabled;
                     this.apiToggles.aiAutoPostingEnabled = data.aiAutoPostingEnabled;
@@ -1425,32 +1423,6 @@ function dashboard() {
             }
         },
 
-
-        async toggleMagicEdenAPI() {
-            try {
-                this.loading = true;
-                const response = await fetch('/api/admin/toggle-magic-eden', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ enabled: !this.apiToggles.magicEdenEnabled })
-                });
-                
-                if (response.ok) {
-                    this.apiToggles.magicEdenEnabled = !this.apiToggles.magicEdenEnabled;
-                    this.showMessage(
-                        `Magic Eden API ${this.apiToggles.magicEdenEnabled ? 'enabled' : 'disabled'}`,
-                        'success'
-                    );
-                } else {
-                    throw new Error('Failed to toggle Magic Eden API');
-                }
-            } catch (error) {
-                console.error('Toggle Magic Eden API error:', error);
-                this.showMessage('Failed to toggle Magic Eden API', 'error');
-            } finally {
-                this.loading = false;
-            }
-        },
 
         async toggleOpenAIAPI() {
             try {

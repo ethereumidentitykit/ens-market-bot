@@ -4,7 +4,7 @@
  * 
  * This service orchestrates the full AI reply flow:
  * 1. Fetch transaction and validate prerequisites
- * 2. Parallel data fetching (Magic Eden, OpenSea, name research)
+ * 2. Parallel data fetching (Grails, OpenSea, name research)
  * 3. Build LLM context
  * 4. Generate AI reply
  * 5. Post as threaded reply to Twitter
@@ -16,7 +16,7 @@ import { IDatabaseService, ProcessedSale, ENSRegistration, ENSBid } from '../typ
 import { OpenAIService } from './openaiService';
 import { TwitterService } from './twitterService';
 import { DataProcessingService } from './dataProcessingService';
-import { TokenActivity } from './magicEdenV4Service';
+import { TokenActivity } from '../types/activity';
 import { GrailsApiService } from './grailsApiService';
 import { ENSWorkerService } from './ensWorkerService';
 import { APIToggleService } from './apiToggleService';
@@ -127,7 +127,6 @@ export class AIReplyService {
         contextData.tokenActivities,
         contextData.buyerActivities,
         contextData.sellerActivities,
-        undefined,
         this.ensWorkerService,
         {
           tokenDataIncomplete: contextData.tokenDataIncomplete,

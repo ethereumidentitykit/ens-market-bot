@@ -336,7 +336,7 @@ export interface IDatabaseService {
 // ENS Bids Types
 export interface ENSBid {
   id?: number;
-  bidId: string;           // Magic Eden order ID
+  bidId: string;           // Marketplace order ID
   contractAddress: string; // ENS contract address
   tokenId?: string;        // ENS token ID (extracted from tokenSetId)
   
@@ -376,69 +376,6 @@ export interface ENSBid {
   // Audit
   createdAt?: string;
   updatedAt?: string;
-}
-
-// Magic Eden API Response Types
-export interface MagicEdenBidResponse {
-  orders: MagicEdenBid[];
-  continuation?: string;
-}
-
-export interface MagicEdenBid {
-  id: string;
-  kind: string;
-  side: string;
-  status: string;
-  tokenSetId: string;
-  tokenSetSchemaHash: string;
-  contract: string;
-  maker: string;
-  taker: string;
-  price: {
-    currency: {
-      contract: string;
-      name: string;
-      symbol: string;
-      decimals: number;
-    };
-    amount: {
-      raw: string;
-      decimal: number;
-      usd: number;
-      native: number;
-    };
-  };
-  validFrom: number;
-  validUntil: number;
-  quantityFilled: string;
-  quantityRemaining: string;
-  criteria: {
-    kind: string;
-    data: {
-      token: {
-        tokenId: string;
-        name?: string;
-        image?: string;
-      };
-    };
-  };
-  source: {
-    id: string;
-    domain: string;
-    name: string;
-    icon: string;
-    url: string;
-  };
-  feeBps: number;
-  feeBreakdown: Array<{
-    kind: string;
-    recipient: string;
-    bps: number;
-  }>;
-  expiration: number;
-  isReservoir: boolean;
-  createdAt: string;
-  updatedAt: string;
 }
 
 // Bid Processing Stats

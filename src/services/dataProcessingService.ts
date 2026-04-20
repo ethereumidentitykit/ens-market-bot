@@ -1,5 +1,5 @@
 import { logger } from '../utils/logger';
-import { TokenActivity } from './magicEdenV4Service';
+import { TokenActivity } from '../types/activity';
 import { ENSWorkerService } from './ensWorkerService';
 import { ClubService, ClubStats } from './clubService';
 import { ClubActivityEntry, GrailsActiveListing, GrailsApiService } from './grailsApiService';
@@ -156,10 +156,10 @@ export interface LLMPromptContext {
     txHash?: string; // Transaction hash from DB (optional for bids)
   };
   
-  // Token historical context (FROM MAGIC EDEN API)
+  // Token historical context (FROM GRAILS API)
   tokenInsights: TokenInsights;
   
-  // User activity context (FROM MAGIC EDEN API)
+  // User activity context (FROM GRAILS API)
   buyerStats: UserStats;
   sellerStats: UserStats | null; // Null for registrations
   recipientStats: UserStats | null; // Recipient stats when minter ≠ recipient (registrations only)
@@ -476,7 +476,6 @@ export class DataProcessingService {
     activities: TokenActivity[],
     userAddress: string,
     role: 'buyer' | 'seller',
-    _magicEdenV4Service?: any,
     currentHoldings?: { names: { name: string; clubs: string[] }[]; incomplete: boolean } | null
   ): Promise<UserStats> {
     logger.debug(`👤 Processing user activity: ${activities.length} activities for ${userAddress.slice(0, 8)}... (${role})`);
@@ -832,7 +831,6 @@ export class DataProcessingService {
     tokenActivities: TokenActivity[],
     buyerActivities: TokenActivity[],
     sellerActivities: TokenActivity[] | null,
-    _magicEdenV4Service?: any,
     ensWorkerService?: ENSWorkerService,
     fetchStatus?: {
       tokenDataIncomplete: boolean;
@@ -906,7 +904,6 @@ export class DataProcessingService {
       buyerActivities,
       eventData.buyerAddress,
       'buyer',
-      undefined,
       holdingsData?.buyerHoldings || null
     );
     
@@ -918,7 +915,6 @@ export class DataProcessingService {
         sellerActivities,
         eventData.sellerAddress,
         'seller',
-        undefined,
         holdingsData?.sellerHoldings || null
       );
     } else {
@@ -933,7 +929,6 @@ export class DataProcessingService {
         recipientActivities,
         eventData.recipientAddress,
         'buyer',
-        undefined,
         holdingsData?.recipientHoldings || null
       );
     }

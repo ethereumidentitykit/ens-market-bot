@@ -9,7 +9,6 @@ import { AlchemyService } from './alchemyService';
 import { OpenSeaService } from './openSeaService';
 import { ENSMetadataService } from './ensMetadataService';
 import { ClubService } from './clubService';
-import { MagicEdenV4Service } from './magicEdenV4Service';
 import { GrailsApiService } from './grailsApiService';
 import { ENSTokenUtils } from './ensTokenUtils';
 import { TimeUtils } from '../utils/timeUtils';
@@ -42,8 +41,7 @@ export class NewTweetFormatter {
     private databaseService?: IDatabaseService,
     private alchemyService?: AlchemyService,
     private openSeaService?: OpenSeaService,
-    private ensMetadataService?: ENSMetadataService,
-    private magicEdenV4Service?: MagicEdenV4Service
+    private ensMetadataService?: ENSMetadataService
   ) {
     logger.info('[NewTweetFormatter] Constructor called');
   }
@@ -305,9 +303,9 @@ export class NewTweetFormatter {
   }
 
   /**
-   * Get current listing price context for bids
-   * Queries Magic Eden and Grails in parallel, picks the lowest listing across both
-   * Shows source(s) in parentheses, e.g. "(grails)" or "(grails + opensea)"
+   * Get current listing price context for bids.
+   * Queries Grails (aggregator) for active listings across all marketplaces.
+   * Shows source(s) in parentheses, e.g. "(Grails)" or "(Grails + OpenSea)"
    */
   private async getListingContext(
     contractAddress: string,
@@ -317,68 +315,43 @@ export class NewTweetFormatter {
   ): Promise<string | null> {
     logger.info(`🔍 Fetching listing context for ${contractAddress}:${tokenId}${ensName ? ` (${ensName})` : ''}`);
 
-    // Query both marketplaces in parallel
-    const [magicEdenResult, grailsResult] = await Promise.all([
-      // Magic Eden: lookup by contract + tokenId
-      this.magicEdenV4Service
-        ? this.magicEdenV4Service.getActiveAsks(contractAddress, tokenId).catch((err: any) => {
-            logger.warn('⚠️ Magic Eden listing lookup failed:', err.message);
-            return [];
-          })
-        : Promise.resolve([]),
-      // Grails: lookup by ENS name
-      ensName
-        ? GrailsApiService.getListingsForName(ensName).catch((err: any) => {
-            logger.warn('⚠️ Grails listing lookup failed:', err.message);
-            return [];
-          })
-        : Promise.resolve([]),
-    ]);
+    if (!ensName) {
+      logger.info('ℹ️ No ENS name available for listing lookup');
+      return null;
+    }
 
-    // Normalise both into { price, symbol, source } for comparison
-    type Candidate = { price: number; symbol: string; source: string };
-    const candidates: Candidate[] = [];
+    const grailsResult = await GrailsApiService.getListingsForName(ensName).catch((err: any) => {
+      logger.warn('⚠️ Grails listing lookup failed:', err.message);
+      return [];
+    });
 
-    // Canonical display names for marketplace sources
     const SOURCE_DISPLAY: Record<string, string> = {
       grails: 'Grails',
       opensea: 'OpenSea',
       blur: 'Blur',
       x2y2: 'X2Y2',
       looksrare: 'LooksRare',
-      magiceden: 'Magic Eden',
     };
     const displaySource = (raw: string): string => {
       const key = raw.toLowerCase();
-      return SOURCE_DISPLAY[key] || raw; // pass through unknown sources as-is
+      return SOURCE_DISPLAY[key] || raw;
     };
 
-    for (const ask of magicEdenResult) {
-      candidates.push({
-        price: parseFloat(ask.price.amount.native),
-        symbol: ask.price.currency.symbol,
-        source: displaySource(ask.source || 'opensea'),
-      });
-    }
-
-    for (const listing of grailsResult) {
-      candidates.push({
-        price: listing.price,
-        symbol: listing.currencySymbol,
-        source: displaySource(listing.source || 'grails'),
-      });
-    }
+    type Candidate = { price: number; symbol: string; source: string };
+    const candidates: Candidate[] = grailsResult.map(listing => ({
+      price: listing.price,
+      symbol: listing.currencySymbol,
+      source: displaySource(listing.source || 'grails'),
+    }));
 
     if (candidates.length === 0) {
       logger.info('ℹ️ No active listing found on any marketplace');
       return null;
     }
 
-    // Find the lowest price
     candidates.sort((a, b) => a.price - b.price);
     const lowestPrice = candidates[0].price;
 
-    // Collect unique sources at that lowest price, Grails always first
     const sourcesAtLowest = [
       ...new Set(
         candidates
@@ -485,14 +458,7 @@ export class NewTweetFormatter {
     // Line 1: ENS name - use stored name from database, with ENS service fallback
     let ensName = bid.ensName;
     
-    // Debug: Show Magic Eden metadata status
-    if (ensName) {
-      logger.info(`✅ Magic Eden provided ENS name for bid ${bid.bidId}: ${ensName}`);
-    } else {
-      logger.warn(`⚠️  Magic Eden did not provide ENS name for bid ${bid.bidId} (token: ${bid.tokenId})`);
-    }
-    
-    // If no ENS name from Magic Eden, try to fetch it ourselves using OpenSea + ENS fallback
+    // If no ENS name from bid source, try to fetch it ourselves using OpenSea + ENS fallback
     if (!ensName && bid.tokenId && bid.contractAddress) {
       try {
         logger.info(`🔍 Missing ENS name for bid ${bid.bidId}, attempting fallback lookup for token ${bid.tokenId}`);
@@ -1028,14 +994,7 @@ export class NewTweetFormatter {
     // Get ENS name for display (from database), with ENS service fallback  
     let ensName = bid.ensName;
     
-    // Debug: Show Magic Eden metadata status for image generation
-    if (ensName) {
-      logger.info(`✅ Magic Eden provided ENS name for image bid ${bid.bidId}: ${ensName}`);
-    } else {
-      logger.warn(`⚠️  Magic Eden did not provide ENS name for image bid ${bid.bidId} (token: ${bid.tokenId})`);
-    }
-    
-    // If no ENS name from Magic Eden, try to fetch it ourselves using OpenSea + ENS fallback
+    // If no ENS name from bid source, try to fetch it ourselves using OpenSea + ENS fallback
     if (!ensName && bid.tokenId && bid.contractAddress) {
       try {
         logger.info(`🔍 Missing ENS name for image generation of bid ${bid.bidId}, attempting fallback lookup for token ${bid.tokenId}`);
@@ -1504,14 +1463,7 @@ export class NewTweetFormatter {
     // Use consistent ENS name resolution (same logic as tweet text and image)
     let ensName = bid.ensName;
     
-    // Debug: Show Magic Eden metadata status for breakdown
-    if (ensName) {
-      logger.info(`✅ Magic Eden provided ENS name for bid breakdown ${bid.bidId}: ${ensName}`);
-    } else {
-      logger.warn(`⚠️  Magic Eden did not provide ENS name for bid breakdown ${bid.bidId} (token: ${bid.tokenId})`);
-    }
-    
-    // If no ENS name from Magic Eden, try to fetch it ourselves using OpenSea + ENS fallback
+    // If no ENS name from bid source, try to fetch it ourselves using OpenSea + ENS fallback
     if (!ensName && bid.tokenId && bid.contractAddress) {
       try {
         logger.info(`🔍 Missing ENS name for bid breakdown ${bid.bidId}, attempting fallback lookup for token ${bid.tokenId}`);

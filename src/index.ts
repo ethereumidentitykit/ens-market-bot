@@ -14,7 +14,7 @@ import { DatabaseService } from './services/databaseService';
 import { IDatabaseService, ENSRegistration, ProcessedSale, ENSBid } from './types';
 import { BidsProcessingService } from './services/bidsProcessingService';
 import { GrailsApiService } from './services/grailsApiService';
-import { MagicEdenV4Service, TokenActivity } from './services/magicEdenV4Service';
+import { TokenActivity } from './types/activity';
 import { SchedulerService } from './services/schedulerService';
 import { TwitterService } from './services/twitterService';
 import { NewTweetFormatter } from './services/newTweetFormatter';
@@ -60,12 +60,9 @@ async function startApplication(): Promise<void> {
     const openSeaService = new OpenSeaService();
     const ensMetadataService = new ENSMetadataService();
 
-    // Magic Eden V4 Service (V3 removed - fully migrated)
-    const magicEdenV4Service = new MagicEdenV4Service();
-    
-    const bidsProcessingService = new BidsProcessingService(magicEdenV4Service, databaseService, alchemyService);
+    const bidsProcessingService = new BidsProcessingService(databaseService, alchemyService);
     const twitterService = new TwitterService();
-    const newTweetFormatter = new NewTweetFormatter(databaseService, alchemyService, openSeaService, ensMetadataService, magicEdenV4Service);
+    const newTweetFormatter = new NewTweetFormatter(databaseService, alchemyService, openSeaService, ensMetadataService);
     const rateLimitService = new RateLimitService(databaseService);
     const ethIdentityService = new ENSWorkerService();
     const worldTimeService = new WorldTimeService();
@@ -542,7 +539,6 @@ async function startApplication(): Promise<void> {
           tokenResult.activities,
           buyerResult.activities,
           sellerResult?.activities || null,
-          undefined,
           ensWorkerService,
           {
             tokenDataIncomplete: tokenResult.incomplete || false,
@@ -1121,32 +1117,6 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    app.post('/api/admin/toggle-magic-eden', requireAuth, async (req, res) => {
-      try {
-        const { enabled } = req.body;
-        if (typeof enabled !== 'boolean') {
-          return res.status(400).json({
-            success: false,
-            error: 'enabled must be a boolean'
-          });
-        }
-
-        await apiToggleService.setMagicEdenEnabled(enabled);
-        logger.info(`Magic Eden API ${enabled ? 'enabled' : 'disabled'} via admin toggle`);
-        
-        const state = apiToggleService.getState();
-        res.json({
-          success: true,
-          magicEdenEnabled: state.magicEdenEnabled
-        });
-      } catch (error: any) {
-        logger.error('Toggle Magic Eden API error:', error);
-        res.status(500).json({
-          success: false,
-          error: error.message
-        });
-      }
-    });
 
     app.post('/api/admin/toggle-openai', requireAuth, async (req, res) => {
       try {
