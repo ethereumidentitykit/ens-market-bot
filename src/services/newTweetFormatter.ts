@@ -195,12 +195,14 @@ export class NewTweetFormatter {
   /**
    * Generate a complete renewal tweet (text + image) for a single transaction.
    *
-   * Tweet text format (Option 2 — confirmed with user):
-   *   Single name:   "{renewer} just renewed {name.eth} for {totalEth} ETH (${totalUsd})"
-   *   Bulk:          "{renewer} just renewed {N} names for {totalEth} ETH (${totalUsd})
-   *                   Top: {top1} ({eth}), {top2} ({eth}), {top3} ({eth}), +{N} more"
-   *
-   * Image: dynamic 1/2/3/4+ card grid (see PuppeteerImageService.generateRenewalImage).
+   * Tweet text mirrors the structured registration format:
+   *   🔁 RENEWED: name.eth  (or "🔁 RENEWED: 10 names")
+   *   For: $X,XXX.XX (Y.YY ETH)
+   *   Owner: name.eth @handle
+   *   Renewer: renewer.eth @handle   ← only if renewer ≠ owner
+   *   Top: name1.eth, name2.eth, name3.eth, +7 more   ← only for bulk
+   *   Categories: ...
+   *   grails.app/name.eth
    *
    * @param renewals All renewal rows belonging to a single transaction (must share tx_hash).
    */
@@ -215,7 +217,6 @@ export class NewTweetFormatter {
 
       // Resolve renewer profile (ENS name + avatar). All rows in the tx share the renewer.
       const renewerAccount = await this.getAccountData(sample.renewerAddress);
-      const renewerHandle = this.getImageDisplayHandle(renewerAccount, sample.renewerAddress);
 
       // Sort all rows by per-name cost desc — top entries drive both text breakdown and image cards.
       const sorted = [...renewals].sort((a, b) => {
@@ -225,7 +226,6 @@ export class NewTweetFormatter {
       });
 
       const totalEth = sorted.reduce((sum, r) => sum + parseFloat(r.costEth || '0'), 0);
-      // Prefer per-row USD if populated; otherwise compute from totalEth × current ETH price below.
       let totalUsd = sorted.reduce((sum, r) => sum + parseFloat(r.costUsd || '0'), 0);
       if (totalUsd === 0 && this.alchemyService && totalEth > 0) {
         try {
@@ -239,27 +239,8 @@ export class NewTweetFormatter {
         }
       }
 
-      const nameCount = sorted.length;
-      const top3 = sorted.slice(0, 3);
-      const extra = nameCount - top3.length;
-
-      // ----- Tweet text -----
-
-      const usdSuffix = totalUsd > 0
-        ? ` ($${totalUsd.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })})`
-        : '';
-
-      let tweetText: string;
-      if (nameCount === 1) {
-        const namePart = this.cleanEnsName(top3[0].fullName);
-        tweetText = `${renewerHandle} just renewed ${namePart} for ${totalEth.toFixed(4)} ETH${usdSuffix}`;
-      } else {
-        const topLine = top3
-          .map(r => `${this.cleanEnsName(r.fullName)} (${parseFloat(r.costEth || '0').toFixed(4)} ETH)`)
-          .join(', ');
-        const extraSuffix = extra > 0 ? `, +${extra} more` : '';
-        tweetText = `${renewerHandle} just renewed ${nameCount} names for ${totalEth.toFixed(4)} ETH${usdSuffix}\n\nTop: ${topLine}${extraSuffix}`;
-      }
+      // ----- Tweet text (structured format mirroring registrations) -----
+      const tweetText = await this.formatRenewalTweetText(sorted, renewerAccount, sample.renewerAddress, totalEth, totalUsd);
 
       // ----- Image generation -----
 
@@ -308,7 +289,7 @@ export class NewTweetFormatter {
         imageData
       };
 
-      logger.info(`Generated renewal tweet: ${result.characterCount} chars, valid: ${result.isValid}, hasImage: ${!!result.imageBuffer}, names: ${nameCount}`);
+      logger.info(`Generated renewal tweet: ${result.characterCount} chars, valid: ${result.isValid}, hasImage: ${!!result.imageBuffer}, names: ${sorted.length}`);
       return result;
 
     } catch (error: any) {
@@ -647,6 +628,114 @@ export class NewTweetFormatter {
       tweet += `\n\n${marketplaceUrl}`;
     }
     
+    return tweet;
+  }
+
+  /**
+   * Format renewal tweet text in the structured format matching registrations.
+   *
+   * Single name:
+   *   🔁 RENEWED: name.eth
+   *   For: $X,XXX.XX (Y.YY ETH)
+   *   Owner: name.eth @handle
+   *   grails.app/name.eth
+   *
+   * Bulk (renewer = owner):
+   *   🔁 RENEWED: 10 names
+   *   For: $477.47 (0.21 ETH)
+   *   Owner: name.eth @handle
+   *   Top: name1.eth, name2.eth, name3.eth, +7 more
+   *   Categories: Single Ethmoji @EthmojiClub
+   *   grails.app/name1.eth
+   *
+   * Bulk (renewer ≠ owner — gift renewal):
+   *   🔁 RENEWED: 10 names
+   *   For: $477.47 (0.21 ETH)
+   *   Owner: owner.eth @handle
+   *   Renewer: renewer.eth @handle
+   *   Top: ...
+   */
+  private async formatRenewalTweetText(
+    sortedRenewals: ENSRenewal[],
+    renewerAccount: ENSWorkerAccount | null,
+    renewerAddress: string,
+    totalEth: number,
+    totalUsd: number
+  ): Promise<string> {
+    const nameCount = sortedRenewals.length;
+    const top3 = sortedRenewals.slice(0, 3);
+    const extra = nameCount - top3.length;
+
+    // Header
+    const topName = this.cleanEnsName(sortedRenewals[0].fullName);
+    const header = nameCount === 1
+      ? `🔁 RENEWED: ${topName}`
+      : `🔁 RENEWED: ${nameCount} names`;
+
+    // Price line (recalculate USD with fresh ETH rate, matching registration pattern)
+    const priceEth = totalEth.toFixed(2);
+    let priceUsdStr = '';
+    if (totalUsd > 0) {
+      priceUsdStr = `$${totalUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+    const priceLine = priceUsdStr
+      ? `For: ${priceUsdStr} (${priceEth} ETH)`
+      : `For: ${priceEth} ETH`;
+
+    // Owner line — resolve the owner of the top name (most expensive / representative)
+    const topRow = sortedRenewals[0];
+    const ownerAddress = topRow.ownerAddress;
+    let ownerHandle: string;
+    if (ownerAddress) {
+      const ownerAccount = await this.getAccountData(ownerAddress);
+      ownerHandle = this.getDisplayHandle(ownerAccount, ownerAddress);
+    } else {
+      // Owner lookup failed during ingestion — use renewer as fallback
+      ownerHandle = this.getDisplayHandle(renewerAccount, renewerAddress);
+    }
+    const ownerLine = `Owner: ${ownerHandle}`;
+
+    // Renewer line — only shown when renewer ≠ owner (gift renewal / 3rd-party service)
+    let renewerLine = '';
+    const isGiftRenewal = ownerAddress &&
+      ownerAddress.toLowerCase() !== renewerAddress.toLowerCase();
+    if (isGiftRenewal) {
+      const renewerHandle = this.getDisplayHandle(renewerAccount, renewerAddress);
+      renewerLine = `Renewer: ${renewerHandle}`;
+    }
+
+    // Top names line (bulk only)
+    let topLine = '';
+    if (nameCount > 1) {
+      const topNames = top3.map(r => this.cleanEnsName(r.fullName)).join(', ');
+      const extraSuffix = extra > 0 ? `, +${extra} more` : '';
+      topLine = `Top: ${topNames}${extraSuffix}`;
+    }
+
+    // Category line — use the top name for club detection (matches image card ordering)
+    const { clubs, clubRanks } = await this.clubService.getClubs(topName);
+    const formattedClubString = await this.clubService.getFormattedClubString(clubs, clubRanks);
+    const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
+    const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
+
+    // Marketplace link (link to the top name)
+    const marketplaceUrl = this.buildMarketplaceUrl(topName);
+
+    // Assemble — matching the registration layout pattern
+    let tweet = `${header}\n\n${priceLine}\n${ownerLine}`;
+    if (renewerLine) {
+      tweet += `\n${renewerLine}`;
+    }
+    if (topLine) {
+      tweet += `\n\n${topLine}`;
+    }
+    if (categoryLine) {
+      tweet += `\n${categoryLine}`;
+    }
+    if (marketplaceUrl) {
+      tweet += `\n\n${marketplaceUrl}`;
+    }
+
     return tweet;
   }
 

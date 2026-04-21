@@ -1001,10 +1001,10 @@ function dashboard() {
 
         async loadUnpostedRenewals() {
             try {
-                const response = await fetch('/api/unposted-renewals');
+                const response = await fetch('/api/database/renewals?limit=100&page=1');
                 const data = await response.json();
                 if (data.success) {
-                    this.unpostedRenewals = data.data || [];
+                    this.unpostedRenewals = data.data?.renewals || [];
                 } else {
                     this.unpostedRenewals = [];
                 }
