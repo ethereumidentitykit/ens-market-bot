@@ -1,10 +1,10 @@
 # ENS Market Bot
 
-An automated Twitter bot that monitors and tweets about Ethereum Name Service (ENS) domain sales, registrations, and bids with AI-generated market analysis.
+An automated Twitter bot that monitors and tweets about Ethereum Name Service (ENS) domain sales, registrations, bids, and renewals with AI-generated market analysis.
 
 ## Features
 
-- **Real-time ENS Monitoring**: Tracks sales, registrations, and bids for ENS domains
+- **Real-time ENS Monitoring**: Tracks sales, registrations, bids, and renewals for ENS domains
 - **AI-Powered Insights**: Generates contextual market analysis using OpenAI GPT-5
 - **Twitter Integration**: Automatically posts formatted tweets with generated images
 - **Web Dashboard**: SIWE-authenticated admin interface for bot management
@@ -12,6 +12,7 @@ An automated Twitter bot that monitors and tweets about Ethereum Name Service (E
 - **Portfolio Analysis**: Enriches transactions with buyer/seller portfolio data and trading patterns
 - **Club Detection**: Identifies membership in ENS clubs (999 Club, 10k Club, etc.)
 - **Bidding Intelligence**: Tracks bidding patterns and conviction signals
+- **Renewal Tracking**: Monitors bulk renewals with per-tx aggregation and dynamic image generation
 
 ## Architecture
 
@@ -24,9 +25,9 @@ An automated Twitter bot that monitors and tweets about Ethereum Name Service (E
 - **OpenSeaService**: Fetches ENS holdings and metadata
 - **ENSSubgraphService**: ENS subgraph powered by ENSNode for fast name resolution
 - **DatabaseService**: PostgreSQL integration for state management
-- **QuickNodeSales/RegistrationService**: Webhook handlers for real-time events
+- **QuickNodeSales/Registration/RenewalService**: Webhook handlers for real-time events
 - **BidsProcessingService**: Monitors and processes new bids
-- **AIReplyService**: Generates contextual replies for transactions
+- **AIReplyService**: Generates contextual replies for transactions (sales, registrations, bids, renewals)
 
 ### Data Flow
 
@@ -124,6 +125,8 @@ The bot requires PostgreSQL with the following tables (auto-created on first run
 - `sales`: ENS sales transactions
 - `registrations`: ENS registrations
 - `bids`: ENS bid events
+- `renewals`: ENS renewal events (one row per name, aggregated per-tx for tweets)
+- `ai_replies`: AI-generated contextual replies (sales, registrations, bids, renewals)
 - `rate_limits`: Twitter API rate limiting state
 - `scheduler_state`: Cron job state management
 - `api_toggle`: Feature flag control
@@ -155,12 +158,16 @@ Access the admin dashboard at `http://localhost:3000` (or your deployed URL):
 
 ### API Endpoints
 
-- `POST /quicknode-sales`: QuickNode sales webhook
-- `POST /quicknode-registrations`: QuickNode registrations webhook
+- `POST /webhook/salesv2`: QuickNode sales webhook
+- `POST /webhook/quicknode-registrations`: QuickNode registrations webhook
+- `POST /webhook/quicknode-renewals`: QuickNode renewals webhook
 - `GET /health`: System health check
-- `GET /api/sales`: Recent sales (authenticated)
-- `GET /api/bids`: Recent bids (authenticated)
-- `GET /api/activity/:address`: User activity lookup
+- `GET /api/database/sales`: Recent sales (authenticated)
+- `GET /api/database/registrations`: Recent registrations (authenticated)
+- `GET /api/database/bids`: Recent bids (authenticated)
+- `GET /api/database/renewals`: Recent renewals grouped by tx (authenticated)
+- `GET /api/renewal/tweet/generate/:txHash`: Preview renewal tweet (authenticated)
+- `POST /api/renewal/tweet/send/:txHash`: Post renewal tweet (authenticated)
 
 ## Development
 
@@ -208,8 +215,9 @@ The bot uses a sophisticated AI pipeline to generate insights:
 
 Additional technical documentation is available in the `docs/` folder:
 
-- **[QuickNode Sales Stream Filter](docs/quicknode-stream-filter.md)** - Seaport OrderFulfilled event filter for ENS sales
+- **[QuickNode Sales Stream Filter](docs/quicknode-sales-filter.md)** - Seaport OrderFulfilled event filter for ENS sales
 - **[QuickNode Registration Stream Filter](docs/quicknode-registration-filter.md)** - NameRegistered event filter for ENS registrations
+- **[QuickNode Renewal Stream Filter](docs/quicknode-renewal-filter.md)** - NameRenewed event filter for ENS renewals (bulk-renewal aware)
 
 ## Rate Limiting
 
