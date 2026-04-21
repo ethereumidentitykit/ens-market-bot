@@ -117,29 +117,41 @@ export class QuickNodeRenewalService {
   }
 
   /**
-   * Process all events for one tx: enrich each event in parallel, then do a single
-   * batched INSERT so the statement-level trigger fires once for the tx.
+   * Process all events for one tx: enrich each event with concurrency limiting,
+   * then do a single batched INSERT so the statement-level trigger fires once.
+   *
+   * Concurrency is limited to ENRICHMENT_CONCURRENCY (default 10) to avoid
+   * overwhelming external APIs (each enrichment makes 3-5 HTTP requests to
+   * Alchemy, ENS subgraph, OpenSea, ENS Metadata). Without limiting, a
+   * 100-name bulk renewal would fire ~500 concurrent outbound requests.
    */
+  private static readonly ENRICHMENT_CONCURRENCY = 30;
+
   private async processSingleTx(
     txHash: string,
     events: QuickNodeRenewalEvent[]
   ): Promise<{ inserted: number; skipped: number }> {
-    logger.info(`📝 Tx ${txHash.slice(0, 10)}…: enriching ${events.length} renewal event(s)`);
+    logger.info(`📝 Tx ${txHash.slice(0, 10)}…: enriching ${events.length} renewal event(s) (concurrency: ${QuickNodeRenewalService.ENRICHMENT_CONCURRENCY})`);
 
-    // Enrich all events in this tx in parallel.
-    const enrichResults = await Promise.allSettled(
-      events.map(e => this.buildRenewalRow(e))
-    );
-
+    // Enrich in chunks to limit concurrent outbound API requests.
     const rows: Omit<ENSRenewal, 'id'>[] = [];
     let enrichFailures = 0;
-    for (const result of enrichResults) {
-      if (result.status === 'fulfilled' && result.value) {
-        rows.push(result.value);
-      } else {
-        enrichFailures++;
-        if (result.status === 'rejected') {
-          logger.warn(`⚠️ Enrichment failed for renewal event:`, result.reason?.message || result.reason);
+    const chunkSize = QuickNodeRenewalService.ENRICHMENT_CONCURRENCY;
+
+    for (let i = 0; i < events.length; i += chunkSize) {
+      const chunk = events.slice(i, i + chunkSize);
+      const chunkResults = await Promise.allSettled(
+        chunk.map(e => this.buildRenewalRow(e))
+      );
+
+      for (const result of chunkResults) {
+        if (result.status === 'fulfilled' && result.value) {
+          rows.push(result.value);
+        } else {
+          enrichFailures++;
+          if (result.status === 'rejected') {
+            logger.warn(`⚠️ Enrichment failed for renewal event:`, result.reason?.message || result.reason);
+          }
         }
       }
     }

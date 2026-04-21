@@ -3,7 +3,7 @@ import session from 'express-session';
 import path from 'path';
 import CryptoJS from 'crypto-js';
 import { gunzipSync } from 'zlib';
-import { createHmac } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 import axios from 'axios';
 import { generateNonce } from 'siwe';
 import { config, validateConfig } from './utils/config';
@@ -3664,7 +3664,7 @@ async function startApplication(): Promise<void> {
                   timestampLength: qnTimestamp.length
                 });
                 
-                if (qnSignature !== expectedSignature) {
+                if (!timingSafeEqual(Buffer.from(qnSignature, 'hex'), Buffer.from(expectedSignature, 'hex'))) {
                   logger.error('❌ QuickNode webhook signature verification failed!');
                   return res.status(401).json({
                     success: false,
@@ -3725,7 +3725,7 @@ async function startApplication(): Promise<void> {
         // Convert buffer to string and then parse as JSON
         try {
           const bodyString = processedBody.toString('utf8');
-          logger.info('Full processed body string:', bodyString);
+          logger.debug('Full processed body string:', bodyString);
           
           // Try to parse as JSON
           webhookData = JSON.parse(bodyString);
@@ -3843,7 +3843,7 @@ async function startApplication(): Promise<void> {
                 matches: qnSignature === expectedSignature
               });
               
-              if (qnSignature !== expectedSignature) {
+              if (!timingSafeEqual(Buffer.from(qnSignature, 'hex'), Buffer.from(expectedSignature, 'hex'))) {
                 logger.error('❌ QuickNode registration webhook signature verification failed!');
                 return res.status(401).json({
                   success: false,
@@ -3903,7 +3903,7 @@ async function startApplication(): Promise<void> {
         // Convert buffer to string and then parse as JSON
         try {
           const bodyString = processedBody.toString('utf8');
-          logger.info('📊 Full registration payload:', bodyString);
+          logger.debug('📊 Full registration payload:', bodyString);
           
           // Try to parse as JSON
           webhookData = JSON.parse(bodyString);
@@ -4014,7 +4014,7 @@ async function startApplication(): Promise<void> {
                 matches: qnSignature === expectedSignature
               });
 
-              if (qnSignature !== expectedSignature) {
+              if (!timingSafeEqual(Buffer.from(qnSignature, 'hex'), Buffer.from(expectedSignature, 'hex'))) {
                 logger.error('❌ QuickNode renewal webhook signature verification failed!');
                 return res.status(401).json({
                   success: false,
@@ -4070,7 +4070,7 @@ async function startApplication(): Promise<void> {
           let webhookData;
           try {
             const bodyString = processedBody.toString('utf8');
-            logger.info('📊 Full renewal payload:', bodyString);
+            logger.debug('📊 Full renewal payload:', bodyString);
             webhookData = JSON.parse(bodyString);
             logger.info('✅ Successfully parsed renewal body as JSON');
             logger.info('📋 Parsed renewal data structure:', JSON.stringify({
