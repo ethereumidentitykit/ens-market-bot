@@ -3,7 +3,7 @@ import session from 'express-session';
 import path from 'path';
 import CryptoJS from 'crypto-js';
 import { gunzipSync } from 'zlib';
-import { createHmac } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 import axios from 'axios';
 import { generateNonce } from 'siwe';
 import { config, validateConfig } from './utils/config';
@@ -11,7 +11,7 @@ import { logger } from './utils/logger';
 import { MONITORED_CONTRACTS } from './config/contracts';
 import { AlchemyService } from './services/alchemyService';
 import { DatabaseService } from './services/databaseService';
-import { IDatabaseService, ENSRegistration, ProcessedSale, ENSBid } from './types';
+import { IDatabaseService, ENSRegistration, ProcessedSale, ENSBid, ENSRenewal } from './types';
 import { BidsProcessingService } from './services/bidsProcessingService';
 import { GrailsApiService } from './services/grailsApiService';
 import { TokenActivity } from './types/activity';
@@ -26,6 +26,7 @@ import { WorldTimeService } from './services/worldTimeService';
 import { SiweService } from './services/siweService';
 import { QuickNodeSalesService } from './services/quickNodeSalesService';
 import { QuickNodeRegistrationService } from './services/quickNodeRegistrationService';
+import { QuickNodeRenewalService } from './services/quickNodeRenewalService';
 import { OpenSeaService } from './services/openSeaService';
 import { ENSMetadataService } from './services/ensMetadataService';
 import { ENSTokenUtils } from './services/ensTokenUtils';
@@ -69,6 +70,7 @@ async function startApplication(): Promise<void> {
     const siweService = new SiweService(databaseService);
     const quickNodeSalesService = new QuickNodeSalesService(databaseService, openSeaService, ensMetadataService, alchemyService);
     const quickNodeRegistrationService = new QuickNodeRegistrationService(databaseService, ensMetadataService, alchemyService, openSeaService);
+    const quickNodeRenewalService = new QuickNodeRenewalService(databaseService, ensMetadataService, alchemyService, openSeaService);
     const autoTweetService = new AutoTweetService(newTweetFormatter, twitterService, rateLimitService, databaseService, worldTimeService, alchemyService);
     const schedulerService = new SchedulerService(bidsProcessingService, autoTweetService, databaseService);
     
@@ -153,8 +155,12 @@ async function startApplication(): Promise<void> {
 
     // Middleware - skip JSON parsing for salesv2 webhook
     app.use((req, res, next) => {
-      if (req.path === '/webhook/salesv2' || req.path === '/webhook/quicknode-registrations') {
-        return next(); // Skip JSON parsing for QuickNode webhooks
+      if (
+        req.path === '/webhook/salesv2' ||
+        req.path === '/webhook/quicknode-registrations' ||
+        req.path === '/webhook/quicknode-renewals'
+      ) {
+        return next(); // Skip JSON parsing for QuickNode webhooks (manual raw-body capture)
       }
       return express.json()(req, res, next);
     });
@@ -429,42 +435,75 @@ async function startApplication(): Promise<void> {
     // AI Reply Preview Endpoint
     app.get('/api/ai-reply-preview', requireAuth, async (req, res) => {
       try {
-        const { type, id } = req.query;
+        // For sale/registration/bid: pass `id` (numeric).
+        // For renewal: pass `txHash` (string) instead of `id` — renewals are tx-keyed.
+        const { type, id, txHash } = req.query;
 
         // Validate inputs
-        if (!type || !id) {
+        if (!type) {
           return res.status(400).json({
             success: false,
-            error: 'Missing required parameters: type and id'
+            error: 'Missing required parameter: type'
           });
         }
 
-        if (type !== 'sale' && type !== 'registration' && type !== 'bid') {
+        if (type !== 'sale' && type !== 'registration' && type !== 'bid' && type !== 'renewal') {
           return res.status(400).json({
             success: false,
-            error: 'Invalid type. Must be "sale", "registration", or "bid"'
+            error: 'Invalid type. Must be "sale", "registration", "bid", or "renewal"'
           });
         }
 
-        const transactionId = parseInt(id as string, 10);
-        if (isNaN(transactionId)) {
+        if (type === 'renewal') {
+          if (!txHash || typeof txHash !== 'string' || !txHash.startsWith('0x')) {
+            return res.status(400).json({
+              success: false,
+              error: 'For type=renewal, "txHash" query param is required (must start with 0x)'
+            });
+          }
+        } else {
+          if (!id) {
+            return res.status(400).json({
+              success: false,
+              error: 'Missing required parameter: id'
+            });
+          }
+        }
+
+        const transactionId = type !== 'renewal' ? parseInt(id as string, 10) : 0;
+        if (type !== 'renewal' && isNaN(transactionId)) {
           return res.status(400).json({
             success: false,
             error: 'Invalid id. Must be a number'
           });
         }
 
-        logger.info(`🔍 AI Reply Preview requested: ${type} ${transactionId}`);
+        const recordKey = type === 'renewal' ? (txHash as string) : transactionId;
+        logger.info(`🔍 AI Reply Preview requested: ${type} ${recordKey}`);
 
-        // Step 1: Fetch transaction from database
+        // Step 1: Fetch transaction(s) from database. Renewals fetch all rows for the tx
+        // and the array is the unit-of-work.
         logger.debug('   Fetching transaction from database...');
+        let renewals: ENSRenewal[] = [];
         const transaction = type === 'sale'
           ? await databaseService.getSaleById(transactionId)
           : type === 'registration'
           ? await databaseService.getRegistrationById(transactionId)
-          : await databaseService.getBidById(transactionId);
+          : type === 'bid'
+          ? await databaseService.getBidById(transactionId)
+          : null;
 
-        if (!transaction) {
+        if (type === 'renewal') {
+          renewals = await databaseService.getRenewalsByTxHash(txHash as string);
+          if (renewals.length === 0) {
+            return res.status(404).json({
+              success: false,
+              error: `No renewal rows found for tx ${(txHash as string).slice(0, 12)}…`
+            });
+          }
+          // Sort by per-name cost desc — matches the format used downstream
+          renewals.sort((a, b) => parseFloat(b.costEth || '0') - parseFloat(a.costEth || '0'));
+        } else if (!transaction) {
           return res.status(404).json({
             success: false,
             error: `${type} with id ${transactionId} not found`
@@ -475,36 +514,65 @@ async function startApplication(): Promise<void> {
         const isSale = type === 'sale';
         const isRegistration = type === 'registration';
         const isBid = type === 'bid';
+        const isRenewal = type === 'renewal';
         
         const sale = isSale ? transaction as ProcessedSale : null;
         const registration = isRegistration ? transaction as ENSRegistration : null;
         const bid = isBid ? transaction as ENSBid : null;
 
-        const tokenName = isSale 
+        const tokenName = isRenewal
+          ? renewals[0].fullName // Top-by-cost name (representative)
+          : isSale 
           ? (sale!.nftName || 'Unknown') 
           : isRegistration 
           ? registration!.fullName 
           : (bid!.ensName || 'Unknown');
-        logger.debug(`   Found transaction: ${tokenName}`);
+        logger.debug(`   Found transaction: ${tokenName}${isRenewal ? ` (+ ${renewals.length - 1} more in tx)` : ''}`);
 
         // Step 3: Prepare event data for context building
-        const eventData = {
-          type: type as 'sale' | 'registration' | 'bid',
-          tokenName,
-          price: parseFloat(isSale ? sale!.priceAmount : isRegistration ? (registration!.costEth || '0') : bid!.priceDecimal),
-          priceUsd: parseFloat(isSale ? (sale!.priceUsd || '0') : isRegistration ? (registration!.costUsd || '0') : (bid!.priceUsd || '0')),
-          currency: isSale ? (sale!.currencySymbol || 'ETH') : isBid ? (bid!.currencySymbol || 'ETH') : 'ETH',
-          timestamp: isBid 
-            ? new Date(bid!.createdAtApi).getTime() / 1000 
-            : new Date((sale || registration)!.blockTimestamp).getTime() / 1000,
-          buyerAddress: isSale ? sale!.buyerAddress : isRegistration ? (registration!.executorAddress || registration!.ownerAddress) : bid!.makerAddress,
-          sellerAddress: isSale ? sale!.sellerAddress : undefined,
-          recipientAddress: isRegistration && registration!.executorAddress &&
-            registration!.executorAddress.toLowerCase() !== registration!.ownerAddress.toLowerCase()
-            ? registration!.ownerAddress
-            : undefined,
-          txHash: isBid ? undefined : (sale || registration)!.transactionHash
-        };
+        const eventData = isRenewal
+          ? (() => {
+              const sample = renewals[0];
+              const totalEth = renewals.reduce((sum, r) => sum + parseFloat(r.costEth || '0'), 0);
+              const totalUsd = renewals.reduce((sum, r) => sum + parseFloat(r.costUsd || '0'), 0);
+              const topNames = renewals.slice(0, 3).map(r => ({ name: r.fullName, costEth: parseFloat(r.costEth || '0') }));
+              const allNames = renewals.map(r => r.fullName);
+              const recipientAddress =
+                sample.ownerAddress &&
+                sample.ownerAddress.toLowerCase() !== sample.renewerAddress.toLowerCase()
+                  ? sample.ownerAddress
+                  : undefined;
+              return {
+                type: 'renewal' as const,
+                tokenName,
+                price: totalEth,
+                priceUsd: totalUsd,
+                currency: 'ETH',
+                timestamp: new Date(sample.blockTimestamp).getTime() / 1000,
+                buyerAddress: sample.renewerAddress,
+                sellerAddress: undefined as string | undefined,
+                recipientAddress,
+                txHash: sample.transactionHash,
+                renewalContext: { nameCount: renewals.length, topNames, allNames }
+              };
+            })()
+          : {
+              type: type as 'sale' | 'registration' | 'bid',
+              tokenName,
+              price: parseFloat(isSale ? sale!.priceAmount : isRegistration ? (registration!.costEth || '0') : bid!.priceDecimal),
+              priceUsd: parseFloat(isSale ? (sale!.priceUsd || '0') : isRegistration ? (registration!.costUsd || '0') : (bid!.priceUsd || '0')),
+              currency: isSale ? (sale!.currencySymbol || 'ETH') : isBid ? (bid!.currencySymbol || 'ETH') : 'ETH',
+              timestamp: isBid 
+                ? new Date(bid!.createdAtApi).getTime() / 1000 
+                : new Date((sale || registration)!.blockTimestamp).getTime() / 1000,
+              buyerAddress: isSale ? sale!.buyerAddress : isRegistration ? (registration!.executorAddress || registration!.ownerAddress) : bid!.makerAddress,
+              sellerAddress: isSale ? sale!.sellerAddress : undefined,
+              recipientAddress: isRegistration && registration!.executorAddress &&
+                registration!.executorAddress.toLowerCase() !== registration!.ownerAddress.toLowerCase()
+                ? registration!.ownerAddress
+                : undefined,
+              txHash: isBid ? undefined : (sale || registration)!.transactionHash
+            };
 
         // Step 3: Fetch activity data from Grails API
         const { GrailsApiService } = await import('./services/grailsApiService');
@@ -560,21 +628,33 @@ async function startApplication(): Promise<void> {
           }
         );
 
-        logger.info(`✅ AI Reply Preview generated for ${type} ${transactionId}`);
+        logger.info(`✅ AI Reply Preview generated for ${type} ${recordKey}`);
 
-        // Step 5: Return preview JSON
+        // Step 5: Return preview JSON. Renewals don't have a single id (they're tx-keyed),
+        // so we return the tx_hash + nameCount in the transaction summary.
         res.json({
           success: true,
           preview: {
-            transaction: {
-              id: transaction.id,
-              type: type,
-              tokenName: eventData.tokenName,
-              price: eventData.price,
-              priceUsd: eventData.priceUsd,
-              txHash: eventData.txHash,
-              blockTimestamp: isBid ? bid!.createdAtApi : (sale || registration)!.blockTimestamp
-            },
+            transaction: isRenewal
+              ? {
+                  id: null,
+                  type: 'renewal',
+                  txHash: eventData.txHash,
+                  tokenName: eventData.tokenName,
+                  nameCount: renewals.length,
+                  totalPrice: eventData.price,
+                  totalPriceUsd: eventData.priceUsd,
+                  blockTimestamp: renewals[0].blockTimestamp
+                }
+              : {
+                  id: transaction!.id,
+                  type: type,
+                  tokenName: eventData.tokenName,
+                  price: eventData.price,
+                  priceUsd: eventData.priceUsd,
+                  txHash: eventData.txHash,
+                  blockTimestamp: isBid ? bid!.createdAtApi : (sale || registration)!.blockTimestamp
+                },
             dataFetched: {
               tokenActivities: tokenResult.activities.length,
               buyerActivities: buyerResult.activities.length,
@@ -612,36 +692,56 @@ async function startApplication(): Promise<void> {
       }
     }
 
-    // AI Reply Generation Endpoint — fires off generation in the background
+    // AI Reply Generation Endpoint — fires off generation in the background.
+    // For sale/registration/bid: pass `id` (numeric).
+    // For renewal: pass `txHash` (string) instead of `id` — renewals are tx-keyed.
     app.post('/api/ai-reply-generate', requireAuth, async (req, res) => {
       try {
-        const { type, id, forceRegenerate } = req.body;
+        const { type, id, txHash, forceRegenerate } = req.body;
 
         // Validate inputs
-        if (!type || !id) {
+        if (!type) {
           return res.status(400).json({
             success: false,
-            error: 'Missing required parameters: type and id'
+            error: 'Missing required parameter: type'
           });
         }
 
-        if (type !== 'sale' && type !== 'registration' && type !== 'bid') {
+        if (type !== 'sale' && type !== 'registration' && type !== 'bid' && type !== 'renewal') {
           return res.status(400).json({
             success: false,
-            error: 'Invalid type. Must be "sale", "registration", or "bid"'
+            error: 'Invalid type. Must be "sale", "registration", "bid", or "renewal"'
           });
         }
 
-        const transactionId = parseInt(id as string, 10);
-        if (isNaN(transactionId)) {
+        const isRenewal = type === 'renewal';
+        if (isRenewal) {
+          if (!txHash || typeof txHash !== 'string' || !txHash.startsWith('0x')) {
+            return res.status(400).json({
+              success: false,
+              error: 'For type=renewal, "txHash" body field is required (must start with 0x)'
+            });
+          }
+        } else {
+          if (!id) {
+            return res.status(400).json({
+              success: false,
+              error: 'Missing required parameter: id'
+            });
+          }
+        }
+
+        const transactionId = !isRenewal ? parseInt(id as string, 10) : 0;
+        if (!isRenewal && isNaN(transactionId)) {
           return res.status(400).json({
             success: false,
             error: 'Invalid id. Must be a number'
           });
         }
 
-        const taskKey = `${type}-${transactionId}`;
-        logger.info(`🤖 AI Reply Generation requested: ${type} ${transactionId}${forceRegenerate ? ' (regenerate)' : ''}`);
+        const recordKey: number | string = isRenewal ? (txHash as string) : transactionId;
+        const taskKey = `${type}-${recordKey}`;
+        logger.info(`🤖 AI Reply Generation requested: ${type} ${recordKey}${forceRegenerate ? ' (regenerate)' : ''}`);
 
         // Check if AI replies are enabled
         const aiEnabled = await databaseService.isAIRepliesEnabled();
@@ -657,7 +757,9 @@ async function startApplication(): Promise<void> {
           ? await databaseService.getAIReplyBySaleId(transactionId)
           : type === 'registration'
           ? await databaseService.getAIReplyByRegistrationId(transactionId)
-          : await databaseService.getAIReplyByBidId(transactionId);
+          : type === 'bid'
+          ? await databaseService.getAIReplyByBidId(transactionId)
+          : await databaseService.getAIReplyByRenewalTxHash(txHash as string);
 
         if (existingReply && !forceRegenerate) {
           logger.info(`   Reply already exists (ID: ${existingReply.id})`);
@@ -720,8 +822,8 @@ async function startApplication(): Promise<void> {
         );
 
         bgAiReplyService.generateReply(
-          type as 'sale' | 'registration' | 'bid',
-          transactionId
+          type as 'sale' | 'registration' | 'bid' | 'renewal',
+          recordKey
         ).then(async (replyId) => {
           aiGenerationTasks.set(taskKey, { status: 'completed', startedAt: Date.now(), replyId });
           logger.info(`✅ Background AI generation completed for ${taskKey} → reply ${replyId}`);
@@ -747,21 +849,33 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    // AI Reply Status Endpoint — dashboard polls this while generation runs in background
+    // AI Reply Status Endpoint — dashboard polls this while generation runs in background.
+    // For sale/registration/bid: pass `id` (numeric).
+    // For renewal: pass `txHash` (string) instead of `id`.
     app.get('/api/ai-reply-status', requireAuth, async (req, res) => {
       try {
-        const { type, id } = req.query;
+        const { type, id, txHash } = req.query;
 
-        if (!type || !id) {
-          return res.status(400).json({ success: false, error: 'Missing type and id query params' });
+        if (!type) {
+          return res.status(400).json({ success: false, error: 'Missing type query param' });
         }
 
-        const transactionId = parseInt(id as string, 10);
-        if (isNaN(transactionId)) {
+        const isRenewal = type === 'renewal';
+        if (isRenewal) {
+          if (!txHash || typeof txHash !== 'string' || !txHash.startsWith('0x')) {
+            return res.status(400).json({ success: false, error: 'For type=renewal, "txHash" query param is required' });
+          }
+        } else if (!id) {
+          return res.status(400).json({ success: false, error: 'Missing id query param' });
+        }
+
+        const transactionId = !isRenewal ? parseInt(id as string, 10) : 0;
+        if (!isRenewal && isNaN(transactionId)) {
           return res.status(400).json({ success: false, error: 'Invalid id' });
         }
 
-        const taskKey = `${type}-${transactionId}`;
+        const recordKey: number | string = isRenewal ? (txHash as string) : transactionId;
+        const taskKey = `${type}-${recordKey}`;
 
         // 1. Check in-memory task map first (covers in-progress and recently finished tasks)
         const task = aiGenerationTasks.get(taskKey);
@@ -798,14 +912,16 @@ async function startApplication(): Promise<void> {
           }
         }
 
-        // 3. Fallback: check database by transaction ID (covers task map already cleaned up,
-        //    or generation that finished between polls)
+        // 3. Fallback: check database by transaction ID / tx_hash (covers task map already
+        //    cleaned up, or generation that finished between polls)
         const reply = type === 'sale'
           ? await databaseService.getAIReplyBySaleId(transactionId)
           : type === 'registration'
           ? await databaseService.getAIReplyByRegistrationId(transactionId)
           : type === 'bid'
           ? await databaseService.getAIReplyByBidId(transactionId)
+          : type === 'renewal'
+          ? await databaseService.getAIReplyByRenewalTxHash(txHash as string)
           : null;
 
         if (reply) {
@@ -977,6 +1093,55 @@ async function startApplication(): Promise<void> {
           success: true,
           data: recentRegistrations,
           count: recentRegistrations.length
+        });
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    // Unposted renewals — grouped by tx_hash (one entry per tx with all names rolled up).
+    // Renewals are tweeted per-tx, so this view matches what the bot will actually post about.
+    app.get('/api/unposted-renewals', requireAuth, async (req, res) => {
+      try {
+        const limit = parseInt(req.query.limit as string) || 100;
+        // Use the broader 24h window for the dashboard view so the user can see anything queued
+        // that was missed by the auto-post window.
+        const maxAgeHours = parseInt(req.query.maxAgeHours as string) || 24;
+
+        const txHashes = await databaseService.getUnpostedRenewalTxHashes(limit, maxAgeHours);
+        // Fan out to fetch all rows per tx, then aggregate.
+        const txGroups = await Promise.all(
+          txHashes.map(async (txHash) => {
+            const rows = await databaseService.getRenewalsByTxHash(txHash);
+            const totalEth = rows.reduce((sum, r) => sum + parseFloat(r.costEth || '0'), 0);
+            const totalUsd = rows.reduce((sum, r) => sum + parseFloat(r.costUsd || '0'), 0);
+            const sorted = [...rows].sort((a, b) => parseFloat(b.costEth || '0') - parseFloat(a.costEth || '0'));
+            return {
+              txHash,
+              renewerAddress: rows[0]?.renewerAddress,
+              blockNumber: rows[0]?.blockNumber,
+              blockTimestamp: rows[0]?.blockTimestamp,
+              nameCount: rows.length,
+              totalCostEth: totalEth.toFixed(8),
+              totalCostUsd: totalUsd > 0 ? totalUsd.toFixed(2) : null,
+              names: sorted.map(r => ({
+                ensName: r.ensName,
+                fullName: r.fullName,
+                costEth: r.costEth,
+                costUsd: r.costUsd,
+                ownerAddress: r.ownerAddress
+              }))
+            };
+          })
+        );
+
+        res.json({
+          success: true,
+          data: txGroups,
+          count: txGroups.length
         });
       } catch (error: any) {
         res.status(500).json({
@@ -1400,13 +1565,21 @@ async function startApplication(): Promise<void> {
           minEth999Club: parseFloat(await databaseService.getSystemState('autopost_bids_min_eth_999') || '0.5'),
           maxAgeHours: parseInt(await databaseService.getSystemState('autopost_bids_max_age_hours') || '24')
         };
-        
+
+        // Renewals: no club tiers (decided: bulk renewals span many clubs).
+        const renewalsSettings = {
+          enabled: (await databaseService.getSystemState('autopost_renewals_enabled') || 'true') === 'true',
+          minEthDefault: parseFloat(await databaseService.getSystemState('autopost_renewals_min_eth_default') || '0.1'),
+          maxAgeHours: parseInt(await databaseService.getSystemState('autopost_renewals_max_age_hours') || '4')
+        };
+
         res.json({
           success: true,
           settings: {
             sales: salesSettings,
             registrations: registrationsSettings,
-            bids: bidsSettings
+            bids: bidsSettings,
+            renewals: renewalsSettings
           }
         });
       } catch (error: any) {
@@ -1423,10 +1596,10 @@ async function startApplication(): Promise<void> {
         const { transactionType, settings } = req.body;
         
         // Validate transaction type
-        if (!['sales', 'registrations', 'bids'].includes(transactionType)) {
+        if (!['sales', 'registrations', 'bids', 'renewals'].includes(transactionType)) {
           return res.status(400).json({
             success: false,
-            error: 'transactionType must be one of: sales, registrations, bids'
+            error: 'transactionType must be one of: sales, registrations, bids, renewals'
           });
         }
 
@@ -1446,19 +1619,24 @@ async function startApplication(): Promise<void> {
             error: 'minEthDefault must be a positive number'
           });
         }
-        
-        if (typeof minEth10kClub !== 'number' || minEth10kClub < 0) {
-          return res.status(400).json({
-            success: false,
-            error: 'minEth10kClub must be a positive number'
-          });
-        }
-        
-        if (typeof minEth999Club !== 'number' || minEth999Club < 0) {
-          return res.status(400).json({
-            success: false,
-            error: 'minEth999Club must be a positive number'
-          });
+
+        // Club-tier minimums are optional — renewals don't use them (decided: bulk
+        // renewals span many clubs so club logic doesn't map cleanly). For other types
+        // they're required.
+        const hasClubTiers = transactionType !== 'renewals';
+        if (hasClubTiers) {
+          if (typeof minEth10kClub !== 'number' || minEth10kClub < 0) {
+            return res.status(400).json({
+              success: false,
+              error: 'minEth10kClub must be a positive number'
+            });
+          }
+          if (typeof minEth999Club !== 'number' || minEth999Club < 0) {
+            return res.status(400).json({
+              success: false,
+              error: 'minEth999Club must be a positive number'
+            });
+          }
         }
         
         if (typeof maxAgeHours !== 'number' || maxAgeHours < 1 || maxAgeHours > 168) {
@@ -1472,17 +1650,19 @@ async function startApplication(): Promise<void> {
         const prefix = `autopost_${transactionType}`;
         await databaseService.setSystemState(`${prefix}_enabled`, enabled.toString());
         await databaseService.setSystemState(`${prefix}_min_eth_default`, minEthDefault.toString());
-        await databaseService.setSystemState(`${prefix}_min_eth_10k`, minEth10kClub.toString());
-        await databaseService.setSystemState(`${prefix}_min_eth_999`, minEth999Club.toString());
+        if (hasClubTiers) {
+          await databaseService.setSystemState(`${prefix}_min_eth_10k`, minEth10kClub.toString());
+          await databaseService.setSystemState(`${prefix}_min_eth_999`, minEth999Club.toString());
+        }
         await databaseService.setSystemState(`${prefix}_max_age_hours`, maxAgeHours.toString());
         
-        logger.info(`Auto-post ${transactionType} settings updated:`, { enabled, minEthDefault, minEth10kClub, minEth999Club, maxAgeHours });
+        logger.info(`Auto-post ${transactionType} settings updated:`, { enabled, minEthDefault, ...(hasClubTiers ? { minEth10kClub, minEth999Club } : {}), maxAgeHours });
         
         res.json({
           success: true,
           message: `Auto-post ${transactionType} settings saved successfully`,
           transactionType,
-          settings: { enabled, minEthDefault, minEth10kClub, minEth999Club, maxAgeHours }
+          settings: { enabled, minEthDefault, ...(hasClubTiers ? { minEth10kClub, minEth999Club } : {}), maxAgeHours }
         });
       } catch (error: any) {
         logger.error('Failed to save auto-post settings:', error.message);
@@ -2433,6 +2613,145 @@ async function startApplication(): Promise<void> {
       }
     });
 
+    // ────────────────────────────────────────────────────────────────────────
+    // Renewal Tweet Generation API endpoints
+    // Renewals are tx-keyed (not row-keyed) — a single tx may contain 100+ rows.
+    // The dashboard fetches all rows for a given tx_hash before generating/posting.
+    // ────────────────────────────────────────────────────────────────────────
+
+    app.get('/api/renewal/tweet/generate/:txHash', requireAuth, async (req, res) => {
+      try {
+        const txHash = req.params.txHash;
+        if (!txHash || !txHash.startsWith('0x')) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid transaction hash (must start with 0x)'
+          });
+        }
+
+        const renewals = await databaseService.getRenewalsByTxHash(txHash);
+        if (renewals.length === 0) {
+          return res.status(404).json({
+            success: false,
+            error: `No renewal rows found for tx ${txHash.slice(0, 12)}…`
+          });
+        }
+
+        const preview = await newTweetFormatter.previewRenewalTweet(renewals);
+        const sample = renewals[0];
+
+        res.json({
+          success: true,
+          data: {
+            renewal: {
+              txHash,
+              renewerAddress: sample.renewerAddress,
+              blockNumber: sample.blockNumber,
+              blockTimestamp: sample.blockTimestamp,
+              nameCount: renewals.length,
+              posted: sample.posted,
+              tweetId: sample.tweetId || null
+            },
+            tweet: preview.tweet,
+            validation: preview.validation,
+            breakdown: preview.breakdown,
+            imageUrl: preview.tweet.imageUrl,
+            hasImage: !!preview.tweet.imageBuffer
+          }
+        });
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    app.post('/api/renewal/tweet/send/:txHash', requireAuth, async (req, res) => {
+      try {
+        const configValidation = twitterService.validateConfig();
+        if (!configValidation.valid) {
+          return res.status(400).json({
+            success: false,
+            error: 'Twitter API configuration incomplete',
+            missingFields: configValidation.missingFields
+          });
+        }
+
+        const txHash = req.params.txHash;
+        if (!txHash || !txHash.startsWith('0x')) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid transaction hash (must start with 0x)'
+          });
+        }
+
+        const renewals = await databaseService.getRenewalsByTxHash(txHash);
+        if (renewals.length === 0) {
+          return res.status(404).json({
+            success: false,
+            error: `No renewal rows found for tx ${txHash.slice(0, 12)}…`
+          });
+        }
+
+        // Allow re-posting (matches the registration endpoint behaviour — testing/preview friendly)
+
+        // Rate limit gate
+        await rateLimitService.validateTweetPost();
+
+        // Generate
+        const generatedTweet = await newTweetFormatter.generateRenewalTweet(renewals);
+        if (!generatedTweet.isValid) {
+          return res.status(400).json({
+            success: false,
+            error: 'Unable to generate valid renewal tweet',
+            details: generatedTweet
+          });
+        }
+
+        // Post to Twitter (with image)
+        const tweetResult = await twitterService.postTweet(generatedTweet.text, generatedTweet.imageBuffer);
+
+        if (tweetResult.success && tweetResult.tweetId) {
+          await rateLimitService.recordTweetPost(tweetResult.tweetId, tweetResult.postedText || generatedTweet.text);
+
+          // Mark ALL rows for the tx as posted in a single SQL statement.
+          // The statement-level posted_renewal_tx trigger fires once → one AI reply queued (Phase 6).
+          await databaseService.markRenewalTxAsPosted(txHash, tweetResult.tweetId);
+
+          const rateLimitStatus = await rateLimitService.canPostTweet();
+          res.json({
+            success: true,
+            data: {
+              tweetId: tweetResult.tweetId,
+              tweetContent: tweetResult.postedText || generatedTweet.text,
+              characterCount: generatedTweet.characterCount,
+              txHash,
+              nameCount: renewals.length,
+              rateLimitStatus,
+              hasImage: !!generatedTweet.imageBuffer
+            }
+          });
+        } else {
+          await rateLimitService.recordFailedTweetPost(
+            generatedTweet.text,
+            tweetResult.error || 'Unknown error'
+          );
+          res.status(500).json({
+            success: false,
+            error: 'Failed to post renewal tweet',
+            twitterError: tweetResult.error,
+            tweetContent: generatedTweet.text
+          });
+        }
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
     app.get('/api/unposted-bids', requireAuth, async (req, res) => {
       try {
         const limit = parseInt(req.query.limit as string) || 500; // Increased for testing
@@ -2751,6 +3070,116 @@ async function startApplication(): Promise<void> {
             stats: {
               totalRegistrations: totalRegistrations,
               pendingTweets: pendingTweets,
+              totalValue: totalValue.toFixed(4),
+              filteredResults: totalFiltered,
+              searchTerm: search
+            }
+          }
+        });
+      } catch (error: any) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    // Database renewals view — grouped by tx_hash (one entry per renewal tx).
+    // Each entry rolls up all names renewed in that tx with total cost.
+    app.get('/api/database/renewals', requireAuth, async (req, res) => {
+      try {
+        const page = parseInt(req.query.page as string) || 1;
+        const limit = parseInt(req.query.limit as string) || 25;
+        const offset = (page - 1) * limit;
+        const search = (req.query.search as string) || '';
+        const sortOrder = (req.query.sortOrder as string) || 'desc';
+
+        // Pull recent rows and aggregate by tx_hash. We pull a generous limit
+        // so pagination after grouping is meaningful even on bursty days.
+        const allRows = await databaseService.getRecentRenewals(2000);
+
+        // Group by tx_hash
+        const txMap = new Map<string, typeof allRows>();
+        for (const row of allRows) {
+          const existing = txMap.get(row.transactionHash) || [];
+          existing.push(row);
+          txMap.set(row.transactionHash, existing);
+        }
+
+        // Build aggregated entries
+        let txEntries = Array.from(txMap.entries()).map(([txHash, rows]) => {
+          const totalEth = rows.reduce((sum, r) => sum + parseFloat(r.costEth || '0'), 0);
+          const totalUsd = rows.reduce((sum, r) => sum + parseFloat(r.costUsd || '0'), 0);
+          const sorted = [...rows].sort((a, b) => parseFloat(b.costEth || '0') - parseFloat(a.costEth || '0'));
+          return {
+            txHash,
+            renewerAddress: rows[0]?.renewerAddress,
+            blockNumber: rows[0]?.blockNumber,
+            blockTimestamp: rows[0]?.blockTimestamp,
+            posted: rows[0]?.posted,
+            tweetId: rows[0]?.tweetId || null,
+            nameCount: rows.length,
+            totalCostEth: totalEth.toFixed(8),
+            totalCostUsd: totalUsd > 0 ? totalUsd.toFixed(2) : null,
+            // Top 3 names by cost — same shape as the tweet's "top" line, useful for the dashboard
+            topNames: sorted.slice(0, 3).map(r => ({
+              ensName: r.ensName,
+              fullName: r.fullName,
+              costEth: r.costEth
+            })),
+            // Full list of names for drill-down
+            names: sorted.map(r => ({
+              ensName: r.ensName,
+              fullName: r.fullName,
+              costEth: r.costEth,
+              costUsd: r.costUsd,
+              ownerAddress: r.ownerAddress
+            }))
+          };
+        });
+
+        // Search filter (matches against tx_hash, renewer, or any name in the tx)
+        if (search) {
+          const s = search.toLowerCase();
+          txEntries = txEntries.filter(tx =>
+            tx.txHash.toLowerCase().includes(s) ||
+            (tx.renewerAddress?.toLowerCase().includes(s) ?? false) ||
+            tx.names.some(n => n.fullName.toLowerCase().includes(s))
+          );
+        }
+
+        // Sort by block_number (newest/oldest first)
+        txEntries.sort((a, b) => {
+          const aNum = a.blockNumber || 0;
+          const bNum = b.blockNumber || 0;
+          return sortOrder === 'asc' ? aNum - bNum : bNum - aNum;
+        });
+
+        const totalFiltered = txEntries.length;
+        const paginated = txEntries.slice(offset, offset + limit);
+
+        // Stats across the full (un-paginated, un-filtered) set
+        const totalTxs = txMap.size;
+        const totalRows = allRows.length;
+        const pendingTxs = txEntries.filter(t => !t.posted).length;
+        const totalValue = txEntries.reduce((sum, t) => sum + parseFloat(t.totalCostEth), 0);
+
+        res.json({
+          success: true,
+          data: {
+            renewals: paginated,
+            pagination: {
+              page,
+              limit,
+              total: totalFiltered,
+              totalPages: Math.ceil(totalFiltered / limit),
+              hasNext: page * limit < totalFiltered,
+              hasPrev: page > 1
+            },
+            stats: {
+              totalTxs: totalTxs,
+              totalRows: totalRows,
+              pendingTxs: pendingTxs,
               totalValue: totalValue.toFixed(4),
               filteredResults: totalFiltered,
               searchTerm: search
@@ -3235,7 +3664,7 @@ async function startApplication(): Promise<void> {
                   timestampLength: qnTimestamp.length
                 });
                 
-                if (qnSignature !== expectedSignature) {
+                if (!timingSafeEqual(Buffer.from(qnSignature, 'hex'), Buffer.from(expectedSignature, 'hex'))) {
                   logger.error('❌ QuickNode webhook signature verification failed!');
                   return res.status(401).json({
                     success: false,
@@ -3296,7 +3725,7 @@ async function startApplication(): Promise<void> {
         // Convert buffer to string and then parse as JSON
         try {
           const bodyString = processedBody.toString('utf8');
-          logger.info('Full processed body string:', bodyString);
+          logger.debug('Full processed body string:', bodyString);
           
           // Try to parse as JSON
           webhookData = JSON.parse(bodyString);
@@ -3414,7 +3843,7 @@ async function startApplication(): Promise<void> {
                 matches: qnSignature === expectedSignature
               });
               
-              if (qnSignature !== expectedSignature) {
+              if (!timingSafeEqual(Buffer.from(qnSignature, 'hex'), Buffer.from(expectedSignature, 'hex'))) {
                 logger.error('❌ QuickNode registration webhook signature verification failed!');
                 return res.status(401).json({
                   success: false,
@@ -3474,7 +3903,7 @@ async function startApplication(): Promise<void> {
         // Convert buffer to string and then parse as JSON
         try {
           const bodyString = processedBody.toString('utf8');
-          logger.info('📊 Full registration payload:', bodyString);
+          logger.debug('📊 Full registration payload:', bodyString);
           
           // Try to parse as JSON
           webhookData = JSON.parse(bodyString);
@@ -3539,6 +3968,179 @@ async function startApplication(): Promise<void> {
     });
   });
 
+    // QuickNode Renewal Webhook — handles NameRenewed events from ENS Registrar Controllers.
+    // Payload may contain events from MULTIPLE txs in one block (QuickNode delivers per block).
+    // The service groups by tx_hash and does one batched INSERT per tx, so the statement-level
+    // PostgreSQL trigger fires exactly one pg_notify('new_renewal_tx', txHash) per distinct tx.
+    app.post('/webhook/quicknode-renewals', (req, res) => {
+      // Capture raw body manually since QuickNode doesn't send Content-Type
+      let rawBody = Buffer.alloc(0);
+
+      req.on('data', (chunk) => {
+        rawBody = Buffer.concat([rawBody, chunk]);
+      });
+
+      req.on('end', async () => {
+        try {
+          logger.info('🚀 QuickNode Renewal webhook received');
+
+          logger.info('Request method:', req.method);
+          logger.info('Raw body length:', rawBody.length);
+          logger.info('Content-Type:', req.headers['content-type'] || 'not specified');
+          logger.info('Content-Encoding:', req.headers['content-encoding'] || 'not specified');
+
+          if (rawBody.length > 0) {
+            logger.info('Raw body (first 100 chars):', rawBody.toString('utf8').substring(0, 100));
+          }
+
+          // QuickNode Webhook Security Verification (HMAC-SHA256)
+          const qnSignature = req.headers['x-qn-signature'] as string;
+          const qnNonce = req.headers['x-qn-nonce'] as string;
+          const qnTimestamp = req.headers['x-qn-timestamp'] as string;
+          const quickNodeSecret = config.quicknode.renewalsWebhookSecret;
+
+          if (qnSignature && qnNonce && qnTimestamp && quickNodeSecret) {
+            try {
+              const bodyString = rawBody.toString('utf8');
+              const stringToSign = qnNonce + qnTimestamp + bodyString;
+
+              const expectedSignature = createHmac('sha256', quickNodeSecret)
+                .update(stringToSign)
+                .digest('hex');
+
+              logger.info('🔐 QuickNode renewal webhook signature verification:', {
+                provided: qnSignature,
+                expected: expectedSignature,
+                matches: qnSignature === expectedSignature
+              });
+
+              if (!timingSafeEqual(Buffer.from(qnSignature, 'hex'), Buffer.from(expectedSignature, 'hex'))) {
+                logger.error('❌ QuickNode renewal webhook signature verification failed!');
+                return res.status(401).json({
+                  success: false,
+                  error: 'Webhook signature verification failed',
+                  message: 'Invalid QuickNode signature'
+                });
+              }
+
+              logger.info('✅ QuickNode renewal webhook signature verified successfully');
+
+            } catch (sigError: any) {
+              logger.error('❌ QuickNode renewal signature verification error:', sigError);
+              return res.status(500).json({
+                success: false,
+                error: 'Signature verification error',
+                message: sigError.message
+              });
+            }
+          } else {
+            logger.warn('⚠️ QuickNode renewal webhook signature verification skipped - missing headers or secret');
+          }
+
+          // Empty body guard
+          if (rawBody.length === 0) {
+            logger.warn('⚠️ Renewal webhook received with empty body');
+            return res.status(200).json({
+              success: true,
+              message: 'Renewal webhook received but body is empty',
+              type: 'empty_body'
+            });
+          }
+
+          // Gzip handling
+          let processedBody: Buffer = rawBody;
+          try {
+            if (req.headers['content-encoding'] === 'gzip') {
+              logger.info('🗜️ Decompressing gzipped renewal content');
+              const decompressed = gunzipSync(rawBody);
+              processedBody = Buffer.from(decompressed);
+            } else {
+              if (rawBody.length >= 2 && rawBody[0] === 0x1f && rawBody[1] === 0x8b) {
+                logger.info('🗜️ Detected gzip magic bytes in renewal data, decompressing...');
+                const decompressed = gunzipSync(rawBody);
+                processedBody = Buffer.from(decompressed);
+              }
+            }
+          } catch (gzipError: any) {
+            logger.warn('⚠️ Failed to decompress renewal data (not gzipped?):', gzipError.message);
+            processedBody = rawBody;
+          }
+
+          // Parse JSON
+          let webhookData;
+          try {
+            const bodyString = processedBody.toString('utf8');
+            logger.debug('📊 Full renewal payload:', bodyString);
+            webhookData = JSON.parse(bodyString);
+            logger.info('✅ Successfully parsed renewal body as JSON');
+            logger.info('📋 Parsed renewal data structure:', JSON.stringify({
+              hasNameRenewed: !!webhookData.nameRenewed,
+              nameRenewedCount: webhookData.nameRenewed ? webhookData.nameRenewed.length : 0
+            }));
+          } catch (parseError: any) {
+            logger.error('❌ Failed to parse renewal webhook data as JSON:', parseError.message);
+            logger.info('Raw renewal data that failed to parse:', processedBody.toString('utf8'));
+            return res.status(400).json({
+              success: false,
+              error: 'JSON parse error',
+              message: parseError.message
+            });
+          }
+
+          // Validate expected payload shape
+          if (!webhookData.nameRenewed || !Array.isArray(webhookData.nameRenewed)) {
+            logger.warn('No nameRenewed array found in renewal webhook');
+            return res.status(200).json({
+              success: true,
+              message: 'Webhook received but no nameRenewed data to process',
+              type: 'no_renewals'
+            });
+          }
+
+          // Process renewal events through QuickNodeRenewalService
+          let stats;
+          try {
+            stats = await quickNodeRenewalService.processRenewals(webhookData);
+            logger.info('✅ QuickNode renewal processing complete', stats);
+          } catch (processingError: any) {
+            logger.error('❌ QuickNode renewal processing failed:', processingError.message);
+            return res.status(500).json({
+              success: false,
+              error: 'Renewal processing failed',
+              details: processingError.message
+            });
+          }
+
+          res.status(200).json({
+            success: true,
+            message: 'QuickNode renewal webhook processed successfully',
+            type: 'quicknode-renewals',
+            results: {
+              eventsReceived: webhookData.nameRenewed.length,
+              ...stats
+            }
+          });
+
+        } catch (error: any) {
+          logger.error('❌ Error processing QuickNode renewal webhook:', error.message);
+          res.status(500).json({
+            success: false,
+            error: 'Webhook processing failed',
+            message: error.message
+          });
+        }
+      });
+
+      req.on('error', (err) => {
+        logger.error('❌ QuickNode renewal webhook request error:', err);
+        res.status(500).json({
+          success: false,
+          error: 'Request error',
+          message: err.message
+        });
+      });
+    });
+
     // API info endpoint
     app.get('/api', (req, res) => {
       res.json({
@@ -3553,7 +4155,8 @@ async function startApplication(): Promise<void> {
         },
         webhooks: {
           salesv2: '/webhook/salesv2',
-          quicknodeRegistrations: '/webhook/quicknode-registrations'
+          quicknodeRegistrations: '/webhook/quicknode-registrations',
+          quicknodeRenewals: '/webhook/quicknode-renewals'
         }
       });
     });

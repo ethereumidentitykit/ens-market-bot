@@ -41,7 +41,8 @@ export const config: Config = {
   },
   quicknode: {
     salesWebhookSecret: process.env.QUICKNODE_SECRET_SALES || '',
-    registrationsWebhookSecret: process.env.QUICKNODE_SECRET_REGISTRATIONS || ''
+    registrationsWebhookSecret: process.env.QUICKNODE_SECRET_REGISTRATIONS || '',
+    renewalsWebhookSecret: process.env.QUICKNODE_SECRET_RENEWALS || ''
   },
   opensea: process.env.OPENSEA_API_KEY ? {
     apiKey: process.env.OPENSEA_API_KEY,
@@ -79,5 +80,11 @@ export function validateConfig(): void {
     console.warn('⚠️  No QUICKNODE_SECRET_REGISTRATIONS set - registrations webhook signature verification will be disabled');
   } else {
     console.log('🔐 QuickNode registrations webhook secret configured for signature verification');
+  }
+
+  if (!process.env.QUICKNODE_SECRET_RENEWALS) {
+    console.warn('⚠️  No QUICKNODE_SECRET_RENEWALS set - renewals webhook signature verification will be disabled');
+  } else {
+    console.log('🔐 QuickNode renewals webhook secret configured for signature verification');
   }
 }

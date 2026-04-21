@@ -12,7 +12,7 @@
  */
 
 import { logger } from '../utils/logger';
-import { IDatabaseService, ProcessedSale, ENSRegistration, ENSBid } from '../types';
+import { IDatabaseService, ProcessedSale, ENSRegistration, ENSBid, ENSRenewal } from '../types';
 import { OpenAIService } from './openaiService';
 import { TwitterService } from './twitterService';
 import { DataProcessingService } from './dataProcessingService';
@@ -21,6 +21,23 @@ import { GrailsApiService } from './grailsApiService';
 import { ENSWorkerService } from './ensWorkerService';
 import { APIToggleService } from './apiToggleService';
 import { AlchemyService } from './alchemyService';
+
+/**
+ * Reply target — uniquely identifies the event we're replying to.
+ *
+ * Sales/registrations/bids are keyed by numeric row id. Renewals are keyed by
+ * tx_hash because a single bulk-renewal tx contains 100+ rows in ens_renewals
+ * but produces one tweet and one AI reply.
+ */
+export type ReplyTargetType = 'sale' | 'registration' | 'bid' | 'renewal';
+export type ReplyTargetKey = number | string; // number for sale/reg/bid, string (tx_hash) for renewal
+
+/**
+ * The "transaction" value the AIReplyService threads through its pipeline.
+ * For renewals, this is the FULL array of ens_renewals rows for the tx (sorted
+ * by per-name cost desc upstream); the array represents the unit-of-work.
+ */
+type ReplyTransaction = ProcessedSale | ENSRegistration | ENSBid | ENSRenewal[];
 
 export class AIReplyService {
   private openaiService: OpenAIService;
@@ -68,19 +85,22 @@ export class AIReplyService {
   /**
    * Generate AI reply and store as 'pending' (does NOT post to Twitter)
    * Used by: Admin dashboard manual generation
+   *
+   * @param type One of 'sale' | 'registration' | 'bid' | 'renewal'
+   * @param recordIdOrTxHash Numeric row id for sale/registration/bid; tx_hash string for renewal
    * @returns The ID of the generated reply
    */
   async generateReply(
-    type: 'sale' | 'registration' | 'bid',
-    recordId: number
+    type: ReplyTargetType,
+    recordIdOrTxHash: ReplyTargetKey
   ): Promise<number> {
     const startTime = Date.now();
-    logger.info(`🤖 [AI Reply] Starting generation for ${type} ${recordId}`);
+    logger.info(`🤖 [AI Reply] Starting generation for ${type} ${recordIdOrTxHash}`);
 
     try {
       // Step 1: Validate prerequisites (skip auto-posting checks)
       logger.debug(`   [AI Reply] Step 1: Validating prerequisites...`);
-      const validation = await this.validateReplyConditions(type, recordId, false); // skipAutoPostChecks
+      const validation = await this.validateReplyConditions(type, recordIdOrTxHash, false); // skipAutoPostChecks
       
       if (!validation.valid || !validation.transaction) {
         throw new Error(`Validation failed: ${validation.reason}`);
@@ -202,20 +222,20 @@ export class AIReplyService {
       logger.debug(`   [AI Reply] Step 6: Storing reply as pending...`);
       const replyId = await this.insertNewReplyAsPending(
         type,
-        recordId,
+        recordIdOrTxHash,
         transaction,
         generatedReply,
         contextData.nameResearch
       );
 
       const totalTime = Date.now() - startTime;
-      logger.info(`✅ [AI Reply] ${type} ${recordId} generated in ${totalTime}ms - Reply ID: ${replyId} (pending)`);
+      logger.info(`✅ [AI Reply] ${type} ${recordIdOrTxHash} generated in ${totalTime}ms - Reply ID: ${replyId} (pending)`);
 
       return replyId;
 
     } catch (error: any) {
       const totalTime = Date.now() - startTime;
-      logger.error(`❌ [AI Reply] ${type} ${recordId} failed after ${totalTime}ms:`, error.message);
+      logger.error(`❌ [AI Reply] ${type} ${recordIdOrTxHash} failed after ${totalTime}ms:`, error.message);
       logger.error(error.stack);
       throw error;
     }
@@ -288,17 +308,20 @@ export class AIReplyService {
    * Generate and post AI reply (automatic flow)
    * Called by DatabaseEventService when a tweet is posted
    * This is a thin wrapper that calls generateReply() then postReply()
+   *
+   * @param type One of 'sale' | 'registration' | 'bid' | 'renewal'
+   * @param recordIdOrTxHash Numeric row id for sale/registration/bid; tx_hash string for renewal
    */
   async generateAndPostAIReply(
-    type: 'sale' | 'registration' | 'bid',
-    recordId: number
+    type: ReplyTargetType,
+    recordIdOrTxHash: ReplyTargetKey
   ): Promise<void> {
     const startTime = Date.now();
-    logger.info(`🤖 [AI Reply] Starting automatic generation+post for ${type} ${recordId}`);
+    logger.info(`🤖 [AI Reply] Starting automatic generation+post for ${type} ${recordIdOrTxHash}`);
 
     try {
       // Validate auto-posting is enabled
-      const validation = await this.validateReplyConditions(type, recordId, true); // requireAutoPostChecks
+      const validation = await this.validateReplyConditions(type, recordIdOrTxHash, true); // requireAutoPostChecks
       
       if (!validation.valid || !validation.transaction) {
         logger.warn(`   [AI Reply] ❌ Validation failed: ${validation.reason}`);
@@ -306,25 +329,29 @@ export class AIReplyService {
       }
 
       // Generate reply (stores as pending)
-      const replyId = await this.generateReply(type, recordId);
+      const replyId = await this.generateReply(type, recordIdOrTxHash);
 
       // Post to Twitter
       await this.postReply(replyId);
 
       const totalTime = Date.now() - startTime;
-      logger.info(`🎉 [AI Reply] ${type} ${recordId} complete (auto-posted) in ${totalTime}ms`);
+      logger.info(`🎉 [AI Reply] ${type} ${recordIdOrTxHash} complete (auto-posted) in ${totalTime}ms`);
 
     } catch (error: any) {
       const totalTime = Date.now() - startTime;
-      logger.error(`❌ [AI Reply] ${type} ${recordId} failed after ${totalTime}ms:`, error.message);
+      logger.error(`❌ [AI Reply] ${type} ${recordIdOrTxHash} failed after ${totalTime}ms:`, error.message);
       logger.error(error.stack);
       
       // Try to record error in database
       try {
         const existingReply = type === 'sale'
-          ? await this.databaseService.getAIReplyBySaleId(recordId)
-          : await this.databaseService.getAIReplyByRegistrationId(recordId);
-        
+          ? await this.databaseService.getAIReplyBySaleId(recordIdOrTxHash as number)
+          : type === 'registration'
+          ? await this.databaseService.getAIReplyByRegistrationId(recordIdOrTxHash as number)
+          : type === 'bid'
+          ? await this.databaseService.getAIReplyByBidId(recordIdOrTxHash as number)
+          : await this.databaseService.getAIReplyByRenewalTxHash(recordIdOrTxHash as string);
+
         if (existingReply && existingReply.id) {
           await this.updateReplyError(existingReply.id, error.message);
         }
@@ -341,13 +368,13 @@ export class AIReplyService {
    * @param requireAutoPostChecks If true, validates auto-posting is enabled (for automatic flow)
    */
   private async validateReplyConditions(
-    type: 'sale' | 'registration' | 'bid',
-    recordId: number,
+    type: ReplyTargetType,
+    recordIdOrTxHash: ReplyTargetKey,
     requireAutoPostChecks: boolean = true
   ): Promise<{
     valid: boolean;
     reason?: string;
-    transaction?: ProcessedSale | ENSRegistration | ENSBid;
+    transaction?: ReplyTransaction;
     existingReply?: any;
   }> {
     // Check if AI replies are enabled
@@ -375,34 +402,54 @@ export class AIReplyService {
       };
     }
 
-    // Fetch transaction
-    const transaction = type === 'sale'
-      ? await this.databaseService.getSaleById(recordId)
-      : type === 'registration'
-      ? await this.databaseService.getRegistrationById(recordId)
-      : await this.databaseService.getBidById(recordId);
+    // Fetch transaction. For renewals, fetch ALL rows for the tx — the array IS the
+    // unit-of-work since a single bulk-renewal tx may contain 100+ rows.
+    let transaction: ReplyTransaction | null = null;
+    let tweetId: string | undefined;
+
+    if (type === 'sale') {
+      const sale = await this.databaseService.getSaleById(recordIdOrTxHash as number);
+      if (sale) { transaction = sale; tweetId = sale.tweetId; }
+    } else if (type === 'registration') {
+      const reg = await this.databaseService.getRegistrationById(recordIdOrTxHash as number);
+      if (reg) { transaction = reg; tweetId = reg.tweetId; }
+    } else if (type === 'bid') {
+      const bid = await this.databaseService.getBidById(recordIdOrTxHash as number);
+      if (bid) { transaction = bid; tweetId = bid.tweetId; }
+    } else if (type === 'renewal') {
+      const renewals = await this.databaseService.getRenewalsByTxHash(recordIdOrTxHash as string);
+      if (renewals.length > 0) {
+        // Sort by per-name cost desc once here; downstream code (prepareEventData,
+        // image gen, etc.) all expects this ordering.
+        renewals.sort((a, b) => parseFloat(b.costEth || '0') - parseFloat(a.costEth || '0'));
+        transaction = renewals;
+        tweetId = renewals[0].tweetId; // All rows share the same tweet_id (set by markRenewalTxAsPosted)
+      }
+    }
 
     if (!transaction) {
       return {
         valid: false,
-        reason: `${type} ${recordId} not found in database`
+        reason: `${type} ${recordIdOrTxHash} not found in database`
       };
     }
 
     // Check if transaction has been posted to Twitter
-    if (!transaction.tweetId) {
+    if (!tweetId) {
       return {
         valid: false,
-        reason: `${type} ${recordId} has not been posted to Twitter yet`
+        reason: `${type} ${recordIdOrTxHash} has not been posted to Twitter yet`
       };
     }
 
     // Check if reply already exists and is posted
     const existingReply = type === 'sale'
-      ? await this.databaseService.getAIReplyBySaleId(recordId)
+      ? await this.databaseService.getAIReplyBySaleId(recordIdOrTxHash as number)
       : type === 'registration'
-      ? await this.databaseService.getAIReplyByRegistrationId(recordId)
-      : await this.databaseService.getAIReplyByBidId(recordId);
+      ? await this.databaseService.getAIReplyByRegistrationId(recordIdOrTxHash as number)
+      : type === 'bid'
+      ? await this.databaseService.getAIReplyByBidId(recordIdOrTxHash as number)
+      : await this.databaseService.getAIReplyByRenewalTxHash(recordIdOrTxHash as string);
 
     if (existingReply && existingReply.status === 'posted' && existingReply.replyTweetId) {
       return {
@@ -420,13 +467,22 @@ export class AIReplyService {
   }
 
   /**
-   * Helper: Prepare event data from transaction
+   * Helper: Prepare event data from transaction.
+   *
+   * For renewals, `transaction` is an ENSRenewal[] (all rows for the tx, sorted
+   * by per-name cost desc by validateReplyConditions). The unit-of-work mapping is:
+   *   - tokenName  → top-by-cost name (representative; all names listed in renewalContext)
+   *   - price      → SUM of per-name costs across the tx (total ETH paid)
+   *   - priceUsd   → SUM of per-name USD costs
+   *   - buyerAddr  → renewer (= tx.from); the actor who paid
+   *   - sellerAddr → undefined (renewals have no seller)
+   *   - recipient  → owner of the top name when ≠ renewer (gift renewal)
    */
   private async prepareEventData(
-    type: 'sale' | 'registration' | 'bid',
-    transaction: ProcessedSale | ENSRegistration | ENSBid
+    type: ReplyTargetType,
+    transaction: ReplyTransaction
   ): Promise<{
-    type: 'sale' | 'registration' | 'bid';
+    type: ReplyTargetType;
     tokenName: string;
     price: number;
     priceUsd: number;
@@ -436,11 +492,60 @@ export class AIReplyService {
     sellerAddress?: string;
     recipientAddress?: string;
     txHash?: string;
+    renewalContext?: {
+      nameCount: number;
+      topNames: Array<{ name: string; costEth: number }>;
+      allNames: string[];
+    };
   }> {
+    // Renewal branch is structurally different — handle it first and return early.
+    if (type === 'renewal') {
+      const renewals = transaction as ENSRenewal[];
+      if (renewals.length === 0) {
+        throw new Error('Renewal transaction has no rows');
+      }
+      const sample = renewals[0];
+
+      const totalEth = renewals.reduce((sum, r) => sum + parseFloat(r.costEth || '0'), 0);
+      const totalUsd = renewals.reduce((sum, r) => sum + parseFloat(r.costUsd || '0'), 0);
+      const topNames = renewals.slice(0, 3).map(r => ({
+        name: r.fullName,
+        costEth: parseFloat(r.costEth || '0')
+      }));
+      const allNames = renewals.map(r => r.fullName);
+
+      // Recipient = current owner of the top name when it's not the renewer (gift renewal).
+      const topRow = renewals[0];
+      const recipientAddress =
+        topRow.ownerAddress &&
+        topRow.ownerAddress.toLowerCase() !== sample.renewerAddress.toLowerCase()
+          ? topRow.ownerAddress
+          : undefined;
+
+      return {
+        type: 'renewal',
+        tokenName: topRow.fullName, // Representative; full list in renewalContext
+        price: totalEth,
+        priceUsd: totalUsd,
+        currency: 'ETH', // Renewals are always ETH (NameRenewed event has only `cost` in wei)
+        timestamp: new Date(sample.blockTimestamp).getTime() / 1000,
+        buyerAddress: sample.renewerAddress, // Renewer = tx.from = the actor who paid
+        sellerAddress: undefined, // Renewals have no seller
+        recipientAddress,
+        txHash: sample.transactionHash,
+        renewalContext: {
+          nameCount: renewals.length,
+          topNames,
+          allNames
+        }
+      };
+    }
+
+    // Existing sale/registration/bid path (unchanged)
     const isSale = type === 'sale';
     const isRegistration = type === 'registration';
     const isBid = type === 'bid';
-    
+
     const sale = isSale ? transaction as ProcessedSale : null;
     const registration = isRegistration ? transaction as ENSRegistration : null;
     const bid = isBid ? transaction as ENSBid : null;
@@ -578,7 +683,7 @@ export class AIReplyService {
    * Helper: Fetch all context data in parallel (Grails API, holdings, name research)
    */
   private async fetchContextData(
-    transaction: ProcessedSale | ENSRegistration | ENSBid,
+    transaction: ReplyTransaction,
     eventData: any
   ): Promise<{
     tokenActivities: TokenActivity[];
@@ -851,28 +956,49 @@ export class AIReplyService {
    * Helper: Insert new reply record as 'pending' (NOT posted to Twitter yet)
    */
   private async insertNewReplyAsPending(
-    type: 'sale' | 'registration' | 'bid',
-    transactionId: number,
-    transaction: ProcessedSale | ENSRegistration | ENSBid,
+    type: ReplyTargetType,
+    recordIdOrTxHash: ReplyTargetKey,
+    transaction: ReplyTransaction,
     generatedReply: any,
     nameResearch?: string
   ): Promise<number> {
-    // Get name research ID from database
-    const tokenName = ('nftName' in transaction) 
-      ? transaction.nftName 
-      : ('fullName' in transaction ? transaction.fullName : ('ensName' in transaction ? transaction.ensName : null));
+    // For renewals: transaction is ENSRenewal[]; pull representative metadata from row 0
+    // (sorted by cost desc upstream — this is the top name).
+    const isRenewal = type === 'renewal';
+    const renewals = isRenewal ? transaction as ENSRenewal[] : null;
+    const sample = isRenewal ? renewals![0] : (transaction as ProcessedSale | ENSRegistration | ENSBid);
+
+    // Resolve the token name we'll associate with this reply (used for name_research lookup).
+    let tokenName: string | null;
+    if (isRenewal) {
+      tokenName = renewals![0].fullName; // Top-by-cost name; matches what the AI reply talks about
+    } else {
+      tokenName = ('nftName' in sample)
+        ? sample.nftName ?? null
+        : ('fullName' in sample ? sample.fullName : ('ensName' in sample ? sample.ensName ?? null : null));
+    }
     // Normalize name to always include .eth suffix for consistency
     const normalizedName = tokenName && tokenName.toLowerCase().endsWith('.eth') ? tokenName : (tokenName ? `${tokenName}.eth` : null);
     const nameResearchRecord = normalizedName ? await this.databaseService.getNameResearch(normalizedName) : null;
-    
+
+    // Resolve the originalTweetId — for renewals all rows share the same tweet_id;
+    // for the others it's directly on the row.
+    const originalTweetId = isRenewal ? renewals![0].tweetId! : (sample as ProcessedSale | ENSRegistration | ENSBid).tweetId!;
+
+    // Resolve transactionHash for non-renewal types (renewals carry it via renewalTxHash instead).
+    const transactionHash = !isRenewal && 'transactionHash' in sample
+      ? sample.transactionHash
+      : undefined;
+
     const replyId = await this.databaseService.insertAIReply({
-      saleId: type === 'sale' ? transactionId : undefined,
-      registrationId: type === 'registration' ? transactionId : undefined,
-      bidId: type === 'bid' ? transactionId : undefined,
-      originalTweetId: transaction.tweetId!,
+      saleId: type === 'sale' ? (recordIdOrTxHash as number) : undefined,
+      registrationId: type === 'registration' ? (recordIdOrTxHash as number) : undefined,
+      bidId: type === 'bid' ? (recordIdOrTxHash as number) : undefined,
+      renewalTxHash: type === 'renewal' ? (recordIdOrTxHash as string) : undefined,
+      originalTweetId,
       replyTweetId: undefined, // Not posted yet
       transactionType: type,
-      transactionHash: 'transactionHash' in transaction ? transaction.transactionHash : undefined,
+      transactionHash,
       modelUsed: generatedReply.modelUsed,
       promptTokens: generatedReply.promptTokens,
       completionTokens: generatedReply.completionTokens,
@@ -885,7 +1011,7 @@ export class AIReplyService {
       errorMessage: undefined
     });
 
-    logger.debug(`      Inserted new pending reply record (ID: ${replyId}) for ${type} ${transactionId}`);
+    logger.debug(`      Inserted new pending reply record (ID: ${replyId}) for ${type} ${recordIdOrTxHash}`);
     return replyId;
   }
 

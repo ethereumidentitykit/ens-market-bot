@@ -5,7 +5,7 @@
 
 import { logger } from '../utils/logger';
 import { isSubdomain } from '../utils/nameUtils';
-import { ProcessedSale, IDatabaseService, ENSRegistration, ENSBid } from '../types';
+import { ProcessedSale, IDatabaseService, ENSRegistration, ENSBid, ENSRenewal } from '../types';
 import { APIToggleService } from './apiToggleService';
 import { NewTweetFormatter } from './newTweetFormatter';
 import { TwitterService } from './twitterService';
@@ -18,8 +18,11 @@ import { AlchemyService } from './alchemyService';
 export interface TransactionSpecificSettings {
   enabled: boolean;
   minEthDefault: number;
-  minEth10kClub: number;
-  minEth999Club: number;
+  // Club-tier minimums are optional — used by sales/registrations/bids only.
+  // Renewals don't use club thresholds (decided: bulk renewals span many clubs,
+  // so club logic doesn't map cleanly), so these fields are omitted for renewals.
+  minEth10kClub?: number;
+  minEth999Club?: number;
   maxAgeHours: number;
 }
 
@@ -28,6 +31,7 @@ export interface AutoPostSettings {
   sales: TransactionSpecificSettings;
   registrations: TransactionSpecificSettings;
   bids: TransactionSpecificSettings;
+  renewals: TransactionSpecificSettings; // Renewals use only minEthDefault (no club tiers)
 }
 
 export interface PostResult {
@@ -35,11 +39,12 @@ export interface PostResult {
   saleId?: number; // For sales
   registrationId?: number; // For registrations
   bidId?: number; // For bids
+  renewalTxHash?: string; // For renewals (per-tx, not per-row)
   tweetId?: string;
   error?: string;
   skipped?: boolean;
   reason?: string;
-  type?: 'sale' | 'registration' | 'bid'; // To distinguish between types
+  type?: 'sale' | 'registration' | 'bid' | 'renewal'; // To distinguish between types
 }
 
 export class AutoTweetService {
@@ -510,13 +515,16 @@ export class AutoTweetService {
     const clubLabels = await Promise.all(clubs.map(c => this.clubService.getClubLabel(c)));
     logger.info(`🔍 SALE FILTER: ${nftName} - clubs detected: [${clubLabels.join(', ') || 'none'}]`);
     
-    // Check for premium clubs with special thresholds (in priority order)
+    // Check for premium clubs with special thresholds (in priority order).
+    // Club tiers are optional on the type (renewals don't use them); fall back to default if unset.
     if (clubs.includes('999')) {
-      logger.info(`🎯 SALE FILTER: ${nftName} - 999 Club detected, minimum: ${settings.minEth999Club} ETH`);
-      return settings.minEth999Club;
+      const min = settings.minEth999Club ?? settings.minEthDefault;
+      logger.info(`🎯 SALE FILTER: ${nftName} - 999 Club detected, minimum: ${min} ETH`);
+      return min;
     } else if (clubs.includes('10k')) {
-      logger.info(`🎯 SALE FILTER: ${nftName} - 10k Club detected, minimum: ${settings.minEth10kClub} ETH`);
-      return settings.minEth10kClub;
+      const min = settings.minEth10kClub ?? settings.minEthDefault;
+      logger.info(`🎯 SALE FILTER: ${nftName} - 10k Club detected, minimum: ${min} ETH`);
+      return min;
     }
     
     logger.info(`🎯 SALE FILTER: ${nftName} - default minimum: ${settings.minEthDefault} ETH`);
@@ -545,11 +553,12 @@ export class AutoTweetService {
     const ensName = registration.fullName || registration.ensName || '';
     const { clubs } = await this.clubService.getClubs(ensName);
     
-    // Check for premium clubs with special thresholds (in priority order)
+    // Check for premium clubs with special thresholds (in priority order).
+    // Club tiers are optional on the type (renewals don't use them); fall back to default if unset.
     if (clubs.includes('999')) {
-      return settings.minEth999Club;
+      return settings.minEth999Club ?? settings.minEthDefault;
     } else if (clubs.includes('10k')) {
-      return settings.minEth10kClub;
+      return settings.minEth10kClub ?? settings.minEthDefault;
     }
     
     return settings.minEthDefault;
@@ -569,6 +578,232 @@ export class AutoTweetService {
     }
     
     return clubs.length > 0 ? `${await this.clubService.getClubLabel(clubs[0])} registration` : 'Standard registration';
+  }
+
+  // ============================================================================
+  // ENS Renewals — per-tx auto-posting
+  // ============================================================================
+  // Renewals are aggregated per transaction (a bulk-renewal tx may contain 100+
+  // names). Each tx → one tweet. Threshold checks apply against the TOTAL cost
+  // for the tx, not per name. Club tiers do NOT apply (decided: bulk renewals
+  // span many clubs so club logic doesn't map cleanly).
+
+  /**
+   * Process renewals grouped by transaction hash. One tweet attempt per tx.
+   * @param renewalsByTx Map of tx_hash → all renewal rows for that tx
+   * @returns One PostResult per tx (success / skipped / error)
+   */
+  async processNewRenewals(
+    renewalsByTx: Map<string, ENSRenewal[]> | Record<string, ENSRenewal[]>,
+    settings: AutoPostSettings
+  ): Promise<PostResult[]> {
+    // Normalize input to Map for consistent iteration
+    const txMap = renewalsByTx instanceof Map
+      ? renewalsByTx
+      : new Map(Object.entries(renewalsByTx));
+
+    if (!settings.enabled) {
+      logger.debug('Auto-posting is globally disabled');
+      return [];
+    }
+
+    if (!settings.renewals.enabled) {
+      logger.debug('Renewals auto-posting is disabled');
+      return [];
+    }
+
+    if (!this.apiToggleService.isTwitterEnabled()) {
+      logger.warn('Cannot auto-post renewals: Twitter API is disabled');
+      return [];
+    }
+
+    if (txMap.size === 0) {
+      logger.debug('No renewal txs to process');
+      return [];
+    }
+
+    logger.info(`🔄 Processing ${txMap.size} renewal tx(es) for auto-posting...`);
+    const results: PostResult[] = [];
+
+    for (const [txHash, renewals] of txMap.entries()) {
+      if (renewals.length === 0) {
+        logger.warn(`Skipping renewal tx ${txHash.slice(0, 10)}… with no rows`);
+        continue;
+      }
+
+      try {
+        const result = await this.processSingleRenewalTx(txHash, renewals, settings);
+        results.push(result);
+
+        // Rate limiting: delay between posts to allow for image generation.
+        // Match the registration cadence (8s after success, 2s after failure).
+        if (result.success) {
+          logger.info('Renewal tweet posted successfully, waiting 8 seconds before next post...');
+          await this.delay(8000);
+        } else {
+          await this.delay(2000);
+        }
+      } catch (error: any) {
+        logger.error(`Error processing renewal tx ${txHash}:`, error.message);
+        results.push({
+          success: false,
+          renewalTxHash: txHash,
+          error: error.message,
+          type: 'renewal'
+        });
+      }
+    }
+
+    const successful = results.filter(r => r.success).length;
+    const skipped = results.filter(r => r.skipped).length;
+    const failed = results.filter(r => !r.success && !r.skipped).length;
+
+    logger.info(`✅ Processed ${txMap.size} renewal tx(es): ${successful} posted, ${skipped} skipped, ${failed} failed`);
+    return results;
+  }
+
+  /**
+   * Process a single renewal tx — gating, threshold check on total cost, generate, post.
+   */
+  private async processSingleRenewalTx(
+    txHash: string,
+    renewals: ENSRenewal[],
+    settings: AutoPostSettings
+  ): Promise<PostResult> {
+    // All rows for the tx share posted state; pick the first to check.
+    const sample = renewals[0];
+
+    if (sample.posted) {
+      return {
+        success: false,
+        renewalTxHash: txHash,
+        skipped: true,
+        reason: 'Renewal tx already posted',
+        type: 'renewal'
+      };
+    }
+
+    // Time-limit check uses the tx's block timestamp (all rows share it).
+    if (!(await this.isWithinRenewalTimeLimit(sample, settings.renewals.maxAgeHours))) {
+      return {
+        success: false,
+        renewalTxHash: txHash,
+        skipped: true,
+        reason: `Renewal tx is older than ${settings.renewals.maxAgeHours} hours`,
+        type: 'renewal'
+      };
+    }
+
+    // Threshold: sum cost across all rows in the tx.
+    const totalEth = renewals.reduce((sum, r) => sum + parseFloat(r.costEth || '0'), 0);
+    const ethMinimum = this.getEthMinimumForRenewal(settings.renewals);
+
+    if (totalEth < ethMinimum) {
+      logger.info(`❌ RENEWAL FILTER: tx ${txHash.slice(0, 10)}… (${renewals.length} names, ${totalEth.toFixed(4)} ETH total) < ${ethMinimum} ETH minimum - REJECTED`);
+      return {
+        success: false,
+        renewalTxHash: txHash,
+        skipped: true,
+        reason: `${totalEth.toFixed(4)} ETH total below minimum ${ethMinimum} ETH (${renewals.length} names)`,
+        type: 'renewal'
+      };
+    }
+
+    logger.info(`✅ RENEWAL FILTER: tx ${txHash.slice(0, 10)}… (${renewals.length} names, ${totalEth.toFixed(4)} ETH total) >= ${ethMinimum} ETH minimum - PASSED`);
+
+    // Rate limit check
+    const rateLimitCheck = await this.rateLimitService.canPostTweet();
+    if (!rateLimitCheck.canPost) {
+      return {
+        success: false,
+        renewalTxHash: txHash,
+        skipped: true,
+        reason: `Rate limit exceeded: ${rateLimitCheck.postsInLast24Hours}/${this.rateLimitService.getDailyLimit()} posts used`,
+        type: 'renewal'
+      };
+    }
+
+    logger.info(`Auto-posting renewal tx: ${renewals.length} names for ${totalEth.toFixed(4)} ETH (tx: ${txHash.slice(0, 10)}…)`);
+
+    try {
+      const tweetData = await this.newTweetFormatter.generateRenewalTweet(renewals);
+
+      if (!tweetData.isValid) {
+        return {
+          success: false,
+          renewalTxHash: txHash,
+          error: 'Failed to generate valid renewal tweet content',
+          type: 'renewal'
+        };
+      }
+
+      const postResult = await this.twitterService.postTweet(
+        tweetData.text,
+        tweetData.imageBuffer
+      );
+
+      if (postResult.success && postResult.tweetId) {
+        await this.rateLimitService.recordTweetPost(
+          postResult.tweetId,
+          postResult.postedText || tweetData.text
+        );
+
+        // Mark all rows for this tx as posted in a single SQL statement.
+        // The statement-level posted_renewal_tx trigger fires once → one AI reply queued.
+        await this.databaseService.markRenewalTxAsPosted(txHash, postResult.tweetId);
+
+        logger.info(`Successfully auto-posted renewal tx ${txHash.slice(0, 10)}… - Tweet ID: ${postResult.tweetId}`);
+
+        return {
+          success: true,
+          renewalTxHash: txHash,
+          tweetId: postResult.tweetId,
+          type: 'renewal'
+        };
+      } else {
+        await this.rateLimitService.recordFailedTweetPost(
+          tweetData.text,
+          postResult.error || 'Unknown error'
+        );
+
+        return {
+          success: false,
+          renewalTxHash: txHash,
+          error: postResult.error || 'Failed to post renewal tweet',
+          type: 'renewal'
+        };
+      }
+    } catch (error: any) {
+      logger.error(`Error posting tweet for renewal tx ${txHash}:`, error.message);
+      return {
+        success: false,
+        renewalTxHash: txHash,
+        error: error.message,
+        type: 'renewal'
+      };
+    }
+  }
+
+  /**
+   * Get ETH minimum requirement for a renewal tx.
+   * Renewals don't use club tiers — always returns the default minimum.
+   */
+  private getEthMinimumForRenewal(settings: TransactionSpecificSettings): number {
+    return settings.minEthDefault;
+  }
+
+  /**
+   * Check if a renewal tx is within the time limit using accurate UTC time.
+   */
+  private async isWithinRenewalTimeLimit(renewal: ENSRenewal, maxAgeHours: number): Promise<boolean> {
+    const renewalTimestamp = new Date(renewal.blockTimestamp);
+    const currentTime = await this.worldTimeService.getCurrentTime();
+    const maxAgeMs = maxAgeHours * 60 * 60 * 1000;
+    const ageMs = currentTime.getTime() - renewalTimestamp.getTime();
+
+    logger.debug(`Time check for renewal tx ${renewal.transactionHash.slice(0, 10)}…: renewal=${renewalTimestamp.toISOString()}, current=${currentTime.toISOString()}, age=${Math.round(ageMs / 1000 / 60)}min, limit=${maxAgeHours}h`);
+
+    return ageMs <= maxAgeMs;
   }
 
   /**
@@ -803,11 +1038,12 @@ export class AutoTweetService {
       // Apply club-aware logic using ClubService
       const { clubs } = await this.clubService.getClubs(ensName);
       
-      // Check for premium clubs with special thresholds (in priority order)
+      // Check for premium clubs with special thresholds (in priority order).
+      // Club tiers are optional on the type (renewals don't use them); fall back to default if unset.
       if (clubs.includes('999')) {
-        return settings.minEth999Club;
+        return settings.minEth999Club ?? settings.minEthDefault;
       } else if (clubs.includes('10k')) {
-        return settings.minEth10kClub;
+        return settings.minEth10kClub ?? settings.minEthDefault;
       }
       
       return settings.minEthDefault;
@@ -925,12 +1161,21 @@ export class AutoTweetService {
         minEth999Club: parseFloat(await this.databaseService.getSystemState('autopost_bids_min_eth_999') || '0.5'),
         maxAgeHours: parseInt(await this.databaseService.getSystemState('autopost_bids_max_age_hours') || '24')
       };
-      
+
+      // Load renewals settings — no club tiers (decided: bulk renewals span many clubs).
+      // Defaults locked in with user: min 0.1 ETH, max age 4h.
+      const renewalsSettings: TransactionSpecificSettings = {
+        enabled: (await this.databaseService.getSystemState('autopost_renewals_enabled') || 'true') === 'true',
+        minEthDefault: parseFloat(await this.databaseService.getSystemState('autopost_renewals_min_eth_default') || '0.1'),
+        maxAgeHours: parseInt(await this.databaseService.getSystemState('autopost_renewals_max_age_hours') || '4')
+      };
+
       return {
         enabled: this.apiToggleService.isAutoPostingEnabled(), // Global master toggle
         sales: salesSettings,
         registrations: registrationsSettings,
-        bids: bidsSettings
+        bids: bidsSettings,
+        renewals: renewalsSettings
       };
     } catch (error: any) {
       logger.warn('Failed to load auto-post settings from database, using defaults:', error.message);
@@ -956,6 +1201,11 @@ export class AutoTweetService {
           minEth10kClub: 1.0,
           minEth999Club: 0.5,
           maxAgeHours: 24
+        },
+        renewals: {
+          enabled: true,
+          minEthDefault: 0.1,
+          maxAgeHours: 4
         }
       };
     }
@@ -987,6 +1237,11 @@ export class AutoTweetService {
         minEth10kClub: 1.0,
         minEth999Club: 0.5,
         maxAgeHours: 24
+      },
+      renewals: {
+        enabled: true,
+        minEthDefault: 0.1,
+        maxAgeHours: 4
       }
     };
   }

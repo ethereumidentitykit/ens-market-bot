@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
-import { ProcessedSale, IDatabaseService, TwitterPost, ENSRegistration, ENSBid, PriceTier, SiweSession, AIReply, NameResearch } from '../types';
+import { ProcessedSale, IDatabaseService, TwitterPost, ENSRegistration, ENSRenewal, ENSBid, PriceTier, SiweSession, AIReply, NameResearch } from '../types';
 
 /**
  * PostgreSQL database service 
@@ -17,6 +17,24 @@ export class DatabaseService implements IDatabaseService {
     if (!this.pool) throw new Error('Database not initialized');
     return this.pool;
   }
+
+  /**
+   * Postgres advisory-lock key used to serialize trigger-function setup across
+   * concurrent app instances (e.g., overlapping nodemon restarts in dev).
+   *
+   * `CREATE OR REPLACE FUNCTION` modifies a row in the `pg_proc` system catalog,
+   * and Postgres throws "tuple concurrently updated" (XX000) if two sessions hit
+   * the same function row simultaneously. Even though `IF NOT EXISTS` guards the
+   * triggers themselves, the function bodies are unconditionally re-created on
+   * every startup, which is where the race lives.
+   *
+   * This is a pure cooperative app-level lock — only matters when two instances
+   * of *this* app race. Production never sees this (single instance starts at a
+   * time); dev with rapid file-saves does, and this fixes it cleanly.
+   *
+   * Key chosen as an arbitrary 64-bit constant (must match across all instances).
+   */
+  private static readonly TRIGGER_SETUP_ADVISORY_LOCK_KEY = 7456120942165173000n;
 
   /**
    * Initialize the PostgreSQL connection
@@ -36,17 +54,65 @@ export class DatabaseService implements IDatabaseService {
 
       // Run pending migrations
       await this.runMigrations();
-      
-      // Auto-setup database triggers for real-time processing
-      await this.setupSaleNotificationTriggers();
-      await this.setupRegistrationNotificationTriggers();
-      await this.setupBidNotificationTriggers();
-      await this.setupAIReplyNotificationTriggers();
-      
+
+      // Auto-setup database triggers for real-time processing.
+      // Wrapped in a session-level advisory lock so two overlapping app instances
+      // (e.g., during nodemon restart in dev) don't race on `CREATE OR REPLACE FUNCTION`.
+      await this.withTriggerSetupLock(async () => {
+        await this.setupSaleNotificationTriggers();
+        await this.setupRegistrationNotificationTriggers();
+        await this.setupBidNotificationTriggers();
+        await this.setupRenewalNotificationTriggers();
+        await this.setupAIReplyNotificationTriggers();
+      });
+
       logger.info('PostgreSQL database initialized successfully');
     } catch (error: any) {
       logger.error('Failed to initialize PostgreSQL database:', error.message);
       throw error;
+    }
+  }
+
+  /**
+   * Hold a session-level Postgres advisory lock for the duration of the callback.
+   *
+   * Instances racing on startup will serialize here: the second instance's
+   * `pg_advisory_lock()` blocks until the first releases, by which point the
+   * trigger functions already exist as `CREATE OR REPLACE` and the second
+   * instance is just no-op'ing its own `CREATE OR REPLACE` (which is now safe
+   * because no other session is touching `pg_proc` rows for these functions).
+   *
+   * Uses a dedicated client (not `pool.query`) because advisory locks are
+   * session-scoped — they release when the connection closes, so we need to
+   * hold the same connection across lock/work/unlock.
+   *
+   * Lock acquisition has a defensive 30s timeout via statement_timeout; if
+   * something is genuinely stuck we'd rather crash with a clear error than
+   * hang indefinitely.
+   */
+  private async withTriggerSetupLock<T>(fn: () => Promise<T>): Promise<T> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    const client = await this.pool.connect();
+    try {
+      // Defensive timeout in case the lock is somehow held indefinitely.
+      await client.query(`SET LOCAL statement_timeout = '30s'`);
+      const acquireStart = Date.now();
+      await client.query('SELECT pg_advisory_lock($1)', [DatabaseService.TRIGGER_SETUP_ADVISORY_LOCK_KEY.toString()]);
+      const waited = Date.now() - acquireStart;
+      if (waited > 50) {
+        // Only worth logging if we actually had to wait (i.e., another instance held it).
+        logger.info(`🔒 Acquired trigger-setup advisory lock after waiting ${waited}ms (another instance was setting up triggers)`);
+      }
+
+      try {
+        return await fn();
+      } finally {
+        // Release the lock no matter what happened in the callback.
+        await client.query('SELECT pg_advisory_unlock($1)', [DatabaseService.TRIGGER_SETUP_ADVISORY_LOCK_KEY.toString()]);
+      }
+    } finally {
+      client.release();
     }
   }
 
@@ -181,6 +247,53 @@ export class DatabaseService implements IDatabaseService {
         CREATE INDEX IF NOT EXISTS idx_ens_posted ON ens_registrations(posted)
       `);
 
+      // Create ens_renewals table
+      // Dedup on (transaction_hash, log_index) like sales — same name can be renewed many times.
+      // A bulk renewal tx emits many NameRenewed events; we store one row per name and aggregate
+      // at the tx level for tweets via statement-level triggers.
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS ens_renewals (
+          id SERIAL PRIMARY KEY,
+          transaction_hash VARCHAR(66) NOT NULL,
+          log_index INTEGER NOT NULL,
+          contract_address VARCHAR(42) NOT NULL,
+          token_id VARCHAR(255) NOT NULL,
+          ens_name VARCHAR(255) NOT NULL,
+          full_name VARCHAR(255) NOT NULL,
+          owner_address VARCHAR(42),
+          renewer_address VARCHAR(42) NOT NULL,
+          cost_wei VARCHAR(100) NOT NULL,
+          cost_eth DECIMAL(18,8),
+          cost_usd DECIMAL(12,2),
+          duration_seconds BIGINT,
+          block_number INTEGER NOT NULL,
+          block_timestamp TIMESTAMP NOT NULL,
+          processed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          image TEXT,
+          description TEXT,
+          tweet_id VARCHAR(255),
+          posted BOOLEAN DEFAULT FALSE,
+          expires_at TIMESTAMP,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT unique_renewal_tx_log UNIQUE (transaction_hash, log_index)
+        )
+      `);
+
+      // Create indexes for ens_renewals
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_renewals_tx_hash ON ens_renewals(transaction_hash)
+      `);
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_renewals_posted ON ens_renewals(posted)
+      `);
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_renewals_block_timestamp ON ens_renewals(block_timestamp)
+      `);
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_renewals_unposted_recovery ON ens_renewals(posted, processed_at)
+      `);
+
       // Create ens_bids table
       await this.pool.query(`
         CREATE TABLE IF NOT EXISTS ens_bids (
@@ -261,7 +374,7 @@ export class DatabaseService implements IDatabaseService {
         await this.pool.query(`
           CREATE TABLE IF NOT EXISTS price_tiers (
             id SERIAL PRIMARY KEY,
-            transaction_type VARCHAR(20) NOT NULL CHECK (transaction_type IN ('sales', 'registrations', 'bids')),
+            transaction_type VARCHAR(20) NOT NULL CHECK (transaction_type IN ('sales', 'registrations', 'bids', 'renewals')),
             tier_level INTEGER NOT NULL CHECK (tier_level >= 1 AND tier_level <= 4),
             min_usd DECIMAL(12,2) NOT NULL,
             max_usd DECIMAL(12,2),
@@ -277,6 +390,36 @@ export class DatabaseService implements IDatabaseService {
         if (!error.message.includes('already exists')) {
           throw error;
         }
+      }
+
+      // Migration: expand price_tiers transaction_type CHECK constraint to include 'renewals'.
+      // Idempotent: drops old constraint (any name) and re-adds the 4-way one.
+      try {
+        await this.pool.query(`
+          DO $$
+          DECLARE
+            constraint_name TEXT;
+          BEGIN
+            -- Find and drop any existing CHECK constraint on transaction_type
+            SELECT con.conname INTO constraint_name
+            FROM pg_constraint con
+            JOIN pg_class rel ON rel.oid = con.conrelid
+            WHERE rel.relname = 'price_tiers'
+              AND con.contype = 'c'
+              AND pg_get_constraintdef(con.oid) ILIKE '%transaction_type%';
+
+            IF constraint_name IS NOT NULL THEN
+              EXECUTE format('ALTER TABLE price_tiers DROP CONSTRAINT %I', constraint_name);
+            END IF;
+
+            -- Add the 4-way constraint
+            ALTER TABLE price_tiers
+              ADD CONSTRAINT price_tiers_transaction_type_check
+              CHECK (transaction_type IN ('sales', 'registrations', 'bids', 'renewals'));
+          END $$;
+        `);
+      } catch (error: any) {
+        logger.warn('Could not expand price_tiers transaction_type constraint (may already include renewals):', error.message);
       }
 
       // Insert default price tiers for each transaction type (skip if already exists)
@@ -298,7 +441,12 @@ export class DatabaseService implements IDatabaseService {
             ('bids', 1, 5000, 10000, 'Bids Grey border tier'),
             ('bids', 2, 10000, 40000, 'Bids Blue border tier'),
             ('bids', 3, 40000, 100000, 'Bids Purple border tier'),
-            ('bids', 4, 100000, NULL, 'Bids Red border tier (premium)')
+            ('bids', 4, 100000, NULL, 'Bids Red border tier (premium)'),
+            -- Renewals tiers
+            ('renewals', 1, 5000, 10000, 'Renewals Grey border tier'),
+            ('renewals', 2, 10000, 40000, 'Renewals Blue border tier'),
+            ('renewals', 3, 40000, 100000, 'Renewals Purple border tier'),
+            ('renewals', 4, 100000, NULL, 'Renewals Red border tier (premium)')
           ON CONFLICT (transaction_type, tier_level) DO NOTHING
         `);
       } catch (error: any) {
@@ -327,16 +475,23 @@ export class DatabaseService implements IDatabaseService {
         CREATE INDEX IF NOT EXISTS idx_admin_sessions_session_id ON admin_sessions(session_id);
       `);
 
-      // Create ai_replies table for AI-generated contextual replies
+      // Create ai_replies table for AI-generated contextual replies.
+      //
+      // NOTE: renewal AI replies are tx-keyed (renewal_tx_hash) rather than row-keyed
+      // (a single bulk-renewal tx may contain 100+ rows in ens_renewals; the AI reply
+      // is generated per tx, not per row). The transaction_type CHECK and
+      // check_transaction_ref exclusivity constraint enforce 4-way mutually-exclusive
+      // foreign keys: sale_id XOR registration_id XOR bid_id XOR renewal_tx_hash.
       await this.pool.query(`
         CREATE TABLE IF NOT EXISTS ai_replies (
           id SERIAL PRIMARY KEY,
           sale_id INTEGER REFERENCES processed_sales(id),
           registration_id INTEGER REFERENCES ens_registrations(id),
           bid_id INTEGER REFERENCES ens_bids(id),
+          renewal_tx_hash VARCHAR(66),
           original_tweet_id VARCHAR(255) NOT NULL,
           reply_tweet_id VARCHAR(255),
-          transaction_type VARCHAR(20) NOT NULL CHECK (transaction_type IN ('sale', 'registration', 'bid')),
+          transaction_type VARCHAR(20) NOT NULL CHECK (transaction_type IN ('sale', 'registration', 'bid', 'renewal')),
           transaction_hash VARCHAR(66),
           model_used VARCHAR(50) NOT NULL,
           prompt_tokens INTEGER NOT NULL,
@@ -351,9 +506,10 @@ export class DatabaseService implements IDatabaseService {
           created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
           posted_at TIMESTAMP,
           CONSTRAINT check_transaction_ref CHECK (
-            (sale_id IS NOT NULL AND registration_id IS NULL AND bid_id IS NULL) OR
-            (sale_id IS NULL AND registration_id IS NOT NULL AND bid_id IS NULL) OR
-            (sale_id IS NULL AND registration_id IS NULL AND bid_id IS NOT NULL)
+            (sale_id IS NOT NULL AND registration_id IS NULL AND bid_id IS NULL AND renewal_tx_hash IS NULL) OR
+            (sale_id IS NULL AND registration_id IS NOT NULL AND bid_id IS NULL AND renewal_tx_hash IS NULL) OR
+            (sale_id IS NULL AND registration_id IS NULL AND bid_id IS NOT NULL AND renewal_tx_hash IS NULL) OR
+            (sale_id IS NULL AND registration_id IS NULL AND bid_id IS NULL AND renewal_tx_hash IS NOT NULL)
           )
         )
       `);
@@ -371,7 +527,10 @@ export class DatabaseService implements IDatabaseService {
         END $$;
       `);
 
-      // Migrations for existing databases
+      // Migrations for existing databases — ai_replies schema additions.
+      // Idempotent: column adds are guarded by IF NOT EXISTS, constraints are dropped
+      // and re-added to ensure they reflect the latest 4-way (sale/registration/bid/renewal)
+      // mutual-exclusivity rules.
       await this.pool.query(`
         DO $$ 
         BEGIN
@@ -390,7 +549,16 @@ export class DatabaseService implements IDatabaseService {
           ) THEN
             ALTER TABLE ai_replies ADD COLUMN bid_id INTEGER REFERENCES ens_bids(id);
           END IF;
-          
+
+          -- Add renewal_tx_hash column if it doesn't exist (renewals are tx-keyed, not row-keyed:
+          -- a single bulk-renewal tx may contain 100+ ens_renewals rows but only one AI reply).
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'ai_replies' AND column_name = 'renewal_tx_hash'
+          ) THEN
+            ALTER TABLE ai_replies ADD COLUMN renewal_tx_hash VARCHAR(66);
+          END IF;
+
           -- Add name_research_id column if it doesn't exist
           IF NOT EXISTS (
             SELECT 1 FROM information_schema.columns 
@@ -401,22 +569,22 @@ export class DatabaseService implements IDatabaseService {
           
           -- Make transaction_hash nullable (for bids that don't have txHash yet)
           ALTER TABLE ai_replies ALTER COLUMN transaction_hash DROP NOT NULL;
-          
-          -- Drop old check constraint if it exists
+
+          -- Drop old check constraint if it exists, then re-add the 4-way version
+          -- including 'renewal'.
           ALTER TABLE ai_replies DROP CONSTRAINT IF EXISTS ai_replies_transaction_type_check;
-          
-          -- Add updated check constraint for transaction_type to include 'bid'
           ALTER TABLE ai_replies ADD CONSTRAINT ai_replies_transaction_type_check 
-            CHECK (transaction_type IN ('sale', 'registration', 'bid'));
-          
-          -- Drop old transaction reference constraint if it exists
+            CHECK (transaction_type IN ('sale', 'registration', 'bid', 'renewal'));
+
+          -- Drop old transaction-reference constraint if it exists, then re-add the
+          -- 4-way exclusivity version: exactly one of sale_id / registration_id /
+          -- bid_id / renewal_tx_hash must be non-null.
           ALTER TABLE ai_replies DROP CONSTRAINT IF EXISTS check_transaction_ref;
-          
-          -- Add updated transaction reference constraint to include bid_id
           ALTER TABLE ai_replies ADD CONSTRAINT check_transaction_ref CHECK (
-            (sale_id IS NOT NULL AND registration_id IS NULL AND bid_id IS NULL) OR
-            (sale_id IS NULL AND registration_id IS NOT NULL AND bid_id IS NULL) OR
-            (sale_id IS NULL AND registration_id IS NULL AND bid_id IS NOT NULL)
+            (sale_id IS NOT NULL AND registration_id IS NULL AND bid_id IS NULL AND renewal_tx_hash IS NULL) OR
+            (sale_id IS NULL AND registration_id IS NOT NULL AND bid_id IS NULL AND renewal_tx_hash IS NULL) OR
+            (sale_id IS NULL AND registration_id IS NULL AND bid_id IS NOT NULL AND renewal_tx_hash IS NULL) OR
+            (sale_id IS NULL AND registration_id IS NULL AND bid_id IS NULL AND renewal_tx_hash IS NOT NULL)
           );
         END $$;
       `);
@@ -426,6 +594,7 @@ export class DatabaseService implements IDatabaseService {
         CREATE INDEX IF NOT EXISTS idx_ai_replies_sale_id ON ai_replies(sale_id);
         CREATE INDEX IF NOT EXISTS idx_ai_replies_registration_id ON ai_replies(registration_id);
         CREATE INDEX IF NOT EXISTS idx_ai_replies_bid_id ON ai_replies(bid_id);
+        CREATE INDEX IF NOT EXISTS idx_ai_replies_renewal_tx_hash ON ai_replies(renewal_tx_hash);
         CREATE INDEX IF NOT EXISTS idx_ai_replies_name_research_id ON ai_replies(name_research_id);
         CREATE INDEX IF NOT EXISTS idx_ai_replies_original_tweet ON ai_replies(original_tweet_id);
         CREATE INDEX IF NOT EXISTS idx_ai_replies_reply_tweet ON ai_replies(reply_tweet_id);
@@ -1686,6 +1855,273 @@ export class DatabaseService implements IDatabaseService {
     }));
   }
 
+  // ============================================================================
+  // ENS Renewals Methods
+  // ============================================================================
+  // Tx-aware: a single bulk-renewal tx contains many rows (one per name renewed),
+  // and the unit-of-work for tweets/AI replies is the tx, not the row.
+  // Use insertRenewalsBatch() (not insertRenewal in a loop) so the statement-level
+  // notify_new_renewal_tx trigger fires exactly once per tx.
+
+  /**
+   * Insert a single renewal row. Used by tests/admin tools.
+   * For ingestion paths, prefer insertRenewalsBatch() — it fires the statement-level trigger
+   * exactly once per tx (one notify per distinct tx_hash in the batch).
+   */
+  async insertRenewal(renewal: Omit<ENSRenewal, 'id'>): Promise<number> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        INSERT INTO ens_renewals (
+          transaction_hash, log_index, contract_address, token_id, ens_name, full_name,
+          owner_address, renewer_address, cost_wei, cost_eth, cost_usd, duration_seconds,
+          block_number, block_timestamp, processed_at, image, description, expires_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+        RETURNING id
+      `, [
+        renewal.transactionHash,
+        renewal.logIndex,
+        renewal.contractAddress,
+        renewal.tokenId,
+        renewal.ensName,
+        renewal.fullName,
+        renewal.ownerAddress || null,
+        renewal.renewerAddress,
+        renewal.costWei,
+        renewal.costEth || null,
+        renewal.costUsd || null,
+        renewal.durationSeconds || null,
+        renewal.blockNumber,
+        renewal.blockTimestamp,
+        renewal.processedAt,
+        renewal.image || null,
+        renewal.description || null,
+        renewal.expiresAt || null
+      ]);
+
+      const id = result.rows[0].id;
+      logger.debug(`Inserted ENS renewal: ${renewal.ensName} (ID: ${id}, tx: ${renewal.transactionHash.slice(0, 10)}…)`);
+      return id;
+    } catch (error: any) {
+      logger.error('Failed to insert ENS renewal:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Batched insert of all renewal rows for one or more transactions.
+   * Done as a single SQL statement so the statement-level trigger fires once and
+   * emits one pg_notify('new_renewal_tx', txHash) per distinct tx_hash inserted.
+   * Rows that hit ON CONFLICT (tx_hash, log_index) DO NOTHING are silently skipped
+   * (duplicates) and do not appear in the returned id array — and crucially do not
+   * appear in the trigger's transition table either, so re-deliveries don't fire spurious notifies.
+   */
+  async insertRenewalsBatch(renewals: Omit<ENSRenewal, 'id'>[]): Promise<number[]> {
+    if (!this.pool) throw new Error('Database not initialized');
+    if (renewals.length === 0) return [];
+
+    try {
+      // Build parameterized multi-row INSERT: 18 params per row.
+      const colsPerRow = 18;
+      const valuesClauses: string[] = [];
+      const params: any[] = [];
+
+      renewals.forEach((r, rowIdx) => {
+        const offset = rowIdx * colsPerRow;
+        const placeholders = Array.from({ length: colsPerRow }, (_, i) => `$${offset + i + 1}`).join(', ');
+        valuesClauses.push(`(${placeholders})`);
+        params.push(
+          r.transactionHash,
+          r.logIndex,
+          r.contractAddress,
+          r.tokenId,
+          r.ensName,
+          r.fullName,
+          r.ownerAddress || null,
+          r.renewerAddress,
+          r.costWei,
+          r.costEth || null,
+          r.costUsd || null,
+          r.durationSeconds || null,
+          r.blockNumber,
+          r.blockTimestamp,
+          r.processedAt,
+          r.image || null,
+          r.description || null,
+          r.expiresAt || null
+        );
+      });
+
+      const result = await this.pool.query(`
+        INSERT INTO ens_renewals (
+          transaction_hash, log_index, contract_address, token_id, ens_name, full_name,
+          owner_address, renewer_address, cost_wei, cost_eth, cost_usd, duration_seconds,
+          block_number, block_timestamp, processed_at, image, description, expires_at
+        ) VALUES ${valuesClauses.join(', ')}
+        ON CONFLICT (transaction_hash, log_index) DO NOTHING
+        RETURNING id
+      `, params);
+
+      const ids = result.rows.map((r: any) => r.id);
+      const distinctTxs = new Set(renewals.map(r => r.transactionHash)).size;
+      logger.info(
+        `💾 Batched-inserted ${ids.length}/${renewals.length} renewal row(s) ` +
+        `across ${distinctTxs} tx(es) (${renewals.length - ids.length} duplicates skipped)`
+      );
+      return ids;
+    } catch (error: any) {
+      logger.error('Failed to batched-insert ENS renewals:', error.message);
+      throw error;
+    }
+  }
+
+  async isRenewalProcessed(transactionHash: string, logIndex: number): Promise<boolean> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(
+        'SELECT 1 FROM ens_renewals WHERE transaction_hash = $1 AND log_index = $2 LIMIT 1',
+        [transactionHash, logIndex]
+      );
+      return result.rows.length > 0;
+    } catch (error: any) {
+      logger.error('Failed to check if ENS renewal processed:', error.message);
+      throw error;
+    }
+  }
+
+  async getRenewalById(id: number): Promise<ENSRenewal | null> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(
+        'SELECT * FROM ens_renewals WHERE id = $1',
+        [id]
+      );
+      if (result.rows.length === 0) return null;
+      return this.mapRenewalRows(result.rows)[0];
+    } catch (error: any) {
+      logger.error('Failed to get ENS renewal by id:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all renewal rows for a given transaction hash.
+   * Used by the per-tx posting path to assemble the bulk-renewal tweet.
+   */
+  async getRenewalsByTxHash(txHash: string): Promise<ENSRenewal[]> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(
+        'SELECT * FROM ens_renewals WHERE transaction_hash = $1 ORDER BY log_index ASC',
+        [txHash]
+      );
+      return this.mapRenewalRows(result.rows);
+    } catch (error: any) {
+      logger.error('Failed to get ENS renewals by tx hash:', error.message);
+      throw error;
+    }
+  }
+
+  async getRecentRenewals(limit: number = 10): Promise<ENSRenewal[]> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        SELECT * FROM ens_renewals
+        ORDER BY block_number DESC, log_index DESC
+        LIMIT $1
+      `, [limit]);
+      return this.mapRenewalRows(result.rows);
+    } catch (error: any) {
+      logger.error('Failed to get recent ENS renewals:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Return distinct tx_hashes that have at least one unposted row within the time window.
+   * Ordered newest first. Used by startup recovery and the unposted-renewals dashboard view.
+   */
+  async getUnpostedRenewalTxHashes(limit: number = 10, maxAgeHours: number = 4): Promise<string[]> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    const safeMaxAgeHours = maxAgeHours && maxAgeHours > 0 ? maxAgeHours : 24;
+    if (safeMaxAgeHours !== maxAgeHours) {
+      logger.warn(`Invalid maxAgeHours (${maxAgeHours}), using 24-hour fallback for renewals`);
+    }
+
+    try {
+      const result = await this.pool.query(`
+        SELECT transaction_hash, MAX(block_number) AS max_block
+        FROM ens_renewals
+        WHERE posted = FALSE
+          AND block_timestamp > NOW() - INTERVAL '1 hour' * $2
+        GROUP BY transaction_hash
+        ORDER BY max_block DESC
+        LIMIT $1
+      `, [limit, safeMaxAgeHours]);
+
+      return result.rows.map((r: any) => r.transaction_hash);
+    } catch (error: any) {
+      logger.error('Failed to get unposted renewal tx hashes:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Mark all rows belonging to a renewal tx as posted in a single SQL statement.
+   * Statement-level trigger fires exactly once → one pg_notify('posted_renewal_tx', txHash) → one AI reply queued.
+   */
+  async markRenewalTxAsPosted(txHash: string, tweetId: string): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        UPDATE ens_renewals
+        SET posted = TRUE, tweet_id = $1, updated_at = CURRENT_TIMESTAMP
+        WHERE transaction_hash = $2
+          AND posted = FALSE
+      `, [tweetId, txHash]);
+
+      logger.debug(`Marked ${result.rowCount ?? 0} renewal row(s) for tx ${txHash.slice(0, 10)}… as posted (tweet ${tweetId})`);
+    } catch (error: any) {
+      logger.error('Failed to mark renewal tx as posted:', error.message);
+      throw error;
+    }
+  }
+
+  private mapRenewalRows(rows: any[]): ENSRenewal[] {
+    return rows.map((row: any) => ({
+      id: row.id,
+      transactionHash: row.transaction_hash,
+      logIndex: row.log_index,
+      contractAddress: row.contract_address,
+      tokenId: row.token_id,
+      ensName: row.ens_name,
+      fullName: row.full_name,
+      ownerAddress: row.owner_address || undefined,
+      renewerAddress: row.renewer_address,
+      costWei: row.cost_wei,
+      costEth: row.cost_eth ? row.cost_eth.toString() : undefined,
+      costUsd: row.cost_usd ? row.cost_usd.toString() : undefined,
+      durationSeconds: row.duration_seconds ? Number(row.duration_seconds) : undefined,
+      blockNumber: row.block_number,
+      blockTimestamp: row.block_timestamp instanceof Date ? row.block_timestamp.toISOString() : row.block_timestamp,
+      processedAt: row.processed_at instanceof Date ? row.processed_at.toISOString() : row.processed_at,
+      image: row.image || undefined,
+      description: row.description || undefined,
+      tweetId: row.tweet_id || undefined,
+      posted: row.posted,
+      expiresAt: row.expires_at ? (row.expires_at instanceof Date ? row.expires_at.toISOString() : row.expires_at) : undefined,
+      createdAt: row.created_at ? (row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at) : undefined,
+      updatedAt: row.updated_at ? (row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at) : undefined
+    }));
+  }
+
   // ENS Bids Methods
 
   /**
@@ -2179,18 +2615,23 @@ export class DatabaseService implements IDatabaseService {
     if (!this.pool) throw new Error('Database not initialized');
 
     try {
+      // Renewals key by tx_hash; sales/regs/bids by numeric row id. Exactly one of
+      // sale_id / registration_id / bid_id / renewal_tx_hash must be non-null —
+      // enforced at the DB layer by check_transaction_ref.
       const result = await this.pool.query(`
         INSERT INTO ai_replies (
-          sale_id, registration_id, bid_id, original_tweet_id, reply_tweet_id,
+          sale_id, registration_id, bid_id, renewal_tx_hash,
+          original_tweet_id, reply_tweet_id,
           transaction_type, transaction_hash, model_used,
           prompt_tokens, completion_tokens, total_tokens, cost_usd,
           reply_text, name_research_id, name_research, status, error_message
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         RETURNING id
       `, [
         reply.saleId || null,
         reply.registrationId || null,
         reply.bidId || null,
+        reply.renewalTxHash || null,
         reply.originalTweetId,
         reply.replyTweetId || null,
         reply.transactionType,
@@ -2215,6 +2656,21 @@ export class DatabaseService implements IDatabaseService {
     }
   }
 
+  // Common SELECT column list for all getAIReply* helpers — keeps them in sync as
+  // the schema evolves. All FK columns (sale_id, registration_id, bid_id, renewal_tx_hash)
+  // are returned so downstream code can inspect the AIReply object completely.
+  private static readonly AI_REPLY_SELECT_COLUMNS = `
+    id, sale_id as "saleId", registration_id as "registrationId", bid_id as "bidId",
+    renewal_tx_hash as "renewalTxHash",
+    original_tweet_id as "originalTweetId", reply_tweet_id as "replyTweetId",
+    transaction_type as "transactionType", transaction_hash as "transactionHash",
+    model_used as "modelUsed", prompt_tokens as "promptTokens",
+    completion_tokens as "completionTokens", total_tokens as "totalTokens",
+    cost_usd as "costUsd", reply_text as "replyText", name_research as "nameResearch", status,
+    error_message as "errorMessage", created_at as "createdAt",
+    posted_at as "postedAt"
+  `;
+
   /**
    * Get AI reply by sale ID
    */
@@ -2223,15 +2679,7 @@ export class DatabaseService implements IDatabaseService {
 
     try {
       const result = await this.pool.query(`
-        SELECT 
-          id, sale_id as "saleId", registration_id as "registrationId", bid_id as "bidId",
-          original_tweet_id as "originalTweetId", reply_tweet_id as "replyTweetId",
-          transaction_type as "transactionType", transaction_hash as "transactionHash",
-          model_used as "modelUsed", prompt_tokens as "promptTokens",
-          completion_tokens as "completionTokens", total_tokens as "totalTokens",
-          cost_usd as "costUsd", reply_text as "replyText", name_research as "nameResearch", status,
-          error_message as "errorMessage", created_at as "createdAt",
-          posted_at as "postedAt"
+        SELECT ${DatabaseService.AI_REPLY_SELECT_COLUMNS}
         FROM ai_replies
         WHERE sale_id = $1
       `, [saleId]);
@@ -2251,15 +2699,7 @@ export class DatabaseService implements IDatabaseService {
 
     try {
       const result = await this.pool.query(`
-        SELECT 
-          id, sale_id as "saleId", registration_id as "registrationId", bid_id as "bidId",
-          original_tweet_id as "originalTweetId", reply_tweet_id as "replyTweetId",
-          transaction_type as "transactionType", transaction_hash as "transactionHash",
-          model_used as "modelUsed", prompt_tokens as "promptTokens",
-          completion_tokens as "completionTokens", total_tokens as "totalTokens",
-          cost_usd as "costUsd", reply_text as "replyText", name_research as "nameResearch", status,
-          error_message as "errorMessage", created_at as "createdAt",
-          posted_at as "postedAt"
+        SELECT ${DatabaseService.AI_REPLY_SELECT_COLUMNS}
         FROM ai_replies
         WHERE registration_id = $1
       `, [registrationId]);
@@ -2279,15 +2719,7 @@ export class DatabaseService implements IDatabaseService {
 
     try {
       const result = await this.pool.query(`
-        SELECT 
-          id, sale_id as "saleId", registration_id as "registrationId", bid_id as "bidId",
-          original_tweet_id as "originalTweetId", reply_tweet_id as "replyTweetId",
-          transaction_type as "transactionType", transaction_hash as "transactionHash",
-          model_used as "modelUsed", prompt_tokens as "promptTokens",
-          completion_tokens as "completionTokens", total_tokens as "totalTokens",
-          cost_usd as "costUsd", reply_text as "replyText", name_research as "nameResearch", status,
-          error_message as "errorMessage", created_at as "createdAt",
-          posted_at as "postedAt"
+        SELECT ${DatabaseService.AI_REPLY_SELECT_COLUMNS}
         FROM ai_replies
         WHERE bid_id = $1
       `, [bidId]);
@@ -2300,6 +2732,27 @@ export class DatabaseService implements IDatabaseService {
   }
 
   /**
+   * Get AI reply by renewal tx_hash. Renewals are tx-keyed (not row-keyed) because
+   * a single bulk-renewal tx may contain 100+ ens_renewals rows but only one AI reply.
+   */
+  async getAIReplyByRenewalTxHash(txHash: string): Promise<AIReply | null> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        SELECT ${DatabaseService.AI_REPLY_SELECT_COLUMNS}
+        FROM ai_replies
+        WHERE renewal_tx_hash = $1
+      `, [txHash]);
+
+      return result.rows.length > 0 ? result.rows[0] : null;
+    } catch (error: any) {
+      logger.error('Failed to get AI reply by renewal tx_hash:', error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Get AI reply by ID
    */
   async getAIReplyById(replyId: number): Promise<AIReply | null> {
@@ -2307,15 +2760,7 @@ export class DatabaseService implements IDatabaseService {
 
     try {
       const result = await this.pool.query(`
-        SELECT 
-          id, sale_id as "saleId", registration_id as "registrationId", bid_id as "bidId",
-          original_tweet_id as "originalTweetId", reply_tweet_id as "replyTweetId",
-          transaction_type as "transactionType", transaction_hash as "transactionHash",
-          model_used as "modelUsed", prompt_tokens as "promptTokens",
-          completion_tokens as "completionTokens", total_tokens as "totalTokens",
-          cost_usd as "costUsd", reply_text as "replyText", name_research as "nameResearch", status,
-          error_message as "errorMessage", created_at as "createdAt",
-          posted_at as "postedAt"
+        SELECT ${DatabaseService.AI_REPLY_SELECT_COLUMNS}
         FROM ai_replies
         WHERE id = $1
       `, [replyId]);
@@ -2335,15 +2780,7 @@ export class DatabaseService implements IDatabaseService {
 
     try {
       const result = await this.pool.query(`
-        SELECT 
-          id, sale_id as "saleId", registration_id as "registrationId",
-          original_tweet_id as "originalTweetId", reply_tweet_id as "replyTweetId",
-          transaction_type as "transactionType", transaction_hash as "transactionHash",
-          model_used as "modelUsed", prompt_tokens as "promptTokens",
-          completion_tokens as "completionTokens", total_tokens as "totalTokens",
-          cost_usd as "costUsd", reply_text as "replyText", name_research as "nameResearch", status,
-          error_message as "errorMessage", created_at as "createdAt",
-          posted_at as "postedAt"
+        SELECT ${DatabaseService.AI_REPLY_SELECT_COLUMNS}
         FROM ai_replies
         ORDER BY created_at DESC
         LIMIT $1
@@ -2364,6 +2801,8 @@ export class DatabaseService implements IDatabaseService {
     if (!this.pool) throw new Error('Database not initialized');
 
     try {
+      // For renewals: token name = the highest-cost name in the tx (representative).
+      // The LATERAL subquery finds the row with the largest cost_eth for that tx_hash.
       const result = await this.pool.query(`
         SELECT
           ar.reply_text as "replyText",
@@ -2372,12 +2811,19 @@ export class DatabaseService implements IDatabaseService {
           COALESCE(
             ps.nft_name,
             er.full_name,
-            eb.ens_name
+            eb.ens_name,
+            ren.full_name
           ) as "tokenName"
         FROM ai_replies ar
         LEFT JOIN processed_sales ps ON ar.sale_id = ps.id
         LEFT JOIN ens_registrations er ON ar.registration_id = er.id
         LEFT JOIN ens_bids eb ON ar.bid_id = eb.id
+        LEFT JOIN LATERAL (
+          SELECT full_name FROM ens_renewals
+          WHERE transaction_hash = ar.renewal_tx_hash
+          ORDER BY cost_eth DESC NULLS LAST, log_index ASC
+          LIMIT 1
+        ) ren ON ar.renewal_tx_hash IS NOT NULL
         WHERE ar.status = 'posted'
         ORDER BY ar.created_at DESC
         LIMIT $1
@@ -2399,6 +2845,8 @@ export class DatabaseService implements IDatabaseService {
 
     try {
       const addr = address.toLowerCase();
+      // Renewals match if the address was the renewer OR the owner of any name in the tx.
+      // The EXISTS subquery checks all rows of the renewal tx for either condition.
       const result = await this.pool.query(`
         SELECT DISTINCT ON (ar.id)
           ar.reply_text as "replyText",
@@ -2407,12 +2855,19 @@ export class DatabaseService implements IDatabaseService {
           COALESCE(
             ps.nft_name,
             er.full_name,
-            eb.ens_name
+            eb.ens_name,
+            ren.full_name
           ) as "tokenName"
         FROM ai_replies ar
         LEFT JOIN processed_sales ps ON ar.sale_id = ps.id
         LEFT JOIN ens_registrations er ON ar.registration_id = er.id
         LEFT JOIN ens_bids eb ON ar.bid_id = eb.id
+        LEFT JOIN LATERAL (
+          SELECT full_name FROM ens_renewals
+          WHERE transaction_hash = ar.renewal_tx_hash
+          ORDER BY cost_eth DESC NULLS LAST, log_index ASC
+          LIMIT 1
+        ) ren ON ar.renewal_tx_hash IS NOT NULL
         WHERE ar.status = 'posted'
           AND (
             LOWER(ps.buyer_address) = $1
@@ -2420,6 +2875,11 @@ export class DatabaseService implements IDatabaseService {
             OR LOWER(er.owner_address) = $1
             OR LOWER(er.executor_address) = $1
             OR LOWER(eb.maker_address) = $1
+            OR (ar.renewal_tx_hash IS NOT NULL AND EXISTS (
+              SELECT 1 FROM ens_renewals enr
+              WHERE enr.transaction_hash = ar.renewal_tx_hash
+                AND (LOWER(enr.renewer_address) = $1 OR LOWER(enr.owner_address) = $1)
+            ))
           )
         ORDER BY ar.id, ar.created_at DESC
         LIMIT $2
@@ -2696,6 +3156,125 @@ export class DatabaseService implements IDatabaseService {
 
     } catch (error: any) {
       logger.error('❌ Failed to setup bid notification triggers:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Set up database notification triggers for real-time renewal processing.
+   *
+   * Unlike sales/registrations/bids (per-row triggers, one notify per row), renewals use
+   * STATEMENT-level triggers with REFERENCING NEW/OLD TABLE clauses. The trigger function
+   * extracts distinct tx_hashes from the transition table and emits exactly one
+   * pg_notify('new_renewal_tx', txHash) per distinct tx in the inserted/updated batch.
+   *
+   * This makes a 100-row bulk-renewal INSERT fire ONE notify, and a multi-tx block
+   * (e.g., 3 different renewers in the same QuickNode webhook) fire one notify per tx.
+   *
+   * Notify payload is a tx_hash string (66 chars), not a numeric row id like other channels.
+   * Requires Postgres 10+ for REFERENCING NEW TABLE / OLD TABLE support.
+   */
+  async setupRenewalNotificationTriggers(): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      // ===== INSERT trigger (new_renewal_tx) =====
+
+      // Trigger function: emit one notify per distinct tx_hash in the inserted batch.
+      // Filters posted=FALSE so backfills/manual inserts of already-posted rows don't fire.
+      // ON CONFLICT DO NOTHING means duplicate rows never appear in the transition table,
+      // so re-deliveries of the same webhook don't fire spurious notifies.
+      const createInsertFunctionQuery = `
+        CREATE OR REPLACE FUNCTION notify_new_renewal_tx()
+        RETURNS TRIGGER AS $$
+        DECLARE
+          tx_hash_record RECORD;
+        BEGIN
+          FOR tx_hash_record IN
+            SELECT DISTINCT transaction_hash
+            FROM new_rows
+            WHERE posted = FALSE
+          LOOP
+            PERFORM pg_notify('new_renewal_tx', tx_hash_record.transaction_hash);
+          END LOOP;
+          RETURN NULL;
+        END;
+        $$ LANGUAGE plpgsql;
+      `;
+
+      await this.pool.query(createInsertFunctionQuery);
+      logger.info('✅ Created notify_new_renewal_tx() trigger function');
+
+      const createInsertTriggerQuery = `
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_trigger WHERE tgname = 'new_renewal_tx_trigger'
+          ) THEN
+            CREATE TRIGGER new_renewal_tx_trigger
+              AFTER INSERT ON ens_renewals
+              REFERENCING NEW TABLE AS new_rows
+              FOR EACH STATEMENT
+              EXECUTE FUNCTION notify_new_renewal_tx();
+          END IF;
+        END $$;
+      `;
+
+      await this.pool.query(createInsertTriggerQuery);
+      logger.info('✅ Created new_renewal_tx_trigger (statement-level, AFTER INSERT) on ens_renewals');
+
+      // ===== UPDATE trigger (posted_renewal_tx) =====
+
+      // Trigger function: emit one notify per distinct tx_hash whose rows transitioned
+      // posted=FALSE → posted=TRUE in this UPDATE statement.
+      // The OLD/NEW join on id ensures we only notify when the flip actually happened
+      // (not on every UPDATE, e.g., metadata refreshes).
+      const createUpdateFunctionQuery = `
+        CREATE OR REPLACE FUNCTION notify_posted_renewal_tx()
+        RETURNS TRIGGER AS $$
+        DECLARE
+          tx_hash_record RECORD;
+        BEGIN
+          FOR tx_hash_record IN
+            SELECT DISTINCT new_rows.transaction_hash
+            FROM new_rows
+            JOIN old_rows ON new_rows.id = old_rows.id
+            WHERE old_rows.posted = FALSE
+              AND new_rows.posted = TRUE
+              AND new_rows.tweet_id IS NOT NULL
+          LOOP
+            PERFORM pg_notify('posted_renewal_tx', tx_hash_record.transaction_hash);
+          END LOOP;
+          RETURN NULL;
+        END;
+        $$ LANGUAGE plpgsql;
+      `;
+
+      await this.pool.query(createUpdateFunctionQuery);
+      logger.info('✅ Created notify_posted_renewal_tx() trigger function');
+
+      const createUpdateTriggerQuery = `
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_trigger WHERE tgname = 'posted_renewal_tx_trigger'
+          ) THEN
+            CREATE TRIGGER posted_renewal_tx_trigger
+              AFTER UPDATE ON ens_renewals
+              REFERENCING NEW TABLE AS new_rows OLD TABLE AS old_rows
+              FOR EACH STATEMENT
+              EXECUTE FUNCTION notify_posted_renewal_tx();
+          END IF;
+        END $$;
+      `;
+
+      await this.pool.query(createUpdateTriggerQuery);
+      logger.info('✅ Created posted_renewal_tx_trigger (statement-level, AFTER UPDATE) on ens_renewals');
+
+      logger.info('🎯 Renewal notification triggers setup complete - per-tx aggregation enforced at DB layer');
+
+    } catch (error: any) {
+      logger.error('❌ Failed to setup renewal notification triggers:', error.message);
       throw error;
     }
   }

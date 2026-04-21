@@ -141,22 +141,32 @@ export interface BiddingStats {
 export interface LLMPromptContext {
   // Current event details (FROM DATABASE - master source of truth)
   event: {
-    type: 'sale' | 'registration' | 'bid';
-    tokenName: string;
-    price: number;
-    priceUsd: number;
+    type: 'sale' | 'registration' | 'bid' | 'renewal';
+    tokenName: string;     // For renewals: top-by-cost name in the tx (representative); other names in renewalContext
+    price: number;         // For renewals: total ETH cost across the tx (sum of per-name costs)
+    priceUsd: number;      // For renewals: total USD cost across the tx
     currency: string;
     timestamp: number;
-    buyerAddress: string;
+    buyerAddress: string;  // For renewals: the renewer (= tx.from); the actor who paid
     buyerEnsName: string | null; // Resolved ENS name for buyer (e.g., "trader.eth")
     buyerTwitter: string | null; // Twitter handle from ENS records (e.g., "handle" without @)
-    sellerAddress?: string; // Not present for registrations
+    sellerAddress?: string; // Not present for registrations OR renewals (no seller in either)
     sellerEnsName?: string | null; // Resolved ENS name for seller (if applicable)
     sellerTwitter?: string | null; // Twitter handle from ENS records (if applicable)
-    recipientAddress?: string; // Name recipient when different from minter/executor (registrations only)
+    recipientAddress?: string; // Name recipient when different from minter/executor (registrations only).
+                                // For renewals: current owner of the top-by-cost name when ≠ renewer (gift renewal).
     recipientEnsName?: string | null;
     recipientTwitter?: string | null;
     txHash?: string; // Transaction hash from DB (optional for bids)
+  };
+
+  // Renewal-specific context — only populated when event.type === 'renewal'.
+  // Carries the bulk-renewal scale (nameCount), the top names by per-name cost,
+  // and the full name list for portfolio-level pattern detection.
+  renewalContext?: {
+    nameCount: number;    // Total names renewed in the tx
+    topNames: Array<{ name: string; costEth: number }>; // Top 3 by cost (matches the tweet & image)
+    allNames: string[];   // All names renewed (used by the LLM for pattern/theme detection)
   };
   
   // Token historical context (FROM GRAILS API)
@@ -169,28 +179,28 @@ export interface LLMPromptContext {
   
   // Full user activity histories for pattern detection (condensed)
   buyerActivityHistory: Array<{
-    type: 'mint' | 'sale' | 'bid';
+    type: 'mint' | 'sale' | 'bid' | 'renewal';
     timestamp: number;
     tokenName?: string;  // Name of token traded (if available)
-    role: 'buyer' | 'seller' | 'bidder'; // Was this user buying, selling, or bidding?
+    role: 'buyer' | 'seller' | 'bidder' | 'renewer';
     price: number;       // ETH
     priceUsd: number;    // USD
     txHash: string;
   }>;
   sellerActivityHistory: Array<{
-    type: 'mint' | 'sale' | 'bid';
+    type: 'mint' | 'sale' | 'bid' | 'renewal';
     timestamp: number;
     tokenName?: string;  // Name of token traded (if available)
-    role: 'buyer' | 'seller' | 'bidder'; // Was this user buying, selling, or bidding?
+    role: 'buyer' | 'seller' | 'bidder' | 'renewer';
     price: number;       // ETH
     priceUsd: number;    // USD
     txHash: string;
   }> | null; // Null for registrations
   recipientActivityHistory: Array<{
-    type: 'mint' | 'sale' | 'bid';
+    type: 'mint' | 'sale' | 'bid' | 'renewal';
     timestamp: number;
     tokenName?: string;
-    role: 'buyer' | 'seller' | 'bidder';
+    role: 'buyer' | 'seller' | 'bidder' | 'renewer';
     price: number;
     priceUsd: number;
     txHash: string;
@@ -841,7 +851,7 @@ export class DataProcessingService {
    */
   async buildLLMContext(
     eventData: {
-      type: 'sale' | 'registration' | 'bid';
+      type: 'sale' | 'registration' | 'bid' | 'renewal';
       tokenName: string;
       price: number;
       priceUsd: number;
@@ -851,6 +861,14 @@ export class DataProcessingService {
       sellerAddress?: string;
       recipientAddress?: string;
       txHash?: string;
+      // Renewal-specific: only populated when type === 'renewal'.
+      // Carries the bulk-renewal scale (nameCount), top names by per-name cost
+      // (matches the tweet/image), and full name list for portfolio-level pattern detection.
+      renewalContext?: {
+        nameCount: number;
+        topNames: Array<{ name: string; costEth: number }>;
+        allNames: string[];
+      };
     },
     tokenActivities: TokenActivity[],
     buyerActivities: TokenActivity[],
@@ -972,19 +990,19 @@ export class DataProcessingService {
     // Buyer's full trading history (including bids, limited to prevent token overflow)
     const MAX_BIDS_FOR_LLM = 500;
     
-    // Process all activities first
+    // Process all activities first (including renewals from Grails API)
     const allBuyerActivities = buyerActivities
-      .filter(a => (a.type === 'mint' || a.type === 'sale' || a.type === 'bid') && a.price?.amount?.decimal !== undefined)
+      .filter(a => (a.type === 'mint' || a.type === 'sale' || a.type === 'bid' || a.type === 'renewal') && a.price?.amount?.decimal !== undefined)
       .map(a => {
         const normalizedBuyerAddress = eventData.buyerAddress.toLowerCase();
         
         // Determine role based on activity type
-        let role: 'buyer' | 'seller' | 'bidder';
+        let role: 'buyer' | 'seller' | 'bidder' | 'renewer';
         if (a.type === 'bid') {
-          // For bids, user is always the bidder
           role = 'bidder';
+        } else if (a.type === 'renewal') {
+          role = 'renewer';
         } else {
-          // For sales/mints, check if user was buyer or seller
           role = a.toAddress.toLowerCase() === normalizedBuyerAddress ? 'buyer' : 'seller';
         }
         
@@ -995,7 +1013,7 @@ export class DataProcessingService {
         const priceEth = typeof rawPrice === 'number' ? rawPrice : parseFloat(rawPrice) || 0;
         
         return {
-          type: a.type as 'mint' | 'sale' | 'bid',
+          type: a.type as 'mint' | 'sale' | 'bid' | 'renewal',
           timestamp: a.timestamp,
           tokenName: a.token?.tokenName ?? undefined,
           role,
@@ -1027,30 +1045,28 @@ export class DataProcessingService {
     let sellerBidsTruncatedCount = 0;
     
     if (sellerActivities && eventData.sellerAddress) {
-      // Process all activities first
+      // Process all activities first (including renewals from Grails API)
       const allSellerActivities = sellerActivities
-        .filter(a => (a.type === 'mint' || a.type === 'sale' || a.type === 'bid') && a.price?.amount?.decimal !== undefined)
+        .filter(a => (a.type === 'mint' || a.type === 'sale' || a.type === 'bid' || a.type === 'renewal') && a.price?.amount?.decimal !== undefined)
         .map(a => {
           const normalizedSellerAddress = eventData.sellerAddress!.toLowerCase();
           
-          // Determine role based on activity type
-          let role: 'buyer' | 'seller' | 'bidder';
+          let role: 'buyer' | 'seller' | 'bidder' | 'renewer';
           if (a.type === 'bid') {
-            // For bids, user is always the bidder
             role = 'bidder';
+          } else if (a.type === 'renewal') {
+            role = 'renewer';
           } else {
-            // For sales/mints, check if user was buyer or seller
             role = a.toAddress.toLowerCase() === normalizedSellerAddress ? 'buyer' : 'seller';
           }
           
-          // Convert price to ETH: use 'decimal' for ETH (precise), 'native' for other currencies (converted)
           const currencyContract = a.price.currency.contract;
           const isEth = CurrencyUtils.isETHEquivalent(currencyContract);
           const rawPrice = isEth ? a.price.amount.decimal : (a.price.amount.native || 0);
           const priceEth = typeof rawPrice === 'number' ? rawPrice : parseFloat(rawPrice) || 0;
           
           return {
-            type: a.type as 'mint' | 'sale' | 'bid',
+            type: a.type as 'mint' | 'sale' | 'bid' | 'renewal',
             timestamp: a.timestamp,
             tokenName: a.token?.tokenName ?? undefined,
             role,
@@ -1081,12 +1097,14 @@ export class DataProcessingService {
     let recipientActivityHistory: typeof buyerActivityHistory | null = null;
     if (recipientActivities && eventData.recipientAddress) {
       const allRecipientActivities = recipientActivities
-        .filter(a => (a.type === 'mint' || a.type === 'sale' || a.type === 'bid') && a.price?.amount?.decimal !== undefined)
+        .filter(a => (a.type === 'mint' || a.type === 'sale' || a.type === 'bid' || a.type === 'renewal') && a.price?.amount?.decimal !== undefined)
         .map(a => {
           const normalizedRecipientAddress = eventData.recipientAddress!.toLowerCase();
-          let role: 'buyer' | 'seller' | 'bidder';
+          let role: 'buyer' | 'seller' | 'bidder' | 'renewer';
           if (a.type === 'bid') {
             role = 'bidder';
+          } else if (a.type === 'renewal') {
+            role = 'renewer';
           } else {
             role = a.toAddress.toLowerCase() === normalizedRecipientAddress ? 'buyer' : 'seller';
           }
@@ -1095,7 +1113,7 @@ export class DataProcessingService {
           const rawPrice = isEth ? a.price.amount.decimal : (a.price.amount.native || 0);
           const priceEth = typeof rawPrice === 'number' ? rawPrice : parseFloat(rawPrice) || 0;
           return {
-            type: a.type as 'mint' | 'sale' | 'bid',
+            type: a.type as 'mint' | 'sale' | 'bid' | 'renewal',
             timestamp: a.timestamp,
             tokenName: a.token?.tokenName ?? undefined,
             role,
@@ -1205,7 +1223,10 @@ export class DataProcessingService {
       clubInfo,
       clubContext,
       activeListings: [],
-      previousReplies: { recent: [], buyer: [], seller: [] }
+      previousReplies: { recent: [], buyer: [], seller: [] },
+      // Pass through renewal-specific context (only set when type === 'renewal').
+      // Carries the bulk-renewal scale + top names + full name list for the LLM.
+      renewalContext: eventData.renewalContext
     };
     
     const processingTime = Date.now() - startTime;

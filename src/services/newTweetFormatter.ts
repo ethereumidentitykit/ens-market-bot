@@ -1,8 +1,8 @@
-import { ProcessedSale, ENSRegistration, ENSBid } from '../types';
+import { ProcessedSale, ENSRegistration, ENSBid, ENSRenewal } from '../types';
 import { logger } from '../utils/logger';
 import { ENSWorkerService, ENSWorkerAccount } from './ensWorkerService';
 import { RealDataImageService, RealImageData } from './realDataImageService';
-import { ImageData } from '../types/imageTypes';
+import { ImageData, RenewalImageData, RenewalNameCard } from '../types/imageTypes';
 import { PuppeteerImageService } from './puppeteerImageService';
 import { IDatabaseService } from '../types';
 import { AlchemyService } from './alchemyService';
@@ -190,6 +190,174 @@ export class NewTweetFormatter {
       logger.error(`Failed to generate bid tweet: ${error.message}`);
       throw error;
     }
+  }
+
+  /**
+   * Generate a complete renewal tweet (text + image) for a single transaction.
+   *
+   * Tweet text mirrors the structured registration format:
+   *   🔁 RENEWED: name.eth  (or "🔁 RENEWED: 10 names")
+   *   For: $X,XXX.XX (Y.YY ETH)
+   *   Owner: name.eth @handle
+   *   Renewer: renewer.eth @handle   ← only if renewer ≠ owner
+   *   Top: name1.eth, name2.eth, name3.eth, +7 more   ← only for bulk
+   *   Categories: ...
+   *   grails.app/name.eth
+   *
+   * @param renewals All renewal rows belonging to a single transaction (must share tx_hash).
+   */
+  async generateRenewalTweet(renewals: ENSRenewal[]): Promise<GeneratedTweet> {
+    if (renewals.length === 0) {
+      return { text: '', characterCount: 0, isValid: false };
+    }
+
+    try {
+      const sample = renewals[0];
+      logger.info(`Generating renewal tweet for tx: ${sample.transactionHash} (${renewals.length} name(s))`);
+
+      // Resolve renewer profile (ENS name + avatar). All rows in the tx share the renewer.
+      const renewerAccount = await this.getAccountData(sample.renewerAddress);
+
+      // Sort all rows by per-name cost desc — top entries drive both text breakdown and image cards.
+      const sorted = [...renewals].sort((a, b) => {
+        const ae = parseFloat(a.costEth || '0');
+        const be = parseFloat(b.costEth || '0');
+        return be - ae;
+      });
+
+      const totalEth = sorted.reduce((sum, r) => sum + parseFloat(r.costEth || '0'), 0);
+      let totalUsd = sorted.reduce((sum, r) => sum + parseFloat(r.costUsd || '0'), 0);
+      if (totalUsd === 0 && this.alchemyService && totalEth > 0) {
+        try {
+          const ethPriceUsd = await this.alchemyService.getETHPriceUSD();
+          if (ethPriceUsd) {
+            totalUsd = totalEth * ethPriceUsd;
+            logger.debug(`💰 Recalculated renewal USD: ${totalEth} ETH × $${ethPriceUsd} = $${totalUsd.toFixed(2)}`);
+          }
+        } catch (error: any) {
+          logger.warn('Failed to recalculate renewal USD price:', error.message);
+        }
+      }
+
+      // ----- Tweet text (structured format mirroring registrations) -----
+      const tweetText = await this.formatRenewalTweetText(sorted, renewerAccount, sample.renewerAddress, totalEth, totalUsd);
+
+      // ----- Image generation -----
+
+      let imageBuffer: Buffer | undefined;
+      let imageUrl: string | undefined;
+      let imageData: RealImageData | undefined; // Kept on the GeneratedTweet shape for backward compat with siblings
+
+      if (this.databaseService) {
+        try {
+          logger.info(`Generating renewal image for tx: ${sample.transactionHash}`);
+          const renewalImageData = await this.convertRenewalToImageData(
+            sorted,
+            renewerAccount,
+            sample.renewerAddress,
+            totalEth,
+            totalUsd
+          );
+
+          imageBuffer = await PuppeteerImageService.generateRenewalImage(
+            renewalImageData,
+            this.databaseService,
+            this.openSeaService
+          );
+
+          if (imageBuffer) {
+            // Save image for preview (filename keyed by tx hash + timestamp)
+            const filename = `renewal-tweet-image-${sample.transactionHash.slice(2, 12)}-${Date.now()}.png`;
+            const savedPath = await PuppeteerImageService.saveImageToFile(imageBuffer, filename, this.databaseService);
+            imageUrl = savedPath.startsWith('/api/images/')
+              ? savedPath
+              : `/generated-images/${filename}`;
+            logger.info(`Generated renewal image: ${filename}`);
+          }
+        } catch (imageError: any) {
+          logger.error('Error generating image for renewal tweet:', imageError.message);
+          // Continue without image — text tweet is still valid
+        }
+      }
+
+      const result: GeneratedTweet = {
+        text: tweetText,
+        characterCount: tweetText.length,
+        isValid: tweetText.length > 0,
+        imageBuffer,
+        imageUrl,
+        imageData
+      };
+
+      logger.info(`Generated renewal tweet: ${result.characterCount} chars, valid: ${result.isValid}, hasImage: ${!!result.imageBuffer}, names: ${sorted.length}`);
+      return result;
+
+    } catch (error: any) {
+      logger.error('Error generating renewal tweet:', error.message);
+      return { text: '', characterCount: 0, isValid: false };
+    }
+  }
+
+  /**
+   * Convert renewal rows + renewer profile to the structured RenewalImageData
+   * the Puppeteer template consumes. The grid layout is selected downstream
+   * based on topNames.length (1 / 2 / 3 / 4+).
+   */
+  private async convertRenewalToImageData(
+    sortedRenewals: ENSRenewal[],
+    renewerAccount: ENSWorkerAccount | null,
+    renewerAddress: string,
+    totalEth: number,
+    totalUsd: number
+  ): Promise<RenewalImageData> {
+    const sample = sortedRenewals[0];
+    logger.debug(`Converting renewal tx ${sample.transactionHash} to image data (${sortedRenewals.length} names)`);
+
+    // Take up to 3 cards for display; anything beyond becomes "+N more" overflow.
+    const topRenewals = sortedRenewals.slice(0, 3);
+    const extraCount = sortedRenewals.length - topRenewals.length;
+
+    // Build card data, retrying ENS metadata for cards missing an image (mirrors the
+    // registration image-recovery flow). Done sequentially per card so we can update
+    // imageData[i].nftImageUrl without a race; metadata API failures are non-fatal.
+    const topNames: RenewalNameCard[] = [];
+    for (const r of topRenewals) {
+      let nftImageUrl = r.image;
+      if (!nftImageUrl && r.tokenId && this.ensMetadataService) {
+        try {
+          logger.debug(`Renewal card image missing, retrying ENS metadata lookup for ${r.fullName}`);
+          const metadata = await this.ensMetadataService.getMetadataWithFallback(r.tokenId);
+          if (metadata?.image || metadata?.image_url) {
+            nftImageUrl = metadata.image || metadata.image_url;
+            logger.debug(`✅ Recovered renewal card image via ENS metadata: ${r.fullName}`);
+          }
+        } catch (error: any) {
+          logger.debug(`ENS metadata retry failed for renewal card ${r.fullName}: ${error.message}`);
+        }
+      }
+      topNames.push({
+        ensName: this.cleanEnsName(r.fullName),
+        costEth: parseFloat(r.costEth || '0'),
+        nftImageUrl,
+        contractAddress: r.contractAddress,
+        tokenId: r.tokenId
+      });
+    }
+
+    const renewerEns = this.getImageDisplayHandle(renewerAccount, renewerAddress);
+    const renewerAvatar = renewerAccount?.avatar || renewerAccount?.records?.avatar;
+
+    return {
+      totalCostEth: totalEth,
+      totalCostUsd: totalUsd,
+      nameCount: sortedRenewals.length,
+      topNames,
+      extraCount,
+      renewerEns,
+      renewerAvatar,
+      transactionHash: sample.transactionHash,
+      timestamp: new Date()
+    };
   }
 
   /**
@@ -460,6 +628,115 @@ export class NewTweetFormatter {
       tweet += `\n\n${marketplaceUrl}`;
     }
     
+    return tweet;
+  }
+
+  /**
+   * Format renewal tweet text in the structured format matching registrations.
+   *
+   * Single name:
+   *   🔁 RENEWED: name.eth
+   *   For: $X,XXX.XX (Y.YY ETH)
+   *   Owner: name.eth @handle
+   *   grails.app/name.eth
+   *
+   * Bulk (renewer = owner):
+   *   🔁 RENEWED: 10 names
+   *   For: $477.47 (0.21 ETH)
+   *   Owner: name.eth @handle
+   *   Top: name1.eth, name2.eth, name3.eth, +7 more
+   *   Categories: Single Ethmoji @EthmojiClub
+   *   grails.app/name1.eth
+   *
+   * Bulk (renewer ≠ owner — gift renewal):
+   *   🔁 RENEWED: 10 names
+   *   For: $477.47 (0.21 ETH)
+   *   Owner: owner.eth @handle
+   *   Renewer: renewer.eth @handle
+   *   Top: ...
+   */
+  private async formatRenewalTweetText(
+    sortedRenewals: ENSRenewal[],
+    renewerAccount: ENSWorkerAccount | null,
+    renewerAddress: string,
+    totalEth: number,
+    totalUsd: number
+  ): Promise<string> {
+    const nameCount = sortedRenewals.length;
+    const top3 = sortedRenewals.slice(0, 3);
+    const extra = nameCount - top3.length;
+
+    // Header
+    const topName = this.cleanEnsName(sortedRenewals[0].fullName);
+    const header = nameCount === 1
+      ? `🔁 RENEWED: ${topName}`
+      : `🔁 RENEWED: ${nameCount} names`;
+
+    // Price line (recalculate USD with fresh ETH rate, matching registration pattern)
+    const priceEth = totalEth.toFixed(2);
+    let priceUsdStr = '';
+    if (totalUsd > 0) {
+      priceUsdStr = `$${totalUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+    const priceLine = priceUsdStr
+      ? `For: ${priceUsdStr} (${priceEth} ETH)`
+      : `For: ${priceEth} ETH`;
+
+    // Owner line — resolve the owner of the top name (most expensive / representative)
+    const topRow = sortedRenewals[0];
+    const ownerAddress = topRow.ownerAddress;
+    let ownerHandle: string;
+    if (ownerAddress) {
+      const ownerAccount = await this.getAccountData(ownerAddress);
+      ownerHandle = this.getDisplayHandle(ownerAccount, ownerAddress);
+    } else {
+      // Owner lookup failed during ingestion — use renewer as fallback
+      ownerHandle = this.getDisplayHandle(renewerAccount, renewerAddress);
+    }
+    const ownerLine = `Owner: ${ownerHandle}`;
+
+    // Renewer line — only shown when renewer ≠ owner (gift renewal / 3rd-party service)
+    let renewerLine = '';
+    const isGiftRenewal = ownerAddress &&
+      ownerAddress.toLowerCase() !== renewerAddress.toLowerCase();
+    if (isGiftRenewal) {
+      const renewerHandle = this.getDisplayHandle(renewerAccount, renewerAddress);
+      renewerLine = `Renewer: ${renewerHandle}`;
+    }
+
+    // Top names line (bulk only)
+    let topLine = '';
+    if (nameCount > 1) {
+      const topNames = top3.map(r => this.cleanEnsName(r.fullName)).join(', ');
+      const extraSuffix = extra > 0 ? `, +${extra} more` : '';
+      topLine = `${topNames}${extraSuffix}`;
+    }
+
+    // Category line — use the top name for club detection (matches image card ordering)
+    const { clubs, clubRanks } = await this.clubService.getClubs(topName);
+    const formattedClubString = await this.clubService.getFormattedClubString(clubs, clubRanks);
+    const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
+    const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
+
+    // Profile link — link to the renewer's Grails profile (not a single name,
+    // since bulk renewals span many names and the actor is the interesting part)
+    const marketplaceUrl = `grails.app/profile/${renewerAddress}`;
+
+    // Assemble — matching the registration layout pattern
+    let tweet = `${header}\n\n${priceLine}\n${ownerLine}`;
+    if (renewerLine) {
+      tweet += `\n${renewerLine}`;
+    }
+    if (topLine) {
+      tweet += `\n\n${topLine}`;
+    }
+    if (categoryLine) {
+      tweet += `\n\n${categoryLine}`;
+    }
+    if (marketplaceUrl) {
+      tweet += `\n\n${marketplaceUrl}`;
+    }
+
     return tweet;
   }
 
@@ -1565,6 +1842,85 @@ export class NewTweetFormatter {
       marketplaceUrl: marketplaceUrl,
       bidderHandle: bidderHandle,
       currentOwnerHandle: currentOwnerHandle
+    };
+
+    return { tweet, validation, breakdown };
+  }
+
+  /**
+   * Validate renewal tweet content. Renewal text doesn't follow a strict fixed format
+   * (the shape varies between single-name and bulk cases), so we only check for non-empty.
+   */
+  validateRenewalTweet(content: string): { valid: boolean; errors: string[] } {
+    const errors: string[] = [];
+    if (!content || content.trim().length === 0) {
+      errors.push('Renewal tweet content cannot be empty');
+    }
+    return { valid: errors.length === 0, errors };
+  }
+
+  /**
+   * Preview renewal tweet with validation and breakdown — used by the dashboard
+   * for manual generation/preview before posting.
+   */
+  async previewRenewalTweet(renewals: ENSRenewal[]): Promise<{
+    tweet: GeneratedTweet;
+    validation: { valid: boolean; errors: string[] };
+    breakdown: {
+      header: string;
+      txHash: string;
+      nameCount: number;
+      totalEth: number;
+      totalUsd: number;
+      renewerHandle: string;
+      topNames: Array<{ ensName: string; costEth: number }>;
+      extraCount: number;
+    };
+  }> {
+    const tweet = await this.generateRenewalTweet(renewals);
+    const validation = this.validateRenewalTweet(tweet.text);
+
+    if (renewals.length === 0) {
+      return {
+        tweet,
+        validation,
+        breakdown: {
+          header: '🔁 RENEWED: (empty)',
+          txHash: '',
+          nameCount: 0,
+          totalEth: 0,
+          totalUsd: 0,
+          renewerHandle: 'unknown',
+          topNames: [],
+          extraCount: 0
+        }
+      };
+    }
+
+    const sample = renewals[0];
+    const sorted = [...renewals].sort((a, b) =>
+      parseFloat(b.costEth || '0') - parseFloat(a.costEth || '0')
+    );
+    const totalEth = sorted.reduce((sum, r) => sum + parseFloat(r.costEth || '0'), 0);
+    const totalUsd = sorted.reduce((sum, r) => sum + parseFloat(r.costUsd || '0'), 0);
+
+    const renewerAccount = await this.getAccountData(sample.renewerAddress);
+    const renewerHandle = this.getDisplayHandle(renewerAccount, sample.renewerAddress);
+
+    const topNames = sorted.slice(0, 3).map(r => ({
+      ensName: this.cleanEnsName(r.fullName),
+      costEth: parseFloat(r.costEth || '0')
+    }));
+
+    const breakdown = {
+      header: `🔁 RENEWED: ${renewals.length} name(s)`,
+      txHash: sample.transactionHash,
+      nameCount: renewals.length,
+      totalEth,
+      totalUsd,
+      renewerHandle,
+      topNames,
+      extraCount: Math.max(0, renewals.length - topNames.length)
     };
 
     return { tweet, validation, breakdown };
