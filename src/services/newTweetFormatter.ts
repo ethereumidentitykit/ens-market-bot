@@ -709,7 +709,7 @@ export class NewTweetFormatter {
     if (nameCount > 1) {
       const topNames = top3.map(r => this.cleanEnsName(r.fullName)).join(', ');
       const extraSuffix = extra > 0 ? `, +${extra} more` : '';
-      topLine = `Top: ${topNames}${extraSuffix}`;
+      topLine = `${topNames}${extraSuffix}`;
     }
 
     // Category line — use the top name for club detection (matches image card ordering)
@@ -718,8 +718,9 @@ export class NewTweetFormatter {
     const categoryLabel = clubs.length > 1 ? 'Categories' : 'Category';
     const categoryLine = formattedClubString ? `${categoryLabel}: ${formattedClubString}` : '';
 
-    // Marketplace link (link to the top name)
-    const marketplaceUrl = this.buildMarketplaceUrl(topName);
+    // Profile link — link to the renewer's Grails profile (not a single name,
+    // since bulk renewals span many names and the actor is the interesting part)
+    const marketplaceUrl = `grails.app/profile/${renewerAddress}`;
 
     // Assemble — matching the registration layout pattern
     let tweet = `${header}\n\n${priceLine}\n${ownerLine}`;
@@ -730,7 +731,7 @@ export class NewTweetFormatter {
       tweet += `\n\n${topLine}`;
     }
     if (categoryLine) {
-      tweet += `\n${categoryLine}`;
+      tweet += `\n\n${categoryLine}`;
     }
     if (marketplaceUrl) {
       tweet += `\n\n${marketplaceUrl}`;
