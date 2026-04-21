@@ -42,9 +42,12 @@ export class DatabaseEventService {
   private isProcessingRenewals = false;
 
   // AI Reply queues (Phase 3.2 + Phase 4.6)
+  // Renewals are tx-keyed (string) rather than row-keyed (number) — a single bulk-renewal
+  // tx contains 100+ rows in ens_renewals but produces one tweet and one AI reply.
   private aiReplySaleQueue: number[] = [];
   private aiReplyRegistrationQueue: number[] = [];
   private aiReplyBidQueue: number[] = [];
+  private aiReplyRenewalTxQueue: string[] = [];
   private isProcessingAIReplies = false;
   private aiReplyDelayMs = 30000; // 30 seconds between AI reply posts
   private lastAIReplyTime = 0;
@@ -151,25 +154,26 @@ export class DatabaseEventService {
       this.client.on('end', this.handleConnectionEnd.bind(this));
 
       // Connect and start listening for sales, registrations, bids, and renewals.
-      // Renewals use a STATEMENT-level trigger that emits one notification per distinct
+      // Renewals use STATEMENT-level triggers that emit one notification per distinct
       // tx_hash (not per row) — payload is a tx_hash string instead of a numeric row id.
-      // Note: posted_renewal_tx LISTEN is deferred to Phase 6 when AIReplyService gains
-      // 'renewal' support — wiring it now would emit error logs on every renewal tweet.
       await this.client.connect();
       await this.client.query('LISTEN new_sale');
       await this.client.query('LISTEN new_registration');
       await this.client.query('LISTEN new_bid');
       await this.client.query('LISTEN new_renewal_tx');
 
-      // Phase 3.2 + 4.6: Listen for AI reply triggers (posted sales/registrations/bids)
+      // Phase 3.2 + 4.6: Listen for AI reply triggers (posted sales/registrations/bids/renewals).
+      // posted_renewal_tx fires once per renewal tx via the statement-level trigger; payload
+      // is the tx_hash string (matches new_renewal_tx).
       await this.client.query('LISTEN posted_sale');
       await this.client.query('LISTEN posted_registration');
       await this.client.query('LISTEN posted_bid');
+      await this.client.query('LISTEN posted_renewal_tx');
 
       this.isListening = true;
       this.reconnectAttempts = 0; // Reset on successful connection
 
-      logger.info('✅ Database listener connected and listening for new_sale, new_registration, new_bid, new_renewal_tx, posted_sale, posted_registration, and posted_bid notifications');
+      logger.info('✅ Database listener connected and listening for new_sale, new_registration, new_bid, new_renewal_tx, posted_sale, posted_registration, posted_bid, and posted_renewal_tx notifications');
 
     } catch (error: any) {
       this.isListening = false;
@@ -266,6 +270,18 @@ export class DatabaseEventService {
 
         logger.info(`🤖 POSTED BID AI REPLY TRIGGER: ID ${bidId} - adding to AI reply queue`);
         this.addBidToAIReplyQueue(bidId);
+
+      } else if (msg.channel === 'posted_renewal_tx' && msg.payload) {
+        // Phase 6: AI Reply trigger for posted renewal tx.
+        // Payload is a tx_hash string (66 chars), not a numeric id.
+        const txHash = msg.payload;
+        if (!txHash.startsWith('0x') || txHash.length < 4) {
+          logger.warn(`Invalid tx_hash in posted_renewal_tx notification: ${txHash}`);
+          return;
+        }
+
+        logger.info(`🤖 POSTED RENEWAL TX AI REPLY TRIGGER: ${txHash.slice(0, 12)}… - adding to AI reply queue`);
+        this.addRenewalTxToAIReplyQueue(txHash);
       }
     } catch (error: any) {
       logger.error('Error handling notification:', error.message);
@@ -404,6 +420,28 @@ export class DatabaseEventService {
   }
 
   /**
+   * Phase 6: Add renewal tx_hash to AI reply queue.
+   * Renewals are tx-keyed (string) — one AI reply per renewal tx, regardless of how
+   * many rows are in ens_renewals for that tx (the statement-level posted_renewal_tx
+   * trigger fires exactly once per tx, so there's nothing to dedupe in app code).
+   */
+  private addRenewalTxToAIReplyQueue(txHash: string): void {
+    if (!this.aiReplyService) {
+      logger.debug(`AI Reply Service not initialized, skipping AI reply for renewal tx ${txHash.slice(0, 12)}…`);
+      return;
+    }
+
+    if (!this.aiReplyRenewalTxQueue.includes(txHash)) {
+      this.aiReplyRenewalTxQueue.push(txHash);
+      logger.info(`🤖 Added renewal tx ${txHash.slice(0, 12)}… to AI reply queue (queue length: ${this.aiReplyRenewalTxQueue.length})`);
+    }
+
+    if (!this.isProcessingAIReplies) {
+      this.processAIReplyQueue();
+    }
+  }
+
+  /**
    * Process the sales notification queue with proper rate limiting
    */
   private async processSalesQueue(): Promise<void> {
@@ -506,23 +544,38 @@ export class DatabaseEventService {
   }
 
   /**
-   * Phase 3.2: Process the AI reply queue with rate limiting
-   * Processes both sales and registrations in FIFO order with configurable delays
+   * Phase 3.2 + 6: Process the AI reply queue with rate limiting.
+   * Drains sales → registrations → bids → renewals in FIFO priority order, with a
+   * configurable delay between each posted reply.
    */
   private async processAIReplyQueue(): Promise<void> {
     if (this.isProcessingAIReplies) {
       return;
     }
 
-    const totalQueueLength = this.aiReplySaleQueue.length + this.aiReplyRegistrationQueue.length + this.aiReplyBidQueue.length;
+    const totalQueueLength =
+      this.aiReplySaleQueue.length +
+      this.aiReplyRegistrationQueue.length +
+      this.aiReplyBidQueue.length +
+      this.aiReplyRenewalTxQueue.length;
     if (totalQueueLength === 0) {
       return;
     }
 
     this.isProcessingAIReplies = true;
-    logger.info(`🤖 Starting AI reply queue processing (${this.aiReplySaleQueue.length} sales, ${this.aiReplyRegistrationQueue.length} registrations, ${this.aiReplyBidQueue.length} bids)`);
+    logger.info(
+      `🤖 Starting AI reply queue processing ` +
+      `(${this.aiReplySaleQueue.length} sales, ${this.aiReplyRegistrationQueue.length} registrations, ` +
+      `${this.aiReplyBidQueue.length} bids, ${this.aiReplyRenewalTxQueue.length} renewals)`
+    );
 
-    while ((this.aiReplySaleQueue.length > 0 || this.aiReplyRegistrationQueue.length > 0 || this.aiReplyBidQueue.length > 0) && !this.isShuttingDown) {
+    while (
+      (this.aiReplySaleQueue.length > 0 ||
+        this.aiReplyRegistrationQueue.length > 0 ||
+        this.aiReplyBidQueue.length > 0 ||
+        this.aiReplyRenewalTxQueue.length > 0) &&
+      !this.isShuttingDown
+    ) {
       // Rate limiting: Check if enough time has passed since last AI reply
       const now = Date.now();
       const timeSinceLastReply = now - this.lastAIReplyTime;
@@ -533,10 +586,10 @@ export class DatabaseEventService {
         await this.sleep(waitTime);
       }
 
-      // Process sales first, then registrations, then bids (FIFO within each type)
+      // Process sales first, then registrations, then bids, then renewals (FIFO within each type)
       if (this.aiReplySaleQueue.length > 0) {
         const saleId = this.aiReplySaleQueue.shift()!;
-        
+
         try {
           await this.processSingleAIReply('sale', saleId);
           this.lastAIReplyTime = Date.now();
@@ -546,7 +599,7 @@ export class DatabaseEventService {
         }
       } else if (this.aiReplyRegistrationQueue.length > 0) {
         const registrationId = this.aiReplyRegistrationQueue.shift()!;
-        
+
         try {
           await this.processSingleAIReply('registration', registrationId);
           this.lastAIReplyTime = Date.now();
@@ -556,12 +609,22 @@ export class DatabaseEventService {
         }
       } else if (this.aiReplyBidQueue.length > 0) {
         const bidId = this.aiReplyBidQueue.shift()!;
-        
+
         try {
           await this.processSingleAIReply('bid', bidId);
           this.lastAIReplyTime = Date.now();
         } catch (error: any) {
           logger.error(`Failed to process AI reply for bid ${bidId}:`, error.message);
+          // Don't update lastAIReplyTime on error - we didn't actually post
+        }
+      } else if (this.aiReplyRenewalTxQueue.length > 0) {
+        const txHash = this.aiReplyRenewalTxQueue.shift()!;
+
+        try {
+          await this.processSingleAIReply('renewal', txHash);
+          this.lastAIReplyTime = Date.now();
+        } catch (error: any) {
+          logger.error(`Failed to process AI reply for renewal tx ${txHash}:`, error.message);
           // Don't update lastAIReplyTime on error - we didn't actually post
         }
       }
@@ -572,20 +635,24 @@ export class DatabaseEventService {
   }
 
   /**
-   * Phase 3.2: Process a single AI reply (sale or registration)
+   * Phase 3.2 + 6: Process a single AI reply.
+   * recordIdOrTxHash is numeric for sale/registration/bid, string for renewal.
    */
-  private async processSingleAIReply(type: 'sale' | 'registration' | 'bid', recordId: number): Promise<void> {
+  private async processSingleAIReply(
+    type: 'sale' | 'registration' | 'bid' | 'renewal',
+    recordIdOrTxHash: number | string
+  ): Promise<void> {
     if (!this.aiReplyService) {
-      logger.warn(`AI Reply Service not available for ${type} ${recordId}`);
+      logger.warn(`AI Reply Service not available for ${type} ${recordIdOrTxHash}`);
       return;
     }
 
     try {
-      logger.info(`🤖 Generating AI reply for ${type} ${recordId}...`);
-      await this.aiReplyService.generateAndPostAIReply(type, recordId);
-      logger.info(`✅ Successfully generated and posted AI reply for ${type} ${recordId}`);
+      logger.info(`🤖 Generating AI reply for ${type} ${recordIdOrTxHash}...`);
+      await this.aiReplyService.generateAndPostAIReply(type, recordIdOrTxHash);
+      logger.info(`✅ Successfully generated and posted AI reply for ${type} ${recordIdOrTxHash}`);
     } catch (error: any) {
-      logger.error(`❌ Failed to generate AI reply for ${type} ${recordId}:`, error.message);
+      logger.error(`❌ Failed to generate AI reply for ${type} ${recordIdOrTxHash}:`, error.message);
       // Could implement retry logic here with exponential backoff
       throw error;
     }
@@ -981,6 +1048,7 @@ export class DatabaseEventService {
     aiReplySalesQueueLength: number;
     aiReplyRegistrationsQueueLength: number;
     aiReplyBidsQueueLength: number;
+    aiReplyRenewalsQueueLength: number;
     isProcessingAIReplies: boolean;
     aiReplyServiceAvailable: boolean;
   } {
@@ -998,6 +1066,7 @@ export class DatabaseEventService {
       aiReplySalesQueueLength: this.aiReplySaleQueue.length,
       aiReplyRegistrationsQueueLength: this.aiReplyRegistrationQueue.length,
       aiReplyBidsQueueLength: this.aiReplyBidQueue.length,
+      aiReplyRenewalsQueueLength: this.aiReplyRenewalTxQueue.length,
       isProcessingAIReplies: this.isProcessingAIReplies,
       aiReplyServiceAvailable: this.aiReplyService !== null,
     };

@@ -11,7 +11,7 @@ import { logger } from './utils/logger';
 import { MONITORED_CONTRACTS } from './config/contracts';
 import { AlchemyService } from './services/alchemyService';
 import { DatabaseService } from './services/databaseService';
-import { IDatabaseService, ENSRegistration, ProcessedSale, ENSBid } from './types';
+import { IDatabaseService, ENSRegistration, ProcessedSale, ENSBid, ENSRenewal } from './types';
 import { BidsProcessingService } from './services/bidsProcessingService';
 import { GrailsApiService } from './services/grailsApiService';
 import { TokenActivity } from './types/activity';
@@ -435,42 +435,75 @@ async function startApplication(): Promise<void> {
     // AI Reply Preview Endpoint
     app.get('/api/ai-reply-preview', requireAuth, async (req, res) => {
       try {
-        const { type, id } = req.query;
+        // For sale/registration/bid: pass `id` (numeric).
+        // For renewal: pass `txHash` (string) instead of `id` — renewals are tx-keyed.
+        const { type, id, txHash } = req.query;
 
         // Validate inputs
-        if (!type || !id) {
+        if (!type) {
           return res.status(400).json({
             success: false,
-            error: 'Missing required parameters: type and id'
+            error: 'Missing required parameter: type'
           });
         }
 
-        if (type !== 'sale' && type !== 'registration' && type !== 'bid') {
+        if (type !== 'sale' && type !== 'registration' && type !== 'bid' && type !== 'renewal') {
           return res.status(400).json({
             success: false,
-            error: 'Invalid type. Must be "sale", "registration", or "bid"'
+            error: 'Invalid type. Must be "sale", "registration", "bid", or "renewal"'
           });
         }
 
-        const transactionId = parseInt(id as string, 10);
-        if (isNaN(transactionId)) {
+        if (type === 'renewal') {
+          if (!txHash || typeof txHash !== 'string' || !txHash.startsWith('0x')) {
+            return res.status(400).json({
+              success: false,
+              error: 'For type=renewal, "txHash" query param is required (must start with 0x)'
+            });
+          }
+        } else {
+          if (!id) {
+            return res.status(400).json({
+              success: false,
+              error: 'Missing required parameter: id'
+            });
+          }
+        }
+
+        const transactionId = type !== 'renewal' ? parseInt(id as string, 10) : 0;
+        if (type !== 'renewal' && isNaN(transactionId)) {
           return res.status(400).json({
             success: false,
             error: 'Invalid id. Must be a number'
           });
         }
 
-        logger.info(`🔍 AI Reply Preview requested: ${type} ${transactionId}`);
+        const recordKey = type === 'renewal' ? (txHash as string) : transactionId;
+        logger.info(`🔍 AI Reply Preview requested: ${type} ${recordKey}`);
 
-        // Step 1: Fetch transaction from database
+        // Step 1: Fetch transaction(s) from database. Renewals fetch all rows for the tx
+        // and the array is the unit-of-work.
         logger.debug('   Fetching transaction from database...');
+        let renewals: ENSRenewal[] = [];
         const transaction = type === 'sale'
           ? await databaseService.getSaleById(transactionId)
           : type === 'registration'
           ? await databaseService.getRegistrationById(transactionId)
-          : await databaseService.getBidById(transactionId);
+          : type === 'bid'
+          ? await databaseService.getBidById(transactionId)
+          : null;
 
-        if (!transaction) {
+        if (type === 'renewal') {
+          renewals = await databaseService.getRenewalsByTxHash(txHash as string);
+          if (renewals.length === 0) {
+            return res.status(404).json({
+              success: false,
+              error: `No renewal rows found for tx ${(txHash as string).slice(0, 12)}…`
+            });
+          }
+          // Sort by per-name cost desc — matches the format used downstream
+          renewals.sort((a, b) => parseFloat(b.costEth || '0') - parseFloat(a.costEth || '0'));
+        } else if (!transaction) {
           return res.status(404).json({
             success: false,
             error: `${type} with id ${transactionId} not found`
@@ -481,36 +514,65 @@ async function startApplication(): Promise<void> {
         const isSale = type === 'sale';
         const isRegistration = type === 'registration';
         const isBid = type === 'bid';
+        const isRenewal = type === 'renewal';
         
         const sale = isSale ? transaction as ProcessedSale : null;
         const registration = isRegistration ? transaction as ENSRegistration : null;
         const bid = isBid ? transaction as ENSBid : null;
 
-        const tokenName = isSale 
+        const tokenName = isRenewal
+          ? renewals[0].fullName // Top-by-cost name (representative)
+          : isSale 
           ? (sale!.nftName || 'Unknown') 
           : isRegistration 
           ? registration!.fullName 
           : (bid!.ensName || 'Unknown');
-        logger.debug(`   Found transaction: ${tokenName}`);
+        logger.debug(`   Found transaction: ${tokenName}${isRenewal ? ` (+ ${renewals.length - 1} more in tx)` : ''}`);
 
         // Step 3: Prepare event data for context building
-        const eventData = {
-          type: type as 'sale' | 'registration' | 'bid',
-          tokenName,
-          price: parseFloat(isSale ? sale!.priceAmount : isRegistration ? (registration!.costEth || '0') : bid!.priceDecimal),
-          priceUsd: parseFloat(isSale ? (sale!.priceUsd || '0') : isRegistration ? (registration!.costUsd || '0') : (bid!.priceUsd || '0')),
-          currency: isSale ? (sale!.currencySymbol || 'ETH') : isBid ? (bid!.currencySymbol || 'ETH') : 'ETH',
-          timestamp: isBid 
-            ? new Date(bid!.createdAtApi).getTime() / 1000 
-            : new Date((sale || registration)!.blockTimestamp).getTime() / 1000,
-          buyerAddress: isSale ? sale!.buyerAddress : isRegistration ? (registration!.executorAddress || registration!.ownerAddress) : bid!.makerAddress,
-          sellerAddress: isSale ? sale!.sellerAddress : undefined,
-          recipientAddress: isRegistration && registration!.executorAddress &&
-            registration!.executorAddress.toLowerCase() !== registration!.ownerAddress.toLowerCase()
-            ? registration!.ownerAddress
-            : undefined,
-          txHash: isBid ? undefined : (sale || registration)!.transactionHash
-        };
+        const eventData = isRenewal
+          ? (() => {
+              const sample = renewals[0];
+              const totalEth = renewals.reduce((sum, r) => sum + parseFloat(r.costEth || '0'), 0);
+              const totalUsd = renewals.reduce((sum, r) => sum + parseFloat(r.costUsd || '0'), 0);
+              const topNames = renewals.slice(0, 3).map(r => ({ name: r.fullName, costEth: parseFloat(r.costEth || '0') }));
+              const allNames = renewals.map(r => r.fullName);
+              const recipientAddress =
+                sample.ownerAddress &&
+                sample.ownerAddress.toLowerCase() !== sample.renewerAddress.toLowerCase()
+                  ? sample.ownerAddress
+                  : undefined;
+              return {
+                type: 'renewal' as const,
+                tokenName,
+                price: totalEth,
+                priceUsd: totalUsd,
+                currency: 'ETH',
+                timestamp: new Date(sample.blockTimestamp).getTime() / 1000,
+                buyerAddress: sample.renewerAddress,
+                sellerAddress: undefined as string | undefined,
+                recipientAddress,
+                txHash: sample.transactionHash,
+                renewalContext: { nameCount: renewals.length, topNames, allNames }
+              };
+            })()
+          : {
+              type: type as 'sale' | 'registration' | 'bid',
+              tokenName,
+              price: parseFloat(isSale ? sale!.priceAmount : isRegistration ? (registration!.costEth || '0') : bid!.priceDecimal),
+              priceUsd: parseFloat(isSale ? (sale!.priceUsd || '0') : isRegistration ? (registration!.costUsd || '0') : (bid!.priceUsd || '0')),
+              currency: isSale ? (sale!.currencySymbol || 'ETH') : isBid ? (bid!.currencySymbol || 'ETH') : 'ETH',
+              timestamp: isBid 
+                ? new Date(bid!.createdAtApi).getTime() / 1000 
+                : new Date((sale || registration)!.blockTimestamp).getTime() / 1000,
+              buyerAddress: isSale ? sale!.buyerAddress : isRegistration ? (registration!.executorAddress || registration!.ownerAddress) : bid!.makerAddress,
+              sellerAddress: isSale ? sale!.sellerAddress : undefined,
+              recipientAddress: isRegistration && registration!.executorAddress &&
+                registration!.executorAddress.toLowerCase() !== registration!.ownerAddress.toLowerCase()
+                ? registration!.ownerAddress
+                : undefined,
+              txHash: isBid ? undefined : (sale || registration)!.transactionHash
+            };
 
         // Step 3: Fetch activity data from Grails API
         const { GrailsApiService } = await import('./services/grailsApiService');
@@ -566,21 +628,33 @@ async function startApplication(): Promise<void> {
           }
         );
 
-        logger.info(`✅ AI Reply Preview generated for ${type} ${transactionId}`);
+        logger.info(`✅ AI Reply Preview generated for ${type} ${recordKey}`);
 
-        // Step 5: Return preview JSON
+        // Step 5: Return preview JSON. Renewals don't have a single id (they're tx-keyed),
+        // so we return the tx_hash + nameCount in the transaction summary.
         res.json({
           success: true,
           preview: {
-            transaction: {
-              id: transaction.id,
-              type: type,
-              tokenName: eventData.tokenName,
-              price: eventData.price,
-              priceUsd: eventData.priceUsd,
-              txHash: eventData.txHash,
-              blockTimestamp: isBid ? bid!.createdAtApi : (sale || registration)!.blockTimestamp
-            },
+            transaction: isRenewal
+              ? {
+                  id: null,
+                  type: 'renewal',
+                  txHash: eventData.txHash,
+                  tokenName: eventData.tokenName,
+                  nameCount: renewals.length,
+                  totalPrice: eventData.price,
+                  totalPriceUsd: eventData.priceUsd,
+                  blockTimestamp: renewals[0].blockTimestamp
+                }
+              : {
+                  id: transaction!.id,
+                  type: type,
+                  tokenName: eventData.tokenName,
+                  price: eventData.price,
+                  priceUsd: eventData.priceUsd,
+                  txHash: eventData.txHash,
+                  blockTimestamp: isBid ? bid!.createdAtApi : (sale || registration)!.blockTimestamp
+                },
             dataFetched: {
               tokenActivities: tokenResult.activities.length,
               buyerActivities: buyerResult.activities.length,
@@ -618,36 +692,56 @@ async function startApplication(): Promise<void> {
       }
     }
 
-    // AI Reply Generation Endpoint — fires off generation in the background
+    // AI Reply Generation Endpoint — fires off generation in the background.
+    // For sale/registration/bid: pass `id` (numeric).
+    // For renewal: pass `txHash` (string) instead of `id` — renewals are tx-keyed.
     app.post('/api/ai-reply-generate', requireAuth, async (req, res) => {
       try {
-        const { type, id, forceRegenerate } = req.body;
+        const { type, id, txHash, forceRegenerate } = req.body;
 
         // Validate inputs
-        if (!type || !id) {
+        if (!type) {
           return res.status(400).json({
             success: false,
-            error: 'Missing required parameters: type and id'
+            error: 'Missing required parameter: type'
           });
         }
 
-        if (type !== 'sale' && type !== 'registration' && type !== 'bid') {
+        if (type !== 'sale' && type !== 'registration' && type !== 'bid' && type !== 'renewal') {
           return res.status(400).json({
             success: false,
-            error: 'Invalid type. Must be "sale", "registration", or "bid"'
+            error: 'Invalid type. Must be "sale", "registration", "bid", or "renewal"'
           });
         }
 
-        const transactionId = parseInt(id as string, 10);
-        if (isNaN(transactionId)) {
+        const isRenewal = type === 'renewal';
+        if (isRenewal) {
+          if (!txHash || typeof txHash !== 'string' || !txHash.startsWith('0x')) {
+            return res.status(400).json({
+              success: false,
+              error: 'For type=renewal, "txHash" body field is required (must start with 0x)'
+            });
+          }
+        } else {
+          if (!id) {
+            return res.status(400).json({
+              success: false,
+              error: 'Missing required parameter: id'
+            });
+          }
+        }
+
+        const transactionId = !isRenewal ? parseInt(id as string, 10) : 0;
+        if (!isRenewal && isNaN(transactionId)) {
           return res.status(400).json({
             success: false,
             error: 'Invalid id. Must be a number'
           });
         }
 
-        const taskKey = `${type}-${transactionId}`;
-        logger.info(`🤖 AI Reply Generation requested: ${type} ${transactionId}${forceRegenerate ? ' (regenerate)' : ''}`);
+        const recordKey: number | string = isRenewal ? (txHash as string) : transactionId;
+        const taskKey = `${type}-${recordKey}`;
+        logger.info(`🤖 AI Reply Generation requested: ${type} ${recordKey}${forceRegenerate ? ' (regenerate)' : ''}`);
 
         // Check if AI replies are enabled
         const aiEnabled = await databaseService.isAIRepliesEnabled();
@@ -663,7 +757,9 @@ async function startApplication(): Promise<void> {
           ? await databaseService.getAIReplyBySaleId(transactionId)
           : type === 'registration'
           ? await databaseService.getAIReplyByRegistrationId(transactionId)
-          : await databaseService.getAIReplyByBidId(transactionId);
+          : type === 'bid'
+          ? await databaseService.getAIReplyByBidId(transactionId)
+          : await databaseService.getAIReplyByRenewalTxHash(txHash as string);
 
         if (existingReply && !forceRegenerate) {
           logger.info(`   Reply already exists (ID: ${existingReply.id})`);
@@ -726,8 +822,8 @@ async function startApplication(): Promise<void> {
         );
 
         bgAiReplyService.generateReply(
-          type as 'sale' | 'registration' | 'bid',
-          transactionId
+          type as 'sale' | 'registration' | 'bid' | 'renewal',
+          recordKey
         ).then(async (replyId) => {
           aiGenerationTasks.set(taskKey, { status: 'completed', startedAt: Date.now(), replyId });
           logger.info(`✅ Background AI generation completed for ${taskKey} → reply ${replyId}`);
@@ -753,21 +849,33 @@ async function startApplication(): Promise<void> {
       }
     });
 
-    // AI Reply Status Endpoint — dashboard polls this while generation runs in background
+    // AI Reply Status Endpoint — dashboard polls this while generation runs in background.
+    // For sale/registration/bid: pass `id` (numeric).
+    // For renewal: pass `txHash` (string) instead of `id`.
     app.get('/api/ai-reply-status', requireAuth, async (req, res) => {
       try {
-        const { type, id } = req.query;
+        const { type, id, txHash } = req.query;
 
-        if (!type || !id) {
-          return res.status(400).json({ success: false, error: 'Missing type and id query params' });
+        if (!type) {
+          return res.status(400).json({ success: false, error: 'Missing type query param' });
         }
 
-        const transactionId = parseInt(id as string, 10);
-        if (isNaN(transactionId)) {
+        const isRenewal = type === 'renewal';
+        if (isRenewal) {
+          if (!txHash || typeof txHash !== 'string' || !txHash.startsWith('0x')) {
+            return res.status(400).json({ success: false, error: 'For type=renewal, "txHash" query param is required' });
+          }
+        } else if (!id) {
+          return res.status(400).json({ success: false, error: 'Missing id query param' });
+        }
+
+        const transactionId = !isRenewal ? parseInt(id as string, 10) : 0;
+        if (!isRenewal && isNaN(transactionId)) {
           return res.status(400).json({ success: false, error: 'Invalid id' });
         }
 
-        const taskKey = `${type}-${transactionId}`;
+        const recordKey: number | string = isRenewal ? (txHash as string) : transactionId;
+        const taskKey = `${type}-${recordKey}`;
 
         // 1. Check in-memory task map first (covers in-progress and recently finished tasks)
         const task = aiGenerationTasks.get(taskKey);
@@ -804,14 +912,16 @@ async function startApplication(): Promise<void> {
           }
         }
 
-        // 3. Fallback: check database by transaction ID (covers task map already cleaned up,
-        //    or generation that finished between polls)
+        // 3. Fallback: check database by transaction ID / tx_hash (covers task map already
+        //    cleaned up, or generation that finished between polls)
         const reply = type === 'sale'
           ? await databaseService.getAIReplyBySaleId(transactionId)
           : type === 'registration'
           ? await databaseService.getAIReplyByRegistrationId(transactionId)
           : type === 'bid'
           ? await databaseService.getAIReplyByBidId(transactionId)
+          : type === 'renewal'
+          ? await databaseService.getAIReplyByRenewalTxHash(txHash as string)
           : null;
 
         if (reply) {

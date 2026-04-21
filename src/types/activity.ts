@@ -4,7 +4,7 @@
  * with normalized pricing and metadata.
  */
 export interface TokenActivity {
-  type: 'mint' | 'sale' | 'transfer' | 'ask' | 'bid' | 'ask_cancel' | 'bid_cancel';
+  type: 'mint' | 'sale' | 'transfer' | 'ask' | 'bid' | 'ask_cancel' | 'bid_cancel' | 'renewal';
   fromAddress: string;
   toAddress: string;
   price: {

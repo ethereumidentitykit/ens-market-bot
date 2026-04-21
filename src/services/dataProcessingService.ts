@@ -179,28 +179,28 @@ export interface LLMPromptContext {
   
   // Full user activity histories for pattern detection (condensed)
   buyerActivityHistory: Array<{
-    type: 'mint' | 'sale' | 'bid';
+    type: 'mint' | 'sale' | 'bid' | 'renewal';
     timestamp: number;
     tokenName?: string;  // Name of token traded (if available)
-    role: 'buyer' | 'seller' | 'bidder'; // Was this user buying, selling, or bidding?
+    role: 'buyer' | 'seller' | 'bidder' | 'renewer';
     price: number;       // ETH
     priceUsd: number;    // USD
     txHash: string;
   }>;
   sellerActivityHistory: Array<{
-    type: 'mint' | 'sale' | 'bid';
+    type: 'mint' | 'sale' | 'bid' | 'renewal';
     timestamp: number;
     tokenName?: string;  // Name of token traded (if available)
-    role: 'buyer' | 'seller' | 'bidder'; // Was this user buying, selling, or bidding?
+    role: 'buyer' | 'seller' | 'bidder' | 'renewer';
     price: number;       // ETH
     priceUsd: number;    // USD
     txHash: string;
   }> | null; // Null for registrations
   recipientActivityHistory: Array<{
-    type: 'mint' | 'sale' | 'bid';
+    type: 'mint' | 'sale' | 'bid' | 'renewal';
     timestamp: number;
     tokenName?: string;
-    role: 'buyer' | 'seller' | 'bidder';
+    role: 'buyer' | 'seller' | 'bidder' | 'renewer';
     price: number;
     priceUsd: number;
     txHash: string;
@@ -990,19 +990,19 @@ export class DataProcessingService {
     // Buyer's full trading history (including bids, limited to prevent token overflow)
     const MAX_BIDS_FOR_LLM = 500;
     
-    // Process all activities first
+    // Process all activities first (including renewals from Grails API)
     const allBuyerActivities = buyerActivities
-      .filter(a => (a.type === 'mint' || a.type === 'sale' || a.type === 'bid') && a.price?.amount?.decimal !== undefined)
+      .filter(a => (a.type === 'mint' || a.type === 'sale' || a.type === 'bid' || a.type === 'renewal') && a.price?.amount?.decimal !== undefined)
       .map(a => {
         const normalizedBuyerAddress = eventData.buyerAddress.toLowerCase();
         
         // Determine role based on activity type
-        let role: 'buyer' | 'seller' | 'bidder';
+        let role: 'buyer' | 'seller' | 'bidder' | 'renewer';
         if (a.type === 'bid') {
-          // For bids, user is always the bidder
           role = 'bidder';
+        } else if (a.type === 'renewal') {
+          role = 'renewer';
         } else {
-          // For sales/mints, check if user was buyer or seller
           role = a.toAddress.toLowerCase() === normalizedBuyerAddress ? 'buyer' : 'seller';
         }
         
@@ -1013,7 +1013,7 @@ export class DataProcessingService {
         const priceEth = typeof rawPrice === 'number' ? rawPrice : parseFloat(rawPrice) || 0;
         
         return {
-          type: a.type as 'mint' | 'sale' | 'bid',
+          type: a.type as 'mint' | 'sale' | 'bid' | 'renewal',
           timestamp: a.timestamp,
           tokenName: a.token?.tokenName ?? undefined,
           role,
@@ -1045,30 +1045,28 @@ export class DataProcessingService {
     let sellerBidsTruncatedCount = 0;
     
     if (sellerActivities && eventData.sellerAddress) {
-      // Process all activities first
+      // Process all activities first (including renewals from Grails API)
       const allSellerActivities = sellerActivities
-        .filter(a => (a.type === 'mint' || a.type === 'sale' || a.type === 'bid') && a.price?.amount?.decimal !== undefined)
+        .filter(a => (a.type === 'mint' || a.type === 'sale' || a.type === 'bid' || a.type === 'renewal') && a.price?.amount?.decimal !== undefined)
         .map(a => {
           const normalizedSellerAddress = eventData.sellerAddress!.toLowerCase();
           
-          // Determine role based on activity type
-          let role: 'buyer' | 'seller' | 'bidder';
+          let role: 'buyer' | 'seller' | 'bidder' | 'renewer';
           if (a.type === 'bid') {
-            // For bids, user is always the bidder
             role = 'bidder';
+          } else if (a.type === 'renewal') {
+            role = 'renewer';
           } else {
-            // For sales/mints, check if user was buyer or seller
             role = a.toAddress.toLowerCase() === normalizedSellerAddress ? 'buyer' : 'seller';
           }
           
-          // Convert price to ETH: use 'decimal' for ETH (precise), 'native' for other currencies (converted)
           const currencyContract = a.price.currency.contract;
           const isEth = CurrencyUtils.isETHEquivalent(currencyContract);
           const rawPrice = isEth ? a.price.amount.decimal : (a.price.amount.native || 0);
           const priceEth = typeof rawPrice === 'number' ? rawPrice : parseFloat(rawPrice) || 0;
           
           return {
-            type: a.type as 'mint' | 'sale' | 'bid',
+            type: a.type as 'mint' | 'sale' | 'bid' | 'renewal',
             timestamp: a.timestamp,
             tokenName: a.token?.tokenName ?? undefined,
             role,
@@ -1099,12 +1097,14 @@ export class DataProcessingService {
     let recipientActivityHistory: typeof buyerActivityHistory | null = null;
     if (recipientActivities && eventData.recipientAddress) {
       const allRecipientActivities = recipientActivities
-        .filter(a => (a.type === 'mint' || a.type === 'sale' || a.type === 'bid') && a.price?.amount?.decimal !== undefined)
+        .filter(a => (a.type === 'mint' || a.type === 'sale' || a.type === 'bid' || a.type === 'renewal') && a.price?.amount?.decimal !== undefined)
         .map(a => {
           const normalizedRecipientAddress = eventData.recipientAddress!.toLowerCase();
-          let role: 'buyer' | 'seller' | 'bidder';
+          let role: 'buyer' | 'seller' | 'bidder' | 'renewer';
           if (a.type === 'bid') {
             role = 'bidder';
+          } else if (a.type === 'renewal') {
+            role = 'renewer';
           } else {
             role = a.toAddress.toLowerCase() === normalizedRecipientAddress ? 'buyer' : 'seller';
           }
@@ -1113,7 +1113,7 @@ export class DataProcessingService {
           const rawPrice = isEth ? a.price.amount.decimal : (a.price.amount.native || 0);
           const priceEth = typeof rawPrice === 'number' ? rawPrice : parseFloat(rawPrice) || 0;
           return {
-            type: a.type as 'mint' | 'sale' | 'bid',
+            type: a.type as 'mint' | 'sale' | 'bid' | 'renewal',
             timestamp: a.timestamp,
             tokenName: a.token?.tokenName ?? undefined,
             role,

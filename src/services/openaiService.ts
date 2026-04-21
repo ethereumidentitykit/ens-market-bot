@@ -410,7 +410,7 @@ Research: ${sanitizedLabel}`;
    * Defines the AI's role, tone, and constraints
    */
   private buildSystemPrompt(): string {
-    return `You are a sharp, opinionated ENS market analyst. You write short, punchy commentary on domain sales, registrations, and bids. You have a personality. You call it like you see it.
+    return `You are a sharp, opinionated ENS market analyst. You write short, punchy commentary on domain sales, registrations, bids, and renewals. You have a personality. You call it like you see it.
 
 YOUR TASK:
 Look at all the data and find the ONE OR TWO things that actually matter. Lead with the most interesting angle. Be direct, be spicy, be confident.
@@ -494,6 +494,21 @@ PRIORITY ORDER (what to focus on, most important first):
 - The "buyer" (minter) is the wallet that sent the transaction and paid for the registration
 - The "recipient" is the wallet that received the name — they may or may not be related
 
+**FOR RENEWALS ONLY** (⚠️ CRITICAL — different lens than other event types):
+- The renewer is paying to keep names they (or someone they're acting for) already own.
+- The "buyer" field is the RENEWER (= tx.from = whoever paid). They may or may not be the owner — anyone can renew anyone's name
+- There is NO seller. NEVER reference a "seller" for renewals
+- BULK SCALE matters: nameCount in the renewalContext tells you how many names were renewed in one transaction. You have the full list. Use the scale:
+  • 1 name = single commitment (often a long-held flagship name being kept alive)
+  • 2-10 names = small collection holder maintaining their stash
+  • 10-50 names = serious portfolio holder
+  • 50+ names = whale-scale renewal maintaining inventory
+  • 100+ names = institutional / whale-scale, lead with the scale
+- TOP NAMES BY COST: 3-letter and 4-letter names cost dramatically more to renew than commodity names.
+- PORTFOLIO PATTERNS in the bulk: Are the names thematically similar? (all 999 club, all 4-digit, all words from a category, all first names?) Identify the COLLECTION THESIS if there is one
+- DON'T analyze for wash trading on renewals — there's no buyer/seller exchange of value, just a commitment payment to the protocol.
+- DON'T treat a renewal as a market event. It's not a sale or a price discovery. The "price" is the protocol-determined renewal cost, not market value
+
 **PORTFOLIO (ONLY mention if $100k+ or if it creates a funny/notable contrast)**:
 - Under $50k: skip it entirely. Not interesting enough to mention
 - $50k-$500k: mention only if it seems relevant.
@@ -528,12 +543,12 @@ FORMATTING:
 - Use periods and commas. Short paragraphs
 - 4-6 sentences total. Front-load the interesting stuff
 
-🚩 **WASH TRADING DETECTION (sales/registrations ONLY, NOT bids)**:
+🚩 **WASH TRADING DETECTION (for sales ONLY, NOT bids, registrations or renewals)**:
 ANY of these combinations = CALL IT A WASH TRADE. Do not hedge. Do not say "either/or." State it as fact:
 - Fresh/empty buyer wallet + seller who mints and flips = WASH TRADE. Say so directly
 - Buyer and seller are the same address = WASH TRADE. Say so directly
 - Name minted and sold same day or within days at inflated price = WASH TRADE. Say so directly
-- Seller has a pattern of minting cheap names and "selling" them to fresh wallets = WASH TRADE. Say so directly
+- Seller has a pattern of minting cheap names and selling them to fresh wallets = WASH TRADE. Say so directly
 
 NEVER hedge with "either X happened or Y." If the signals are there, the conclusion is wash trading. Period.
 NEVER frame wash trading as clever strategy ("found a lane to print"). Call it what it is
@@ -663,39 +678,61 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
     // Format event details
     let prompt = `EVENT:\n`;
     prompt += `- Type: ${event.type}\n`;
-    prompt += `- Name: ${sanitizedTokenName}\n`;
-    prompt += `- Price: ${event.price} ETH ($${event.priceUsd.toLocaleString()})\n`;
-    
-    if (event.type === 'bid') {
-      prompt += `- Bidder: ${buyerHandle}\n`;
-      if (sellerHandle) {
-        prompt += `- Current Owner: ${sellerHandle}\n`;
+
+    if (event.type === 'renewal') {
+      // Renewals are tx-level: name is the top-by-cost representative; full list is in renewalContext.
+      // The "price" here is the TOTAL cost across all names in the tx, not per-name.
+      const ctx = context.renewalContext;
+      const nameCount = ctx?.nameCount ?? 1;
+      if (nameCount === 1) {
+        prompt += `- Name: ${sanitizedTokenName}\n`;
+      } else {
+        prompt += `- Top Name: ${sanitizedTokenName} (representative; full list below)\n`;
+        prompt += `- Bulk Renewal: ${nameCount} names in one tx\n`;
+      }
+      prompt += `- Total Renewal Cost: ${event.price.toFixed(4)} ETH ($${event.priceUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })})\n`;
+      prompt += `- Renewer: ${buyerHandle}\n`;
+
+      // Recipient context for renewals: gift renewal / 3rd-party paid on behalf of owner
+      if (recipientHandle) {
+        prompt += `- Owner of top name: ${recipientHandle} (renewer ≠ owner — gift renewal or 3rd-party renewal service)\n`;
       }
     } else {
-      prompt += `- Buyer: ${buyerHandle}\n`;
-      if (event.type === 'sale' && sellerHandle) {
-        prompt += `- Seller: ${sellerHandle}\n`;
+      // Existing sale/registration/bid event rendering (unchanged)
+      prompt += `- Name: ${sanitizedTokenName}\n`;
+      prompt += `- Price: ${event.price} ETH ($${event.priceUsd.toLocaleString()})\n`;
+
+      if (event.type === 'bid') {
+        prompt += `- Bidder: ${buyerHandle}\n`;
+        if (sellerHandle) {
+          prompt += `- Current Owner: ${sellerHandle}\n`;
+        }
+      } else {
+        prompt += `- Buyer: ${buyerHandle}\n`;
+        if (event.type === 'sale' && sellerHandle) {
+          prompt += `- Seller: ${sellerHandle}\n`;
+        }
       }
-    }
 
-    // Programmatic wash trade flag: same buyer and seller address
-    if (event.type === 'sale' && event.sellerAddress &&
-        event.buyerAddress.toLowerCase() === event.sellerAddress.toLowerCase()) {
-      prompt += `- ⚠️ SAME ADDRESS: Buyer and seller are the SAME wallet. This is a self-trade.\n`;
-    }
+      // Programmatic wash trade flag: same buyer and seller address
+      if (event.type === 'sale' && event.sellerAddress &&
+          event.buyerAddress.toLowerCase() === event.sellerAddress.toLowerCase()) {
+        prompt += `- ⚠️ SAME ADDRESS: Buyer and seller are the SAME wallet. This is a self-trade.\n`;
+      }
 
-    // Known account: ENS Fairy (check both buyer/minter and recipient)
-    const ensFairyName = 'ensfairy.eth';
-    if (event.type === 'registration' && (
-      event.buyerEnsName?.toLowerCase() === ensFairyName ||
-      event.recipientEnsName?.toLowerCase() === ensFairyName
-    )) {
-      prompt += `- ℹ️ KNOWN ACCOUNT: ensfairy.eth is a public-good entity that registers names preemptively to gift them to the matching companies/projects before others get them.\n`;
-    }
+      // Known account: ENS Fairy (check both buyer/minter and recipient)
+      const ensFairyName = 'ensfairy.eth';
+      if (event.type === 'registration' && (
+        event.buyerEnsName?.toLowerCase() === ensFairyName ||
+        event.recipientEnsName?.toLowerCase() === ensFairyName
+      )) {
+        prompt += `- ℹ️ KNOWN ACCOUNT: ensfairy.eth is a public-good entity that registers names preemptively to gift them to the matching companies/projects before others get them.\n`;
+      }
 
-    // Recipient context: when the name was registered to a different wallet
-    if (event.type === 'registration' && recipientHandle) {
-      prompt += `- Recipient: ${recipientHandle} (${buyerHandle} registered this name to ${recipientHandle}'s wallet)\n`;
+      // Recipient context: when the name was registered to a different wallet
+      if (event.type === 'registration' && recipientHandle) {
+        prompt += `- Recipient: ${recipientHandle} (${buyerHandle} registered this name to ${recipientHandle}'s wallet)\n`;
+      }
     }
     
     // Include category membership if available (sanitized)
@@ -719,6 +756,30 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
         prompt += ` [${lowest.source}]`;
       }
       prompt += `\n`;
+    }
+
+    // For renewals: render the top-3-by-cost breakdown + the full name list.
+    // The image shows the top 3 cards; the LLM gets everything for pattern detection.
+    if (event.type === 'renewal' && context.renewalContext) {
+      const ctx = context.renewalContext;
+      if (ctx.topNames.length > 0 && ctx.nameCount > 1) {
+        prompt += `\nRENEWAL BREAKDOWN:\n`;
+        prompt += `- Top names by per-name renewal cost (these are the renewer's most valuable holdings in this tx):\n`;
+        for (const t of ctx.topNames) {
+          prompt += `    ${t.name} — ${t.costEth.toFixed(4)} ETH\n`;
+        }
+        if (ctx.nameCount > ctx.topNames.length) {
+          // Always include the FULL name list for pattern/theme detection.
+          // Truncate at a reasonable cap if a tx is absurdly large (e.g., 500+ names)
+          // to avoid blowing the context window.
+          const maxAllNames = 200;
+          const allNamesList = ctx.allNames.slice(0, maxAllNames).join(', ');
+          const truncatedNote = ctx.allNames.length > maxAllNames
+            ? ` (showing first ${maxAllNames} of ${ctx.allNames.length})`
+            : '';
+          prompt += `- All ${ctx.nameCount} names renewed in this tx${truncatedNote}:\n    ${allNamesList}\n`;
+        }
+      }
     }
 
     // Include club context (stats + recent activity) if available

@@ -374,7 +374,7 @@ export class GrailsApiService {
 
     try {
       while (page <= maxPages) {
-        const url = `${apiBase}/activity/${encodeURIComponent(cleanName)}?limit=${limit}&page=${page}&event_type=bought&event_type=mint`;
+        const url = `${apiBase}/activity/${encodeURIComponent(cleanName)}?limit=${limit}&page=${page}&event_type=bought&event_type=mint&event_type=renewal`;
         logger.debug(`   Page ${page}: ${url}`);
 
         const response = await axios.get<GrailsApiResponse>(url, {
@@ -433,7 +433,7 @@ export class GrailsApiService {
 
     try {
       while (page <= maxPages) {
-        const url = `${apiBase}/activity/address/${address}?limit=${limit}&page=${page}&event_type=sold&event_type=bought&event_type=mint&event_type=offer_made`;
+        const url = `${apiBase}/activity/address/${address}?limit=${limit}&page=${page}&event_type=sold&event_type=bought&event_type=mint&event_type=offer_made&event_type=renewal`;
         logger.debug(`   Page ${page}: ${url}`);
 
         const response = await axios.get<GrailsApiResponse>(url, {
@@ -496,7 +496,8 @@ export class GrailsApiService {
         record.event_type === 'mint' ||
         record.event_type === 'bought' ||
         record.event_type === 'sold' ||
-        record.event_type === 'offer_made'
+        record.event_type === 'offer_made' ||
+        record.event_type === 'renewal'
       ) {
         results.push(GrailsApiService.toTokenActivity(record));
       }
@@ -517,7 +518,8 @@ export class GrailsApiService {
    *                 (Off-chain order; no on-chain tx hash. Used for bidding-stats analysis.)
    */
   static toTokenActivity(record: GrailsActivityRecord): TokenActivity {
-    const currencySymbol = record.event_type === 'mint'
+    // Renewals and mints always use ETH (native payment, no ERC-20 currency address)
+    const currencySymbol = (record.event_type === 'mint' || record.event_type === 'renewal')
       ? 'ETH'
       : CURRENCY_MAP[record.currency_address?.toLowerCase()] || 'UNKNOWN';
     const decimals = CURRENCY_DECIMALS[currencySymbol] || 18;
@@ -533,6 +535,12 @@ export class GrailsApiService {
       fromAddress = '0x0000000000000000000000000000000000000000';
       toAddress = record.actor_address;
       activityType = 'mint';
+    } else if (record.event_type === 'renewal') {
+      // Renewal: actor is the renewer (= tx.from, the wallet that paid).
+      // No counterparty — renewals don't transfer ownership.
+      fromAddress = record.actor_address;
+      toAddress = record.actor_address; // Same address — no transfer
+      activityType = 'renewal';
     } else if (record.event_type === 'bought') {
       fromAddress = record.counterparty_address || '0x0000000000000000000000000000000000000000';
       toAddress = record.actor_address;
