@@ -66,6 +66,11 @@ function dashboard() {
                 tier1: 5000,
                 tier2: 10000,
                 tier3: 40000
+            },
+            renewals: {
+                tier1: 5000,
+                tier2: 10000,
+                tier3: 40000
             }
         },
         
@@ -92,6 +97,11 @@ function dashboard() {
                 minEth10kClub: 1.0,
                 minEth999Club: 0.5,
                 maxAgeHours: 24
+            },
+            renewals: {
+                enabled: true,
+                minEthDefault: 0.1,
+                maxAgeHours: 4
             }
         },
         
@@ -122,6 +132,8 @@ function dashboard() {
         selectedRegistrationId: '',
         unpostedBids: [],
         selectedBidId: '',
+        unpostedRenewals: [],
+        selectedRenewalTxHash: '',
         generatedTweet: null,
         tweetBreakdown: null,
         tweetImageUrl: null,
@@ -147,6 +159,8 @@ function dashboard() {
         postedSales: [],
         postedRegistrations: [],
         postedBids: [],
+        postedRenewals: [],
+        aiReplyRenewalTxHash: '',
         generatedAIReply: null,
         aiReplyGenerating: false,
         aiReplySending: false,
@@ -524,6 +538,7 @@ function dashboard() {
             await this.loadUnpostedSales();
             await this.loadUnpostedRegistrations();
             await this.loadUnpostedBids();
+            await this.loadUnpostedRenewals();
             await this.loadContracts();
             await this.loadTweetHistory();
             await this.loadAIRepliesStatus();
@@ -984,10 +999,38 @@ function dashboard() {
             }
         },
 
+        async loadUnpostedRenewals() {
+            try {
+                const response = await fetch('/api/unposted-renewals');
+                const data = await response.json();
+                if (data.success) {
+                    this.unpostedRenewals = data.data || [];
+                } else {
+                    this.unpostedRenewals = [];
+                }
+            } catch (error) {
+                this.unpostedRenewals = [];
+            }
+        },
+
+        async refreshUnpostedRenewals() {
+            this.loading = true;
+            try {
+                await this.loadUnpostedRenewals();
+                this.showTwitterMessage('Unposted renewals refreshed', 'success');
+            } catch (error) {
+                console.error('Error refreshing unposted renewals:', error);
+                this.showTwitterMessage('Failed to refresh unposted renewals', 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
         clearSelection() {
             this.selectedSaleId = '';
             this.selectedRegistrationId = '';
             this.selectedBidId = '';
+            this.selectedRenewalTxHash = '';
         },
         
         // Price Tier Management
@@ -998,8 +1041,8 @@ function dashboard() {
                     const data = await response.json();
                     
                     if (data.success && data.tiers) {
-                        // Load tiers for each transaction type
-                        ['sales', 'registrations', 'bids'].forEach(type => {
+                        // Load tiers for each transaction type (including renewals)
+                        ['sales', 'registrations', 'bids', 'renewals'].forEach(type => {
                             const typeTiers = data.tiers[type];
                             if (typeTiers && typeTiers.length >= 3) {
                                 const tier1 = typeTiers.find(t => t.tierLevel === 1);
@@ -1126,6 +1169,37 @@ function dashboard() {
                     self.$nextTick();
                 });
             }
+
+            // Renewals slider
+            const renewalsSlider = document.getElementById('renewals-slider');
+            if (renewalsSlider && typeof noUiSlider !== 'undefined') {
+                noUiSlider.create(renewalsSlider, {
+                    start: [
+                        this.priceTiers.renewals.tier1,
+                        this.priceTiers.renewals.tier2,
+                        this.priceTiers.renewals.tier3
+                    ],
+                    connect: [true, true, true, true],
+                    step: 500,
+                    margin: 500,
+                    range: {
+                        'min': 500,
+                        'max': 200000
+                    },
+                    tooltips: [
+                        { to: (value) => '$' + (value/1000).toFixed(0) + 'k' },
+                        { to: (value) => '$' + (value/1000).toFixed(0) + 'k' },
+                        { to: (value) => '$' + (value/1000).toFixed(0) + 'k' }
+                    ]
+                });
+                
+                renewalsSlider.noUiSlider.on('update', function(values) {
+                    self.priceTiers.renewals.tier1 = Math.round(values[0]);
+                    self.priceTiers.renewals.tier2 = Math.round(values[1]);
+                    self.priceTiers.renewals.tier3 = Math.round(values[2]);
+                    self.$nextTick();
+                });
+            }
         },
         
         async savePriceTiers(type) {
@@ -1185,6 +1259,10 @@ function dashboard() {
                 selectedId = this.selectedBidId;
                 itemType = 'bid';
                 endpoint = `/api/bid/tweet/generate/${selectedId}`;
+            } else if (this.tweetType === 'renewal') {
+                selectedId = this.selectedRenewalTxHash;
+                itemType = 'renewal';
+                endpoint = `/api/renewal/tweet/generate/${selectedId}`;
             }
             
             if (!selectedId) {
@@ -1238,6 +1316,10 @@ function dashboard() {
                 selectedId = this.selectedBidId;
                 itemType = 'bid';
                 endpoint = `/api/bid/tweet/send/${selectedId}`;
+            } else if (this.tweetType === 'renewal') {
+                selectedId = this.selectedRenewalTxHash;
+                itemType = 'renewal';
+                endpoint = `/api/renewal/tweet/send/${selectedId}`;
             }
             
             if (!selectedId) {
@@ -1530,12 +1612,17 @@ function dashboard() {
                     const data = await response.json();
                     console.log('Loaded settings response:', data);
                     if (data.success) {
-                        // Update transaction-specific settings
+                        // Update transaction-specific settings (renewals may not have
+                        // club-tier fields — merge with defaults to keep the UI happy)
                         this.autoPostSettings = {
                             ...this.autoPostSettings,
                             sales: data.settings.sales,
                             registrations: data.settings.registrations,
-                            bids: data.settings.bids
+                            bids: data.settings.bids,
+                            renewals: {
+                                ...this.autoPostSettings.renewals,
+                                ...(data.settings.renewals || {})
+                            }
                         };
                         console.log('Updated autoPostSettings:', this.autoPostSettings);
                     }
@@ -1988,6 +2075,15 @@ Issued At: ${issuedAt}`;
                     this.postedBids = bids.filter(bid => bid.tweetId);
                     console.log('✅ Posted bids:', this.postedBids.length);
                 }
+
+                // Load posted renewals (those with tweet_id, grouped by tx_hash)
+                const renewalsResponse = await this.fetch('/api/database/renewals?limit=100&page=1');
+                if (renewalsResponse.ok) {
+                    const renewalsData = await renewalsResponse.json();
+                    const renewals = renewalsData.data?.renewals || [];
+                    this.postedRenewals = renewals.filter(tx => tx.tweetId);
+                    console.log('✅ Posted renewals:', this.postedRenewals.length);
+                }
             } catch (error) {
                 console.error('Failed to refresh posted transactions:', error);
             } finally {
@@ -2011,7 +2107,7 @@ Issued At: ${issuedAt}`;
             }
         },
 
-        _pollForReply(type, id, forceRegenerate) {
+        _pollForReply(type, idOrTxHash, forceRegenerate) {
             const pollInterval = 4000; // 4 seconds
             const maxPollTime = 15 * 60 * 1000; // give up after 15 min
             const startedAt = Date.now();
@@ -2022,7 +2118,11 @@ Issued At: ${issuedAt}`;
                     this.aiReplyMessage = `Generating AI reply… ${elapsed}s elapsed`;
                     this.aiReplyMessageType = 'info';
 
-                    const resp = await this.fetch(`/api/ai-reply-status?type=${type}&id=${id}`);
+                    // Renewals use txHash instead of numeric id for the status endpoint
+                    const statusParams = type === 'renewal'
+                        ? `type=${type}&txHash=${encodeURIComponent(idOrTxHash)}`
+                        : `type=${type}&id=${idOrTxHash}`;
+                    const resp = await this.fetch(`/api/ai-reply-status?${statusParams}`);
                     if (!resp.ok) return; // transient error, retry next tick
 
                     const data = await resp.json();
@@ -2059,8 +2159,13 @@ Issued At: ${issuedAt}`;
         },
 
         async generateAIReply(forceRegenerate = false) {
-            if (!this.aiReplyTransactionId) {
+            const isRenewal = this.aiReplyType === 'renewal';
+            if (!isRenewal && !this.aiReplyTransactionId) {
                 this.showAIReplyMessage('Please select a transaction', 'error');
+                return;
+            }
+            if (isRenewal && !this.aiReplyRenewalTxHash) {
+                this.showAIReplyMessage('Please select a renewal tx', 'error');
                 return;
             }
 
@@ -2076,11 +2181,14 @@ Issued At: ${issuedAt}`;
                 }
 
                 const type = this.aiReplyType;
-                const id = parseInt(this.aiReplyTransactionId);
+                // Renewals send txHash instead of numeric id
+                const bodyPayload = isRenewal
+                    ? { type, txHash: this.aiReplyRenewalTxHash, forceRegenerate }
+                    : { type, id: parseInt(this.aiReplyTransactionId), forceRegenerate };
 
                 const response = await this.fetch('/api/ai-reply-generate', {
                     method: 'POST',
-                    body: JSON.stringify({ type, id, forceRegenerate })
+                    body: JSON.stringify(bodyPayload)
                 });
 
                 if (!response.ok) {
@@ -2108,7 +2216,8 @@ Issued At: ${issuedAt}`;
                 if (data.status === 'generating') {
                     this.aiReplyMessage = 'Generating AI reply… 0s elapsed';
                     this.aiReplyMessageType = 'info';
-                    this._pollForReply(type, id, forceRegenerate);
+                    const pollKey = isRenewal ? this.aiReplyRenewalTxHash : parseInt(this.aiReplyTransactionId);
+                    this._pollForReply(type, pollKey, forceRegenerate);
                     return;
                 }
 

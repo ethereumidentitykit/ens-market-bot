@@ -1565,13 +1565,21 @@ async function startApplication(): Promise<void> {
           minEth999Club: parseFloat(await databaseService.getSystemState('autopost_bids_min_eth_999') || '0.5'),
           maxAgeHours: parseInt(await databaseService.getSystemState('autopost_bids_max_age_hours') || '24')
         };
-        
+
+        // Renewals: no club tiers (decided: bulk renewals span many clubs).
+        const renewalsSettings = {
+          enabled: (await databaseService.getSystemState('autopost_renewals_enabled') || 'true') === 'true',
+          minEthDefault: parseFloat(await databaseService.getSystemState('autopost_renewals_min_eth_default') || '0.1'),
+          maxAgeHours: parseInt(await databaseService.getSystemState('autopost_renewals_max_age_hours') || '4')
+        };
+
         res.json({
           success: true,
           settings: {
             sales: salesSettings,
             registrations: registrationsSettings,
-            bids: bidsSettings
+            bids: bidsSettings,
+            renewals: renewalsSettings
           }
         });
       } catch (error: any) {
@@ -1588,10 +1596,10 @@ async function startApplication(): Promise<void> {
         const { transactionType, settings } = req.body;
         
         // Validate transaction type
-        if (!['sales', 'registrations', 'bids'].includes(transactionType)) {
+        if (!['sales', 'registrations', 'bids', 'renewals'].includes(transactionType)) {
           return res.status(400).json({
             success: false,
-            error: 'transactionType must be one of: sales, registrations, bids'
+            error: 'transactionType must be one of: sales, registrations, bids, renewals'
           });
         }
 
@@ -1611,19 +1619,24 @@ async function startApplication(): Promise<void> {
             error: 'minEthDefault must be a positive number'
           });
         }
-        
-        if (typeof minEth10kClub !== 'number' || minEth10kClub < 0) {
-          return res.status(400).json({
-            success: false,
-            error: 'minEth10kClub must be a positive number'
-          });
-        }
-        
-        if (typeof minEth999Club !== 'number' || minEth999Club < 0) {
-          return res.status(400).json({
-            success: false,
-            error: 'minEth999Club must be a positive number'
-          });
+
+        // Club-tier minimums are optional — renewals don't use them (decided: bulk
+        // renewals span many clubs so club logic doesn't map cleanly). For other types
+        // they're required.
+        const hasClubTiers = transactionType !== 'renewals';
+        if (hasClubTiers) {
+          if (typeof minEth10kClub !== 'number' || minEth10kClub < 0) {
+            return res.status(400).json({
+              success: false,
+              error: 'minEth10kClub must be a positive number'
+            });
+          }
+          if (typeof minEth999Club !== 'number' || minEth999Club < 0) {
+            return res.status(400).json({
+              success: false,
+              error: 'minEth999Club must be a positive number'
+            });
+          }
         }
         
         if (typeof maxAgeHours !== 'number' || maxAgeHours < 1 || maxAgeHours > 168) {
@@ -1637,17 +1650,19 @@ async function startApplication(): Promise<void> {
         const prefix = `autopost_${transactionType}`;
         await databaseService.setSystemState(`${prefix}_enabled`, enabled.toString());
         await databaseService.setSystemState(`${prefix}_min_eth_default`, minEthDefault.toString());
-        await databaseService.setSystemState(`${prefix}_min_eth_10k`, minEth10kClub.toString());
-        await databaseService.setSystemState(`${prefix}_min_eth_999`, minEth999Club.toString());
+        if (hasClubTiers) {
+          await databaseService.setSystemState(`${prefix}_min_eth_10k`, minEth10kClub.toString());
+          await databaseService.setSystemState(`${prefix}_min_eth_999`, minEth999Club.toString());
+        }
         await databaseService.setSystemState(`${prefix}_max_age_hours`, maxAgeHours.toString());
         
-        logger.info(`Auto-post ${transactionType} settings updated:`, { enabled, minEthDefault, minEth10kClub, minEth999Club, maxAgeHours });
+        logger.info(`Auto-post ${transactionType} settings updated:`, { enabled, minEthDefault, ...(hasClubTiers ? { minEth10kClub, minEth999Club } : {}), maxAgeHours });
         
         res.json({
           success: true,
           message: `Auto-post ${transactionType} settings saved successfully`,
           transactionType,
-          settings: { enabled, minEthDefault, minEth10kClub, minEth999Club, maxAgeHours }
+          settings: { enabled, minEthDefault, ...(hasClubTiers ? { minEth10kClub, minEth999Club } : {}), maxAgeHours }
         });
       } catch (error: any) {
         logger.error('Failed to save auto-post settings:', error.message);

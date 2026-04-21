@@ -405,6 +405,35 @@
                             <button @click="saveTransactionAutoPostSettings('bids')" class="mt-2 px-3 py-1 bg-orange-500 hover:bg-orange-600 text-white rounded text-xs font-medium transition-colors">Save Bid Settings</button>
                         </div>
 
+                        <!-- Renewals Auto-Posting (no club tiers — bulk renewals span many clubs) -->
+                        <div :class="autoPostSettings.renewals?.enabled ? 'bg-green-500/30 border border-green-500/40' : 'bg-red-500/30 border border-red-500/40'" class="backdrop-blur rounded-lg p-3 transition-colors">
+                            <div class="flex items-center justify-between mb-3">
+                                <div class="flex items-center">
+                                    <i class="fas fa-sync-alt text-teal-400 mr-2"></i>
+                                    <span class="text-sm font-medium text-blue-100">Renewals Auto-Posting</span>
+                                </div>
+                                <button 
+                                    @click="toggleTransactionAutoPost('renewals')"
+                                    :disabled="loading || !apiToggles.twitterEnabled"
+                                    :class="autoPostSettings.renewals?.enabled ? 'bg-green-500 hover:bg-green-600' : 'bg-red-500 hover:bg-red-600'"
+                                    class="px-2 py-1 rounded text-xs font-medium text-white transition-colors disabled:opacity-50"
+                                >
+                                    <span x-text="autoPostSettings.renewals?.enabled ? 'ON' : 'OFF'"></span>
+                                </button>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">Min ETH (total tx)</label>
+                                    <input type="number" step="0.01" min="0" x-model.number="autoPostSettings.renewals.minEthDefault" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-blue-200 mb-1">Max Age (h)</label>
+                                    <input type="number" min="1" max="168" x-model.number="autoPostSettings.renewals.maxAgeHours" class="w-full px-2 py-1 bg-white/20 border border-white/30 rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-white/50">
+                                </div>
+                            </div>
+                            <button @click="saveTransactionAutoPostSettings('renewals')" class="mt-2 px-3 py-1 bg-teal-500 hover:bg-teal-600 text-white rounded text-xs font-medium transition-colors">Save Renewal Settings</button>
+                        </div>
+
                         <!-- Blacklists -->
                         <div class="bg-gray-800/60 border border-gray-600/50 backdrop-blur rounded-lg p-3">
                             <div class="flex items-center mb-3">
@@ -497,6 +526,10 @@
                                 <div class="bg-orange-400 w-2 h-2 rounded-full mr-2 animate-pulse"></div>
                                 <span class="text-blue-100">Bids active</span>
                             </div>
+                            <div class="flex items-center" x-show="autoPostSettings.renewals?.enabled">
+                                <div class="bg-teal-400 w-2 h-2 rounded-full mr-2 animate-pulse"></div>
+                                <span class="text-blue-100">Renewals active</span>
+                            </div>
                         </div>
 
                     </div>
@@ -578,6 +611,28 @@
                         <!-- NoUISlider Container -->
                         <div class="px-4 py-2">
                             <div id="bids-slider" class="mb-2"></div>
+                        </div>
+                    </div>
+
+                    <!-- Renewals Tier Slider -->
+                    <div class="bg-white/10 backdrop-blur rounded-lg p-3">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="font-medium flex items-center text-sm">
+                                <i class="fas fa-sync-alt text-teal-400 mr-2"></i>
+                                Renewal Image Tiers
+                            </h3>
+                            <button 
+                                @click="savePriceTiers('renewals')"
+                                :disabled="loading"
+                                class="px-3 py-1 bg-purple-500 hover:bg-purple-600 rounded text-xs font-medium transition-colors disabled:opacity-50"
+                            >
+                                Save
+                            </button>
+                        </div>
+                        
+                        <!-- NoUISlider Container -->
+                        <div class="px-4 py-2">
+                            <div id="renewals-slider" class="mb-2"></div>
                         </div>
                     </div>
                 </div>
@@ -758,6 +813,10 @@
                                     <input type="radio" x-model="tweetType" value="bid" class="form-radio h-4 w-4 text-orange-600" @change="clearTweetPreview(); clearSelection();">
                                     <span class="ml-2 text-sm text-gray-700">✋ Bids</span>
                                 </label>
+                                <label class="inline-flex items-center">
+                                    <input type="radio" x-model="tweetType" value="renewal" class="form-radio h-4 w-4 text-teal-600" @change="clearTweetPreview(); clearSelection();">
+                                    <span class="ml-2 text-sm text-gray-700">🔁 Renewals</span>
+                                </label>
                             </div>
                         </div>
 
@@ -836,11 +895,36 @@
                             </div>
                         </div>
 
+                        <!-- Renewal Selection (tx-keyed — grouped by tx_hash) -->
+                        <div x-show="tweetType === 'renewal'" class="mb-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Select Renewal Tx to Tweet</label>
+                            <div class="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
+                                <select 
+                                    x-model="selectedRenewalTxHash"
+                                    @change="clearTweetPreview()"
+                                    class="flex-1 block px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                                >
+                                    <option value="">Select a renewal tx...</option>
+                                    <template x-for="tx in unpostedRenewals" :key="tx.txHash">
+                                        <option :value="tx.txHash" x-text="`${tx.nameCount} names — ${parseFloat(tx.totalCostEth || '0').toFixed(4)} ETH (${tx.txHash.slice(0, 10)}…)`"></option>
+                                    </template>
+                                </select>
+                                <button 
+                                    @click="refreshUnpostedRenewals()" 
+                                    :disabled="loading"
+                                    class="inline-flex w-full items-center justify-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 sm:w-auto disabled:opacity-50"
+                                >
+                                    <i class="fas fa-sync-alt mr-1" :class="{'loading': loading}"></i>
+                                    Refresh
+                                </button>
+                            </div>
+                        </div>
+
                         <!-- Generate Post Button -->
                         <div class="mb-4">
                             <button 
                                 @click="generateTweetPost()" 
-                                :disabled="(!selectedSaleId && !selectedRegistrationId && !selectedBidId) || tweetGenerating"
+                                :disabled="(!selectedSaleId && !selectedRegistrationId && !selectedBidId && !selectedRenewalTxHash) || tweetGenerating"
                                 class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 <i class="fas fa-magic mr-2" :class="{'loading': tweetGenerating}"></i>
@@ -1134,6 +1218,10 @@
                                     <input type="radio" x-model="aiReplyType" value="bid" class="form-radio h-4 w-4 text-purple-600" @change="clearAIReply(); aiReplyTransactionId = '';">
                                     <span class="ml-2 text-sm text-gray-700">🤝 Bids</span>
                                 </label>
+                                <label class="inline-flex items-center">
+                                    <input type="radio" x-model="aiReplyType" value="renewal" class="form-radio h-4 w-4 text-teal-600" @change="clearAIReply(); aiReplyTransactionId = ''; aiReplyRenewalTxHash = '';">
+                                    <span class="ml-2 text-sm text-gray-700">🔁 Renewals</span>
+                                </label>
                             </div>
                         </div>
 
@@ -1212,12 +1300,37 @@
                             </div>
                         </div>
 
+                        <!-- Renewal Selection (tx-keyed — posted renewals only) -->
+                        <div x-show="aiReplyType === 'renewal'" class="mb-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Select Renewal Tx (Posted to Twitter only)</label>
+                            <div class="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
+                                <select 
+                                    x-model="aiReplyRenewalTxHash"
+                                    @change="clearAIReply()"
+                                    class="flex-1 block px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                                >
+                                    <option value="">Select a renewal tx...</option>
+                                    <template x-for="tx in postedRenewals" :key="tx.txHash">
+                                        <option :value="tx.txHash" x-text="`${tx.nameCount} names — ${parseFloat(tx.totalCostEth || '0').toFixed(4)} ETH (${tx.txHash.slice(0, 10)}…)`"></option>
+                                    </template>
+                                </select>
+                                <button 
+                                    @click="refreshPostedTransactions()" 
+                                    :disabled="loading"
+                                    class="inline-flex w-full items-center justify-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 sm:w-auto disabled:opacity-50"
+                                >
+                                    <i class="fas fa-sync-alt mr-1" :class="{'loading': loading}"></i>
+                                    Refresh
+                                </button>
+                            </div>
+                        </div>
+
                         <!-- Generate AI Reply Button -->
                         <div class="mb-4">
                             <div class="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
                                 <button 
                                     @click="generateAIReply()" 
-                                    :disabled="!aiReplyTransactionId || aiReplyGenerating || !aiRepliesEnabled"
+                                    :disabled="(!aiReplyTransactionId && !aiReplyRenewalTxHash) || aiReplyGenerating || !aiRepliesEnabled"
                                     class="inline-flex w-full items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     <i class="fas fa-robot mr-2" :class="{'loading': aiReplyGenerating}"></i>
