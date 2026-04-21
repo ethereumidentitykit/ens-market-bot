@@ -434,6 +434,63 @@ function dashboard() {
             }
         },
 
+        // ENS Renewals viewer state (grouped by tx_hash)
+        renewalsView: {
+            data: null,
+            loading: false,
+            searchTerm: '',
+            sortOrder: 'desc',
+            limit: 25,
+            currentPage: 1,
+            searchTimeout: null,
+            error: null,
+
+            async loadPage(page) {
+                this.loading = true;
+                this.currentPage = page;
+                this.error = null;
+
+                try {
+                    const params = new URLSearchParams({
+                        page: page,
+                        limit: this.limit,
+                        sortOrder: this.sortOrder
+                    });
+
+                    if (this.searchTerm.trim()) {
+                        params.append('search', this.searchTerm.trim());
+                    }
+
+                    const response = await fetch(`/api/database/renewals?${params}`);
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+
+                    const result = await response.json();
+
+                    if (result.success) {
+                        this.data = result.data;
+                    } else {
+                        this.error = result.error || 'Failed to load renewals';
+                        this.data = null;
+                    }
+                } catch (error) {
+                    this.error = error.message;
+                    this.data = null;
+                } finally {
+                    this.loading = false;
+                }
+            },
+
+            searchDebounced() {
+                clearTimeout(this.searchTimeout);
+                this.searchTimeout = setTimeout(() => {
+                    this.loadPage(1);
+                }, 500);
+            }
+        },
+
         // Helper function for relative time
         getRelativeTime(timestamp) {
             const now = new Date();

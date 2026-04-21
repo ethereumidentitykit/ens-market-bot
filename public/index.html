@@ -1632,6 +1632,14 @@
                                 <i class="fas fa-hand-paper mr-2"></i>
                                 ENS Bids
                             </button>
+                            <button
+                                @click="databaseSubView = 'renewals'; renewalsView.loadPage(1)"
+                                :class="databaseSubView === 'renewals' ? 'border-teal-500 text-teal-400' : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-600'"
+                                class="py-2 px-1 border-b-2 font-medium text-sm transition-colors duration-200 flex items-center"
+                            >
+                                <i class="fas fa-sync-alt mr-2"></i>
+                                ENS Renewals
+                            </button>
                         </nav>
                     </div>
                 </div>
@@ -2339,6 +2347,153 @@
                     </div>
                 </div>
                 <!-- End ENS Bids Database View -->
+
+                <!-- ENS Renewals Database View -->
+                <div x-show="databaseSubView === 'renewals'" x-transition>
+                    <div x-show="renewalsView.loading" class="text-center py-12">
+                        <i class="fas fa-spinner fa-spin text-3xl text-gray-400 mb-4"></i>
+                        <p class="text-gray-400">Loading ENS renewals...</p>
+                    </div>
+
+                    <div x-show="renewalsView.error && !renewalsView.loading" class="text-center py-12">
+                        <i class="fas fa-exclamation-triangle text-3xl text-red-400 mb-4"></i>
+                        <p class="text-red-400" x-text="renewalsView.error"></p>
+                    </div>
+
+                    <div x-show="renewalsView.data && !renewalsView.loading">
+                        <!-- Renewals Stats -->
+                        <div class="bg-gray-800 border border-gray-700 rounded-lg p-6 mb-6">
+                            <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                                <div class="text-center">
+                                    <div class="text-2xl font-bold text-teal-400" x-text="renewalsView.data?.stats?.totalTxs || 0"></div>
+                                    <div class="text-sm text-gray-400">Total Renewal Txs</div>
+                                </div>
+                                <div class="text-center">
+                                    <div class="text-2xl font-bold text-green-400" x-text="renewalsView.data?.stats?.totalRows || 0"></div>
+                                    <div class="text-sm text-gray-400">Total Names Renewed</div>
+                                </div>
+                                <div class="text-center">
+                                    <div class="text-2xl font-bold text-blue-400" x-text="renewalsView.data?.stats?.pendingTxs || 0"></div>
+                                    <div class="text-sm text-gray-400">Pending Tweets</div>
+                                </div>
+                                <div class="text-center">
+                                    <div class="text-2xl font-bold text-purple-400" x-text="renewalsView.data?.stats?.totalValue || '0.00'"></div>
+                                    <div class="text-sm text-gray-400">Total ETH Value</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Search and Controls -->
+                        <div class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-6">
+                            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                                <div class="flex-1">
+                                    <input 
+                                        type="text" 
+                                        x-model="renewalsView.searchTerm"
+                                        @input="renewalsView.searchDebounced()"
+                                        placeholder="Search names, tx hashes, addresses..."
+                                        class="block w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                                    >
+                                </div>
+                                <select 
+                                    x-model="renewalsView.limit" 
+                                    @change="renewalsView.loadPage(1)"
+                                    class="px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                                >
+                                    <option value="25">25 per page</option>
+                                    <option value="50">50 per page</option>
+                                    <option value="100">100 per page</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Renewals Table (grouped by tx) -->
+                        <div class="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
+                            <div class="overflow-x-auto">
+                                <table class="min-w-full divide-y divide-gray-700">
+                                    <thead class="bg-gray-900">
+                                        <tr>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Names</th>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Total Cost</th>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Renewer</th>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Time</th>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Status</th>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Transaction</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-gray-700">
+                                        <template x-for="tx in renewalsView.data?.renewals || []" :key="tx.txHash">
+                                            <tr class="bg-gray-800 hover:bg-gray-700 transition-colors duration-150">
+                                                <td class="px-6 py-4">
+                                                    <div class="text-sm font-medium text-white" x-text="tx.nameCount + ' name' + (tx.nameCount !== 1 ? 's' : '')"></div>
+                                                    <div class="text-xs text-gray-400 mt-1" x-text="tx.topNames?.map(n => n.ensName || n.fullName).join(', ') + (tx.nameCount > 3 ? ', +' + (tx.nameCount - 3) + ' more' : '')"></div>
+                                                </td>
+                                                <td class="px-6 py-4 whitespace-nowrap">
+                                                    <div class="text-sm font-medium text-white" x-text="parseFloat(tx.totalCostEth || 0).toFixed(4) + ' ETH'"></div>
+                                                    <div class="text-xs text-gray-400" x-show="tx.totalCostUsd" x-text="'$' + parseFloat(tx.totalCostUsd).toFixed(2)"></div>
+                                                </td>
+                                                <td class="px-6 py-4 whitespace-nowrap">
+                                                    <div class="text-sm font-mono text-white" x-text="(tx.renewerAddress || '').substring(0, 10) + '...'"></div>
+                                                </td>
+                                                <td class="px-6 py-4 whitespace-nowrap">
+                                                    <div class="text-sm text-white" x-text="tx.blockTimestamp ? new Date(tx.blockTimestamp).toLocaleDateString() : ''"></div>
+                                                    <div class="text-xs text-gray-400" x-text="tx.blockTimestamp ? new Date(tx.blockTimestamp).toLocaleTimeString() : ''"></div>
+                                                </td>
+                                                <td class="px-6 py-4 whitespace-nowrap">
+                                                    <div class="flex flex-col gap-1">
+                                                        <span x-show="tx.posted" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-900 text-green-300">
+                                                            <i class="fas fa-check-circle mr-1"></i>
+                                                            Tweeted
+                                                        </span>
+                                                        <span x-show="!tx.posted" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-900 text-yellow-300">
+                                                            <i class="fas fa-clock mr-1"></i>
+                                                            Pending
+                                                        </span>
+                                                        <a x-show="tx.tweetId" :href="'https://twitter.com/i/web/status/' + tx.tweetId" target="_blank" class="text-blue-400 hover:text-blue-300 text-xs">
+                                                            Tweet <i class="fas fa-external-link-alt text-xs"></i>
+                                                        </a>
+                                                    </div>
+                                                </td>
+                                                <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-300">
+                                                    <a :href="'https://etherscan.io/tx/' + tx.txHash" target="_blank" class="text-teal-400 hover:text-teal-300">
+                                                        <span x-text="tx.txHash.substring(0, 10) + '...'"></span>
+                                                        <i class="fas fa-external-link-alt ml-1 text-xs"></i>
+                                                    </a>
+                                                </td>
+                                            </tr>
+                                        </template>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Pagination -->
+                        <div x-show="renewalsView.data?.pagination" class="mt-6 flex items-center justify-between">
+                            <div class="text-sm text-gray-400">
+                                Showing <span x-text="((renewalsView.currentPage - 1) * renewalsView.limit) + 1"></span>
+                                to <span x-text="Math.min(renewalsView.currentPage * renewalsView.limit, renewalsView.data?.stats?.totalTxs || 0)"></span>
+                                of <span x-text="renewalsView.data?.stats?.totalTxs || 0"></span> renewal txs
+                            </div>
+                            <nav class="flex items-center space-x-2">
+                                <button 
+                                    @click="renewalsView.loadPage(Math.max(1, renewalsView.currentPage - 1))"
+                                    :disabled="renewalsView.currentPage <= 1"
+                                    class="px-3 py-2 border border-gray-600 text-sm font-medium rounded-md text-gray-300 bg-gray-700 hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-50"
+                                >
+                                    Previous
+                                </button>
+                                <button 
+                                    @click="renewalsView.loadPage(Math.min(renewalsView.data?.pagination?.totalPages || 1, renewalsView.currentPage + 1))"
+                                    :disabled="renewalsView.currentPage >= (renewalsView.data?.pagination?.totalPages || 1)"
+                                    class="px-3 py-2 border border-gray-600 text-sm font-medium rounded-md text-gray-300 bg-gray-700 hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-50"
+                                >
+                                    Next
+                                </button>
+                            </nav>
+                        </div>
+                    </div>
+                </div>
+                <!-- End ENS Renewals Database View -->
 
             </main>
         </div>
