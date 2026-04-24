@@ -198,7 +198,27 @@ export class WeeklySummaryDataService {
     const salesChart = salesChartRaw ?? null;
     const volumeDistribution = volumeDistributionRaw ?? null;
     const premiumByWatchers = premiumByWatchersRaw ?? [];
-    const graceByWatchers = graceByWatchersRaw ?? [];
+    // Grace filter: only include grace-period names that will TRANSITION INTO
+    // the premium auction phase within the next 7 days.
+    //
+    // ENS post-expiry timeline:
+    //   Day 0      → name expires
+    //   Days 0-90  → grace period (owner can still renew at normal cost)
+    //   Day 90     → grace ends, premium auction starts
+    //   Days 90+   → premium decays from $100M to $0 over 21 days
+    //
+    // "Drops from grace to premium within 7 days" means the name has been in
+    // grace for 83-90 days (i.e. expiry_date is between 90 and 83 days ago).
+    // Grace names sitting at, say, 30 days post-expiry aren't actionable yet
+    // — the watcher data on those is stale signal. The 83-90d slice IS
+    // actionable: registrants are about to compete for the name.
+    const graceFilterEnd = end.getTime() - 83 * 24 * 60 * 60 * 1000;   // expired ≤ 83d ago
+    const graceFilterStart = end.getTime() - 90 * 24 * 60 * 60 * 1000; // expired ≥ 90d ago
+    const graceByWatchers = (graceByWatchersRaw ?? []).filter(name => {
+      const expiryMs = new Date(name.expiry_date).getTime();
+      // Must have a parseable expiry within the 83-90d-ago window.
+      return Number.isFinite(expiryMs) && expiryMs >= graceFilterStart && expiryMs <= graceFilterEnd;
+    });
 
     const botPosts = botPostsRaw ?? [];
     const renewalsStats: WeeklyRenewalsStats = renewalsStatsRaw ?? {

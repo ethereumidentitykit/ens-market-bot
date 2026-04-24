@@ -544,12 +544,35 @@ export type WeeklySummaryStatus =
   | 'partial_posted';
 
 /**
- * One tweet in the generated thread. `postedTweetId` is filled in immediately
- * after each successful post so a partial-failure leaves the row in an
- * inspectable, resumable state.
+ * The five lanes of the weekly summary thread. Each lane has a dedicated job
+ * so the thread reads predictably each week. Order matters — the LLM must
+ * return tweets in this exact order, enforced by the JSON schema and by the
+ * post-parse validator in `OpenAIService.validateWeeklyTweets`.
  */
-export interface WeeklySummaryTweet {
+export type WeeklyTweetSection =
+  | 'headline'         // T1: punchy lead-in, ideally <280 chars, GrailsAI Weekly ✨ header
+  | 'by_the_numbers'   // T2: sales/regs/bids volumes + counts, premiums paid, ETH context, WoW delta
+  | 'spotlight'        // T3: dynamic — names to watch (default), engaging bot tweet, hot category, etc.
+  | 'community_pulse'  // T4: broad sentiment from ENS chatter + average bot engagement
+  | 'top_player';      // T5: climactic actor reveal — picks from top-3 candidates by combined volume
+
+/**
+ * One LLM-generated tweet in the weekly thread, before posting. Returned by
+ * `OpenAIService.generateWeeklySummary`. The `section` tag both validates
+ * order and lets the dashboard / image template label each preview tweet.
+ */
+export interface WeeklyThreadTweet {
+  section: WeeklyTweetSection;
   text: string;
+}
+
+/**
+ * One tweet in the stored thread — extends the generated shape with the
+ * posted Twitter ID once published. `postedTweetId` is set by the posting
+ * service after each successful post (immediately, so a partial failure
+ * mid-thread doesn't lose state).
+ */
+export interface WeeklySummaryTweet extends WeeklyThreadTweet {
   postedTweetId?: string | null;
 }
 

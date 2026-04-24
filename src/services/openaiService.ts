@@ -2,6 +2,14 @@ import OpenAI from 'openai';
 import { logger } from '../utils/logger';
 import { LLMPromptContext } from './dataProcessingService';
 import { CLUB_LABELS } from '../constants/clubMetadata';
+import {
+  WeeklySummaryData,
+  WeeklySnapshotData,
+  WeeklyTopParticipant,
+  WeeklyBotPost,
+  WeeklyThreadTweet,
+  WeeklyTweetSection,
+} from '../types';
 
 /**
  * Response from OpenAI containing generated tweet and metadata
@@ -36,10 +44,22 @@ export class OpenAIService {
   private readonly baseRetryDelay = 1000; // 1 second base delay
   
   // Model configurations (token limits based on Oct 2025 OpenAI specs)
-  private readonly models: { 
+  //
+  // NOTE: `base` and `weekly` intentionally point at the same model slug
+  // (`gpt-5.4-2026-03-05`) but with different `maxInputTokens` — and the
+  // weekly path passes `reasoning.effort: 'xhigh'` while the per-event reply
+  // path does not. Two entries instead of one because:
+  //   - Per-event AI replies use selectModel(estimatedTokens) which compares
+  //     against `base.maxInputTokens` (128k) to decide whether to escalate to
+  //     the o1 thinking model. Bumping `base.maxInputTokens` to 1.05M would
+  //     silently disable that escalation and change reply quality.
+  //   - The weekly summary uses the model's full 1.05M context window plus
+  //     xhigh reasoning. It never escalates.
+  private readonly models: {
     search: ModelConfig;
-    base: ModelConfig; 
+    base: ModelConfig;
     thinking: ModelConfig;
+    weekly: ModelConfig;
   } = {
     search: {
       name: 'gpt-5-mini',
@@ -55,6 +75,11 @@ export class OpenAIService {
       name: 'o1', // Thinking model with larger context window
       maxInputTokens: 200000, // O1 extended context window
       description: 'Advanced reasoning model for complex/long inputs'
+    },
+    weekly: {
+      name: 'gpt-5.4-2026-03-05',
+      maxInputTokens: 1_050_000,
+      description: 'GPT-5.4 with xhigh reasoning for weekly market summary'
     }
   };
 
@@ -73,6 +98,7 @@ export class OpenAIService {
     logger.info(`   Search model: ${this.models.search.name} (with web search)`);
     logger.info(`   Generation model: ${this.models.base.name} (max ${this.models.base.maxInputTokens.toLocaleString()} tokens)`);
     logger.info(`   Fallback model: ${this.models.thinking.name} (max ${this.models.thinking.maxInputTokens.toLocaleString()} tokens)`);
+    logger.info(`   Weekly summary model: ${this.models.weekly.name} (max ${this.models.weekly.maxInputTokens.toLocaleString()} tokens, xhigh reasoning)`);
   }
 
   /**
@@ -1114,5 +1140,742 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
 
     return true;
   }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Weekly Market Summary (Phase 4)
+  // ───────────────────────────────────────────────────────────────────────────
+  //
+  // Single Responses-API call against the `weekly` model with xhigh reasoning
+  // and a strict JSON schema for output. The aggregator
+  // (`WeeklySummaryDataService`) hands us a fully populated `WeeklySummaryData`;
+  // we serialize it deterministically, prepend a long-form system prompt, and
+  // ask the model to return JSON matching `WEEKLY_THREAD_SCHEMA` — five
+  // tweets, one per dedicated lane, in fixed order.
+  //
+  // We never escalate to the o1 thinking model here — the weekly model
+  // already has 1.05M context and built-in reasoning. The token estimator and
+  // selectModel() machinery used by the per-event reply path is intentionally
+  // bypassed; cost matters less than quality on a once-a-week run.
+  //
+  // We use Structured Outputs (json_schema, strict: true) instead of marker-
+  // based parsing because (a) it's API-enforced rather than hoping the model
+  // emits the literal separator string, (b) the per-tweet `section` tag lets
+  // the dashboard / image template label tweets without inferring from
+  // position, and (c) `maxLength` on `text` is enforced server-side.
+
+  /** Twitter Premium+ ceiling for thread tweets. */
+  private static readonly WEEKLY_TWEET_MAX_CHARS = 1200;
+  /**
+   * The five lanes of the weekly thread, in the order they MUST appear.
+   * The system prompt + JSON schema both anchor on this ordering; the
+   * post-parse validator double-checks it.
+   */
+  private static readonly WEEKLY_TWEET_ORDER: readonly WeeklyTweetSection[] = [
+    'headline',
+    'by_the_numbers',
+    'spotlight',
+    'community_pulse',
+    'top_player',
+  ] as const;
+  /** Pricing (USD per token) for `gpt-5.4-2026-03-05` per OpenAI model card. */
+  private static readonly WEEKLY_INPUT_USD_PER_TOKEN = 2.5 / 1_000_000;
+  private static readonly WEEKLY_OUTPUT_USD_PER_TOKEN = 15 / 1_000_000;
+
+  /**
+   * Strict JSON schema enforcing exactly 5 thread tweets in fixed order. The
+   * `section` enum + `tweets` minItems/maxItems make the API itself reject
+   * any malformed output. `text` length cap (1200) is enforced server-side
+   * too. We still re-validate the order post-parse as defence in depth.
+   */
+  private static readonly WEEKLY_THREAD_SCHEMA = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['tweets'],
+    properties: {
+      tweets: {
+        type: 'array',
+        minItems: 5,
+        maxItems: 5,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['section', 'text'],
+          properties: {
+            section: {
+              type: 'string',
+              enum: ['headline', 'by_the_numbers', 'spotlight', 'community_pulse', 'top_player'],
+              description:
+                'Which lane this tweet covers. Tweets MUST appear in this exact order: ' +
+                'headline, by_the_numbers, spotlight, community_pulse, top_player.',
+            },
+            text: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 1200,
+              description:
+                'Final tweet text. Tweet 1 (headline) ideally <280 chars; tweets 2-5 up to 1200.',
+            },
+          },
+        },
+      },
+    },
+  } as const;
+
+  /**
+   * Generate the weekly market summary thread.
+   *
+   * @param data Fully populated `WeeklySummaryData` from the aggregator.
+   * @returns Parsed thread tweets (with section tags), model metadata, and
+   *   combined LLM cost.
+   * @throws if the model output isn't valid JSON, doesn't match the schema,
+   *   or returns sections in the wrong order.
+   */
+  async generateWeeklySummary(data: WeeklySummaryData): Promise<{
+    tweets: WeeklyThreadTweet[];
+    modelUsed: string;
+    promptTokens: number;
+    completionTokens: number;
+    costUsd: number;
+    fullPrompt: string;
+  }> {
+    const startTime = Date.now();
+    logger.info(`📰 Generating weekly summary for ${data.weekStart} → ${data.weekEnd}`);
+
+    const systemPrompt = this.buildWeeklySummarySystemPrompt();
+    const userPrompt = this.buildWeeklySummaryUserPrompt(data);
+    const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
+
+    logger.info(
+      `📰 Prompt: system=${systemPrompt.length} chars, user=${userPrompt.length} chars, total=${fullPrompt.length} chars`,
+    );
+    logger.info(
+      `📰 Source failures (${data.partialSourceFailures.length}): ${data.partialSourceFailures.join(', ') || 'none'}`,
+    );
+
+    // Call the Responses API with retry. Two `as any` casts:
+    //   - `effort: 'xhigh'`: the installed `openai` SDK (6.2.0) only types
+    //     ReasoningEffort up to 'high', but the OpenAI API accepts 'xhigh' as
+    //     a higher tier on the gpt-5.4 family. If the API rejects 'xhigh' at
+    //     runtime, swap to 'high' here.
+    //   - `schema: ... as any`: the SDK types `schema: { [k: string]: unknown }`
+    //     which doesn't accept a `readonly` const-asserted object directly. The
+    //     literal we pass is a perfectly valid JSON Schema; the cast is purely
+    //     to satisfy TS. The model slug `gpt-5.4-2026-03-05` is also outside
+    //     the SDK's known ChatModel union but works at runtime for the same
+    //     reason.
+    const response = await this.withRetry(
+      async () => {
+        return await this.client.responses.create({
+          model: this.models.weekly.name,
+          input: fullPrompt,
+          reasoning: { effort: 'xhigh' as any },
+          text: {
+            format: {
+              type: 'json_schema',
+              name: 'WeeklySummaryThread',
+              strict: true,
+              schema: OpenAIService.WEEKLY_THREAD_SCHEMA as any,
+            },
+          },
+        });
+      },
+      `Weekly summary generation (window ${data.weekStart} → ${data.weekEnd})`,
+    );
+
+    const rawText = response.output_text?.trim() || '';
+    if (!rawText) {
+      throw new Error('Weekly summary: model returned empty output');
+    }
+
+    const tweets = this.parseAndValidateWeeklyTweets(rawText);
+
+    const usage = response.usage;
+    const promptTokens = usage?.input_tokens || 0;
+    const completionTokens = usage?.output_tokens || 0;
+    const costUsd =
+      promptTokens * OpenAIService.WEEKLY_INPUT_USD_PER_TOKEN +
+      completionTokens * OpenAIService.WEEKLY_OUTPUT_USD_PER_TOKEN;
+
+    const elapsedMs = Date.now() - startTime;
+    logger.info(
+      `📰 Weekly summary generated in ${elapsedMs}ms — ${tweets.length} tweet(s), ` +
+        `${promptTokens.toLocaleString()} input + ${completionTokens.toLocaleString()} output tokens, ` +
+        `cost ~$${costUsd.toFixed(3)}`,
+    );
+
+    return {
+      tweets,
+      modelUsed: response.model,
+      promptTokens,
+      completionTokens,
+      costUsd,
+      fullPrompt,
+    };
+  }
+
+  /**
+   * Parse the JSON-schema response and validate that:
+   *   - It's parseable JSON with a `tweets` array
+   *   - Exactly 5 items
+   *   - Sections appear in the canonical order (headline → by_the_numbers →
+   *     spotlight → community_pulse → top_player)
+   *   - Each `text` is non-empty and within the Premium+ char ceiling
+   *
+   * Most of these are also enforced by the API via `strict: true`, but we
+   * re-validate as defence in depth — if the model ever returns a payload
+   * that bypasses the schema (or a future SDK upgrade silently relaxes
+   * `strict`), we fail loudly here instead of posting garbage.
+   */
+  private parseAndValidateWeeklyTweets(rawText: string): WeeklyThreadTweet[] {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(rawText);
+    } catch (err: any) {
+      throw new Error(`Weekly summary: model output is not valid JSON: ${err.message}`);
+    }
+
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error('Weekly summary: model output is not a JSON object');
+    }
+
+    const tweetsRaw = (parsed as any).tweets;
+    if (!Array.isArray(tweetsRaw)) {
+      throw new Error('Weekly summary: model output is missing the "tweets" array');
+    }
+
+    const expectedOrder = OpenAIService.WEEKLY_TWEET_ORDER;
+    if (tweetsRaw.length !== expectedOrder.length) {
+      throw new Error(
+        `Weekly summary: expected exactly ${expectedOrder.length} tweets, got ${tweetsRaw.length}`,
+      );
+    }
+
+    const tweets: WeeklyThreadTweet[] = [];
+    for (let i = 0; i < tweetsRaw.length; i++) {
+      const item = tweetsRaw[i];
+      if (typeof item !== 'object' || item === null) {
+        throw new Error(`Weekly summary tweet ${i + 1}: not an object`);
+      }
+      const section = (item as any).section;
+      const text = (item as any).text;
+
+      if (typeof section !== 'string' || !expectedOrder.includes(section as WeeklyTweetSection)) {
+        throw new Error(
+          `Weekly summary tweet ${i + 1}: invalid section "${section}" (allowed: ${expectedOrder.join(', ')})`,
+        );
+      }
+      if (section !== expectedOrder[i]) {
+        throw new Error(
+          `Weekly summary tweet ${i + 1}: section out of order — got "${section}", expected "${expectedOrder[i]}"`,
+        );
+      }
+      if (typeof text !== 'string' || text.trim().length === 0) {
+        throw new Error(`Weekly summary tweet ${i + 1}: text is empty`);
+      }
+      if (text.length > OpenAIService.WEEKLY_TWEET_MAX_CHARS) {
+        throw new Error(
+          `Weekly summary tweet ${i + 1} (${section}): text exceeds ` +
+            `${OpenAIService.WEEKLY_TWEET_MAX_CHARS} chars (actual: ${text.length}). Premium+ ceiling.`,
+        );
+      }
+
+      tweets.push({ section: section as WeeklyTweetSection, text });
+    }
+
+    return tweets;
+  }
+
+  /**
+   * Long-form system prompt for the weekly summary. Establishes voice
+   * continuity with the per-event AI replies, defines the 5-tweet thread
+   * shape (each lane has a dedicated job), and lays out framing rules for
+   * the spotlight, Top Player, wash data, week-over-week deltas, etc.
+   *
+   * Output format is enforced by the JSON schema in WEEKLY_THREAD_SCHEMA;
+   * this prompt re-states the structure so the model has explicit guidance
+   * for what each lane is for.
+   */
+  private buildWeeklySummarySystemPrompt(): string {
+    return `You are GrailsAI Weekly — a sharp, opinionated ENS market analyst writing the weekly recap thread for the ENS community on X. You look back over the past 7 days, find the real story, and tell it tight.
+
+YOUR TASK:
+Write a 5-tweet thread following the strict JSON schema you've been given. Each tweet has a dedicated lane — they are NOT interchangeable. Together they form a clear arc: pulse → numbers → forward → community → personality.
+
+OUTPUT FORMAT:
+Return JSON: { "tweets": [ { "section": "...", "text": "..." }, ... ] } with EXACTLY 5 entries in this order:
+
+  1. section "headline"          → punchy lead-in
+  2. section "by_the_numbers"    → hard data
+  3. section "spotlight"         → dynamic deep-focus
+  4. section "community_pulse"   → broad sentiment
+  5. section "top_player"        → climactic actor reveal
+
+Each \`text\` field must be ≤ 1200 characters. The schema enforces this server-side; do not exceed it.
+
+DO NOT number tweets ("1/", "2/"). DO NOT add a TL;DR. DO NOT use dashes (—, –, or - at start of lines). Use periods, commas, short paragraphs.
+
+══════════════════════════════════════════════════════════════════════════
+TWEET 1 — section: "headline"
+══════════════════════════════════════════════════════════════════════════
+The single most interesting take of the week. Could be a trend, a whale, a market shift, a wash-trade pattern, a category waking up — whatever the data screams loudest about. Pick ONE angle and go hard.
+
+FORMAT: Start with the literal header "GrailsAI Weekly ✨" on its own line, then a blank line, then the headline take. Aim under 280 characters total so it renders cleanly on every client. Punchy, opinionated, leaves the reader wanting tweet 2.
+
+══════════════════════════════════════════════════════════════════════════
+TWEET 2 — section: "by_the_numbers"
+══════════════════════════════════════════════════════════════════════════
+The hard-data tweet. The headline numbers a market watcher needs to know:
+
+  - Sales: count + total volume (ETH and USD)
+  - Registrations: count + total cost + total premium paid
+  - Bids/offers: how active was the bid layer
+  - Renewals: count + volume (this is OUR data, Grails doesn't have it)
+  - Week-over-week delta on the BIGGEST mover (use PREVIOUS WEEK SNAPSHOT if provided; skip the comparison entirely if it isn't)
+  - ETH price context if move is ≥3% AND it explains a USD-volume vs ETH-volume divergence
+
+Be selective — don't list every number you have. Surface 4-6 numbers that actually matter. Numbers prefer specificity ("47 ETH across 23 sales" > "lots of activity"). Round USD to nice units ($14k, $1.2M).
+
+══════════════════════════════════════════════════════════════════════════
+TWEET 3 — section: "spotlight"
+══════════════════════════════════════════════════════════════════════════
+The dynamic deep-focus tweet. Pick ONE angle from the menu below — whichever is loudest in the week's data — and go DEEP on it. ONE thing, well-explored.
+
+DEFAULT angle: NAMES TO WATCH. Use the data in NAMES TO WATCH: PREMIUM DECAY (top names with high watcher concentration in the premium auction phase) and NAMES TO WATCH: GRACE → PREMIUM SOON (names dropping into the premium auction within 7 days). Lead with premium-decay names — that's where the auction action is happening this week. Mention 1-2 grace-soon names as a tail ("and watching these enter the auction this week:").
+
+PIVOT angles (use INSTEAD of names-to-watch only if clearly louder):
+  - ENGAGING BOT TWEET: One specific bot post drove unusually high engagement or a juicy reply thread. Lead with what landed and why. Reference the actual replies for context (PARAPHRASE — never quote verbatim, never @-mention).
+  - CATEGORY HEATING UP: 2+ of the week's top sales or registrations share a club tag (999 club, 10k club, 3-letter, prepunks, etc.). Identify the cluster and what it means.
+  - HOT LIVE OFFER ACTIVITY: A specific name has unusually stacked active offers, or top current offers are clustering in a way that signals where bidders are circling.
+  - NOTABLE SINGLE TRADE: One individual sale or registration is genuinely the story of the week — a steal, a wash, an absurd overpay, a name with a backstory. Different from the headline insight (which is broader).
+
+Whatever you pick, go DEEP — give the reader specifics, numbers, names. Don't list multiple angles. ONE thing.
+
+══════════════════════════════════════════════════════════════════════════
+TWEET 4 — section: "community_pulse"
+══════════════════════════════════════════════════════════════════════════
+Broad sentiment sweep. Zoom OUT (vs tweet 3 which goes deep on one thing). Aggregate themes across:
+
+  - ENS CHATTER: themes from broad ENS-related tweets in the past 7d. Common topics, narrative threads, vibe shifts.
+  - OWN TWEET ENGAGEMENT: which kinds of bot posts are landing this week (which categories of sale/reg/bid drove the most engagement on average), without repeating any specific tweet you covered in tweet 3.
+  - Notable accounts mentioning ENS or relevant news/launches if surfaced in chatter.
+
+If chatter is quiet and there's no clear sentiment thread, lead with the most-engaged bot post of the week and what made it land — without re-using whatever was already in tweet 3.
+
+NEVER quote third-party tweets verbatim. NEVER @-mention any third-party account. PARAPHRASE community sentiment, never reproduce it.
+
+══════════════════════════════════════════════════════════════════════════
+TWEET 5 — section: "top_player"
+══════════════════════════════════════════════════════════════════════════
+Climactic actor reveal. Lead with the literal phrase "Top Player of the Week:" followed by the address handle (their ENS name if they have one, otherwise a short address like 0xabcd…1234).
+
+Then 2-4 sentences explaining what they did this week. Reference TOP PARTICIPANTS data — full breakdown of buys / sells / registrations / renewals with actual ETH amounts. Pick the address with the most interesting STORY given the rest of the week's context — it does NOT have to be #1 by volume. The math gave you the top 3 candidates from OUR DATABASE ONLY (we miss micro-actions below our notability thresholds), so be honest about that limitation if natural ("from what we tracked", "from our feed").
+
+══════════════════════════════════════════════════════════════════════════
+GENERAL FRAMING RULES
+══════════════════════════════════════════════════════════════════════════
+
+WASH-TRADE DATA: You'll see WASH SIGNALS — sales involving blacklisted addresses, plus AI replies that mentioned "wash" this week. NEITHER is a verdict — they're inputs. Surface in tweet 1 if washes were a meaningful share of volume; footnote in tweet 3 spotlight if there's a notable single wash; otherwise skip.
+
+WEEK-OVER-WEEK: If PREVIOUS WEEK SNAPSHOT is present, use deltas in tweet 2 ("volume +40% w/w"). If NOT present, skip the comparison angle entirely — DO NOT say "no comparison available".
+
+PARTIAL SOURCE FAILURES: If a section is listed as failed, work without it. NEVER fabricate numbers to fill gaps.
+
+WRITING STYLE:
+- Short, punchy sentences. Get to the point fast.
+- Be confident. No hedging. "Volume cratered 40% week-on-week" not "volume seems to have decreased somewhat".
+- Mock gently when warranted: "67 names renewed in one tx by an address that's never sold. Call it conviction or call it indecision."
+- Highlight steals and overpays with actual numbers.
+- Humor comes from data contrasts, not forced jokes.
+- Use "onchain" not "on-chain", "multichain" not "multi-chain".
+- ETH values: 2 decimals max for ≥0.01 ETH, more precision only for tiny values.
+- USD: rounded ($14k, $1.2M, $850).
+- Avoid: "scooped up", "snapped up", "nabbed", "on a tear", emojis except the ✨ in the tweet 1 header.
+
+CRITICAL RULES:
+- NEVER fabricate numbers. If a section is missing, work without it.
+- NEVER quote third-party tweets verbatim. NEVER @-mention any account other than @-handles already present in the bot's own previous output (and even then, sparingly).
+- NEVER use the word "edgy". NEVER use "rather than", "instead of", "as opposed to".
+- NEVER mention legal / trademark / IP / copyright issues.
+- NEVER mention the absence of something ("no wash trades", "no notable whales").
+- NEVER apologise for missing data. State what you have and move on.
+- NEVER ask questions. You're writing a recap, not a survey.
+- The thread will be posted by an automated bot. You ARE the bot's voice — don't refer to "the bot" in third person.
+
+Each tweet stands on its own — a reader who only sees tweet 1 should still get value. Tweets 2-5 build context, detail, sentiment, and the actor reveal.`;
+  }
+
+  /**
+   * Serialize `WeeklySummaryData` into a plain-text user prompt with clear
+   * section headers. We do NOT truncate self-tweets, AI replies, or third-party
+   * replies — the LLM gets everything raw. We DO truncate enormous arrays
+   * (e.g., 50 premium watchers) only by limit at the source level (already
+   * capped by the aggregator's TUNABLES).
+   *
+   * Sections appear in roughly priority order so the model reads the most
+   * important context first if it has to make decisions about what to surface.
+   */
+  private buildWeeklySummaryUserPrompt(data: WeeklySummaryData): string {
+    const lines: string[] = [];
+
+    lines.push(`WEEK WINDOW: ${data.weekStart}  →  ${data.weekEnd}`);
+    lines.push('');
+
+    // ── Source failure honesty ───────────────────────────────────────────────
+    if (data.partialSourceFailures.length > 0) {
+      lines.push(`PARTIAL SOURCE FAILURES (${data.partialSourceFailures.length}):`);
+      lines.push(`  ${data.partialSourceFailures.join(', ')}`);
+      lines.push('  → Treat these sections as missing; do not fabricate numbers.');
+      lines.push('');
+    }
+
+    // ── ETH price context ────────────────────────────────────────────────────
+    lines.push('ETH PRICE:');
+    if (data.ethPriceNow !== null) {
+      lines.push(`  Now:        $${data.ethPriceNow.toFixed(2)}`);
+    } else {
+      lines.push(`  Now:        unavailable`);
+    }
+    if (data.ethPrice7dAgo !== null) {
+      lines.push(`  7d ago:     $${data.ethPrice7dAgo.toFixed(2)}`);
+      if (data.ethPriceNow !== null) {
+        const delta = data.ethPriceNow - data.ethPrice7dAgo;
+        const pct = (delta / data.ethPrice7dAgo) * 100;
+        const sign = delta >= 0 ? '+' : '';
+        lines.push(`  Change:     ${sign}$${delta.toFixed(2)} (${sign}${pct.toFixed(1)}%)`);
+      }
+    } else {
+      lines.push(`  7d ago:     unavailable`);
+    }
+    lines.push('');
+
+    // ── Market overview (Grails) ─────────────────────────────────────────────
+    if (data.marketAnalytics) {
+      const m = data.marketAnalytics;
+      lines.push('MARKET OVERVIEW (7d, from Grails):');
+      lines.push(`  Total names:        ${m.overview.total_names.toLocaleString()}`);
+      lines.push(`  Active listings:    ${m.overview.active_listings.toLocaleString()}`);
+      lines.push(`  Active offers:      ${m.overview.active_offers.toLocaleString()}`);
+      lines.push(`  Total watchers:     ${m.overview.total_watchers.toLocaleString()}`);
+      lines.push(`  Total views:        ${m.overview.total_views.toLocaleString()}`);
+      lines.push('');
+      lines.push(`  Sales count:        ${m.volume.sales_count.toLocaleString()}`);
+      lines.push(`  Total volume:       ${weiToEth(m.volume.total_volume_wei)} ETH`);
+      lines.push(`  Avg sale price:     ${weiToEth(m.volume.avg_sale_price_wei)} ETH`);
+      lines.push(`  Max sale price:     ${weiToEth(m.volume.max_sale_price_wei)} ETH`);
+      lines.push(`  Min sale price:     ${weiToEth(m.volume.min_sale_price_wei)} ETH`);
+      lines.push(`  Unique names sold:  ${m.volume.unique_names_sold.toLocaleString()}`);
+      lines.push(`  Unique buyers:      ${m.volume.unique_buyers.toLocaleString()}`);
+      lines.push(`  Unique sellers:     ${m.volume.unique_sellers.toLocaleString()}`);
+      lines.push('');
+      lines.push(`  Activity (7d): ${m.activity.views.toLocaleString()} views, ${m.activity.watchlist_adds.toLocaleString()} watchlist adds, ${m.activity.offers.toLocaleString()} offers, ${m.activity.listings.toLocaleString()} listings`);
+      lines.push('');
+    }
+
+    // ── Registration analytics ───────────────────────────────────────────────
+    if (data.registrationAnalytics) {
+      const r = data.registrationAnalytics.summary;
+      lines.push('REGISTRATIONS (7d, from Grails):');
+      lines.push(`  Total count:           ${r.registration_count.toLocaleString()}`);
+      lines.push(`  Total cost:            ${weiToEth(r.total_cost_wei)} ETH`);
+      lines.push(`  Total base cost:       ${weiToEth(r.total_base_cost_wei)} ETH`);
+      lines.push(`  Total premium:         ${weiToEth(r.total_premium_wei)} ETH`);
+      lines.push(`  Avg cost:              ${weiToEth(r.avg_cost_wei)} ETH`);
+      lines.push(`  Premium registrations: ${r.premium_registrations.toLocaleString()} (${pct(r.premium_registrations, r.registration_count)})`);
+      lines.push(`  Unique registrants:    ${r.unique_registrants.toLocaleString()}`);
+
+      const byLen = data.registrationAnalytics.by_length;
+      if (byLen.length > 0) {
+        lines.push('  By name length (count, total cost ETH):');
+        for (const b of byLen) {
+          lines.push(`    ${String(b.name_length).padStart(2)}-char: ${String(b.count).padStart(5)}  total ${weiToEth(b.total_cost_wei).padStart(8)} ETH`);
+        }
+      }
+      lines.push('');
+    }
+
+    // ── Self-DB renewals stats (Grails has none) ─────────────────────────────
+    lines.push('RENEWAL STATS (7d, from our DB — Grails has no renewal endpoints):');
+    lines.push(`  Names renewed:         ${data.renewalsStats.count.toLocaleString()}`);
+    lines.push(`  Distinct transactions: ${data.renewalsStats.txCount.toLocaleString()}`);
+    lines.push(`  Total volume:          ${data.renewalsStats.totalVolumeEth.toFixed(4)} ETH (${fmtUsd(data.renewalsStats.totalVolumeUsd)})`);
+    if (data.renewalsStats.topByVolume.length > 0) {
+      lines.push(`  Top renewals by per-name cost (top ${data.renewalsStats.topByVolume.length}):`);
+      for (const r of data.renewalsStats.topByVolume) {
+        const eth = r.costEth ? Number(r.costEth).toFixed(4) : '?';
+        const usd = r.costUsd ? fmtUsd(Number(r.costUsd)) : '?';
+        lines.push(`    ${r.fullName} — ${eth} ETH (${usd}) — renewer ${shortAddrLocal(r.renewerAddress)}`);
+      }
+    }
+    lines.push('');
+
+    // ── Top Player of the Week candidates ────────────────────────────────────
+    // The math gave us the top 3 by combined volume; the prompt instructs the
+    // model to pick the most INTERESTING story from these, not necessarily #1.
+    if (data.topParticipants.length > 0) {
+      lines.push(`TOP PLAYER OF THE WEEK CANDIDATES (top ${data.topParticipants.length} by combined ETH volume across buys+sells+regs+renewals; from our DB only):`);
+      data.topParticipants.forEach((p, idx) => {
+        lines.push(this.formatTopParticipant(p, idx + 1));
+      });
+      lines.push('  ↑ For tweet 5: pick the most interesting story from above — does NOT have to be #1.');
+      lines.push('');
+    }
+
+    // ── Wash signals ─────────────────────────────────────────────────────────
+    lines.push('WASH SIGNALS (7d, raw — surface only if meaningful):');
+    lines.push(`  Blacklisted-address sales: ${data.washSignals.blacklistMatches.count.toLocaleString()}, volume ${data.washSignals.blacklistMatches.volumeEth.toFixed(4)} ETH (${fmtUsd(data.washSignals.blacklistMatches.volumeUsd)})`);
+    lines.push(`  AI replies mentioning 'wash': ${data.washSignals.aiReplyWashMentions.count.toLocaleString()}`);
+    if (data.washSignals.blacklistMatches.sales.length > 0) {
+      lines.push(`  Sample blacklist sales (first ${data.washSignals.blacklistMatches.sales.length}):`);
+      for (const s of data.washSignals.blacklistMatches.sales.slice(0, 5)) {
+        const name = s.nftName || `#${s.tokenId?.slice(0, 8)}`;
+        const eth = s.priceAmount ? Number(s.priceAmount).toFixed(4) : '?';
+        const usd = s.priceUsd ? fmtUsd(Number(s.priceUsd)) : '?';
+        lines.push(`    ${name} — ${eth} ETH (${usd}) — buyer ${shortAddrLocal(s.buyerAddress)}, seller ${shortAddrLocal(s.sellerAddress)}`);
+      }
+    }
+    lines.push('');
+
+    // ── Top sales (Grails) ───────────────────────────────────────────────────
+    if (data.topSales.length > 0) {
+      lines.push(`TOP SALES (7d, top ${data.topSales.length} by price, from Grails):`);
+      for (const s of data.topSales) {
+        const eth = weiToEth(s.sale_price_wei);
+        const clubs = s.clubs && s.clubs.length > 0 ? `  [${s.clubs.join(', ')}]` : '';
+        lines.push(`  ${s.name} — ${eth} ETH — buyer ${shortAddrLocal(s.buyer_address)}, seller ${shortAddrLocal(s.seller_address)}, on ${s.source ?? 'unknown'}${clubs}`);
+      }
+      lines.push('');
+    }
+
+    // ── Top registrations (Grails) ───────────────────────────────────────────
+    if (data.topRegistrations.length > 0) {
+      lines.push(`TOP REGISTRATIONS (7d, top ${data.topRegistrations.length} by cost; premium drops surface here naturally):`);
+      for (const r of data.topRegistrations) {
+        const total = weiToEth(r.total_cost_wei);
+        const premium = weiToEth(r.premium_wei);
+        const clubs = r.clubs && r.clubs.length > 0 ? `  [${r.clubs.join(', ')}]` : '';
+        lines.push(`  ${r.name} — ${total} ETH total (${premium} ETH premium) — registrant ${shortAddrLocal(r.registrant_address)}${clubs}`);
+      }
+      lines.push('');
+    }
+
+    // ── Top offers (Grails) ──────────────────────────────────────────────────
+    if (data.topOffers.length > 0) {
+      lines.push(`TOP OFFERS (7d, top ${data.topOffers.length} by amount):`);
+      for (const o of data.topOffers) {
+        const amt = weiToEth(o.offer_amount_wei);
+        const clubs = o.clubs && o.clubs.length > 0 ? `  [${o.clubs.join(', ')}]` : '';
+        lines.push(`  ${o.name} — ${amt} ETH (${o.status}) — bidder ${shortAddrLocal(o.buyer_address)}, on ${o.source ?? 'unknown'}${clubs}`);
+      }
+      lines.push('');
+    }
+
+    // ── Volume distribution by price bucket ──────────────────────────────────
+    if (data.volumeDistribution && data.volumeDistribution.distribution.length > 0) {
+      lines.push('VOLUME DISTRIBUTION (7d, sales count + total ETH volume by price bucket):');
+      for (const b of data.volumeDistribution.distribution) {
+        lines.push(`  ${b.price_range.padEnd(14)}  ${String(b.sales_count).padStart(4)} sale(s)  ${weiToEth(b.total_volume_wei)} ETH`);
+      }
+      lines.push('');
+    }
+
+    // ── Daily volume + sales charts (compact) ────────────────────────────────
+    if (data.volumeChart && data.volumeChart.points.length > 0) {
+      lines.push('DAILY VOLUME (7d, ETH per day):');
+      for (const p of data.volumeChart.points) {
+        lines.push(`  ${p.date.slice(0, 10)}  ${weiToEth(p.total)} ETH`);
+      }
+      lines.push('');
+    }
+    if (data.salesChart && data.salesChart.points.length > 0) {
+      lines.push('DAILY SALES (7d, count per day):');
+      for (const p of data.salesChart.points) {
+        lines.push(`  ${p.date.slice(0, 10)}  ${String(p.total).padStart(4)} sale(s)`);
+      }
+      lines.push('');
+    }
+
+    // ── Names to watch — primary input for the spotlight (tweet 3) ───────────
+    // Premium-decay names are weighted 80% (the auction action is happening
+    // here NOW), grace-soon names are weighted 20% (they enter the auction
+    // within 7 days). We surface premium prominently and grace as a tail.
+    if (data.premiumByWatchers.length > 0) {
+      lines.push(`NAMES TO WATCH: PREMIUM DECAY (top ${Math.min(25, data.premiumByWatchers.length)} by watcher count — auction is live, registrants competing):`);
+      for (const n of data.premiumByWatchers.slice(0, 25)) {
+        const clubs = n.clubs && n.clubs.length > 0 ? `  [${n.clubs.join(', ')}]` : '';
+        lines.push(`  ${n.name} — ${n.watchers_count} watcher(s), expired ${n.expiry_date.slice(0, 10)}${clubs}`);
+      }
+      lines.push('');
+    }
+    if (data.graceByWatchers.length > 0) {
+      // Grace list is already pre-filtered by the aggregator to names that
+      // enter premium auction within 7 days (expiry 83-90 days ago).
+      lines.push(`NAMES TO WATCH: GRACE → PREMIUM SOON (top ${Math.min(10, data.graceByWatchers.length)} by watcher count — these enter the premium auction within ~7 days):`);
+      for (const n of data.graceByWatchers.slice(0, 10)) {
+        const clubs = n.clubs && n.clubs.length > 0 ? `  [${n.clubs.join(', ')}]` : '';
+        lines.push(`  ${n.name} — ${n.watchers_count} watcher(s), expired ${n.expiry_date.slice(0, 10)}${clubs}`);
+      }
+      lines.push('');
+    }
+
+    // ── Previous week snapshot for week-over-week comparison ────────────────
+    if (data.previousSnapshot) {
+      lines.push('PREVIOUS WEEK SNAPSHOT (for week-over-week comparison):');
+      lines.push(this.formatPreviousSnapshot(data.previousSnapshot));
+      lines.push('');
+    } else {
+      lines.push('PREVIOUS WEEK SNAPSHOT: not available (first run, or last week\'s post failed). Skip the week-over-week angle entirely — do not mention it.');
+      lines.push('');
+    }
+
+    // ── Bot's own posted tweets + AI replies (RAW) ───────────────────────────
+    if (data.botPosts.length > 0) {
+      lines.push(`BOT POSTS — your own posted tweets + AI replies for the week, RAW (${data.botPosts.length} item(s), newest first):`);
+      for (const p of data.botPosts) {
+        lines.push(this.formatBotPost(p));
+      }
+      lines.push('');
+    }
+
+    // ── Twitter engagement metrics on bot's own tweets ───────────────────────
+    if (data.ownTweetsWithFreshMetrics.length > 0) {
+      lines.push(`OWN TWEET ENGAGEMENT (${data.ownTweetsWithFreshMetrics.length} tweet(s) with fresh metrics):`);
+      // Sort by impressions desc to surface the highest-engagement ones first.
+      const sorted = [...data.ownTweetsWithFreshMetrics].sort((a, b) => {
+        const ai = a.public_metrics?.impression_count ?? 0;
+        const bi = b.public_metrics?.impression_count ?? 0;
+        return bi - ai;
+      });
+      // Cap to the top 25 for token sanity; the LLM only needs the engagement
+      // distribution shape, not every single tweet's metrics.
+      for (const t of sorted.slice(0, 25)) {
+        const m = t.public_metrics;
+        if (!m) continue;
+        const created = t.created_at ? t.created_at.slice(0, 10) : '?';
+        lines.push(`  [${created}] ${m.impression_count.toLocaleString()} imp, ${m.like_count} likes, ${m.reply_count} replies, ${m.retweet_count} RT, ${m.quote_count} quotes — id ${t.id}`);
+      }
+      lines.push('');
+    }
+
+    // ── Third-party replies on bot's tweets (RAW) ────────────────────────────
+    if (data.thirdPartyReplies.length > 0) {
+      const totalReplies = data.thirdPartyReplies.reduce((acc, c) => acc + c.replies.length, 0);
+      lines.push(`THIRD-PARTY REPLIES — actual reply text from other accounts (${data.thirdPartyReplies.length} engaged conv(s), ${totalReplies} repl(ies) total):`);
+      for (const conv of data.thirdPartyReplies) {
+        lines.push(`  Conversation ${conv.conversationId} (${conv.replies.length} repl(ies)):`);
+        for (const r of conv.replies) {
+          // Compress text to a single line to keep the prompt readable.
+          const text = (r.text ?? '').replace(/\s+/g, ' ').trim();
+          if (text.length === 0) continue;
+          lines.push(`    "${text}"`);
+        }
+      }
+      lines.push('');
+    }
+
+    // ── Broad ENS Twitter chatter ────────────────────────────────────────────
+    if (data.ensTwitterChatter.length > 0) {
+      lines.push(`ENS CHATTER (${data.ensTwitterChatter.length} broad ENS tweets from past 7d, raw — for sentiment/themes context only, do not quote verbatim or @-mention):`);
+      for (const t of data.ensTwitterChatter) {
+        const text = (t.text ?? '').replace(/\s+/g, ' ').trim();
+        if (text.length === 0) continue;
+        lines.push(`  "${text}"`);
+      }
+      lines.push('');
+    }
+
+    // ── Final reminder ───────────────────────────────────────────────────────
+    lines.push('---');
+    lines.push(`Now write the thread. Return JSON matching the WeeklySummaryThread schema: exactly 5 tweets, in order: headline → by_the_numbers → spotlight → community_pulse → top_player. Tweet 1 starts with "GrailsAI Weekly ✨" header on its own line; ideally <280 chars. Tweets 2-5 max ${OpenAIService.WEEKLY_TWEET_MAX_CHARS} chars each. Tweet 5 leads with the literal phrase "Top Player of the Week:" followed by the chosen handle. No numbering, no TL;DR, no @-mentions of third-party accounts.`);
+
+    return lines.join('\n');
+  }
+
+  /**
+   * Format one top participant entry — multi-line with per-bucket breakdown.
+   */
+  private formatTopParticipant(p: WeeklyTopParticipant, rank: number): string {
+    const lines: string[] = [];
+    const ensLabel = p.ensName ? ` (${p.ensName})` : '';
+    lines.push(`  #${rank}: ${shortAddrLocal(p.address)}${ensLabel}  — total ${p.totalEth.toFixed(4)} ETH (${fmtUsd(p.totalUsd)})`);
+    if (p.buys.count > 0) lines.push(`     Buys:  ${p.buys.count} for ${p.buys.volumeEth.toFixed(4)} ETH (${fmtUsd(p.buys.volumeUsd)})`);
+    if (p.sells.count > 0) lines.push(`     Sells: ${p.sells.count} for ${p.sells.volumeEth.toFixed(4)} ETH (${fmtUsd(p.sells.volumeUsd)})`);
+    if (p.registrations.count > 0) lines.push(`     Regs:  ${p.registrations.count} for ${p.registrations.costEth.toFixed(4)} ETH (${fmtUsd(p.registrations.costUsd)})`);
+    if (p.renewals.count > 0) lines.push(`     Renews: ${p.renewals.count} for ${p.renewals.costEth.toFixed(4)} ETH (${fmtUsd(p.renewals.costUsd)})`);
+    return lines.join('\n');
+  }
+
+  /**
+   * Format one bot-post entry. RAW text — no compression.
+   */
+  private formatBotPost(p: WeeklyBotPost): string {
+    const date = p.postedAt.slice(0, 10);
+    const tag = `[${date} ${p.type.toUpperCase()}${p.tweetId ? ` id=${p.tweetId}` : ''}]`;
+    return `  ${tag} ${p.text}`;
+  }
+
+  /**
+   * Format the previous-week snapshot for week-over-week deltas. The model
+   * does the actual delta math; we just present both weeks' headline numbers
+   * side-by-side in a deterministic shape.
+   */
+  private formatPreviousSnapshot(s: WeeklySnapshotData): string {
+    const lines: string[] = [];
+    lines.push(`  Window:                ${s.weekStart} → ${s.weekEnd}`);
+    lines.push(`  Sales count:           ${s.salesCount.toLocaleString()}`);
+    lines.push(`  Sales volume:          ${s.salesVolumeEth.toFixed(4)} ETH (${fmtUsd(s.salesVolumeUsd)})`);
+    lines.push(`  Unique buyers:         ${s.uniqueBuyers.toLocaleString()}`);
+    lines.push(`  Unique sellers:        ${s.uniqueSellers.toLocaleString()}`);
+    lines.push(`  Unique names sold:     ${s.uniqueNamesSold.toLocaleString()}`);
+    lines.push(`  Registrations:         ${s.registrationCount.toLocaleString()} for ${s.registrationCostEth.toFixed(4)} ETH (${fmtUsd(s.registrationCostUsd)})`);
+    lines.push(`  Premium regs:          ${s.premiumRegistrations.toLocaleString()}`);
+    lines.push(`  Unique registrants:    ${s.uniqueRegistrants.toLocaleString()}`);
+    lines.push(`  Renewals:              ${s.renewalCount.toLocaleString()} (${s.renewalTxCount.toLocaleString()} tx) for ${s.renewalVolumeEth.toFixed(4)} ETH (${fmtUsd(s.renewalVolumeUsd)})`);
+    lines.push(`  Offers:                ${s.offersCount.toLocaleString()}`);
+    lines.push(`  Active listings:       ${s.activeListings.toLocaleString()}`);
+    lines.push(`  Active offers:         ${s.activeOffers.toLocaleString()}`);
+    if (s.ethPriceUsd !== null) lines.push(`  ETH price (week end):  $${s.ethPriceUsd.toFixed(2)}`);
+    return lines.join('\n');
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Module-private helpers used by the weekly-summary prompt builder.
+// Kept at module scope (vs. private static) so they don't widen the class API
+// surface; they're pure formatting utilities tied to the wei/USD/address
+// conventions of the user prompt.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Convert a wei value (decimal string per Grails responses) to an ETH string
+ * with 4 decimals. Returns "?" on parse failure.
+ */
+function weiToEth(wei: string | number | null | undefined): string {
+  if (wei === null || wei === undefined) return '?';
+  try {
+    // Use BigInt for the integer division to avoid losing precision on huge wei
+    // values, then convert the remainder to a decimal portion.
+    const bi = typeof wei === 'string' ? BigInt(wei.split('.')[0]) : BigInt(Math.floor(Number(wei)));
+    const eth = Number(bi) / 1e18;
+    return eth.toFixed(4);
+  } catch {
+    return '?';
+  }
+}
+
+function fmtUsd(usd: number | null | undefined): string {
+  if (usd === null || usd === undefined || !Number.isFinite(usd)) return '$?';
+  if (usd === 0) return '$0';
+  return `$${usd.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+}
+
+function pct(num: number, denom: number): string {
+  if (!denom || !Number.isFinite(num / denom)) return '?%';
+  return `${((num / denom) * 100).toFixed(1)}%`;
+}
+
+function shortAddrLocal(addr: string | null | undefined): string {
+  if (!addr) return '<unknown>';
+  if (addr.length < 10) return addr;
+  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
