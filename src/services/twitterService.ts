@@ -18,6 +18,46 @@ export interface TwitterUser {
   name: string;
 }
 
+/**
+ * Public-metrics block returned by Twitter v2 `tweet.fields=public_metrics`.
+ * Shape is stable across owned-tweet and search endpoints.
+ */
+export interface TwitterPublicMetrics {
+  retweet_count: number;
+  reply_count: number;
+  like_count: number;
+  quote_count: number;
+  bookmark_count: number;
+  impression_count: number;
+}
+
+/**
+ * Tweet shape returned by the v2 GET endpoints used by the weekly summary.
+ *
+ * `public_metrics` is only populated when `tweet.fields=public_metrics` is in
+ * the request. `conversation_id` requires the same field flag. `author_id` is
+ * always returned when a user-context token is used.
+ */
+export interface TwitterV2Tweet {
+  id: string;
+  text: string;
+  created_at?: string;          // ISO 8601 with Z
+  conversation_id?: string;     // Top-of-thread tweet id (=== id for root tweets)
+  author_id?: string;
+  public_metrics?: TwitterPublicMetrics;
+}
+
+/**
+ * Result wrapper for paid Twitter read methods. `costUsd` is the theoretical
+ * billed amount given Twitter's pay-per-resource model — owned reads cost
+ * $0.001/tweet, third-party (search/replies) cost $0.005/tweet. The 24h dedup
+ * window can make the actual bill smaller; we always log the upper bound.
+ */
+export interface TwitterReadResult<T> {
+  data: T;
+  costUsd: number;
+}
+
 export class TwitterService {
   private oauth: OAuth;
   private apiToggleService: APIToggleService;
@@ -483,6 +523,258 @@ export class TwitterService {
       
       req.end();
     });
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // v2 read methods (used by weekly-summary).
+  //
+  // Cost model (per Twitter pay-per-use, Apr 2026):
+  //   - owned reads (own tweets, hydrate own metrics, /users/me): $0.001 / tweet
+  //   - third-party reads (search results, replies): $0.005 / tweet
+  //
+  // All methods log the upper-bound cost on success. The 24h dedup window can
+  // bring the actual bill lower; we always log the upper bound. Each method
+  // returns `{ data, costUsd }` so the weekly aggregator can sum spend.
+  //
+  // Failures degrade to `{ data: emptyShape, costUsd: 0 }` rather than throwing —
+  // weekly-summary uses Promise.allSettled and a single API outage shouldn't
+  // crash the run. Errors are logged at warn level.
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /** Cached own-user lookup. Cleared only on process restart. */
+  private ownUserIdCache: string | null = null;
+
+  /**
+   * GET helper that signs the URL+query with OAuth 1.0a (user context) and
+   * sends the request. The OAuth signature MUST include the query params
+   * (oauth-1.0a does this when `data` is passed alongside the bare base URL),
+   * and the actual HTTP request MUST go to the URL WITH the query string.
+   */
+  private async signedGet(
+    baseUrl: string,
+    params: Record<string, string | number | undefined> = {},
+  ): Promise<{ success: boolean; json?: any; error?: string }> {
+    // Strip undefined params and stringify the rest.
+    const cleanParams: Record<string, string> = {};
+    for (const [k, v] of Object.entries(params)) {
+      if (v === undefined || v === null) continue;
+      cleanParams[k] = String(v);
+    }
+
+    const qs = new URLSearchParams(cleanParams).toString();
+    const fullUrl = qs ? `${baseUrl}?${qs}` : baseUrl;
+
+    const token = {
+      key: config.twitter.accessToken,
+      secret: config.twitter.accessTokenSecret,
+    };
+
+    // For OAuth 1.0a, sign against the bare base URL + the params dict.
+    const authHeader = this.oauth.toHeader(
+      this.oauth.authorize({ url: baseUrl, method: 'GET', data: cleanParams }, token),
+    );
+
+    const response = await this.makeRequest(fullUrl, 'GET', authHeader.Authorization);
+    if (!response.success || !response.data) {
+      return { success: false, error: response.error };
+    }
+
+    try {
+      return { success: true, json: JSON.parse(response.data) };
+    } catch (err: any) {
+      return { success: false, error: `JSON parse failed: ${err.message}` };
+    }
+  }
+
+  /**
+   * Get the bot's own Twitter user ID via /2/users/me. Cached for the lifetime
+   * of the process (the bot is a single account; the ID never changes).
+   *
+   * Cost: $0.001 on first call, $0 on cached subsequent calls.
+   */
+  async getOwnUserId(): Promise<string | null> {
+    if (this.ownUserIdCache) {
+      return this.ownUserIdCache;
+    }
+    if (!this.checkApiEnabled()) return null;
+
+    const result = await this.signedGet('https://api.twitter.com/2/users/me');
+    if (!result.success || !result.json?.data?.id) {
+      logger.warn(`[Twitter] getOwnUserId failed: ${result.error || 'no data.id in response'}`);
+      return null;
+    }
+
+    const userId = result.json.data.id as string;
+    this.ownUserIdCache = userId;
+    logger.info(`[Twitter] Own user id resolved: ${userId} (cost ~$0.001)`);
+    return userId;
+  }
+
+  /**
+   * Fetch the bot's own tweets posted at or after `startTime` (ISO 8601, Z),
+   * up to `limit` total tweets. Paginates internally via `pagination_token`
+   * with `max_results=100` per page (the v2 cap).
+   *
+   * Each tweet includes `public_metrics`, `created_at`, and `conversation_id`.
+   *
+   * Cost: $0.001 per returned tweet (owned-read rate).
+   */
+  async getOwnTweetsSince(
+    startTime: string,
+    limit: number = 100,
+  ): Promise<TwitterReadResult<TwitterV2Tweet[]>> {
+    if (!this.checkApiEnabled()) return { data: [], costUsd: 0 };
+
+    const userId = await this.getOwnUserId();
+    if (!userId) return { data: [], costUsd: 0 };
+
+    const all: TwitterV2Tweet[] = [];
+    let paginationToken: string | undefined;
+    let pageCount = 0;
+    const maxPages = 20; // Hard safety cap; 20 pages × 100 = 2000 tweets max
+
+    while (all.length < limit && pageCount < maxPages) {
+      const remaining = limit - all.length;
+      const pageSize = Math.min(100, Math.max(remaining, 5)); // v2 requires max_results in [5, 100]
+
+      const result = await this.signedGet(
+        `https://api.twitter.com/2/users/${userId}/tweets`,
+        {
+          start_time: startTime,
+          max_results: pageSize,
+          'tweet.fields': 'public_metrics,created_at,conversation_id',
+          pagination_token: paginationToken,
+        },
+      );
+
+      if (!result.success) {
+        logger.warn(`[Twitter] getOwnTweetsSince page ${pageCount + 1} failed: ${result.error}`);
+        break;
+      }
+
+      const pageTweets: TwitterV2Tweet[] = result.json?.data ?? [];
+      all.push(...pageTweets);
+      pageCount++;
+
+      paginationToken = result.json?.meta?.next_token;
+      if (!paginationToken || pageTweets.length === 0) break;
+    }
+
+    const trimmed = all.slice(0, limit);
+    const costUsd = trimmed.length * 0.001;
+    logger.info(
+      `[Twitter] getOwnTweetsSince fetched ${trimmed.length} own tweet(s) ` +
+        `from ${pageCount} page(s) since ${startTime} (cost ~$${costUsd.toFixed(3)})`,
+    );
+    return { data: trimmed, costUsd };
+  }
+
+  /**
+   * Hydrate `public_metrics` (and other fields) for an arbitrary list of tweet
+   * IDs. Batched at 100 per request (v2 cap on the `ids` parameter). Used when
+   * we need fresh engagement numbers for tweets we already know about (e.g.,
+   * the bot's own historical tweets).
+   *
+   * Cost: $0.001 per returned tweet (owned-read rate; assumes caller passes
+   * ids of tweets the authenticated account owns).
+   */
+  async getTweetsWithMetrics(tweetIds: string[]): Promise<TwitterReadResult<TwitterV2Tweet[]>> {
+    if (!this.checkApiEnabled()) return { data: [], costUsd: 0 };
+    if (tweetIds.length === 0) return { data: [], costUsd: 0 };
+
+    const all: TwitterV2Tweet[] = [];
+    for (let i = 0; i < tweetIds.length; i += 100) {
+      const batch = tweetIds.slice(i, i + 100);
+
+      const result = await this.signedGet('https://api.twitter.com/2/tweets', {
+        ids: batch.join(','),
+        'tweet.fields': 'public_metrics,created_at,conversation_id',
+      });
+
+      if (!result.success) {
+        logger.warn(
+          `[Twitter] getTweetsWithMetrics batch ${i / 100 + 1} failed: ${result.error}`,
+        );
+        continue;
+      }
+
+      const batchTweets: TwitterV2Tweet[] = result.json?.data ?? [];
+      all.push(...batchTweets);
+    }
+
+    const costUsd = all.length * 0.001;
+    logger.info(
+      `[Twitter] getTweetsWithMetrics hydrated ${all.length}/${tweetIds.length} tweet(s) ` +
+        `(cost ~$${costUsd.toFixed(3)})`,
+    );
+    return { data: all, costUsd };
+  }
+
+  /**
+   * Fetch up to `maxResults` (max 100) third-party replies in a conversation,
+   * via /2/tweets/search/recent with `query=conversation_id:X`. The cap of 100
+   * is by design — one search-recent call per conversation bounds the runtime
+   * cost on viral threads.
+   *
+   * Cost: $0.005 per returned tweet (third-party-read rate).
+   */
+  async getRepliesToTweet(
+    conversationId: string,
+    maxResults: number = 100,
+  ): Promise<TwitterReadResult<TwitterV2Tweet[]>> {
+    if (!this.checkApiEnabled()) return { data: [], costUsd: 0 };
+
+    const capped = Math.min(Math.max(maxResults, 10), 100); // v2 search recent: [10, 100]
+    const result = await this.signedGet('https://api.twitter.com/2/tweets/search/recent', {
+      query: `conversation_id:${conversationId}`,
+      max_results: capped,
+      'tweet.fields': 'author_id,created_at,public_metrics,conversation_id',
+    });
+
+    if (!result.success) {
+      logger.warn(`[Twitter] getRepliesToTweet(${conversationId}) failed: ${result.error}`);
+      return { data: [], costUsd: 0 };
+    }
+
+    const replies: TwitterV2Tweet[] = result.json?.data ?? [];
+    const costUsd = replies.length * 0.005;
+    logger.info(
+      `[Twitter] getRepliesToTweet(${conversationId}) fetched ${replies.length} repl(ies) ` +
+        `(cost ~$${costUsd.toFixed(3)})`,
+    );
+    return { data: replies, costUsd };
+  }
+
+  /**
+   * One short search for general ENS chatter on Twitter — used as broad context
+   * for the weekly summary. Excludes retweets and restricts to English. The
+   * query is intentionally simple in v1; we'll expand or vary it in a follow-up
+   * if the signal turns out to be too noisy or too sparse.
+   *
+   * Cost: $0.005 per returned tweet (third-party-read rate). With max_results=100
+   * the worst-case cost is ~$0.50 per call.
+   */
+  async searchEnsContent(maxResults: number = 100): Promise<TwitterReadResult<TwitterV2Tweet[]>> {
+    if (!this.checkApiEnabled()) return { data: [], costUsd: 0 };
+
+    const capped = Math.min(Math.max(maxResults, 10), 100);
+    const result = await this.signedGet('https://api.twitter.com/2/tweets/search/recent', {
+      query: '(ens OR ".eth") -is:retweet lang:en',
+      max_results: capped,
+      'tweet.fields': 'author_id,created_at,public_metrics,conversation_id',
+    });
+
+    if (!result.success) {
+      logger.warn(`[Twitter] searchEnsContent failed: ${result.error}`);
+      return { data: [], costUsd: 0 };
+    }
+
+    const tweets: TwitterV2Tweet[] = result.json?.data ?? [];
+    const costUsd = tweets.length * 0.005;
+    logger.info(
+      `[Twitter] searchEnsContent fetched ${tweets.length} tweet(s) (cost ~$${costUsd.toFixed(3)})`,
+    );
+    return { data: tweets, costUsd };
   }
 
   /**

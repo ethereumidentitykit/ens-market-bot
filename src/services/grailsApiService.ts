@@ -10,6 +10,16 @@ import {
   GrailsActiveListing,
   ClubActivityEntry,
   GrailsServiceStats,
+  GrailsMarketAnalytics,
+  GrailsRegistrationAnalytics,
+  GrailsTopRegistration,
+  GrailsTopSale,
+  GrailsTopOffer,
+  GrailsVolumeChart,
+  GrailsSalesChart,
+  GrailsVolumeDistribution,
+  GrailsSearchResponse,
+  GrailsSearchName,
 } from '../types/bids';
 import {
   CURRENCY_MAP,
@@ -27,6 +37,16 @@ export type {
   GrailsActiveListing,
   ClubActivityEntry,
   GrailsServiceStats,
+  GrailsMarketAnalytics,
+  GrailsRegistrationAnalytics,
+  GrailsTopRegistration,
+  GrailsTopSale,
+  GrailsTopOffer,
+  GrailsVolumeChart,
+  GrailsSalesChart,
+  GrailsVolumeDistribution,
+  GrailsSearchResponse,
+  GrailsSearchName,
 };
 
 /**
@@ -875,6 +895,149 @@ export class GrailsApiService {
       logger.debug(`🍷 Failed to fetch validity for offer ${offerId}: ${error.message}`);
       return null;
     }
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Analytics / charts / search methods (used by the weekly-summary feature).
+  //
+  // All return `null` on failure rather than throwing, so the weekly-summary
+  // aggregator can `Promise.allSettled` everything and degrade gracefully if
+  // any single source goes down. Failures are logged at warn level.
+  //
+  // GOTCHA: `analytics/registrations` only returns the top-N `results` array
+  // when `page=1` is in the query string. Without it, only `summary` and
+  // `by_length` come back. `analytics/sales` and `analytics/offers` return
+  // `results` either way — registrations is the odd one out. See
+  // shared/lessons.md for the full story.
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Shared helper for all analytics calls. 15s timeout, common headers, and
+   * a uniform "unwrap `data` or null" path so each method below stays terse.
+   */
+  private static async fetchAnalytics<T>(path: string, params: Record<string, string | number>): Promise<T | null> {
+    const apiBase = GrailsApiService.getApiBase();
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) qs.append(k, String(v));
+    const url = `${apiBase}${path}?${qs.toString()}`;
+
+    try {
+      const response = await axios.get(url, {
+        timeout: 15000,
+        headers: { 'Accept': 'application/json', 'User-Agent': 'ENS-TwitterBot/2.0' },
+      });
+
+      if (!response.data?.success || !response.data?.data) {
+        logger.warn(`🍷 Grails ${path} returned unsuccessful envelope`);
+        return null;
+      }
+
+      return response.data.data as T;
+    } catch (error: any) {
+      logger.warn(`🍷 Grails ${path} failed: ${error.message}`);
+      return null;
+    }
+  }
+
+  /** GET /analytics/market — overview + volume + activity for the period. */
+  static async getMarketAnalytics(period: '7d' = '7d'): Promise<GrailsMarketAnalytics | null> {
+    return GrailsApiService.fetchAnalytics<GrailsMarketAnalytics>('/analytics/market', { period });
+  }
+
+  /**
+   * GET /analytics/registrations — summary + by-length aggregates for the period.
+   * Use {@link getTopRegistrations} when you also need the top-N records list.
+   */
+  static async getRegistrationAnalyticsSummary(period: '7d' = '7d'): Promise<GrailsRegistrationAnalytics | null> {
+    return GrailsApiService.fetchAnalytics<GrailsRegistrationAnalytics>(
+      '/analytics/registrations',
+      { period },
+    );
+  }
+
+  /**
+   * GET /analytics/sales sorted by price desc — the top-N most expensive sales
+   * of the period. Returns `[]` if the API succeeds with no results, `null`
+   * only on transport/envelope failure.
+   */
+  static async getTopSales(period: '7d' = '7d', limit: number = 20): Promise<GrailsTopSale[] | null> {
+    const data = await GrailsApiService.fetchAnalytics<{ results?: GrailsTopSale[] }>(
+      '/analytics/sales',
+      { period, sortBy: 'price', sortOrder: 'desc', limit, page: 1 },
+    );
+    return data?.results ?? (data ? [] : null);
+  }
+
+  /**
+   * GET /analytics/registrations sorted by cost desc — the top-N most expensive
+   * registrations of the period. Premium drops surface here naturally because
+   * the cost includes both base + premium.
+   *
+   * Note: requires `page=1` to get the `results` array (Grails quirk).
+   */
+  static async getTopRegistrations(period: '7d' = '7d', limit: number = 20): Promise<GrailsTopRegistration[] | null> {
+    const data = await GrailsApiService.fetchAnalytics<GrailsRegistrationAnalytics>(
+      '/analytics/registrations',
+      { period, sortBy: 'cost', sortOrder: 'desc', limit, page: 1 },
+    );
+    return data?.results ?? (data ? [] : null);
+  }
+
+  /**
+   * GET /analytics/offers sorted by price desc — the top-N highest offers of
+   * the period.
+   */
+  static async getTopOffers(period: '7d' = '7d', limit: number = 20): Promise<GrailsTopOffer[] | null> {
+    const data = await GrailsApiService.fetchAnalytics<{ results?: GrailsTopOffer[] }>(
+      '/analytics/offers',
+      { period, sortBy: 'price', sortOrder: 'desc', limit, page: 1 },
+    );
+    return data?.results ?? (data ? [] : null);
+  }
+
+  /** GET /charts/volume — daily-bucketed volume series (each `total` is a wei string). */
+  static async getVolumeChart(period: '7d' = '7d'): Promise<GrailsVolumeChart | null> {
+    return GrailsApiService.fetchAnalytics<GrailsVolumeChart>('/charts/volume', { period });
+  }
+
+  /** GET /charts/sales — daily-bucketed sales-count series (each `total` is a number). */
+  static async getSalesChart(period: '7d' = '7d'): Promise<GrailsSalesChart | null> {
+    return GrailsApiService.fetchAnalytics<GrailsSalesChart>('/charts/sales', { period });
+  }
+
+  /** GET /analytics/volume — distribution of sales by price bucket. */
+  static async getVolumeDistribution(period: '7d' = '7d'): Promise<GrailsVolumeDistribution | null> {
+    return GrailsApiService.fetchAnalytics<GrailsVolumeDistribution>('/analytics/volume', { period });
+  }
+
+  /**
+   * GET /search — top-N premium-decay names by watcher count. Used by the
+   * weekly summary to surface "what people are watching while it bleeds price."
+   */
+  static async searchPremiumByWatchers(limit: number = 50): Promise<GrailsSearchName[] | null> {
+    const data = await GrailsApiService.fetchAnalytics<GrailsSearchResponse>('/search', {
+      'filters[status]': 'premium',
+      sortBy: 'watchers_count',
+      sortOrder: 'desc',
+      limit,
+      page: 1,
+    });
+    return data?.results ?? (data ? [] : null);
+  }
+
+  /**
+   * GET /search — top-N grace-period names by watcher count. Used by the
+   * weekly summary to surface names that are about to expire and are being watched.
+   */
+  static async searchGraceByWatchers(limit: number = 50): Promise<GrailsSearchName[] | null> {
+    const data = await GrailsApiService.fetchAnalytics<GrailsSearchResponse>('/search', {
+      'filters[status]': 'grace',
+      sortBy: 'watchers_count',
+      sortOrder: 'desc',
+      limit,
+      page: 1,
+    });
+    return data?.results ?? (data ? [] : null);
   }
 }
 
