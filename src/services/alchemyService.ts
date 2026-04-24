@@ -481,6 +481,87 @@ export class AlchemyService {
   }
 
   /**
+   * Get historical ETH/USD price at a given Unix timestamp (seconds).
+   *
+   * Uses Alchemy's `POST /prices/v1/{apiKey}/tokens/historical` endpoint with a
+   * 2-day window (target ± 1d) at `1d` interval, and returns the data point
+   * whose timestamp is closest to the requested time.
+   *
+   * Used by the weekly summary feature to compute week-over-week ETH price
+   * deltas. Caller is responsible for caching — this method always hits the
+   * network so it isn't suitable as a hot-path call.
+   *
+   * @param unixTimestamp - Target time in Unix seconds (NOT ms). For "now",
+   *   pass `Math.floor(Date.now() / 1000)`.
+   * @returns USD price as a number, or `null` on any failure.
+   */
+  async getHistoricalEthPrice(unixTimestamp: number): Promise<number | null> {
+    try {
+      const oneDaySeconds = 24 * 60 * 60;
+      const startUnix = unixTimestamp - oneDaySeconds;
+      const endUnix = unixTimestamp + oneDaySeconds;
+
+      const startIso = new Date(startUnix * 1000).toISOString();
+      const endIso = new Date(endUnix * 1000).toISOString();
+
+      logger.debug(
+        `[Alchemy] Fetching historical ETH price around ${new Date(unixTimestamp * 1000).toISOString()} ` +
+          `(window ${startIso} → ${endIso})`,
+      );
+
+      const response = await axios.post(
+        `https://api.g.alchemy.com/prices/v1/${this.apiKey}/tokens/historical`,
+        {
+          symbol: 'ETH',
+          startTime: startIso,
+          endTime: endIso,
+          interval: '1d',
+        },
+        {
+          timeout: 10000,
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'User-Agent': 'ENS-TwitterBot/1.0',
+          },
+        },
+      );
+
+      const dataPoints: Array<{ value: string; timestamp: string }> = response.data?.data ?? [];
+      if (dataPoints.length === 0) {
+        logger.warn('[Alchemy] Historical ETH price response had no data points');
+        return null;
+      }
+
+      const targetMs = unixTimestamp * 1000;
+      let closest = dataPoints[0];
+      let closestDelta = Math.abs(new Date(closest.timestamp).getTime() - targetMs);
+      for (const point of dataPoints.slice(1)) {
+        const delta = Math.abs(new Date(point.timestamp).getTime() - targetMs);
+        if (delta < closestDelta) {
+          closest = point;
+          closestDelta = delta;
+        }
+      }
+
+      const priceValue = parseFloat(closest.value);
+      if (!Number.isFinite(priceValue)) {
+        logger.warn(`[Alchemy] Historical ETH price value not parseable: ${closest.value}`);
+        return null;
+      }
+
+      logger.debug(
+        `[Alchemy] Historical ETH price: $${priceValue} at ${closest.timestamp} ` +
+          `(target ${new Date(targetMs).toISOString()}, delta ${Math.round(closestDelta / 1000)}s)`,
+      );
+      return priceValue;
+    } catch (error: any) {
+      logger.warn(`[Alchemy] Failed to fetch historical ETH price: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
    * Test the API connection and configuration
    */
   async testConnection(): Promise<boolean> {

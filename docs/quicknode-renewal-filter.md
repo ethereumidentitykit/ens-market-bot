@@ -4,7 +4,7 @@ This document describes the QuickNode Streams filter function used to monitor EN
 
 ## Overview
 
-The filter listens for `NameRenewed` events from ENS Registrar Controller contracts (legacy, current, and newest) and forwards them. Unlike the registration filter, the **per-event price filter is loose** (single-name renewals are typically tiny). The bot does its own per-transaction aggregation downstream — a bulk renewal of 100 names becomes one tweet at the application layer, with the threshold check applied to the **total transaction cost**.
+The filter listens for `NameRenewed` events from ENS Registrar Controller contracts (legacy, current, and newest) and forwards them. Unlike the registration filter (which filters per-event), this filter aggregates `cost` across all `NameRenewed` events sharing the same `txHash` and drops the entire transaction if the **total cost** is below a threshold. This mirrors what the bot does downstream and is safe for bulk renewals (a tx with 100 names at 0.001 ETH each = 0.1 ETH total still passes), while still cutting webhook traffic for lone single-name renewals.
 
 ## Configuration
 
@@ -20,13 +20,14 @@ Same three controllers as the registration filter (renewals fire from the same c
 
 > **Note on bulk renewal contracts.** ENS's official `BulkRenewal` contract (and any third-party bulk renewal services like `ensbatcher`, marketplace bulk-renewal flows, etc.) ultimately call `renew()` on one of the three controllers above per name. The `NameRenewed` events still emit from the controller addresses, so monitoring just these three is sufficient to capture all bulk renewal activity.
 
-### Per-Event Price Filter
+### Per-Tx Total Cost Filter
 
-- **Minimum per-event cost**: `0` (no per-event filter — accept everything)
-- The bot aggregates renewals by `transaction_hash` and applies a per-tx threshold downstream
-- Setting this to 0 means even tiny single renewals are forwarded; the bot decides whether to tweet
+- **Minimum per-tx total cost**: `0.1 ETH` (`100_000_000_000_000_000n` wei)
+- Costs are summed across all `NameRenewed` events that share the same `txHash` (and pass the contract filter), so a bulk renewal of 100 names at 0.001 ETH each = 0.1 ETH total → all rows are forwarded.
+- A lone single-name renewal at 0.0001 ETH → dropped. A small bulk renewal totalling 0.05 ETH → dropped.
+- This threshold matches the bot's `autopost_renewals_min_eth_default` (default `0.1`), so anything filtered here would also have been rejected downstream — the QuickNode-layer filter just saves the webhook round-trip, DB write, owner lookup, and metadata fetches.
 
-If you want to reduce webhook traffic at the QuickNode layer (e.g., to skip lone $5 renewals that will never be tweeted on their own), you can raise this to e.g. `10_000_000_000_000_000n` (0.01 ETH). But be careful: this will also drop tiny per-name costs that are part of a high-value bulk renewal. **Recommended: keep at 0 and let the bot filter.**
+If `autopost_renewals_min_eth_default` is changed in the bot, update `MIN_TX_TOTAL_WEI` in the filter to match (or set it lower, never higher — setting it higher would silently drop renewals the bot was configured to tweet).
 
 ## Event ABIs
 
@@ -97,8 +98,9 @@ The filter handles naming differences across controller versions (same robustnes
 
 ### Step 4: Filter Criteria
 
-1. **Contract Filter**: Only process events from labeled ENS controller contracts
-2. **No price filter** (or very low minimum) — defer to per-tx aggregation downstream
+1. **Contract Filter**: Only process events from labeled ENS controller contracts.
+2. **Per-Tx Aggregation**: For each receipt (= one tx), sum `cost` across all `NameRenewed` events that passed the contract filter.
+3. **Per-Tx Threshold**: Drop the entire tx (all rows) if the summed total is below `MIN_TX_TOTAL_WEI` (0.1 ETH). Otherwise, emit all rows for that tx.
 
 ### Step 5: Output Structure
 
@@ -162,9 +164,14 @@ function main(stream) {
   ]);
   const LIMIT_TO_LABELLED = true;
 
-  // Per-event minimum cost. Recommended: 0 (let the bot do per-tx aggregation).
-  // If you want to drop tiny lone renewals at the stream layer, raise this.
-  const MIN_PER_EVENT_WEI = 0n;
+  // Per-tx total cost minimum (sum of `cost` across all NameRenewed events sharing
+  // the same txHash). Mirrors the bot's `autopost_renewals_min_eth_default` so any
+  // tx that wouldn't be tweeted gets dropped here, saving the webhook round-trip,
+  // DB write, owner lookup, and metadata fetches.
+  // 100_000_000_000_000_000n = 0.1 ETH. If you change `autopost_renewals_min_eth_default`
+  // in the bot, update this to match (or set lower — never higher, or you'll silently
+  // drop renewals the bot was configured to tweet).
+  const MIN_TX_TOTAL_WEI = 100_000_000_000_000_000n;
 
   // helpers
   const lc = (x) => (x || '').toLowerCase();
@@ -194,6 +201,14 @@ function main(stream) {
 
   const out = [];
   for (const r of decoded) {
+    // Each receipt `r` is one transaction. Build candidate rows for the tx, sum
+    // their costs, then emit the whole batch only if the tx total clears the
+    // threshold. This is the key difference vs sales/regs: bulk-renewal txs have
+    // many cheap rows that individually look like junk but collectively are
+    // tweetable, so we must aggregate before deciding.
+    const txRows = [];
+    let txTotalWei = 0n;
+
     for (const log of (r.decodedLogs || [])) {
       // Only ABI we registered is NameRenewed, so any decoded log here IS one.
       // (QuickNode's decoded log shape is flat — there's no `log.name === 'NameRenewed'`
@@ -225,9 +240,9 @@ function main(stream) {
       const referrer = log.referrer; // bytes32 on newest only
 
       const costWei = cost !== undefined ? toBI(cost) : 0n;
-      if (costWei < MIN_PER_EVENT_WEI) continue;
+      txTotalWei += costWei;
 
-      out.push({
+      txRows.push({
         txHash: r.transactionHash,
         blockNumber: r.blockNumber,
         from: r.from, // The renewer (= tx.from)
@@ -244,6 +259,13 @@ function main(stream) {
         totalCostWei: costWei.toString(),
         totalCostEth: ethStr(costWei)
       });
+    }
+
+    // Drop the whole tx if its summed cost is below threshold. This must happen
+    // AFTER the per-log loop so bulk renewals (many cheap rows summing to a big
+    // total) survive — applying the threshold per-log would drop them all.
+    if (txRows.length && txTotalWei >= MIN_TX_TOTAL_WEI) {
+      for (const row of txRows) out.push(row);
     }
   }
 

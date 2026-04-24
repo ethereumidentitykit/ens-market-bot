@@ -459,7 +459,7 @@ export class ENSWorkerService {
   }
 
   private async getEthFollowAccount(address: string): Promise<ENSWorkerAccount | null> {
-    const fallbackUrl = `${this.ethFollowDataBaseUrl}/users/${address}/account?cache=fresh`;
+    const fallbackUrl = `${this.ethFollowDataBaseUrl}/users/${address}/account`;
     
     try {
       logger.debug(`[EthFollow] Requesting: ${fallbackUrl}`);

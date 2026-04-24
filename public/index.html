@@ -1424,6 +1424,179 @@
                 </div>
             </div>
 
+            <!-- Weekly Market Summary (Phase 8) -->
+            <div class="mb-8">
+                <div class="bg-white shadow rounded-lg p-6">
+                    <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4 flex items-center">
+                        <i class="fas fa-newspaper text-amber-500 mr-2"></i>
+                        Weekly Market Summary
+                    </h3>
+
+                    <!-- Status panel: auto-toggle, scheduler injection, next gen/post times (Madrid TZ) -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+                        <div class="flex items-center">
+                            <span class="text-sm font-medium text-gray-500 mr-2">Auto:</span>
+                            <span x-show="weeklySummary.autoEnabled" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                <i class="fas fa-check mr-1"></i>
+                                Enabled
+                            </span>
+                            <span x-show="!weeklySummary.autoEnabled" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                <i class="fas fa-times mr-1"></i>
+                                Disabled
+                            </span>
+                        </div>
+
+                        <div class="flex items-center">
+                            <span class="text-sm font-medium text-gray-500 mr-2">Service:</span>
+                            <span x-show="weeklySummary.serviceInjected" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                <i class="fas fa-check-circle mr-1"></i>
+                                Ready
+                            </span>
+                            <span x-show="!weeklySummary.serviceInjected" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                <i class="fas fa-exclamation-triangle mr-1"></i>
+                                Not Ready
+                            </span>
+                        </div>
+
+                        <div class="flex flex-col">
+                            <span class="text-xs font-medium text-gray-500">Next Gen (19:00 Madrid):</span>
+                            <span class="text-xs text-gray-900" x-text="formatMadridTime(weeklySummary.nextGenRunTime) || '—'"></span>
+                        </div>
+
+                        <div class="flex flex-col">
+                            <span class="text-xs font-medium text-gray-500">Next Post (20:00 Madrid):</span>
+                            <span class="text-xs text-gray-900" x-text="formatMadridTime(weeklySummary.nextPostRunTime) || '—'"></span>
+                        </div>
+                    </div>
+
+                    <!-- Auto toggle button -->
+                    <div class="mb-4">
+                        <button
+                            @click="toggleWeeklySummaryAuto()"
+                            :disabled="weeklySummary.loading"
+                            class="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500 disabled:opacity-50"
+                        >
+                            <i class="fas" :class="weeklySummary.autoEnabled ? 'fa-toggle-on text-green-600' : 'fa-toggle-off text-gray-400'" style="font-size: 1.25rem; margin-right: 0.5rem;"></i>
+                            <span x-text="weeklySummary.autoEnabled ? 'Disable Friday Auto-Post' : 'Enable Friday Auto-Post'"></span>
+                        </button>
+                        <p class="mt-1 text-xs text-gray-500">When enabled, the bot generates the recap thread Friday 19:00 Madrid and posts it 20:00 Madrid. Manual buttons below work regardless of this toggle.</p>
+                    </div>
+
+                    <!-- Action buttons -->
+                    <div class="mb-4 flex flex-wrap gap-2">
+                        <button
+                            @click="generateWeeklySummary()"
+                            :disabled="weeklySummary.generating || weeklySummary.posting"
+                            class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-amber-600 hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500 disabled:opacity-50"
+                        >
+                            <i class="fas" :class="weeklySummary.generating ? 'fa-spinner fa-spin' : 'fa-magic'" style="margin-right: 0.5rem;"></i>
+                            <span x-text="weeklySummary.generating ? 'Generating...' : 'Generate Now'"></span>
+                        </button>
+
+                        <button
+                            @click="postWeeklySummary()"
+                            :disabled="weeklySummary.posting || weeklySummary.generating || !weeklySummary.pending"
+                            class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                        >
+                            <i class="fas" :class="weeklySummary.posting ? 'fa-spinner fa-spin' : 'fa-paper-plane'" style="margin-right: 0.5rem;"></i>
+                            <span x-text="weeklySummary.posting ? 'Posting...' : 'Post Pending'"></span>
+                        </button>
+
+                        <button
+                            @click="discardWeeklySummary()"
+                            :disabled="weeklySummary.posting || weeklySummary.generating || !weeklySummary.pending"
+                            class="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-400 disabled:opacity-50"
+                        >
+                            <i class="fas fa-trash mr-2"></i>
+                            Discard Pending
+                        </button>
+
+                        <button
+                            @click="loadWeeklySummary()"
+                            :disabled="weeklySummary.loading"
+                            class="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-400 disabled:opacity-50"
+                        >
+                            <i class="fas fa-sync mr-2"></i>
+                            Refresh
+                        </button>
+                    </div>
+
+                    <!-- Inline message -->
+                    <div x-show="weeklySummary.message" class="mb-4 p-3 rounded text-sm"
+                         :class="weeklySummary.messageType === 'error' ? 'bg-red-50 text-red-800 border border-red-200' : 'bg-green-50 text-green-800 border border-green-200'">
+                        <span x-text="weeklySummary.message"></span>
+                    </div>
+
+                    <!-- Pending preview pane -->
+                    <div x-show="weeklySummary.pending" class="mt-4 p-4 bg-amber-50 rounded-lg border border-amber-200">
+                        <div class="flex items-center justify-between mb-3">
+                            <h4 class="text-sm font-medium text-gray-900">
+                                Pending Thread Preview
+                                <span class="ml-2 text-xs text-gray-500" x-text="weeklySummary.pending ? `id ${weeklySummary.pending.id} · generated ${formatRelativeTime(weeklySummary.pending.generatedAt)}` : ''"></span>
+                            </h4>
+                            <span class="text-xs text-gray-500" x-text="weeklySummary.pending ? `${weeklySummary.pending.tweets.length} tweet(s) · ~$${(weeklySummary.pending.costUsd || 0).toFixed(2)}` : ''"></span>
+                        </div>
+                        <div class="space-y-3">
+                            <template x-for="(tweet, idx) in (weeklySummary.pending ? weeklySummary.pending.tweets : [])" :key="idx">
+                                <div class="bg-white p-3 rounded border border-gray-200">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
+                                              :class="weeklySummaryStatusBadgeClass(tweet.section)"
+                                              x-text="`${idx + 1}/${weeklySummary.pending.tweets.length} · ${weeklySummarySectionLabel(tweet.section)}`"></span>
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-xs"
+                                                  :class="tweet.charCount > 280 ? 'text-amber-700' : 'text-gray-500'"
+                                                  x-text="`${tweet.charCount} chars`"></span>
+                                            <span x-show="tweet.postedTweetId" class="text-xs text-green-700">
+                                                <i class="fas fa-check"></i> posted
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <pre class="text-sm text-gray-800 whitespace-pre-wrap font-sans" x-text="tweet.text"></pre>
+                                    <a x-show="tweet.postedTweetId"
+                                       :href="`https://twitter.com/i/status/${tweet.postedTweetId}`"
+                                       target="_blank"
+                                       class="text-xs text-blue-600 hover:underline mt-2 inline-block">
+                                        View on X →
+                                    </a>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- History list -->
+                    <div class="mt-6">
+                        <h4 class="text-sm font-medium text-gray-900 mb-2">Recent History</h4>
+                        <div x-show="weeklySummary.history.length === 0" class="text-sm text-gray-500 italic">
+                            No prior summaries yet.
+                        </div>
+                        <div x-show="weeklySummary.history.length > 0" class="space-y-2">
+                            <template x-for="row in weeklySummary.history" :key="row.id">
+                                <div class="flex items-center justify-between text-sm bg-gray-50 px-3 py-2 rounded border border-gray-200">
+                                    <div class="flex items-center gap-3">
+                                        <span class="font-mono text-xs text-gray-500" x-text="`#${row.id}`"></span>
+                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
+                                              :class="weeklySummaryStatusBadgeClass(row.status)"
+                                              x-text="row.status"></span>
+                                        <span class="text-xs text-gray-700" x-text="`${row.weekStart.slice(0,10)} → ${row.weekEnd.slice(0,10)}`"></span>
+                                        <span x-show="row.postedAt" class="text-xs text-gray-500" x-text="`posted ${formatRelativeTime(row.postedAt)}`"></span>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <span x-show="row.costUsd != null" class="text-xs text-gray-500" x-text="`$${(row.costUsd || 0).toFixed(2)}`"></span>
+                                        <template x-for="(tid, tidx) in row.postedTweetIds.filter(x => !!x)" :key="tidx">
+                                            <a :href="`https://twitter.com/i/status/${tid}`"
+                                               target="_blank"
+                                               class="text-xs text-blue-600 hover:underline"
+                                               x-text="`T${tidx + 1}`"></a>
+                                        </template>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Scheduler Status -->
             <div class="mb-8">
                 <div class="bg-white shadow rounded-lg p-6">

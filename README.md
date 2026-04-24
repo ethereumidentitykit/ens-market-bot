@@ -106,9 +106,9 @@ SIWE_DOMAIN=your-domain.com
 ENS_SUBGRAPH_PRIMARY_URL=https://your-subgraph-endpoint.com/subgraph
 
 # Grails API (Optional - aggregator for ENS bid ingestion across marketplaces)
-# Defaults to https://grails-api.ethid.org/api/v1/activity if unset.
+# Defaults to https://api.grails.app/api/v1/activity if unset.
 # Set to empty string to explicitly disable bid ingestion entirely.
-GRAILS_API_URL=https://grails-api.ethid.org/api/v1/activity
+GRAILS_API_URL=https://api.grails.app/api/v1/activity
 
 # Timezone (Recommended)
 TZ=UTC
@@ -116,7 +116,7 @@ TZ=UTC
 
 ### Grails API (bid ingestion)
 
-The bot ingests ENS bids from the [Grails API](https://grails-api.ethid.org), which aggregates offers across OpenSea, Blur, and other marketplaces. By default, `GRAILS_API_URL` defaults to the production endpoint (`https://grails-api.ethid.org/api/v1/activity`) so bid ingestion works out of the box. To disable bid ingestion entirely (e.g., for sales/registrations-only deployments), explicitly set `GRAILS_API_URL=` (empty string). The startup log will warn loudly when this is the case.
+The bot ingests ENS bids from the [Grails API](https://api.grails.app), which aggregates offers across OpenSea, Blur, and other marketplaces. By default, `GRAILS_API_URL` defaults to the production endpoint (`https://api.grails.app/api/v1/activity`) so bid ingestion works out of the box. To disable bid ingestion entirely (e.g., for sales/registrations-only deployments), explicitly set `GRAILS_API_URL=` (empty string). The startup log will warn loudly when this is the case.
 
 ## Database Setup
 

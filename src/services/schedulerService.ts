@@ -3,18 +3,27 @@ import { BidsProcessingService } from './bidsProcessingService';
 import { GrailsApiService } from './grailsApiService';
 import { AutoTweetService, AutoPostSettings, PostResult } from './autoTweetService';
 import { APIToggleService } from './apiToggleService';
+import { WeeklySummaryService } from './weeklySummaryService';
 import { logger } from '../utils/logger';
 import { IDatabaseService } from '../types';
 
 export class SchedulerService {
   private bidsProcessingService: BidsProcessingService;
   private grailsApiService: GrailsApiService | null = null;
+  private weeklySummaryService: WeeklySummaryService | null = null;
   private autoTweetService: AutoTweetService;
   private apiToggleService: APIToggleService;
   private databaseService: IDatabaseService;
   private salesSyncJob: CronJob | null = null;
   private registrationSyncJob: CronJob | null = null;
   private grailsSyncJob: CronJob | null = null;
+  // Two decoupled cron jobs for the Friday weekly summary thread:
+  //   - Gen at 19:00 Madrid: collect data + LLM call + insert as 'pending'
+  //   - Post at 20:00 Madrid: post the pending row as a thread
+  // Decoupled so the post is deterministic at 20:00 even if generation is
+  // slow, and so admin can manually override either step from the dashboard.
+  private weeklySummaryGenJob: CronJob | null = null;
+  private weeklySummaryPostJob: CronJob | null = null;
   private isRunning: boolean = false;
   private lastRunTime: Date | null = null;
   private lastRunStats: any = null;
@@ -24,6 +33,8 @@ export class SchedulerService {
   private isProcessingSales: boolean = false;
   private isProcessingRegistrations: boolean = false;
   private isProcessingGrails: boolean = false;
+  private isProcessingWeeklyGen: boolean = false;
+  private isProcessingWeeklyPost: boolean = false;
 
   constructor(
     bidsProcessingService: BidsProcessingService,
@@ -42,6 +53,17 @@ export class SchedulerService {
   setGrailsApiService(grailsApiService: GrailsApiService): void {
     this.grailsApiService = grailsApiService;
     logger.info('🍷 GrailsApiService injected into SchedulerService');
+  }
+
+  /**
+   * Set WeeklySummaryService. Injected after construction (mirrors the
+   * GrailsApiService pattern) because the weekly service has many of its
+   * own dependencies that the scheduler shouldn't know about. If not
+   * injected, the weekly cron jobs gracefully skip with a warn-level log.
+   */
+  setWeeklySummaryService(weeklySummaryService: WeeklySummaryService): void {
+    this.weeklySummaryService = weeklySummaryService;
+    logger.info('📰 WeeklySummaryService injected into SchedulerService');
   }
 
   async initializeFromDatabase(): Promise<void> {
@@ -73,10 +95,17 @@ export class SchedulerService {
   /**
    * Start the automated scheduling.
    * Sales: every 5 minutes, Registrations: every 1 minute, Grails bids: every 1 minute.
+   * Weekly summary: Friday 19:00 (gen) + 20:00 (post) Madrid time.
    * Registration tweet processing is handled in real-time by DatabaseEventService.
    */
   async start(): Promise<void> {
-    if (this.salesSyncJob || this.registrationSyncJob || this.grailsSyncJob) {
+    if (
+      this.salesSyncJob ||
+      this.registrationSyncJob ||
+      this.grailsSyncJob ||
+      this.weeklySummaryGenJob ||
+      this.weeklySummaryPostJob
+    ) {
       logger.warn('Scheduler already running, stopping existing jobs first');
       await this.stop();
     }
@@ -105,18 +134,45 @@ export class SchedulerService {
       'America/New_York'
     );
 
+    // Weekly summary jobs run in Europe/Madrid TZ (separate from the New York
+    // jobs above). Cron `0 0 H * * 5` = at second 0 of minute 0 of hour H,
+    // any day of any month, day-of-week 5 (Friday). Both jobs gate on the
+    // weeklySummaryAutoEnabled toggle at run time — we always register them
+    // with the scheduler (so admin doesn't need to restart to flip the
+    // toggle) but they no-op when the toggle is off.
+    this.weeklySummaryGenJob = new CronJob(
+      '0 0 19 * * 5',
+      () => { this.runWeeklySummaryGen(); },
+      null,
+      false,
+      'Europe/Madrid'
+    );
+
+    this.weeklySummaryPostJob = new CronJob(
+      '0 0 20 * * 5',
+      () => { this.runWeeklySummaryPost(); },
+      null,
+      false,
+      'Europe/Madrid'
+    );
+
     this.salesSyncJob.start();
     this.registrationSyncJob.start();
     this.grailsSyncJob.start();
+    this.weeklySummaryGenJob.start();
+    this.weeklySummaryPostJob.start();
     this.isRunning = true;
     
     await this.saveSchedulerState(true);
     
     logger.info('Scheduler started - Sales: every 5 minutes, Registrations: every 1 minute, Grails bids: every 1 minute');
+    logger.info('Weekly summary: Fridays 19:00 (gen) + 20:00 (post) Europe/Madrid');
     logger.info('Tweet processing: REAL-TIME via DatabaseEventService for QuickNode data');
     logger.info(`Next sales run: ${this.salesSyncJob.nextDate().toString()}`);
     logger.info(`Next registration run: ${this.registrationSyncJob.nextDate().toString()}`);
     logger.info(`Next Grails run: ${this.grailsSyncJob.nextDate().toString()}`);
+    logger.info(`Next weekly summary gen: ${this.weeklySummaryGenJob.nextDate().toString()}`);
+    logger.info(`Next weekly summary post: ${this.weeklySummaryPostJob.nextDate().toString()}`);
   }
 
   /**
@@ -142,12 +198,24 @@ export class SchedulerService {
       this.grailsSyncJob = null;
       wasRunning = true;
     }
-    
+
+    if (this.weeklySummaryGenJob) {
+      this.weeklySummaryGenJob.stop();
+      this.weeklySummaryGenJob = null;
+      wasRunning = true;
+    }
+
+    if (this.weeklySummaryPostJob) {
+      this.weeklySummaryPostJob.stop();
+      this.weeklySummaryPostJob = null;
+      wasRunning = true;
+    }
+
     if (wasRunning) {
       this.isRunning = false;
       await this.saveSchedulerState(false);
       logger.info('💾 Scheduler state persisted: DISABLED (survives restarts)');
-      logger.info('Scheduler stopped - sales, registration, and bid processing halted');
+      logger.info('Scheduler stopped - sales, registration, bid, and weekly summary processing halted');
       logger.info('Registration tweet processing continues via real-time DatabaseEventService');
     } else {
       logger.info('Scheduler was not running');
@@ -169,7 +237,17 @@ export class SchedulerService {
       this.grailsSyncJob.stop();
       this.grailsSyncJob = null;
     }
-    
+
+    if (this.weeklySummaryGenJob) {
+      this.weeklySummaryGenJob.stop();
+      this.weeklySummaryGenJob = null;
+    }
+
+    if (this.weeklySummaryPostJob) {
+      this.weeklySummaryPostJob.stop();
+      this.weeklySummaryPostJob = null;
+    }
+
     this.isRunning = false;
     logger.info('Scheduler gracefully stopped (state preserved for restart)');
   }
@@ -191,7 +269,17 @@ export class SchedulerService {
       this.grailsSyncJob.stop();
       this.grailsSyncJob = null;
     }
-    
+
+    if (this.weeklySummaryGenJob) {
+      this.weeklySummaryGenJob.stop();
+      this.weeklySummaryGenJob = null;
+    }
+
+    if (this.weeklySummaryPostJob) {
+      this.weeklySummaryPostJob.stop();
+      this.weeklySummaryPostJob = null;
+    }
+
     await this.saveSchedulerState(false);
     logger.info('Scheduler force stopped - all processing halted');
   }
@@ -358,6 +446,151 @@ export class SchedulerService {
     }
   }
 
+  /**
+   * Weekly summary GENERATION job (Friday 19:00 Madrid).
+   * Pre-flight checks (in order, fail-soft on any miss):
+   *   1. Scheduler must be running
+   *   2. weeklySummaryService must be injected
+   *   3. weeklySummaryAutoEnabled toggle must be on (admin-controlled)
+   *   4. Twitter + OpenAI APIs must both be enabled (data integrity)
+   *   5. No pending row may already exist (avoid double-generation if cron
+   *      fires twice for any reason; admin-generated rows also count here)
+   *   6. Mutex against another in-flight gen run
+   *
+   * Errors are caught and logged — never bubble out of the cron callback.
+   */
+  private async runWeeklySummaryGen(): Promise<void> {
+    if (!this.isRunning) {
+      logger.debug('Skipping weekly summary gen - scheduler is stopped');
+      return;
+    }
+    if (!this.weeklySummaryService) {
+      logger.warn('📰 Weekly summary gen skipped - WeeklySummaryService not injected');
+      return;
+    }
+    if (!this.apiToggleService.isWeeklySummaryAutoEnabled()) {
+      logger.info('📰 Weekly summary gen skipped - auto toggle is OFF (admin-controlled)');
+      return;
+    }
+    if (!this.apiToggleService.isTwitterEnabled() || !this.apiToggleService.isOpenAIEnabled()) {
+      logger.warn('📰 Weekly summary gen skipped - Twitter or OpenAI API is disabled');
+      return;
+    }
+    if (this.isProcessingWeeklyGen) {
+      logger.warn('📰 Weekly summary gen skipped - previous run still in flight');
+      return;
+    }
+
+    // Skip if a pending row already exists at all (admin may have generated
+    // earlier, or a previous cron fired). The post job will pick up whatever
+    // is pending; we don't want to overwrite it.
+    try {
+      const existing = await this.databaseService.getCurrentPendingWeeklySummary();
+      if (existing) {
+        logger.info(
+          `📰 Weekly summary gen skipped - pending row already exists (id=${existing.id}, weekStart=${existing.weekStart})`,
+        );
+        return;
+      }
+    } catch (error: any) {
+      logger.error('📰 Failed to check for existing pending summary - aborting gen:', error.message);
+      return;
+    }
+
+    this.isProcessingWeeklyGen = true;
+    const startTime = Date.now();
+    logger.info('📰 Starting weekly summary generation...');
+
+    try {
+      const id = await this.weeklySummaryService.generate();
+      const elapsed = Date.now() - startTime;
+      logger.info(`📰 Weekly summary gen completed in ${elapsed}ms - new pending row id=${id}`);
+    } catch (error: any) {
+      logger.error('📰 Weekly summary gen failed:', error.message);
+      logger.error(error.stack);
+    } finally {
+      this.isProcessingWeeklyGen = false;
+    }
+  }
+
+  /**
+   * Weekly summary POSTING job (Friday 20:00 Madrid).
+   * Pre-flight checks:
+   *   1. Scheduler running, service injected, toggle on, Twitter enabled
+   *   2. A pending row must exist (we DO NOT auto-generate at the last
+   *      second — if gen failed at 19:00, post just skips to avoid posting
+   *      a degraded thread)
+   *   3. The pending row's `generatedAt` must be within the last 24 hours
+   *      (stale rows from prior weeks are skipped)
+   *   4. Mutex against another in-flight post run
+   *
+   * Errors are caught and logged.
+   */
+  private async runWeeklySummaryPost(): Promise<void> {
+    if (!this.isRunning) {
+      logger.debug('Skipping weekly summary post - scheduler is stopped');
+      return;
+    }
+    if (!this.weeklySummaryService) {
+      logger.warn('📰 Weekly summary post skipped - WeeklySummaryService not injected');
+      return;
+    }
+    if (!this.apiToggleService.isWeeklySummaryAutoEnabled()) {
+      logger.info('📰 Weekly summary post skipped - auto toggle is OFF (admin-controlled)');
+      return;
+    }
+    if (!this.apiToggleService.isTwitterEnabled()) {
+      logger.warn('📰 Weekly summary post skipped - Twitter API is disabled');
+      return;
+    }
+    if (this.isProcessingWeeklyPost) {
+      logger.warn('📰 Weekly summary post skipped - previous run still in flight');
+      return;
+    }
+
+    let pending;
+    try {
+      pending = await this.databaseService.getCurrentPendingWeeklySummary();
+    } catch (error: any) {
+      logger.error('📰 Failed to fetch pending summary - aborting post:', error.message);
+      return;
+    }
+
+    if (!pending || pending.id === undefined) {
+      logger.warn(
+        '📰 Weekly summary post skipped - no pending row found. Gen at 19:00 may have failed; ' +
+          'NOT auto-generating now to avoid posting a low-quality last-minute thread.',
+      );
+      return;
+    }
+
+    // Stale-row check: anything generated >24h ago is treated as not-this-week.
+    const generatedMs = new Date(pending.generatedAt).getTime();
+    const ageHours = (Date.now() - generatedMs) / (1000 * 60 * 60);
+    if (!Number.isFinite(generatedMs) || ageHours > 24) {
+      logger.warn(
+        `📰 Weekly summary post skipped - pending row id=${pending.id} is stale ` +
+          `(generated ${ageHours.toFixed(1)}h ago, expected <24h). Discard it manually if no longer wanted.`,
+      );
+      return;
+    }
+
+    this.isProcessingWeeklyPost = true;
+    const startTime = Date.now();
+    logger.info(`📰 Starting weekly summary post for id=${pending.id} (generated ${ageHours.toFixed(1)}h ago)...`);
+
+    try {
+      await this.weeklySummaryService.post(pending.id);
+      const elapsed = Date.now() - startTime;
+      logger.info(`📰 Weekly summary post completed in ${elapsed}ms - id=${pending.id}`);
+    } catch (error: any) {
+      logger.error(`📰 Weekly summary post failed for id=${pending.id}:`, error.message);
+      logger.error(error.stack);
+    } finally {
+      this.isProcessingWeeklyPost = false;
+    }
+  }
+
   getStatus(): {
     isRunning: boolean;
     lastRunTime: Date | null;
@@ -365,7 +598,10 @@ export class SchedulerService {
     nextSalesRunTime: Date | null;
     nextRegistrationRunTime: Date | null;
     nextGrailsRunTime: Date | null;
+    nextWeeklyGenRunTime: Date | null;
+    nextWeeklyPostRunTime: Date | null;
     grailsEnabled: boolean;
+    weeklySummaryEnabled: boolean;
     lastRunStats: any;
     consecutiveErrors: number;
     uptime: number;
@@ -373,9 +609,17 @@ export class SchedulerService {
     const nextSalesRunTime = this.salesSyncJob ? this.salesSyncJob.nextDate().toJSDate() : null;
     const nextRegistrationRunTime = this.registrationSyncJob ? this.registrationSyncJob.nextDate().toJSDate() : null;
     const nextGrailsRunTime = this.grailsSyncJob ? this.grailsSyncJob.nextDate().toJSDate() : null;
-    
+    const nextWeeklyGenRunTime = this.weeklySummaryGenJob ? this.weeklySummaryGenJob.nextDate().toJSDate() : null;
+    const nextWeeklyPostRunTime = this.weeklySummaryPostJob ? this.weeklySummaryPostJob.nextDate().toJSDate() : null;
+
     let nextRunTime = null;
-    const allNextTimes = [nextSalesRunTime, nextRegistrationRunTime, nextGrailsRunTime].filter(t => t !== null);
+    const allNextTimes = [
+      nextSalesRunTime,
+      nextRegistrationRunTime,
+      nextGrailsRunTime,
+      nextWeeklyGenRunTime,
+      nextWeeklyPostRunTime,
+    ].filter(t => t !== null);
     if (allNextTimes.length > 0) {
       nextRunTime = new Date(Math.min(...allNextTimes.map(t => t!.getTime())));
     }
@@ -387,7 +631,10 @@ export class SchedulerService {
       nextSalesRunTime,
       nextRegistrationRunTime,
       nextGrailsRunTime,
+      nextWeeklyGenRunTime,
+      nextWeeklyPostRunTime,
       grailsEnabled: this.grailsApiService !== null,
+      weeklySummaryEnabled: this.weeklySummaryService !== null,
       lastRunStats: this.lastRunStats,
       consecutiveErrors: this.consecutiveErrors,
       uptime: this.lastRunTime ? Date.now() - this.lastRunTime.getTime() : 0

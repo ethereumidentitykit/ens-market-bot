@@ -116,6 +116,26 @@ async function startApplication(): Promise<void> {
       aiReplyService  // Phase 3.4: Pass AI Reply Service
     );
 
+    // Phase 8: Initialize Weekly Summary feature (data aggregator + orchestrator).
+    // Injected into scheduler BEFORE initializeFromDatabase() so the cron jobs
+    // have the service available the moment they're registered.
+    const { WeeklySummaryDataService } = await import('./services/weeklySummaryDataService');
+    const { WeeklySummaryService } = await import('./services/weeklySummaryService');
+    const weeklySummaryDataService = new WeeklySummaryDataService(
+      databaseService,
+      alchemyService,
+      twitterService,
+      ethIdentityService,
+    );
+    const weeklySummaryService = new WeeklySummaryService(
+      databaseService,
+      weeklySummaryDataService,
+      openaiService,
+      twitterService,
+    );
+    schedulerService.setWeeklySummaryService(weeklySummaryService);
+    logger.info('📰 Weekly Summary Service initialized + injected into scheduler');
+
     // Initialize database
     await databaseService.initialize();
     logger.info('Database initialized successfully');
@@ -135,6 +155,7 @@ async function startApplication(): Promise<void> {
     // Make services available to controllers
     app.locals.databaseService = databaseService;
     app.locals.ethIdentityService = ethIdentityService;
+    app.locals.weeklySummaryService = weeklySummaryService;
 
     // Middleware to detect HTTPS from Cloudflare headers
     app.use((req, res, next) => {
@@ -1426,6 +1447,264 @@ async function startApplication(): Promise<void> {
           success: false,
           error: error.message
         });
+      }
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Weekly Summary admin endpoints (Phase 8)
+    // ─────────────────────────────────────────────────────────────────────────
+    // All requireAuth — same SIWE gate as the rest of /api/admin/*. The
+    // service is wired into app.locals at startup; we pull from req.app.locals
+    // here to match the pattern used by the existing image controller.
+
+    /**
+     * GET /api/admin/weekly-summary/status
+     * Returns: auto-toggle state, next gen/post run times (Madrid TZ),
+     * whether the service was injected into the scheduler, plus last
+     * generated_at if there's a pending row. Powers the dashboard status panel.
+     */
+    app.get('/api/admin/weekly-summary/status', requireAuth, async (req, res) => {
+      try {
+        const autoEnabled = APIToggleService.getInstance().isWeeklySummaryAutoEnabled();
+        const schedulerStatus = schedulerService.getStatus();
+        const pending = await databaseService.getCurrentPendingWeeklySummary();
+
+        res.json({
+          success: true,
+          autoEnabled,
+          schedulerRunning: schedulerStatus.isRunning,
+          weeklySummaryServiceInjected: schedulerStatus.weeklySummaryEnabled,
+          nextGenRunTime: schedulerStatus.nextWeeklyGenRunTime,
+          nextPostRunTime: schedulerStatus.nextWeeklyPostRunTime,
+          pendingExists: !!pending,
+          pendingId: pending?.id ?? null,
+          pendingGeneratedAt: pending?.generatedAt ?? null,
+          pendingWeekStart: pending?.weekStart ?? null,
+          pendingWeekEnd: pending?.weekEnd ?? null,
+        });
+      } catch (error: any) {
+        logger.error('Failed to get weekly summary status:', error.message);
+        res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
+    /**
+     * GET /api/admin/weekly-summary/pending
+     * Returns the current pending summary in full (including the parsed
+     * tweets with section tags + char counts) so the dashboard can render
+     * a preview pane. Returns 404 if no pending row exists.
+     */
+    app.get('/api/admin/weekly-summary/pending', requireAuth, async (req, res) => {
+      try {
+        const pending = await databaseService.getCurrentPendingWeeklySummary();
+        if (!pending) {
+          return res.status(404).json({
+            success: false,
+            error: 'No pending weekly summary found',
+          });
+        }
+        res.json({
+          success: true,
+          summary: {
+            id: pending.id,
+            weekStart: pending.weekStart,
+            weekEnd: pending.weekEnd,
+            status: pending.status,
+            generatedAt: pending.generatedAt,
+            tweets: pending.tweets.map(t => ({
+              section: t.section,
+              text: t.text,
+              charCount: t.text.length,
+              postedTweetId: t.postedTweetId ?? null,
+            })),
+            modelUsed: pending.modelUsed,
+            promptTokens: pending.promptTokens,
+            completionTokens: pending.completionTokens,
+            costUsd: pending.costUsd,
+            errorMessage: pending.errorMessage,
+          },
+        });
+      } catch (error: any) {
+        logger.error('Failed to get pending weekly summary:', error.message);
+        res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
+    /**
+     * GET /api/admin/weekly-summary/history?limit=12
+     * Returns the most recent N summaries (any status) for the history list.
+     * Includes per-tweet IDs so the UI can deep-link to twitter.com/i/status/{id}.
+     */
+    app.get('/api/admin/weekly-summary/history', requireAuth, async (req, res) => {
+      try {
+        const rawLimit = parseInt(req.query.limit as string, 10);
+        const limit = Number.isFinite(rawLimit) && rawLimit > 0 && rawLimit <= 100 ? rawLimit : 12;
+        const history = await databaseService.getWeeklySummariesHistory(limit);
+        res.json({
+          success: true,
+          summaries: history.map(s => ({
+            id: s.id,
+            weekStart: s.weekStart,
+            weekEnd: s.weekEnd,
+            status: s.status,
+            generatedAt: s.generatedAt,
+            postedAt: s.postedAt ?? null,
+            tweetCount: s.tweets.length,
+            postedTweetIds: s.tweets.map(t => t.postedTweetId ?? null),
+            costUsd: s.costUsd,
+            errorMessage: s.errorMessage ?? null,
+          })),
+        });
+      } catch (error: any) {
+        logger.error('Failed to get weekly summary history:', error.message);
+        res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
+    /**
+     * POST /api/admin/weekly-summary/generate
+     * Body: { weekStart?: ISO, weekEnd?: ISO } — optional override window;
+     *       defaults to trailing 7 days.
+     * Triggers the full data-collection + LLM-generation pipeline. Returns
+     * the new pending row id. ~1-3 minutes for a typical run (LLM + Twitter
+     * API + Grails analytics) — the dashboard should show a spinner.
+     */
+    app.post('/api/admin/weekly-summary/generate', requireAuth, async (req, res) => {
+      try {
+        const svc = req.app.locals.weeklySummaryService;
+        if (!svc) {
+          return res.status(503).json({
+            success: false,
+            error: 'WeeklySummaryService is not initialized',
+          });
+        }
+        const { weekStart, weekEnd } = req.body ?? {};
+        const start = weekStart ? new Date(weekStart) : undefined;
+        const end = weekEnd ? new Date(weekEnd) : undefined;
+
+        // Validate any provided dates parse cleanly.
+        if (weekStart && start && Number.isNaN(start.getTime())) {
+          return res.status(400).json({ success: false, error: 'Invalid weekStart date' });
+        }
+        if (weekEnd && end && Number.isNaN(end.getTime())) {
+          return res.status(400).json({ success: false, error: 'Invalid weekEnd date' });
+        }
+
+        logger.info(`📰 [admin] Manual weekly summary generation triggered`);
+        const id = await svc.generate(start, end);
+        res.json({ success: true, id });
+      } catch (error: any) {
+        logger.error('Failed to generate weekly summary:', error.message);
+        res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
+    /**
+     * POST /api/admin/weekly-summary/post
+     * Body: { id?: number } — defaults to the current pending summary.
+     * Posts the thread. Idempotent: re-runs safely; resumes from where a
+     * partial-failure run left off.
+     */
+    app.post('/api/admin/weekly-summary/post', requireAuth, async (req, res) => {
+      try {
+        const svc = req.app.locals.weeklySummaryService;
+        if (!svc) {
+          return res.status(503).json({
+            success: false,
+            error: 'WeeklySummaryService is not initialized',
+          });
+        }
+
+        let id: number | undefined = req.body?.id;
+        if (id === undefined) {
+          const pending = await databaseService.getCurrentPendingWeeklySummary();
+          if (!pending) {
+            return res.status(404).json({
+              success: false,
+              error: 'No pending weekly summary to post (and no id provided)',
+            });
+          }
+          id = pending.id;
+        }
+        if (typeof id !== 'number' || !Number.isFinite(id)) {
+          return res.status(400).json({ success: false, error: 'Invalid summary id' });
+        }
+
+        logger.info(`📰 [admin] Manual weekly summary post triggered for id=${id}`);
+        await svc.post(id);
+        res.json({ success: true, id });
+      } catch (error: any) {
+        logger.error('Failed to post weekly summary:', error.message);
+        res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
+    /**
+     * POST /api/admin/weekly-summary/discard
+     * Body: { id?: number } — defaults to the current pending summary.
+     * Marks the row as 'discarded'. Refuses if status is 'posted' or in-flight.
+     */
+    app.post('/api/admin/weekly-summary/discard', requireAuth, async (req, res) => {
+      try {
+        const svc = req.app.locals.weeklySummaryService;
+        if (!svc) {
+          return res.status(503).json({
+            success: false,
+            error: 'WeeklySummaryService is not initialized',
+          });
+        }
+
+        let id: number | undefined = req.body?.id;
+        if (id === undefined) {
+          const pending = await databaseService.getCurrentPendingWeeklySummary();
+          if (!pending) {
+            return res.status(404).json({
+              success: false,
+              error: 'No pending weekly summary to discard (and no id provided)',
+            });
+          }
+          id = pending.id;
+        }
+        if (typeof id !== 'number' || !Number.isFinite(id)) {
+          return res.status(400).json({ success: false, error: 'Invalid summary id' });
+        }
+
+        logger.info(`📰 [admin] Manual weekly summary discard triggered for id=${id}`);
+        await svc.discard(id);
+        res.json({ success: true, id });
+      } catch (error: any) {
+        logger.error('Failed to discard weekly summary:', error.message);
+        res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
+    /**
+     * POST /api/admin/toggle-weekly-summary-auto
+     * Body: { enabled: boolean }
+     * Flips the `weeklySummaryAutoEnabled` toggle. Will refuse to enable if
+     * Twitter or OpenAI APIs are disabled (same dependency contract as
+     * setAIAutoPostingEnabled).
+     */
+    app.post('/api/admin/toggle-weekly-summary-auto', requireAuth, async (req, res) => {
+      try {
+        const { enabled } = req.body ?? {};
+        if (typeof enabled !== 'boolean') {
+          return res.status(400).json({
+            success: false,
+            error: 'enabled must be a boolean',
+          });
+        }
+
+        await APIToggleService.getInstance().setWeeklySummaryAutoEnabled(enabled);
+        const newState = APIToggleService.getInstance().isWeeklySummaryAutoEnabled();
+        logger.info(`📰 [admin] Weekly summary auto toggle set to ${newState}`);
+
+        res.json({ success: true, enabled: newState });
+      } catch (error: any) {
+        // setWeeklySummaryAutoEnabled throws on dependency violations; surface
+        // the message so the UI can display it.
+        logger.error('Failed to toggle weekly summary auto:', error.message);
+        res.status(400).json({ success: false, error: error.message });
       }
     });
 

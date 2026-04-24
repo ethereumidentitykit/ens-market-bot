@@ -150,6 +150,23 @@ function dashboard() {
         newBlacklistAddress: '',
         addressBlacklistLoading: false,
 
+        // Weekly Market Summary state (Phase 8 — Friday-cadence recap thread)
+        // Single grouped object so the UI can reference `weeklySummary.X` and
+        // we don't pollute the top-level state with ~10 separate flags.
+        weeklySummary: {
+            autoEnabled: false,           // is the Friday auto-post toggle on?
+            serviceInjected: false,       // did index.ts wire the service into the scheduler?
+            nextGenRunTime: null,         // ISO of next Friday 19:00 Madrid
+            nextPostRunTime: null,        // ISO of next Friday 20:00 Madrid
+            pending: null,                // current pending row (or null) — full preview
+            history: [],                  // last N summaries
+            loading: false,               // any fetch in flight
+            generating: false,            // generate() in flight (long — 1-3 min)
+            posting: false,               // post() in flight
+            message: '',                  // inline status/error text
+            messageType: 'success',       // 'success' | 'error'
+        },
+
         // AI Replies state
         aiRepliesEnabled: false,
         openaiConfigured: false,
@@ -599,6 +616,7 @@ function dashboard() {
             await this.loadContracts();
             await this.loadTweetHistory();
             await this.loadAIRepliesStatus();
+            await this.loadWeeklySummary();
             await this.refreshPostedTransactions();
             await this.databaseView.loadPage(1);
             await this.registrationsView.loadPage(1);
@@ -2090,6 +2108,272 @@ Issued At: ${issuedAt}`;
                 this.showAIReplyMessage(error.message, 'error');
             } finally {
                 this.loading = false;
+            }
+        },
+
+        // ===== Weekly Summary Functions (Phase 8) =====
+        // All four user-facing actions (load, generate, post, discard) use the
+        // same `weeklySummary.message` slot for inline feedback. `loading` is
+        // for refresh; `generating` and `posting` are separate so the buttons
+        // can spin independently.
+
+        /**
+         * Load all weekly-summary state in one shot: status, pending preview,
+         * history. Called on init() and after any mutation.
+         */
+        async loadWeeklySummary() {
+            this.weeklySummary.loading = true;
+            try {
+                // Fire all three in parallel — they hit different endpoints.
+                const [statusRes, pendingRes, historyRes] = await Promise.all([
+                    this.fetch('/api/admin/weekly-summary/status'),
+                    this.fetch('/api/admin/weekly-summary/pending'),
+                    this.fetch('/api/admin/weekly-summary/history?limit=12'),
+                ]);
+
+                if (statusRes.ok) {
+                    const data = await statusRes.json();
+                    this.weeklySummary.autoEnabled = !!data.autoEnabled;
+                    this.weeklySummary.serviceInjected = !!data.weeklySummaryServiceInjected;
+                    this.weeklySummary.nextGenRunTime = data.nextGenRunTime;
+                    this.weeklySummary.nextPostRunTime = data.nextPostRunTime;
+                }
+
+                // pending returns 404 when there's no pending row — that's the
+                // common case, not an error. Treat 404 as "no pending".
+                if (pendingRes.ok) {
+                    const data = await pendingRes.json();
+                    this.weeklySummary.pending = data.summary || null;
+                } else if (pendingRes.status === 404) {
+                    this.weeklySummary.pending = null;
+                }
+
+                if (historyRes.ok) {
+                    const data = await historyRes.json();
+                    this.weeklySummary.history = data.summaries || [];
+                }
+            } catch (error) {
+                console.error('Failed to load weekly summary:', error);
+                this.showWeeklySummaryMessage(`Load failed: ${error.message}`, 'error');
+            } finally {
+                this.weeklySummary.loading = false;
+            }
+        },
+
+        /**
+         * Flip the Friday auto-post toggle. Server enforces the dependency
+         * contract (Twitter + OpenAI must be enabled to turn ON); failures
+         * surface inline with the server's error message.
+         */
+        async toggleWeeklySummaryAuto() {
+            this.weeklySummary.loading = true;
+            try {
+                const newState = !this.weeklySummary.autoEnabled;
+                const response = await this.fetch('/api/admin/toggle-weekly-summary-auto', {
+                    method: 'POST',
+                    body: JSON.stringify({ enabled: newState }),
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    this.weeklySummary.autoEnabled = !!data.enabled;
+                    this.showWeeklySummaryMessage(
+                        `Friday auto-post ${data.enabled ? 'enabled' : 'disabled'}`,
+                        'success'
+                    );
+                } else {
+                    this.showWeeklySummaryMessage(data.error || 'Toggle failed', 'error');
+                }
+            } catch (error) {
+                console.error('Toggle weekly summary auto failed:', error);
+                this.showWeeklySummaryMessage(error.message, 'error');
+            } finally {
+                this.weeklySummary.loading = false;
+            }
+        },
+
+        /**
+         * Manually trigger generation. Long-running (1-3 min for the LLM +
+         * Twitter API + Grails analytics fan-out). The button shows a spinner
+         * via `weeklySummary.generating` until this resolves.
+         */
+        async generateWeeklySummary() {
+            this.weeklySummary.generating = true;
+            this.showWeeklySummaryMessage('Generating thread — this may take 1-3 minutes…', 'success');
+            try {
+                const response = await this.fetch('/api/admin/weekly-summary/generate', {
+                    method: 'POST',
+                    body: JSON.stringify({}),
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    this.showWeeklySummaryMessage(`Generated pending summary id=${data.id}`, 'success');
+                    await this.loadWeeklySummary();
+                } else {
+                    this.showWeeklySummaryMessage(data.error || 'Generate failed', 'error');
+                }
+            } catch (error) {
+                console.error('Generate weekly summary failed:', error);
+                this.showWeeklySummaryMessage(error.message, 'error');
+            } finally {
+                this.weeklySummary.generating = false;
+            }
+        },
+
+        /**
+         * Post the current pending thread. Defaults to the pending row id; the
+         * server resolves it. Idempotent on the server side, so double-clicks
+         * are safe (the per-process inflight guard handles it).
+         */
+        async postWeeklySummary() {
+            if (!this.weeklySummary.pending) {
+                this.showWeeklySummaryMessage('No pending summary to post', 'error');
+                return;
+            }
+            const id = this.weeklySummary.pending.id;
+            if (!confirm(`Post the pending thread (id ${id}) to Twitter? This is irreversible.`)) {
+                return;
+            }
+            this.weeklySummary.posting = true;
+            this.showWeeklySummaryMessage('Posting thread…', 'success');
+            try {
+                const response = await this.fetch('/api/admin/weekly-summary/post', {
+                    method: 'POST',
+                    body: JSON.stringify({ id }),
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    this.showWeeklySummaryMessage(`Posted thread id=${data.id}`, 'success');
+                    await this.loadWeeklySummary();
+                } else {
+                    this.showWeeklySummaryMessage(data.error || 'Post failed', 'error');
+                    await this.loadWeeklySummary(); // refresh — may now be partial_posted
+                }
+            } catch (error) {
+                console.error('Post weekly summary failed:', error);
+                this.showWeeklySummaryMessage(error.message, 'error');
+                await this.loadWeeklySummary();
+            } finally {
+                this.weeklySummary.posting = false;
+            }
+        },
+
+        /**
+         * Discard the current pending thread. Asks for confirmation since
+         * regenerating costs $2-ish in API calls.
+         */
+        async discardWeeklySummary() {
+            if (!this.weeklySummary.pending) {
+                this.showWeeklySummaryMessage('No pending summary to discard', 'error');
+                return;
+            }
+            const id = this.weeklySummary.pending.id;
+            if (!confirm(`Discard the pending thread (id ${id})? Regenerating costs ~$2.`)) {
+                return;
+            }
+            this.weeklySummary.loading = true;
+            try {
+                const response = await this.fetch('/api/admin/weekly-summary/discard', {
+                    method: 'POST',
+                    body: JSON.stringify({ id }),
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    this.showWeeklySummaryMessage(`Discarded summary id=${data.id}`, 'success');
+                    await this.loadWeeklySummary();
+                } else {
+                    this.showWeeklySummaryMessage(data.error || 'Discard failed', 'error');
+                }
+            } catch (error) {
+                console.error('Discard weekly summary failed:', error);
+                this.showWeeklySummaryMessage(error.message, 'error');
+            } finally {
+                this.weeklySummary.loading = false;
+            }
+        },
+
+        /**
+         * Set the inline message + type. Auto-clears after 8s for non-error
+         * messages so success notifications don't linger forever.
+         */
+        showWeeklySummaryMessage(text, type) {
+            this.weeklySummary.message = text;
+            this.weeklySummary.messageType = type || 'success';
+            if (type !== 'error') {
+                setTimeout(() => {
+                    if (this.weeklySummary.message === text) {
+                        this.weeklySummary.message = '';
+                    }
+                }, 8000);
+            }
+        },
+
+        // ─── Display helpers (used by Alpine x-text bindings) ─────────────
+
+        /** Pretty section labels for the per-tweet badges. */
+        weeklySummarySectionLabel(section) {
+            const labels = {
+                headline: 'Headline',
+                by_the_numbers: 'By the Numbers',
+                spotlight: 'Spotlight',
+                community_pulse: 'Community Pulse',
+                top_player: 'Top Player',
+            };
+            return labels[section] || section;
+        },
+
+        /** Tailwind classes for status / section badges. Same palette across both. */
+        weeklySummaryStatusBadgeClass(value) {
+            const map = {
+                pending: 'bg-yellow-100 text-yellow-800',
+                posted: 'bg-green-100 text-green-800',
+                partial_posted: 'bg-orange-100 text-orange-800',
+                failed: 'bg-red-100 text-red-800',
+                discarded: 'bg-gray-100 text-gray-800',
+                headline: 'bg-amber-100 text-amber-800',
+                by_the_numbers: 'bg-blue-100 text-blue-800',
+                spotlight: 'bg-purple-100 text-purple-800',
+                community_pulse: 'bg-teal-100 text-teal-800',
+                top_player: 'bg-pink-100 text-pink-800',
+            };
+            return map[value] || 'bg-gray-100 text-gray-800';
+        },
+
+        /** Format an ISO timestamp in Madrid time for the next-run displays. */
+        formatMadridTime(iso) {
+            if (!iso) return '';
+            try {
+                const d = new Date(iso);
+                if (Number.isNaN(d.getTime())) return '';
+                return d.toLocaleString('en-GB', {
+                    timeZone: 'Europe/Madrid',
+                    weekday: 'short',
+                    day: '2-digit',
+                    month: 'short',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                });
+            } catch {
+                return '';
+            }
+        },
+
+        /** Generic relative-time formatter for "posted 2h ago" labels. */
+        formatRelativeTime(iso) {
+            if (!iso) return '';
+            try {
+                const d = new Date(iso);
+                if (Number.isNaN(d.getTime())) return '';
+                const diffMs = Date.now() - d.getTime();
+                const minutes = Math.round(diffMs / 60000);
+                if (minutes < 1) return 'just now';
+                if (minutes < 60) return `${minutes}m ago`;
+                const hours = Math.round(minutes / 60);
+                if (hours < 24) return `${hours}h ago`;
+                const days = Math.round(hours / 24);
+                if (days < 30) return `${days}d ago`;
+                return d.toLocaleDateString();
+            } catch {
+                return '';
             }
         },
 
