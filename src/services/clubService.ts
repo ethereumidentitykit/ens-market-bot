@@ -1,7 +1,7 @@
 import { logger } from '../utils/logger';
 import { CLUB_LABELS, CLUB_TWITTER_HANDLES, getFirstClubHandle as getFirstClubHandleFallback } from '../constants/clubMetadata';
 
-const GRAILS_API_BASE = 'https://grails-api.ethid.org/api/v1';
+const GRAILS_API_BASE = 'https://api.grails.app/api/v1';
 const CLUBS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 export interface ClubRank {

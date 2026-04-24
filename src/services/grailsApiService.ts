@@ -48,7 +48,7 @@ export class GrailsApiService {
 
   constructor(databaseService: IDatabaseService) {
     this.databaseService = databaseService;
-    this.baseUrl = process.env.GRAILS_API_URL || 'https://grails-api.ethid.org/api/v1/activity';
+    this.baseUrl = process.env.GRAILS_API_URL || 'https://api.grails.app/api/v1/activity';
     
     logger.info(`🍷 GrailsApiService initialized (endpoint: ${this.baseUrl})`);
   }
@@ -349,7 +349,7 @@ export class GrailsApiService {
   private static getApiBase(): string {
     return process.env.GRAILS_API_URL
       ? process.env.GRAILS_API_URL.replace(/\/activity$/, '')
-      : 'https://grails-api.ethid.org/api/v1';
+      : 'https://api.grails.app/api/v1';
   }
 
   /**
