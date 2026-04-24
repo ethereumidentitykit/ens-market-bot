@@ -41,8 +41,14 @@ const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const TUNABLES = {
   /** Top-N for Grails analytics top lists (sales/regs/offers). */
   GRAILS_TOP_LIMIT: 20,
-  /** How many premium-decay names by watcher count. */
-  PREMIUM_LIMIT: 50,
+  /**
+   * How many premium-decay names by watcher count.
+   * Bumped from 50 → 100 so genuine grails (e.g. send.eth, prompt.eth) don't
+   * fall off the bottom of the list when several niche names happen to spike
+   * in watchers in a given week. Most cost is in the prompt char budget, not
+   * the API call itself, and the prompt builder still slices to a render cap.
+   */
+  PREMIUM_LIMIT: 100,
   /** How many grace-period names by watcher count. */
   GRACE_LIMIT: 50,
   /** Top-N renewal rows by per-name cost. */
@@ -53,8 +59,6 @@ const TUNABLES = {
   WASH_SALES_LIMIT: 20,
   /** First N AI replies that mentioned 'wash' (full count is unbounded). */
   WASH_REPLIES_LIMIT: 10,
-  /** Upper bound on the bot's own tweets fetched in the window. ~50-100/wk realistically. */
-  OWN_TWEETS_LIMIT: 200,
   /** Replies per engaged conversation. Capped at 100 by the v2 search-recent endpoint. */
   REPLIES_PER_CONV_CAP: 100,
   /** ENS chatter search size. */
@@ -136,8 +140,8 @@ export class WeeklySummaryDataService {
       ethPriceNowRaw,
       ethPrice7dAgoRaw,
 
-      // Twitter
-      ownTweetsRes,
+      // Twitter (only the ENS chatter search at Wave 1 — own-tweet metrics
+      // are hydrated in Wave 1.5 from DB tweet IDs, see comment below)
       ensChatterRes,
     ] = await Promise.all([
       safe('grails:marketAnalytics', GrailsApiService.getMarketAnalytics('7d')),
@@ -181,10 +185,6 @@ export class WeeklySummaryDataService {
         this.alchemyService.getHistoricalEthPrice(Math.floor(start.getTime() / 1000)),
       ),
 
-      safe(
-        'twitter:ownTweets',
-        this.twitterService.getOwnTweetsSince(startIso, TUNABLES.OWN_TWEETS_LIMIT),
-      ),
       safe('twitter:ensChatter', this.twitterService.searchEnsContent(TUNABLES.ENS_SEARCH_LIMIT)),
     ]);
 
@@ -242,11 +242,50 @@ export class WeeklySummaryDataService {
     const ethPriceNow = ethPriceNowRaw ?? null;
     const ethPrice7dAgo = ethPrice7dAgoRaw ?? null;
 
-    const ownTweetsWithFreshMetrics: TwitterV2Tweet[] = ownTweetsRes?.data ?? [];
-    twitterCostUsd += ownTweetsRes?.costUsd ?? 0;
-
     const ensTwitterChatter: TwitterV2Tweet[] = ensChatterRes?.data ?? [];
     twitterCostUsd += ensChatterRes?.costUsd ?? 0;
+
+    // ── Wave 1.5: hydrate engagement metrics on the bot's own tweets ────────
+    //
+    // Why this isn't `getOwnTweetsSince`: the prior `/2/users/{me}/tweets`
+    // approach silently broke in dev environments. Dev runs use a TESTING
+    // Twitter account, but the DB contains tweet IDs from the PRODUCTION
+    // account (DB is shared). `/2/users/{me}/tweets` returned the testing
+    // account's recent tweets — usually empty or unrelated — which meant
+    // `engagedTweets` was always empty in dev and the entire reply-fetch
+    // pipeline downstream of it never ran.
+    //
+    // The DB-driven path works in BOTH environments: tweet IDs are global
+    // on Twitter, and `public_metrics` is available regardless of which
+    // account holds the auth token. We pull tweet IDs we know we posted
+    // (from `botPosts`) and call `getTweetsWithMetrics(ids)` to hydrate.
+    //
+    // Cost note: in dev, hydrating tweet IDs the testing account doesn't own
+    // is technically a "third-party read" ($0.005/tweet) instead of an
+    // "owned read" ($0.001/tweet). For ~50 tweets/week that's a ~$0.20 diff
+    // — acceptable. In prod, where the auth token matches the tweets, it's
+    // back to $0.001/tweet.
+    //
+    // Trade-off: tweets posted to the bot's account OUTSIDE our pipeline
+    // (e.g. manual posts via Twitter UI) won't be in `botPosts` and so
+    // won't be hydrated. For the weekly summary use case that's fine — we
+    // report on the bot's automated content, not its manual content.
+    const ownTweetIds = Array.from(
+      new Set(botPosts.map(p => p.tweetId).filter((id): id is string => !!id)),
+    );
+    let ownTweetsWithFreshMetrics: TwitterV2Tweet[] = [];
+    if (ownTweetIds.length > 0) {
+      logger.info(
+        `📊 [WeeklyData] Hydrating engagement metrics on ${ownTweetIds.length} bot tweet ID(s) from DB`,
+      );
+      try {
+        const res = await this.twitterService.getTweetsWithMetrics(ownTweetIds);
+        ownTweetsWithFreshMetrics = res.data;
+        twitterCostUsd += res.costUsd;
+      } catch (err: any) {
+        fail('twitter:hydrateOwnMetrics', err);
+      }
+    }
 
     // ── Wave 2: third-party replies for each engaged own tweet ──────────────
     //

@@ -1185,15 +1185,46 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
   // the dashboard / image template label tweets without inferring from
   // position, and (c) `maxLength` on `text` is enforced server-side.
 
-  /** Twitter Premium+ ceiling for thread tweets. */
-  private static readonly WEEKLY_TWEET_MAX_CHARS = 1200;
   /**
-   * Hardcoded first line prepended to the headline tweet after parsing.
-   * The LLM is told NOT to write its own header (and to budget chars
-   * accordingly) — same pattern we use elsewhere in the codebase for the
-   * per-event AI replies (where "AI insight:" is auto-prefixed).
+   * Final per-tweet character ceiling — what gets posted to Twitter. Lower
+   * than the Premium+ technical max (25k) for stylistic reasons: tweets
+   * capped at 1k chars total for readability. Enforced post-decoration in
+   * `parseAndValidateWeeklyTweets`.
    */
-  private static readonly WEEKLY_HEADLINE_HEADER = 'ENS Market Weekly Digest --- by GrailsAI ✨';
+  private static readonly WEEKLY_TWEET_FINAL_MAX_CHARS = 1000;
+
+  /**
+   * Maximum length of the LLM's raw `text` field BEFORE we add the auto-
+   * prepended section header (and, for tweet 1, the auto-appended thread
+   * footer). Keeping this ~30 chars below the final limit gives the longest
+   * section header room without ever pushing total over 1k. The schema's
+   * `maxLength` uses this constant; the API enforces it.
+   */
+  private static readonly WEEKLY_TWEET_LLM_MAX_CHARS = 970;
+
+  /**
+   * Hardcoded section headers — auto-prepended to each tweet's `text` after
+   * parsing. The LLM is told NOT to write any of these; it provides only the
+   * body. Same pattern as "AI insight:" prefix in the per-event reply path.
+   *
+   * Format: emoji at end mirrors the existing `(by GrailsAI ✨)` style on
+   * the headline header. Numbering on tweets 2-5 makes thread continuity
+   * obvious to readers who land on a single tweet.
+   */
+  private static readonly WEEKLY_SECTION_HEADERS: Record<WeeklyTweetSection, string> = {
+    headline: '💥 ENS Market Weekly Digest ~ by GrailsAI ✨',
+    by_the_numbers: '2/5 ~ Numbers 📊',
+    spotlight: '3/5 ~ Looking Forward 🔮',
+    community_pulse: '4/5 ~ Community Overview 💬',
+    top_player: '5/5 ~ Player of the Week 🏆',
+  };
+
+  /**
+   * Auto-appended at the END of tweet 1 only — signals "this is the start of
+   * a thread, scroll to read more." Format mirrors the section headers:
+   * "1/5 🧵" sits visually parallel to "2/5 Numbers 📊" etc.
+   */
+  private static readonly WEEKLY_HEADLINE_FOOTER = '1/5 🧵';
   /**
    * The five lanes of the weekly thread, in the order they MUST appear.
    * The system prompt + JSON schema both anchor on this ordering; the
@@ -1213,8 +1244,9 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
   /**
    * Strict JSON schema enforcing exactly 5 thread tweets in fixed order. The
    * `section` enum + `tweets` minItems/maxItems make the API itself reject
-   * any malformed output. `text` length cap (1200) is enforced server-side
-   * too. We still re-validate the order post-parse as defence in depth.
+   * any malformed output. `text` length is bounded server-side at the LLM
+   * raw cap (970) — the post-decoration final cap (1000) is then re-checked
+   * by `parseAndValidateWeeklyTweets` after we add section headers + footer.
    */
   private static readonly WEEKLY_THREAD_SCHEMA = {
     type: 'object',
@@ -1240,9 +1272,14 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
             text: {
               type: 'string',
               minLength: 1,
-              maxLength: 1200,
+              // Keep this in sync with WEEKLY_TWEET_LLM_MAX_CHARS — schema is a
+              // const-asserted literal so we can't reference the constant here.
+              maxLength: 970,
               description:
-                'Final tweet text. Tweet 1 (headline) ideally <280 chars; tweets 2-5 up to 1200.',
+                'Body of the tweet — DO NOT include any header. Section header (and footer for tweet 1) ' +
+                'is auto-prepended to your text. Tweet 1 body should ideally be <200 chars so the final ' +
+                'tweet (with auto-chrome) renders under 280 chars on every client. Tweets 2-5 max 970 ' +
+                'chars in this field; final post is capped at 1000 chars after auto-chrome is added.',
             },
           },
         },
@@ -1411,30 +1448,41 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
       if (typeof text !== 'string' || text.trim().length === 0) {
         throw new Error(`Weekly summary tweet ${i + 1}: text is empty`);
       }
-      if (text.length > OpenAIService.WEEKLY_TWEET_MAX_CHARS) {
+      // LLM raw cap (also enforced by schema; this is defence-in-depth).
+      if (text.length > OpenAIService.WEEKLY_TWEET_LLM_MAX_CHARS) {
         throw new Error(
           `Weekly summary tweet ${i + 1} (${section}): text exceeds ` +
-            `${OpenAIService.WEEKLY_TWEET_MAX_CHARS} chars (actual: ${text.length}). Premium+ ceiling.`,
+            `${OpenAIService.WEEKLY_TWEET_LLM_MAX_CHARS} chars (actual: ${text.length}). Schema cap should have caught this.`,
         );
       }
 
       tweets.push({ section: section as WeeklyTweetSection, text });
     }
 
-    // Apply the hardcoded headline header. The system prompt tells the model
-    // NOT to write its own header (and to budget the tweet 1 character count
-    // accordingly), so we prepend ours here. Same pattern as the per-event AI
-    // reply pipeline ("AI insight:" prefix). Single literal newline keeps the
-    // header on its own line followed immediately by the model's text.
-    const headlineIdx = tweets.findIndex(t => t.section === 'headline');
-    if (headlineIdx !== -1) {
-      tweets[headlineIdx] = {
-        section: 'headline',
-        text: `${OpenAIService.WEEKLY_HEADLINE_HEADER}\n\n${tweets[headlineIdx].text}`,
-      };
-    }
-
-    return tweets;
+    // Decoration: prepend section header to every tweet, and append the
+    // thread footer to tweet 1 only. The system prompt tells the model NOT
+    // to write any of these — it provides only the body. Same pattern as
+    // the per-event AI reply pipeline's "AI insight:" prefix.
+    //
+    // Final-decoration check: even though the schema bounds raw text at
+    // WEEKLY_TWEET_LLM_MAX_CHARS (970) and headers/footers max ~30 chars,
+    // re-check the post-decoration total against the FINAL cap (1000) so a
+    // chrome change can never silently push tweets over the post limit.
+    return tweets.map(t => {
+      const header = OpenAIService.WEEKLY_SECTION_HEADERS[t.section];
+      let decorated = `${header}\n\n${t.text}`;
+      if (t.section === 'headline') {
+        decorated = `${decorated}\n\n${OpenAIService.WEEKLY_HEADLINE_FOOTER}`;
+      }
+      if (decorated.length > OpenAIService.WEEKLY_TWEET_FINAL_MAX_CHARS) {
+        throw new Error(
+          `Weekly summary tweet (${t.section}): decorated text ${decorated.length} chars exceeds ` +
+            `final ${OpenAIService.WEEKLY_TWEET_FINAL_MAX_CHARS} char limit. ` +
+            `LLM raw was ${t.text.length}, header+footer chrome adds ${decorated.length - t.text.length}.`,
+        );
+      }
+      return { section: t.section, text: decorated };
+    });
   }
 
   /**
@@ -1448,10 +1496,10 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
    * for what each lane is for.
    */
   private buildWeeklySummarySystemPrompt(): string {
-    return `You are GrailsAI Weekly — a sharp, opinionated ENS market analyst writing the weekly recap thread for the ENS community on X. You look back over the past 7 days, find the real story, and tell it tight.
+    return `You are writing the weekly ENS market recap thread — a 5-tweet news report on the past 7 days of activity in the ENS namespace. You are an analyst-reporter, NOT a personality. The bot publishes the thread; you don't narrate as the bot.
 
 YOUR TASK:
-Write a 5-tweet thread following the strict JSON schema you've been given. Each tweet has a dedicated lane — they are NOT interchangeable. Together they form a clear arc: pulse → numbers → forward → community → personality.
+Write a 5-tweet thread following the strict JSON schema. Each tweet has a dedicated lane — they are NOT interchangeable. Together they form a clear arc: pulse → numbers → forward → community → personality.
 
 OUTPUT FORMAT:
 Return JSON: { "tweets": [ { "section": "...", "text": "..." }, ... ] } with EXACTLY 5 entries in this order:
@@ -1462,114 +1510,151 @@ Return JSON: { "tweets": [ { "section": "...", "text": "..." }, ... ] } with EXA
   4. section "community_pulse"   → broad sentiment
   5. section "top_player"        → climactic actor reveal
 
-Each \`text\` field must be ≤ 1200 characters. The schema enforces this server-side; do not exceed it.
+Each \`text\` field must be ≤ 970 characters. The schema enforces this. Aim shorter — tight beats long. Final posts are capped at 1000 chars after auto-prepended chrome.
 
-DO NOT number tweets ("1/", "2/"). DO NOT add a TL;DR. DO NOT use dashes (—, –, or - at start of lines). Use periods, commas, short paragraphs.
+EVERY tweet has a section header (and tweet 1 has a thread footer) AUTO-PREPENDED/APPENDED at post time. DO NOT write headers, DO NOT write "1/5", DO NOT write "Top Player of the Week:" — all of that is added for you. Your "text" field is the BODY ONLY.
+
+DO NOT add a TL;DR. DO NOT use dashes (—, –, or - at start of lines). Use periods, commas, short paragraphs.
+
+══════════════════════════════════════════════════════════════════════════
+READABILITY (read this BEFORE writing anything)
+══════════════════════════════════════════════════════════════════════════
+The thread should be a PLEASURE to read. The reader's eyes should fall over it without effort. Every choice you make should serve that.
+
+PARAGRAPH BREAKS — non-negotiable:
+- ONE distinct point = ONE paragraph. If a tweet covers two distinct ideas, they go in TWO paragraphs separated by a blank line ("\\n\\n" inside the JSON string).
+- Even if a tweet is short. Even if you can technically fit both ideas in one paragraph. The eye needs the white space to process the shift.
+- Example of WRONG (two ideas mushed):
+    "Two trades made up most of weekly sales. The clearest live demand signal came at the registry, where prompt.eth cost 5.25 ETH."
+- Example of RIGHT (same content, two paragraphs):
+    "Two trades made up most of weekly sales.
+
+    The clearest live demand signal came at the registry, where prompt.eth cost 5.25 ETH."
+
+SENTENCE LENGTH:
+- Mostly short sentences. 8-15 words is the sweet spot.
+- A long sentence is fine for variety, but never two long sentences in a row.
+- Read it back in your head. If you stumble, rewrite it.
+
+PLAIN LANGUAGE:
+- Use words a smart non-trader can understand on first read.
+- Never make the reader pause to decode a phrase. If a clearer wording exists, use it.
+- "ENS premium decay" is fine (it's the actual ENS feature name). "The decay ladder" is not (it's coded jargon).
+
+VISUAL BREATHING ROOM:
+- Tweets 2-5 should have 2-4 short paragraphs each, separated by blank lines.
+- Tweet 1 (headline) should be 1-2 short paragraphs max — punchy.
+- DO NOT write a wall of text. Even tight 600-char tweets benefit from a paragraph break in the middle.
 
 ══════════════════════════════════════════════════════════════════════════
 TWEET 1 — section: "headline"
 ══════════════════════════════════════════════════════════════════════════
-The single most interesting take of the week. Could be a trend, a whale, a market shift, a wash-trade pattern, a category waking up — whatever the data screams loudest about. Pick ONE angle and go hard.
+The single most interesting fact, trend, or contrast of the week. Could be a market shift, a whale move, a category waking up, an unusual price action — whatever the data points to most clearly. Pick ONE angle.
 
-DO NOT write a header line. The string "${OpenAIService.WEEKLY_HEADLINE_HEADER}" plus a blank line will be prepended to your tweet automatically — your "text" field should contain ONLY your headline take, no header. Aim for under 240 characters in your text so the final tweet (with our header) renders under Twitter's 280-char default limit. Punchy, opinionated, leaves the reader wanting tweet 2.
+The header "${OpenAIService.WEEKLY_SECTION_HEADERS.headline}" is auto-prepended and "${OpenAIService.WEEKLY_HEADLINE_FOOTER}" is auto-appended. Keep your body under 200 characters so the final tweet renders cleanly under Twitter's 280-char default limit. Punchy, factual, leaves the reader wanting tweet 2.
 
 ══════════════════════════════════════════════════════════════════════════
 TWEET 2 — section: "by_the_numbers"
 ══════════════════════════════════════════════════════════════════════════
-The hard-data tweet. The headline numbers a market watcher needs to know:
+The hard-data tweet. The numbers a market watcher needs to know this week:
 
-  - Sales: count + total volume (ETH and USD)
-  - Registrations: count + total cost + total premium paid (premium = the auction-clearing portion above base reg cost; high premium spend = high demand)
+  - Sales: count + total volume (ETH)
+  - Registrations: count + total cost + total premium paid (premium = auction-clearing portion above base reg cost; high premium spend = high demand)
   - Renewals: count + total volume (conviction signal — owners paying to keep names)
-  - Bids/offers: how active was the bid layer
+  - Bids/offers: how active was the offer side
   - Week-over-week delta on the BIGGEST mover (use PREVIOUS WEEK SNAPSHOT if provided; skip the comparison entirely if it isn't)
-  - ETH price context if move is ≥5% AND how it may effect sentiment.
+  - ETH price context if move is ≥5% AND how it may affect sentiment
 
-Be selective — don't list every number you have. Surface 4-6 numbers that actually matter. Numbers prefer specificity ("47 ETH across 23 sales" > "lots of activity"). Round USD to nice units ($14k, $1.2M).
+Be selective — don't list every number. Surface 4-6 numbers that actually matter, in plain reporter language. The auto-prepended "2/5 Numbers 📊" header tells the reader what's coming; you don't need to repeat it.
 
 ══════════════════════════════════════════════════════════════════════════
 TWEET 3 — section: "spotlight"
 ══════════════════════════════════════════════════════════════════════════
-The dynamic deep-focus tweet. Pick ONE angle from the menu below — whichever is loudest in the week's data — and go DEEP on it. ONE thing, well-explored.
+ONE angle, deep. The auto-prepended "3/5 Looking Forward 🔮" header signals this is the forward-looking lane. Pick from the menu — whichever is loudest in the week's data:
 
-DEFAULT angle: NAMES TO WATCH. Use the data in NAMES TO WATCH: PREMIUM DECAY (live auction names) and NAMES TO WATCH: GRACE → PREMIUM SOON (entering the auction within 7 days if owner doesn't renew).
+DEFAULT: NAMES TO WATCH. Use the data in NAMES TO WATCH: PREMIUM DECAY (live auction names — registerable RIGHT NOW for the listed premium price) and NAMES TO WATCH: GRACE → PREMIUM SOON (entering the auction within 7 days if owner doesn't renew).
 
 KEY CONTEXT on premium decay: ENS premium starts at $100M when a name enters the auction (90 days after expiry) and HALVES EVERY DAY for 21 days, ending at $0. So Day 1 = $50M, Day 5 = ~$3M, Day 10 = ~$98k, Day 14 = ~$6k, Day 17 = ~$760, Day 19 = ~$190, Day 20 = ~$95, Day 21 = $0. The cheaper the current premium, the more likely the name CLEARS soon — and the more accessible to organic registrants.
 
 WHAT TO TALK ABOUT (not what to list):
   - The NAMES themselves: what makes them grail-quality? Short? Brandable? Tied to a real concept? Dictionary words? Common first names? Crypto-native (ai/zk/cpu/agent)? Club members (999/10k/3-letter/prepunk)?
   - CURRENT PREMIUM PRICE — surface it for names where it's already cheap (under $5k = anyone can reach; under $1k = will likely clear this week). High premium ($100k+) = collector territory, only mention if it's a true grail
-  - DAYS LEFT in the auction — for names with low days remaining ("3 days left, premium ~$1.5k"), lean into "this is the moment to act"
+  - DAYS LEFT in the auction — for names with low days remaining, lean into "this is the moment"
   - For grace-soon names: frame as "watch list for next week" — these aren't biddable yet
-  - LAST SALE PRICE if present — useful as a fair-value anchor ("last cleared at 2 ETH in 2022, currently at $390 premium")
+  - LAST SALE PRICE if present — useful as a fair-value anchor
 
-DO NOT cite watcher counts. Watcher counts are a backend filter mechanism that surfaces these names to you in the first place — they're not interesting data for readers.
+DO NOT cite watcher counts. Watcher counts are a backend filter mechanism that surfaces these names — they're not interesting data for readers.
 
-PIVOT angles (use INSTEAD of names-to-watch only if clearly louder):
-  - ENGAGING POST OF YOURS: One of YOUR OWN posts from earlier this week drove unusually high engagement or a juicy reply thread. Lead with what you said and why it landed. Reference the actual replies for context (PARAPHRASE — never quote verbatim).
+PIVOT angles (use INSTEAD of names-to-watch only if clearly louder this week):
+  - ENGAGING POST: One specific post published earlier this week drove unusually high engagement or a notable reply thread. Report on what landed and why. Reference replies as paraphrased context only.
   - CATEGORY HEATING UP: 2+ of the week's top sales or registrations share a club tag (999 club, 10k club, 3-letter, prepunks, etc.). Identify the cluster and what it means.
-  - NOTABLE SINGLE TRADE: One individual sale or registration is genuinely the story of the week — a steal, an absurd overpay, a name with a backstory. Different from the headline insight (which is broader).
-
-Whatever you pick, go DEEP — give the reader specifics, numbers, names. Don't list multiple angles. ONE thing.
+  - NOTABLE SINGLE TRADE: One individual sale or registration is genuinely the story of the week — a steal, an absurd overpay, a name with a backstory. Different from the headline (which is broader).
 
 ══════════════════════════════════════════════════════════════════════════
 TWEET 4 — section: "community_pulse"
 ══════════════════════════════════════════════════════════════════════════
-Broad sentiment sweep. Zoom OUT (vs tweet 3 which goes deep on one thing). Aggregate themes across:
+Report on broader sentiment. Zoom OUT (vs tweet 3 which goes deep on one thing). Aggregate themes from:
 
-  - ENS CHATTER: themes from ENS-specific tweets in the past 7d. The search is now anchored on @ensdomains mentions and phrase queries like "ENS domain", "ENS name", "ENS subname" — so chatter SHOULD be on-topic. Look for narrative threads, vibe shifts, common discussion topics.
-  - YOUR OWN ENGAGEMENT: which kinds of YOUR posts are landing this week (which categories of sale/reg/bid drove the most engagement), without repeating any specific post you already covered in tweet 3.
+  - ENS CHATTER: themes from ENS-specific tweets in the past 7d. The search is anchored on @ensdomains mentions and phrase queries like "ENS domain", "ENS name", "ENS subname" — so chatter SHOULD be on-topic. Look for narrative threads, vibe shifts, common topics.
+  - POSTED CONTENT ENGAGEMENT: which kinds of recent posts drove the highest engagement (which categories of sale / reg / bid landed best) — without re-using any specific post already covered in tweet 3.
   - Notable accounts mentioning ENS or relevant ENS news/launches if surfaced in chatter.
+
+The framing here is third-person reporting on what the community is talking about. NOT "we noticed", NOT "on our feed", NOT "my take". Just "the community focused on X this week" or "discussion centered on Y" or "engagement was strongest on Z-type posts".
 
 NEVER quote third-party tweets verbatim. PARAPHRASE community sentiment, never reproduce it.
 
 ══════════════════════════════════════════════════════════════════════════
 TWEET 5 — section: "top_player"
 ══════════════════════════════════════════════════════════════════════════
-Climactic actor reveal. Lead with the literal phrase "Top Player of the Week:" followed by the chosen handle. Handle resolution priority:
+The auto-prepended "5/5 Player of the Week 🏆" header introduces this lane. DO NOT write "Top Player of the Week:" yourself — start your text directly with the chosen handle.
 
+Handle resolution priority:
   1. If the candidate has a Twitter handle (look for "twitter: @handle" in the candidate breakdown) → use "@handle" — this is the strongest because it actually mentions the person on Twitter
   2. Else if they have an ENS name → use "ensname.eth"
   3. Else fallback to the short address ("0xabcd…1234")
 
-Then 2-4 sentences explaining what they did this week. Reference TOP PLAYER OF THE WEEK CANDIDATES data — break down their buys / sells / registrations / renewals with actual ETH amounts. Pick the address with the most interesting STORY given the rest of the week's context — it does NOT have to be #1 by volume. The math gave you the top 3 candidates from OUR DATABASE only (we miss micro-actions below our notability thresholds).
+Then 2-4 sentences explaining what they did this week. Reference TOP PLAYER OF THE WEEK CANDIDATES data — break down their buys / sells / registrations / renewals with actual ETH amounts. Pick the address with the most interesting STORY given the rest of the week's context — it does NOT have to be #1 by volume. The math gave you the top 3 candidates from our DB only (we miss micro-actions below our notability thresholds).
 
 ══════════════════════════════════════════════════════════════════════════
 GENERAL FRAMING RULES
 ══════════════════════════════════════════════════════════════════════════
 
-TONE — OPTIMISTIC MARKET ANALYST:
-You are bullish on ENS as a market and as an identity primitive. Your default lens is "what's working, what's interesting, what's growing". When you spot a contrast or a quiet week, frame it as setup for what's coming next — not as an indictment. Lean into the upside angle where one exists. You are honest, never delusional — if numbers genuinely cratered, say so. But you are NOT bearish by default, and you do not mock buyers, sellers, or holders.
+TONE — OPTIMISTIC MARKET REPORTER:
+You report on ENS as a healthy market and identity primitive. Default lens: "what's working, what's interesting, what's growing". When you spot a contrast or a quiet week, frame it as setup for what's coming next — not as an indictment. Lean into the upside angle where one exists. Honest, never delusional — if numbers genuinely cratered, say so. But not bearish by default, and never mocking buyers, sellers, or holders.
 
-Examples of the right energy:
-  - "Secondary was thin this week, but registration spend tells the real story — buyers are going straight to the source"
-  - "Premium decay leaderboard is loaded with quality drops" (frame as opportunity)
-  - "Volume held flat at $XXk despite ETH dropping 5% — the floor is sticky"
-  - "Three-letter names cleared at premium twice this week. The grail tier is awake"
+You are NOT a personality. You are a market reporter writing a weekly digest. Third-person reporting beats first-person opinion. "Volume held flat" beats "I think volume held flat". "The community focused on X" beats "We saw X this week".
 
-AVOID (these are the wrong energy):
-  - "Volume cratered", "buyers fled", "the market is dead"
-  - Snide framing of buyers ("right before they overpay", "pretending they never overpay")
-  - "Patience of a saint, returns of a savings account" — not in this format
-  - Any hedging like "weak", "tepid", "thin", "barely registered" without a follow-up upside angle
+JOKES & HUMOR:
+When the data is genuinely funny — ironic timing, absurd contrasts, names that comment on themselves, jokes that write themselves — make the joke. Don't force humor when the data is dry, but don't suppress it either. Examples of natural humor:
+  - "agent.eth registered the same week the AI agent narrative broke into mainstream feeds. Timing or thesis, take your pick."
+  - "Three names with 'punk' in them changed hands. The original CryptoPunks tribute act is still selling tickets."
+  - "0928.eth, 0929.eth, 0930.eth all sold to different wallets. Either the calendar lobby is back or someone is timing their birthday."
+The joke should land naturally — never set up at the expense of accuracy.
 
-WASH-TRADE DATA: You'll see WASH SIGNALS — sales involving blacklisted addresses (these are pre-filtered OUT of TOP SALES so they won't appear there), plus AI replies that mentioned "wash" this week. Surface in tweet 1 if washes were a meaningful share of volume; footnote in tweet 3 spotlight if there's a notable single wash; otherwise skip entirely.
+JARGON BAN — DO NOT USE these crypto-trader phrases (they sound out of place for a measured market digest):
+  - "tape" / "the tape" / "sales tape" / "prints" / "the print"
+  - "the bid layer" / "the offer side" (you can SAY "bid activity" or "offer activity" but not "layer")
+  - "forward board" / "decay ladder" / "watchlist board"
+  - "moving upstack" / "downstack" / "upper-layer"
+  - "on our feed" / "across our feed" / "my feed"
+  - "leg into" / "leg out of" / "legs"
+  - "wall formed" / "stacked the wall" / "thin the book"
+  - "venue" used to mean a marketplace ("the registry was the venue") — just say "the registry" or "the marketplace"
+
+WASH-TRADE DATA: You'll see WASH SIGNALS — sales the bot caught and BLOCKED from publishing because the addresses involved are flagged as wash traders (pre-filtered OUT of TOP SALES so they won't appear there), plus AI replies that mentioned "wash" this week. When you write about these in a tweet, frame them as "blocked as wash trades" or "filtered as suspected wash trades" — NEVER use the word "blacklisted" in tweet text (that's internal jargon — readers don't know what list). Surface in tweet 1 if washes were a meaningful share of volume; footnote in tweet 3 spotlight if there's a notable single wash; otherwise skip entirely.
 
 WEEK-OVER-WEEK: If PREVIOUS WEEK SNAPSHOT is present, use deltas in tweet 2 ("volume +40% w/w"). If NOT present, skip the comparison angle entirely — DO NOT say "no comparison available".
 
 PARTIAL SOURCE FAILURES: If a section is listed as failed, work without it. NEVER fabricate numbers to fill gaps.
 
 WRITING STYLE:
-- Short, confident sentences. Get to the point fast.
+- Short, declarative sentences. Get to the point fast.
 - Specifics beat vagueness. "47 ETH across 23 sales" > "lots of activity".
-- Humor comes from data contrasts, not from putting people down.
+- LEAD WITH ETH amounts, not USD. Convert to USD ONLY when (a) the amount is large enough that USD is a clearer anchor (e.g. $100k+ matters more than 40 ETH), or (b) you're explicitly comparing to a non-ETH benchmark. Do NOT append "$X" to every ETH figure — most ETH figures stand alone.
 - Use "onchain" not "on-chain", "multichain" not "multi-chain".
 - ETH values: 2 decimals max for ≥0.01 ETH, more precision only for tiny values.
-- USD: rounded ($14k, $1.2M, $850).
-- Avoid: "scooped up", "snapped up", "nabbed", "on a tear", "cratered", "fled", "dead", "tepid". No emojis (the ✨ in the auto-prepended tweet 1 header is the only one — your text fields should contain none).
-
-CONTINUOUS IDENTITY:
-You are GrailsAI Weekly. The data you'll see under YOUR PAST POSTS, YOUR OWN TWEET ENGAGEMENT, and THIRD-PARTY REPLIES is YOUR OWN past output and the engagement on it — NOT some external bot's. Speak in first person. Use "we" or "I" when referencing past takes ("we covered this on Tuesday", "our take on the X sale aged well"). NEVER refer to yourself as "the bot" or "the AI" in third person — that breaks the voice.
+- USD when used: rounded ($14k, $1.2M, $850).
+- Avoid: "scooped up", "snapped up", "nabbed", "on a tear", "cratered", "fled", "dead", "tepid". No emojis in your text fields — the auto-prepended headers handle all visual chrome.
 
 CRITICAL RULES:
 - NEVER fabricate numbers. If a section is missing, work without it.
@@ -1700,8 +1785,8 @@ Each tweet stands on its own — a reader who only sees tweet 1 should still get
     }
 
     // ── Wash signals ─────────────────────────────────────────────────────────
-    lines.push('WASH SIGNALS (7d, raw — surface only if meaningful):');
-    lines.push(`  Blacklisted-address sales: ${data.washSignals.blacklistMatches.count.toLocaleString()}, volume ${data.washSignals.blacklistMatches.volumeEth.toFixed(4)} ETH (${fmtUsd(data.washSignals.blacklistMatches.volumeUsd)})`);
+    lines.push('WASH SIGNALS (7d, raw — surface only if meaningful). When writing about these, frame as "blocked as wash trades" or "filtered as suspected wash trades" — NEVER use the word "blacklisted" in tweet text (that is internal jargon):');
+    lines.push(`  Sales blocked as suspected wash trades (filtered out of regular tweet output): ${data.washSignals.blacklistMatches.count.toLocaleString()}, volume ${data.washSignals.blacklistMatches.volumeEth.toFixed(4)} ETH (${fmtUsd(data.washSignals.blacklistMatches.volumeUsd)})`);
     lines.push(`  AI replies mentioning 'wash': ${data.washSignals.aiReplyWashMentions.count.toLocaleString()}`);
     if (data.washSignals.blacklistMatches.sales.length > 0) {
       lines.push(`  Sample blacklist sales (first ${data.washSignals.blacklistMatches.sales.length}):`);
@@ -1787,10 +1872,14 @@ Each tweet stands on its own — a reader who only sees tweet 1 should still get
     // auction (day 90 post-expiry), then HALVES every full day. So the
     // current premium at day D into the auction is $100M × 2^(-D), capped
     // at 21 days (after which it's effectively 0).
+    // Render up to 50 names — gives the model enough breadth that genuine
+    // grail names (short/dictionary/brandable) don't get crowded out by
+    // niche names that happened to spike in watcher count this week.
     if (data.premiumByWatchers.length > 0) {
-      lines.push(`NAMES TO WATCH: PREMIUM DECAY (live auction — registrants can register these RIGHT NOW for the listed premium price):`);
+      const renderCap = 50;
+      lines.push(`NAMES TO WATCH: PREMIUM DECAY — live auction, top ${Math.min(renderCap, data.premiumByWatchers.length)} by watcher count. Anyone can register these RIGHT NOW for the listed premium. Pick the GRAILS (short/dictionary/brandable/club members), not just the top of the list:`);
       const nowMs = Date.now();
-      for (const n of data.premiumByWatchers.slice(0, 25)) {
+      for (const n of data.premiumByWatchers.slice(0, renderCap)) {
         const clubs = n.clubs && n.clubs.length > 0 ? `  [${n.clubs.join(', ')}]` : '';
         const expiryMs = new Date(n.expiry_date).getTime();
         if (!Number.isFinite(expiryMs)) {
@@ -1799,15 +1888,20 @@ Each tweet stands on its own — a reader who only sees tweet 1 should still get
         }
         const daysSinceExpiry = (nowMs - expiryMs) / (24 * 60 * 60 * 1000);
         const daysIntoAuction = Math.max(0, daysSinceExpiry - 90);
-        const daysLeft = Math.max(0, 21 - daysIntoAuction);
+        const daysLeftRaw = Math.max(0, 21 - daysIntoAuction);
+        // Round to nearest whole day — the LLM was rendering "5.2 days" /
+        // "1.1 days" verbatim, which felt awkward for a recap. Day granularity
+        // is the right read for the reader.
+        const daysLeft = Math.round(daysLeftRaw);
         const currentPremiumUsd = daysIntoAuction >= 21
           ? 0
           : 100_000_000 / Math.pow(2, daysIntoAuction);
         const lastSale = n.last_sale_price_usd
           ? `  last sold ${(n.last_sale_date ?? '').slice(0, 10) || '?'} for ${fmtUsd(n.last_sale_price_usd)}`
           : '';
+        const dayLabel = daysLeft === 1 ? 'day' : 'days';
         lines.push(
-          `  ${n.name} — ${daysLeft.toFixed(1)} days left in auction, current premium ~${fmtUsdLowDigits(currentPremiumUsd)}${lastSale}${clubs}`,
+          `  ${n.name} — ${daysLeft} ${dayLabel} left in auction, current premium ~${fmtUsdLowDigits(currentPremiumUsd)}${lastSale}${clubs}`,
         );
       }
       lines.push('');
@@ -1825,12 +1919,14 @@ Each tweet stands on its own — a reader who only sees tweet 1 should still get
           continue;
         }
         const daysSinceExpiry = (nowMs - expiryMs) / (24 * 60 * 60 * 1000);
-        const daysUntilAuction = Math.max(0, 90 - daysSinceExpiry);
+        const daysUntilAuctionRaw = Math.max(0, 90 - daysSinceExpiry);
+        const daysUntilAuction = Math.round(daysUntilAuctionRaw);
         const lastSale = n.last_sale_price_usd
           ? `  last sold ${(n.last_sale_date ?? '').slice(0, 10) || '?'} for ${fmtUsd(n.last_sale_price_usd)}`
           : '';
+        const dayLabel = daysUntilAuction === 1 ? 'day' : 'days';
         lines.push(
-          `  ${n.name} — enters auction in ${daysUntilAuction.toFixed(1)} days${lastSale}${clubs}`,
+          `  ${n.name} — enters auction in ${daysUntilAuction} ${dayLabel}${lastSale}${clubs}`,
         );
       }
       lines.push('');
@@ -1846,20 +1942,21 @@ Each tweet stands on its own — a reader who only sees tweet 1 should still get
       lines.push('');
     }
 
-    // ── Your own posted tweets + AI replies from this week (RAW) ────────────
-    // Framed as "yours" rather than "the bot's" — the LLM IS GrailsAI Weekly
-    // and these are its own past posts. Continuous identity matters for voice.
+    // ── Recent posted content (the bot's own published tweets + AI replies) ─
+    // Framed in third person ("the account's recent posts") rather than first
+    // person — the digest is written ABOUT the bot's activity, not BY the bot
+    // narrating its own takes.
     if (data.botPosts.length > 0) {
-      lines.push(`YOUR PAST POSTS — your own posted tweets + AI replies from this week, RAW (${data.botPosts.length} item(s), newest first):`);
+      lines.push(`RECENT POSTED CONTENT — tweets + AI replies published by this account in the past 7 days, RAW (${data.botPosts.length} item(s), newest first):`);
       for (const p of data.botPosts) {
         lines.push(this.formatBotPost(p));
       }
       lines.push('');
     }
 
-    // ── Twitter engagement metrics on your own tweets ────────────────────────
+    // ── Twitter engagement metrics on this account's tweets ─────────────────
     if (data.ownTweetsWithFreshMetrics.length > 0) {
-      lines.push(`YOUR OWN TWEET ENGAGEMENT (${data.ownTweetsWithFreshMetrics.length} of your tweets with fresh metrics):`);
+      lines.push(`POSTED CONTENT ENGAGEMENT (${data.ownTweetsWithFreshMetrics.length} tweet(s) by this account with fresh metrics):`);
       // Sort by impressions desc to surface the highest-engagement ones first.
       const sorted = [...data.ownTweetsWithFreshMetrics].sort((a, b) => {
         const ai = a.public_metrics?.impression_count ?? 0;
@@ -1877,10 +1974,10 @@ Each tweet stands on its own — a reader who only sees tweet 1 should still get
       lines.push('');
     }
 
-    // ── Third-party replies on your tweets (RAW) ─────────────────────────────
+    // ── Third-party replies on this account's tweets (RAW) ───────────────────
     if (data.thirdPartyReplies.length > 0) {
       const totalReplies = data.thirdPartyReplies.reduce((acc, c) => acc + c.replies.length, 0);
-      lines.push(`THIRD-PARTY REPLIES — actual reply text from other accounts to YOUR posts (${data.thirdPartyReplies.length} engaged conv(s), ${totalReplies} repl(ies) total):`);
+      lines.push(`THIRD-PARTY REPLIES — actual reply text from other accounts on this account's posts (${data.thirdPartyReplies.length} engaged conv(s), ${totalReplies} repl(ies) total):`);
       for (const conv of data.thirdPartyReplies) {
         lines.push(`  Conversation ${conv.conversationId} (${conv.replies.length} repl(ies)):`);
         for (const r of conv.replies) {
@@ -1906,7 +2003,7 @@ Each tweet stands on its own — a reader who only sees tweet 1 should still get
 
     // ── Final reminder ───────────────────────────────────────────────────────
     lines.push('---');
-    lines.push(`Now write the thread. Return JSON matching the WeeklySummaryThread schema: exactly 5 tweets, in order: headline → by_the_numbers → spotlight → community_pulse → top_player. Tweet 1 (headline): aim for <240 chars in your text — the literal header "${OpenAIService.WEEKLY_HEADLINE_HEADER}" plus a blank line will be auto-prepended, so do NOT write a header yourself. Tweets 2-5 max ${OpenAIService.WEEKLY_TWEET_MAX_CHARS} chars each. Tweet 5 leads with the literal phrase "Top Player of the Week:" followed by the chosen handle. No numbering, no TL;DR, no @-mentions of third-party accounts. Speak in first person — you are GrailsAI Weekly; the past posts you'll see are yours.`);
+    lines.push(`Now write the thread. Return JSON matching the WeeklySummaryThread schema: exactly 5 tweets, in the section order headline → by_the_numbers → spotlight → community_pulse → top_player. Each tweet's section header is auto-prepended to your text — DO NOT write any header (no "1/5", no "Top Player of the Week:", no GrailsAI line). Tweet 1 body: aim for <200 chars. Tweets 2-5 body: max ${OpenAIService.WEEKLY_TWEET_LLM_MAX_CHARS} chars each, but shorter is better. No numbering, no TL;DR, no @-mentions of third-party accounts. Report in third-person — you are not the bot, you are writing the digest. Lead with ETH amounts; only convert to USD when the dollar figure adds meaningful context.`);
 
     return lines.join('\n');
   }
@@ -1931,10 +2028,10 @@ Each tweet stands on its own — a reader who only sees tweet 1 should still get
   }
 
   /**
-   * Format one of your past-post entries (a tweet you posted earlier this week
-   * — sale/registration/bid/renewal tweet, or an AI reply). RAW text, no
-   * compression. The "you" framing is intentional: from the LLM's POV these
-   * are its own past posts, not some external bot's.
+   * Format one of the account's recent-post entries (a tweet posted earlier
+   * this week — sale/registration/bid/renewal tweet, or an AI reply). RAW
+   * text, no compression. Third-person framing — the digest reports ABOUT
+   * this account's activity rather than narrating as the account.
    */
   private formatBotPost(p: WeeklyBotPost): string {
     const date = p.postedAt.slice(0, 10);

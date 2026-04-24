@@ -637,10 +637,14 @@ export class TwitterService {
    * Hydrate `public_metrics` (and other fields) for an arbitrary list of tweet
    * IDs. Batched at 100 per request (v2 cap on the `ids` parameter). Used when
    * we need fresh engagement numbers for tweets we already know about (e.g.,
-   * the bot's own historical tweets).
+   * the bot's own historical tweets pulled from our DB).
    *
-   * Cost: $0.001 per returned tweet (owned-read rate; assumes caller passes
-   * ids of tweets the authenticated account owns).
+   * Cost: logged at the OWNED-read rate ($0.001/tweet). If the caller passes
+   * IDs the authenticated account does NOT own, Twitter actually charges the
+   * THIRD-PARTY rate ($0.005/tweet). This happens in dev where the auth token
+   * belongs to a testing account but the DB tweet IDs are from production —
+   * actual bill will be ~5x our logged estimate. Acceptable for v1 since the
+   * dollar diff at our volume is ~$0.20/wk; revisit if it becomes material.
    */
   async getTweetsWithMetrics(tweetIds: string[]): Promise<TwitterReadResult<TwitterV2Tweet[]>> {
     if (!this.checkApiEnabled()) return { data: [], costUsd: 0 };
