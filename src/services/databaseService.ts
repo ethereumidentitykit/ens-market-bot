@@ -1,7 +1,24 @@
 import { Pool } from 'pg';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
-import { ProcessedSale, IDatabaseService, TwitterPost, ENSRegistration, ENSRenewal, ENSBid, PriceTier, SiweSession, AIReply, NameResearch, WeeklySummary, WeeklySummaryStatus } from '../types';
+import {
+  ProcessedSale,
+  IDatabaseService,
+  TwitterPost,
+  ENSRegistration,
+  ENSRenewal,
+  ENSBid,
+  PriceTier,
+  SiweSession,
+  AIReply,
+  NameResearch,
+  WeeklySummary,
+  WeeklySummaryStatus,
+  WeeklyBotPost,
+  WeeklyRenewalsStats,
+  WeeklyTopParticipant,
+  WeeklyWashSignals,
+} from '../types';
 
 /**
  * PostgreSQL database service 
@@ -3724,5 +3741,519 @@ export class DatabaseService implements IDatabaseService {
       createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
       updatedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at,
     }));
+  }
+
+  // ============================================================================
+  // Weekly Summary Aggregation Helpers (Phase 3.1)
+  // ============================================================================
+  // These exist to feed `WeeklySummaryDataService` (Phase 3.2). They're kept on
+  // the database service because they're tightly coupled to schema details that
+  // shouldn't leak into the aggregator layer.
+  //
+  // Window semantics:
+  //   - "posted in window" (transactions): filter on `updated_at` because
+  //     that's when we marked the row posted (no other writes happen on these
+  //     tables after insert except the `markAsPosted` family of updates).
+  //   - "happened in window" (renewals stats, top participants, wash sales):
+  //     filter on `block_timestamp` (the on-chain event time).
+  //   - AI replies: filter on `posted_at` (which IS a real column on ai_replies).
+
+  /**
+   * Helper: format an Ethereum address as 0xabcd…1234 for compact LLM context.
+   * Falls back to the bare address if it's somehow shorter than 10 chars.
+   */
+  private static shortAddr(addr: string | null | undefined): string {
+    if (!addr) return '<unknown>';
+    if (addr.length < 10) return addr;
+    return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+  }
+
+  /**
+   * Helper: format a USD value with a $ prefix, comma thousands, and at most
+   * two decimals. Returns the literal `$0` for null/undefined/0.
+   */
+  private static fmtUsd(usd: number | string | null | undefined): string {
+    const n = typeof usd === 'string' ? parseFloat(usd) : (usd ?? 0);
+    if (!Number.isFinite(n) || n === 0) return '$0';
+    return `$${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+  }
+
+  /**
+   * Helper: format an ETH value with up to 4 decimals (truncating trailing
+   * zeros) and an "ETH" suffix.
+   */
+  private static fmtEth(eth: number | string | null | undefined): string {
+    const n = typeof eth === 'string' ? parseFloat(eth) : (eth ?? 0);
+    if (!Number.isFinite(n)) return '0 ETH';
+    return `${n.toLocaleString('en-US', { maximumFractionDigits: 4 })} ETH`;
+  }
+
+  async getWeeklyTweetsAndReplies(start: Date, end: Date): Promise<WeeklyBotPost[]> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    const startIso = start.toISOString();
+    const endIso = end.toISOString();
+
+    try {
+      // Fire all 5 queries in parallel — they hit different tables, no shared
+      // locks, and each is independently small.
+      const [salesRes, regsRes, bidsRes, renewalsRes, repliesRes] = await Promise.all([
+        this.pool.query(
+          `
+          SELECT id, updated_at, tweet_id, transaction_hash,
+                 buyer_address, seller_address,
+                 price_amount, price_usd, currency_symbol,
+                 nft_name, token_id
+          FROM processed_sales
+          WHERE posted = TRUE AND tweet_id IS NOT NULL
+            AND updated_at >= $1 AND updated_at < $2
+          `,
+          [startIso, endIso],
+        ),
+        this.pool.query(
+          `
+          SELECT id, updated_at, tweet_id, transaction_hash,
+                 full_name, cost_eth, cost_usd,
+                 COALESCE(executor_address, owner_address) AS minter_address
+          FROM ens_registrations
+          WHERE posted = TRUE AND tweet_id IS NOT NULL
+            AND updated_at >= $1 AND updated_at < $2
+          `,
+          [startIso, endIso],
+        ),
+        this.pool.query(
+          `
+          SELECT id, updated_at, tweet_id,
+                 ens_name, price_decimal, price_usd, currency_symbol,
+                 maker_address
+          FROM ens_bids
+          WHERE posted = TRUE AND tweet_id IS NOT NULL
+            AND updated_at >= $1 AND updated_at < $2
+          `,
+          [startIso, endIso],
+        ),
+        // Renewals: aggregated per-tx (one bot tweet per renewal tx, regardless
+        // of how many name rows are in the tx). All rows in a tx share the
+        // same renewer + tweet_id; we MAX them for the per-tx representation.
+        this.pool.query(
+          `
+          SELECT
+            transaction_hash,
+            MAX(updated_at) AS posted_at,
+            MAX(tweet_id) AS tweet_id,
+            COUNT(*) AS name_count,
+            SUM(cost_eth) AS total_eth,
+            SUM(cost_usd) AS total_usd,
+            STRING_AGG(full_name, ', ' ORDER BY cost_eth DESC NULLS LAST) AS names_csv,
+            MAX(renewer_address) AS renewer_address
+          FROM ens_renewals
+          WHERE posted = TRUE AND tweet_id IS NOT NULL
+            AND updated_at >= $1 AND updated_at < $2
+          GROUP BY transaction_hash
+          `,
+          [startIso, endIso],
+        ),
+        this.pool.query(
+          `
+          SELECT id, posted_at, reply_tweet_id, original_tweet_id, reply_text, transaction_hash, transaction_type
+          FROM ai_replies
+          WHERE status = 'posted'
+            AND reply_tweet_id IS NOT NULL
+            AND posted_at >= $1 AND posted_at < $2
+          `,
+          [startIso, endIso],
+        ),
+      ]);
+
+      const posts: WeeklyBotPost[] = [];
+
+      for (const row of salesRes.rows) {
+        const symbol = row.currency_symbol || 'ETH';
+        const nameLabel = row.nft_name || `token ${row.token_id?.slice(0, 8) ?? ''}…`;
+        posts.push({
+          type: 'sale',
+          postedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at,
+          tweetId: row.tweet_id,
+          sourceId: row.id,
+          sourceTxHash: row.transaction_hash,
+          text:
+            `${nameLabel} sold for ${DatabaseService.fmtEth(row.price_amount)} ` +
+            (symbol !== 'ETH' ? `(${symbol}) ` : '') +
+            `${DatabaseService.fmtUsd(row.price_usd)} — ` +
+            `buyer ${DatabaseService.shortAddr(row.buyer_address)}, ` +
+            `seller ${DatabaseService.shortAddr(row.seller_address)}`,
+        });
+      }
+
+      for (const row of regsRes.rows) {
+        posts.push({
+          type: 'registration',
+          postedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at,
+          tweetId: row.tweet_id,
+          sourceId: row.id,
+          sourceTxHash: row.transaction_hash,
+          text:
+            `${row.full_name || '(unknown)'} registered for ${DatabaseService.fmtEth(row.cost_eth)} ` +
+            `${DatabaseService.fmtUsd(row.cost_usd)} — ` +
+            `minter ${DatabaseService.shortAddr(row.minter_address)}`,
+        });
+      }
+
+      for (const row of bidsRes.rows) {
+        const symbol = row.currency_symbol || 'ETH';
+        posts.push({
+          type: 'bid',
+          postedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at,
+          tweetId: row.tweet_id,
+          sourceId: row.id,
+          text:
+            `${row.ens_name || '(unknown)'} — bid ${DatabaseService.fmtEth(row.price_decimal)}` +
+            (symbol !== 'ETH' ? ` (${symbol})` : '') +
+            ` ${DatabaseService.fmtUsd(row.price_usd)} ` +
+            `by ${DatabaseService.shortAddr(row.maker_address)}`,
+        });
+      }
+
+      for (const row of renewalsRes.rows) {
+        const nameCount = Number(row.name_count);
+        const allNames = (row.names_csv as string) || '';
+        // Trim names list for the tweet text — the LLM gets the full list via
+        // the renewals top-by-volume rows separately.
+        const namesPreview = allNames.split(', ').slice(0, 3).join(', ');
+        const trailer = nameCount > 3 ? ` (+${nameCount - 3} more)` : '';
+        posts.push({
+          type: 'renewal',
+          postedAt: row.posted_at instanceof Date ? row.posted_at.toISOString() : row.posted_at,
+          tweetId: row.tweet_id,
+          sourceTxHash: row.transaction_hash,
+          text:
+            `${nameCount} name${nameCount === 1 ? '' : 's'} renewed for ` +
+            `${DatabaseService.fmtEth(row.total_eth)} ${DatabaseService.fmtUsd(row.total_usd)} ` +
+            `by ${DatabaseService.shortAddr(row.renewer_address)} — top: ${namesPreview}${trailer}`,
+        });
+      }
+
+      for (const row of repliesRes.rows) {
+        posts.push({
+          type: 'ai_reply',
+          postedAt: row.posted_at instanceof Date ? row.posted_at.toISOString() : row.posted_at,
+          tweetId: row.reply_tweet_id,
+          conversationId: row.original_tweet_id,
+          sourceId: row.id,
+          sourceTxHash: row.transaction_hash || undefined,
+          text: row.reply_text,
+        });
+      }
+
+      // Sort newest-first (matches the rest of the codebase's pattern).
+      posts.sort((a, b) => (a.postedAt < b.postedAt ? 1 : a.postedAt > b.postedAt ? -1 : 0));
+
+      logger.info(
+        `📚 Weekly tweets/replies aggregated: ${salesRes.rows.length} sales, ` +
+          `${regsRes.rows.length} regs, ${bidsRes.rows.length} bids, ` +
+          `${renewalsRes.rows.length} renewal txs, ${repliesRes.rows.length} AI replies ` +
+          `(${posts.length} total) in window ${startIso} → ${endIso}`,
+      );
+      return posts;
+    } catch (error: any) {
+      logger.error('Failed to aggregate weekly tweets and replies:', error.message);
+      throw error;
+    }
+  }
+
+  async getWeeklyRenewalsStats(
+    start: Date,
+    end: Date,
+    topN: number = 10,
+  ): Promise<WeeklyRenewalsStats> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    const startIso = start.toISOString();
+    const endIso = end.toISOString();
+
+    try {
+      const [aggRes, topRes] = await Promise.all([
+        this.pool.query(
+          `
+          SELECT
+            COUNT(*) AS row_count,
+            COUNT(DISTINCT transaction_hash) AS tx_count,
+            COALESCE(SUM(cost_eth), 0) AS total_eth,
+            COALESCE(SUM(cost_usd), 0) AS total_usd
+          FROM ens_renewals
+          WHERE block_timestamp >= $1 AND block_timestamp < $2
+          `,
+          [startIso, endIso],
+        ),
+        this.pool.query(
+          `
+          SELECT * FROM ens_renewals
+          WHERE block_timestamp >= $1 AND block_timestamp < $2
+          ORDER BY cost_eth DESC NULLS LAST
+          LIMIT $3
+          `,
+          [startIso, endIso, topN],
+        ),
+      ]);
+
+      const agg = aggRes.rows[0];
+      const stats: WeeklyRenewalsStats = {
+        count: Number(agg.row_count) || 0,
+        txCount: Number(agg.tx_count) || 0,
+        totalVolumeEth: Number(agg.total_eth) || 0,
+        totalVolumeUsd: Number(agg.total_usd) || 0,
+        topByVolume: this.mapRenewalRows(topRes.rows),
+      };
+
+      logger.info(
+        `📚 Weekly renewals stats: ${stats.count} rows across ${stats.txCount} tx(s), ` +
+          `${stats.totalVolumeEth.toFixed(4)} ETH (${DatabaseService.fmtUsd(stats.totalVolumeUsd)})`,
+      );
+      return stats;
+    } catch (error: any) {
+      logger.error('Failed to aggregate weekly renewals stats:', error.message);
+      throw error;
+    }
+  }
+
+  async getWeeklyTopParticipants(
+    start: Date,
+    end: Date,
+    topN: number = 3,
+  ): Promise<WeeklyTopParticipant[]> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    const startIso = start.toISOString();
+    const endIso = end.toISOString();
+
+    try {
+      // Single CTE that UNIONs each per-event contribution into a uniform
+      // (address, bucket, eth, usd) shape, then GROUPs and ranks. This keeps
+      // the query bounded and lets PG do the heavy lifting in one round-trip.
+      const result = await this.pool.query(
+        `
+        WITH activity AS (
+          SELECT LOWER(buyer_address) AS address, 'buys' AS bucket,
+                 price_amount AS eth, COALESCE(price_usd, 0) AS usd
+          FROM processed_sales
+          WHERE block_timestamp >= $1 AND block_timestamp < $2
+          UNION ALL
+          SELECT LOWER(seller_address) AS address, 'sells' AS bucket,
+                 price_amount AS eth, COALESCE(price_usd, 0) AS usd
+          FROM processed_sales
+          WHERE block_timestamp >= $1 AND block_timestamp < $2
+          UNION ALL
+          SELECT LOWER(COALESCE(executor_address, owner_address)) AS address, 'regs' AS bucket,
+                 COALESCE(cost_eth, 0) AS eth, COALESCE(cost_usd, 0) AS usd
+          FROM ens_registrations
+          WHERE block_timestamp >= $1 AND block_timestamp < $2
+          UNION ALL
+          SELECT LOWER(renewer_address) AS address, 'renewals' AS bucket,
+                 COALESCE(cost_eth, 0) AS eth, COALESCE(cost_usd, 0) AS usd
+          FROM ens_renewals
+          WHERE block_timestamp >= $1 AND block_timestamp < $2
+        )
+        SELECT
+          address,
+          SUM(CASE WHEN bucket = 'buys' THEN 1 ELSE 0 END) AS buys_count,
+          SUM(CASE WHEN bucket = 'buys' THEN eth ELSE 0 END) AS buys_eth,
+          SUM(CASE WHEN bucket = 'buys' THEN usd ELSE 0 END) AS buys_usd,
+          SUM(CASE WHEN bucket = 'sells' THEN 1 ELSE 0 END) AS sells_count,
+          SUM(CASE WHEN bucket = 'sells' THEN eth ELSE 0 END) AS sells_eth,
+          SUM(CASE WHEN bucket = 'sells' THEN usd ELSE 0 END) AS sells_usd,
+          SUM(CASE WHEN bucket = 'regs' THEN 1 ELSE 0 END) AS regs_count,
+          SUM(CASE WHEN bucket = 'regs' THEN eth ELSE 0 END) AS regs_eth,
+          SUM(CASE WHEN bucket = 'regs' THEN usd ELSE 0 END) AS regs_usd,
+          SUM(CASE WHEN bucket = 'renewals' THEN 1 ELSE 0 END) AS renewals_count,
+          SUM(CASE WHEN bucket = 'renewals' THEN eth ELSE 0 END) AS renewals_eth,
+          SUM(CASE WHEN bucket = 'renewals' THEN usd ELSE 0 END) AS renewals_usd,
+          SUM(eth) AS total_eth,
+          SUM(usd) AS total_usd
+        FROM activity
+        WHERE address IS NOT NULL
+        GROUP BY address
+        ORDER BY total_eth DESC NULLS LAST
+        LIMIT $3
+        `,
+        [startIso, endIso, topN],
+      );
+
+      const participants: WeeklyTopParticipant[] = result.rows.map((row: any) => ({
+        address: row.address,
+        ensName: null, // Aggregator (T3.2) enriches this via ENSWorkerService
+        buys: {
+          count: Number(row.buys_count) || 0,
+          volumeEth: Number(row.buys_eth) || 0,
+          volumeUsd: Number(row.buys_usd) || 0,
+        },
+        sells: {
+          count: Number(row.sells_count) || 0,
+          volumeEth: Number(row.sells_eth) || 0,
+          volumeUsd: Number(row.sells_usd) || 0,
+        },
+        registrations: {
+          count: Number(row.regs_count) || 0,
+          costEth: Number(row.regs_eth) || 0,
+          costUsd: Number(row.regs_usd) || 0,
+        },
+        renewals: {
+          count: Number(row.renewals_count) || 0,
+          costEth: Number(row.renewals_eth) || 0,
+          costUsd: Number(row.renewals_usd) || 0,
+        },
+        totalEth: Number(row.total_eth) || 0,
+        totalUsd: Number(row.total_usd) || 0,
+      }));
+
+      logger.info(
+        `📚 Weekly top participants: ${participants.length} address(es) ranked by total ETH ` +
+          `(top: ${participants[0]?.address ?? 'none'} @ ${participants[0]?.totalEth.toFixed(4) ?? '0'} ETH)`,
+      );
+      return participants;
+    } catch (error: any) {
+      logger.error('Failed to aggregate weekly top participants:', error.message);
+      throw error;
+    }
+  }
+
+  async getWeeklyWashSignals(
+    start: Date,
+    end: Date,
+    salesLimit: number = 20,
+    repliesLimit: number = 10,
+  ): Promise<WeeklyWashSignals> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    const startIso = start.toISOString();
+    const endIso = end.toISOString();
+
+    try {
+      // Load blacklist via existing API (it's stored as JSON in system_state).
+      const blacklist = await this.getAddressBlacklist();
+      const blacklistArr = blacklist.map(a => a.toLowerCase());
+
+      // Run blacklist queries only if there's actually a blacklist; otherwise
+      // skip and return zeroes (saves a couple of round-trips on fresh installs).
+      let blacklistAgg = { count: 0, totalEth: 0, totalUsd: 0 };
+      let blacklistSales: ProcessedSale[] = [];
+
+      if (blacklistArr.length > 0) {
+        const [blAggRes, blSalesRes] = await Promise.all([
+          this.pool.query(
+            `
+            SELECT
+              COUNT(*) AS row_count,
+              COALESCE(SUM(price_amount), 0) AS total_eth,
+              COALESCE(SUM(price_usd), 0) AS total_usd
+            FROM processed_sales
+            WHERE block_timestamp >= $1 AND block_timestamp < $2
+              AND (LOWER(buyer_address) = ANY($3::text[]) OR LOWER(seller_address) = ANY($3::text[]))
+            `,
+            [startIso, endIso, blacklistArr],
+          ),
+          this.pool.query(
+            `
+            SELECT * FROM processed_sales
+            WHERE block_timestamp >= $1 AND block_timestamp < $2
+              AND (LOWER(buyer_address) = ANY($3::text[]) OR LOWER(seller_address) = ANY($3::text[]))
+            ORDER BY price_amount DESC NULLS LAST
+            LIMIT $4
+            `,
+            [startIso, endIso, blacklistArr, salesLimit],
+          ),
+        ]);
+
+        const agg = blAggRes.rows[0];
+        blacklistAgg = {
+          count: Number(agg.row_count) || 0,
+          totalEth: Number(agg.total_eth) || 0,
+          totalUsd: Number(agg.total_usd) || 0,
+        };
+        // Map to ProcessedSale shape (fields match the existing pattern in mapBidRows).
+        blacklistSales = blSalesRes.rows.map((row: any) => ({
+          id: row.id,
+          transactionHash: row.transaction_hash,
+          contractAddress: row.contract_address,
+          tokenId: row.token_id,
+          marketplace: row.marketplace,
+          buyerAddress: row.buyer_address,
+          sellerAddress: row.seller_address,
+          priceAmount: row.price_amount?.toString(),
+          priceUsd: row.price_usd?.toString(),
+          currencySymbol: row.currency_symbol,
+          blockNumber: row.block_number,
+          blockTimestamp:
+            row.block_timestamp instanceof Date
+              ? row.block_timestamp.toISOString()
+              : row.block_timestamp,
+          logIndex: row.log_index,
+          processedAt:
+            row.processed_at instanceof Date ? row.processed_at.toISOString() : row.processed_at,
+          tweetId: row.tweet_id,
+          posted: row.posted,
+          collectionName: row.collection_name,
+          collectionLogo: row.collection_logo,
+          nftName: row.nft_name,
+          nftImage: row.nft_image,
+          nftDescription: row.nft_description,
+          marketplaceLogo: row.marketplace_logo,
+          verifiedCollection: row.verified_collection,
+          feeRecipientAddress: row.fee_recipient_address,
+          feeAmountWei: row.fee_amount_wei,
+          feePercent: row.fee_percent !== null ? Number(row.fee_percent) : undefined,
+        }));
+      }
+
+      // AI replies that mentioned the literal word "wash" (case-insensitive,
+      // word-boundary anchored — `\m...\M` are PG's word-boundary metacharacters,
+      // so this matches "wash" / "Wash" / "WASH" but NOT "washing" / "washed").
+      const [washReplyAggRes, washReplyRowsRes] = await Promise.all([
+        this.pool.query(
+          `
+          SELECT COUNT(*) AS row_count
+          FROM ai_replies
+          WHERE status = 'posted'
+            AND posted_at >= $1 AND posted_at < $2
+            AND reply_text ~* '\\mwash\\M'
+          `,
+          [startIso, endIso],
+        ),
+        this.pool.query(
+          `
+          SELECT ${DatabaseService.AI_REPLY_SELECT_COLUMNS}
+          FROM ai_replies
+          WHERE status = 'posted'
+            AND posted_at >= $1 AND posted_at < $2
+            AND reply_text ~* '\\mwash\\M'
+          ORDER BY posted_at DESC
+          LIMIT $3
+          `,
+          [startIso, endIso, repliesLimit],
+        ),
+      ]);
+
+      const signals: WeeklyWashSignals = {
+        blacklistMatches: {
+          count: blacklistAgg.count,
+          volumeEth: blacklistAgg.totalEth,
+          volumeUsd: blacklistAgg.totalUsd,
+          sales: blacklistSales,
+        },
+        aiReplyWashMentions: {
+          count: Number(washReplyAggRes.rows[0]?.row_count) || 0,
+          replies: washReplyRowsRes.rows as AIReply[],
+        },
+      };
+
+      logger.info(
+        `📚 Weekly wash signals: ${signals.blacklistMatches.count} blacklist sale(s) ` +
+          `(${signals.blacklistMatches.volumeEth.toFixed(4)} ETH), ` +
+          `${signals.aiReplyWashMentions.count} AI reply 'wash' mention(s)`,
+      );
+      return signals;
+    } catch (error: any) {
+      logger.error('Failed to aggregate weekly wash signals:', error.message);
+      throw error;
+    }
   }
 }

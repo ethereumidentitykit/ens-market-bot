@@ -412,6 +412,54 @@ export interface IDatabaseService {
    *  for week-over-week deltas. */
   getLastPostedWeeklySummary(beforeDate: Date): Promise<WeeklySummary | null>;
   getWeeklySummariesHistory(limit?: number): Promise<WeeklySummary[]>;
+
+  // Weekly summary aggregation helpers (Phase 3.1)
+  // ─────────────────────────────────────────────────
+  /**
+   * All bot-posted items in the window — posted transactions (one per row,
+   * except renewals which aggregate per-tx) plus posted AI replies. Each item
+   * includes the full constructed text content. Renewals are aggregated by
+   * tx_hash because the unit-of-work for tweets is the tx, not the row (a
+   * single bulk-renewal tx becomes one tweet). Window filter uses `updated_at`
+   * for transactions (= when we marked posted) and `posted_at` for AI replies.
+   * Returned newest-first.
+   */
+  getWeeklyTweetsAndReplies(start: Date, end: Date): Promise<WeeklyBotPost[]>;
+
+  /**
+   * Aggregated renewal stats for the window, plus the top-N renewal rows by
+   * per-name cost. Window filter uses `block_timestamp` (the on-chain renewal
+   * time, not when/whether we tweeted it).
+   */
+  getWeeklyRenewalsStats(start: Date, end: Date, topN?: number): Promise<WeeklyRenewalsStats>;
+
+  /**
+   * Top-N addresses by combined ETH volume across buys + sells + registrations
+   * + renewals in the window. Bids are intentionally NOT included (per plan).
+   * For registrations, attribute cost to the EXECUTOR (the wallet that paid),
+   * which equals owner_address when no separate executor was set. `ensName` is
+   * left null — the caller (aggregator) enriches via ENSWorkerService.
+   * Window filter uses `block_timestamp`.
+   */
+  getWeeklyTopParticipants(start: Date, end: Date, topN?: number): Promise<WeeklyTopParticipant[]>;
+
+  /**
+   * Wash-trade signals for the window — pulled raw, the LLM decides whether
+   * and how to surface them in the thread. Two sources:
+   *   - `blacklistMatches`: sales where buyer OR seller is in the address
+   *     blacklist (filter window: `block_timestamp`). Returns full count + sum
+   *     across the window, plus the first `salesLimit` sales for LLM context.
+   *   - `aiReplyWashMentions`: AI replies whose `reply_text` matches a
+   *     word-boundary `wash` (case-insensitive; PG `~*` with `\m...\M`). Filter
+   *     window: `posted_at`. Returns full count plus the first `repliesLimit`
+   *     replies for LLM context.
+   */
+  getWeeklyWashSignals(
+    start: Date,
+    end: Date,
+    salesLimit?: number,
+    repliesLimit?: number,
+  ): Promise<WeeklyWashSignals>;
 }
 
 // ENS Bids Types
