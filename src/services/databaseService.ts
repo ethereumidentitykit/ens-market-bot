@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
-import { ProcessedSale, IDatabaseService, TwitterPost, ENSRegistration, ENSRenewal, ENSBid, PriceTier, SiweSession, AIReply, NameResearch } from '../types';
+import { ProcessedSale, IDatabaseService, TwitterPost, ENSRegistration, ENSRenewal, ENSBid, PriceTier, SiweSession, AIReply, NameResearch, WeeklySummary, WeeklySummaryStatus } from '../types';
 
 /**
  * PostgreSQL database service 
@@ -623,6 +623,48 @@ export class DatabaseService implements IDatabaseService {
       await this.pool.query(`
         CREATE INDEX IF NOT EXISTS idx_token_prices_lookup ON token_prices(network, token_address);
         CREATE INDEX IF NOT EXISTS idx_token_prices_expiry ON token_prices(last_updated_at);
+      `);
+
+      // Create weekly_summaries table — Friday-cadence market recap thread.
+      //
+      // Lifecycle (status):
+      //   pending         — generation job inserted at 19:00 Madrid; not yet posted
+      //   posted          — full thread posted at 20:00 Madrid (or via dashboard)
+      //   failed          — generation itself failed (no tweets exist on Twitter)
+      //   discarded       — admin discarded the pending row
+      //   partial_posted  — some thread tweets landed, some didn't; the JSONB
+      //                     `tweets` array carries posted_tweet_id for the ones
+      //                     that did so the dashboard can show partial progress.
+      //
+      // unique_week_start prevents a second pending row for the same week if
+      // the generation job is re-triggered (the manual override path uses
+      // INSERT-or-discard-old-pending logic at the service layer).
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS weekly_summaries (
+          id SERIAL PRIMARY KEY,
+          week_start TIMESTAMP NOT NULL,
+          week_end TIMESTAMP NOT NULL,
+          status VARCHAR(20) NOT NULL CHECK (status IN ('pending','posted','failed','discarded','partial_posted')),
+          generated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          posted_at TIMESTAMP,
+          snapshot_data JSONB NOT NULL,
+          llm_context_text TEXT,
+          tweets JSONB NOT NULL DEFAULT '[]',
+          error_message TEXT,
+          model_used VARCHAR(100),
+          prompt_tokens INTEGER,
+          completion_tokens INTEGER,
+          cost_usd DECIMAL(10,4),
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT unique_week_start UNIQUE (week_start)
+        );
+      `);
+
+      // Indexes for the dashboard's status filter and history query.
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_weekly_summaries_status ON weekly_summaries(status);
+        CREATE INDEX IF NOT EXISTS idx_weekly_summaries_week_end ON weekly_summaries(week_end DESC);
       `);
 
       logger.info('PostgreSQL tables created successfully');
@@ -3447,5 +3489,240 @@ export class DatabaseService implements IDatabaseService {
       logger.error('❌ Failed to check trigger status:', error.message);
       return false;
     }
+  }
+
+  // ============================================================================
+  // Weekly Summary Methods
+  // ============================================================================
+  // Friday-cadence market recap thread. The lifecycle is:
+  //   pending → posted | partial_posted | discarded | failed
+  // The CRUD here intentionally stays simple — orchestration (when to insert,
+  // when to mark posted, partial-failure recovery) lives in WeeklySummaryService
+  // (Phase 5). These methods are dumb data plumbing.
+  //
+  // JSONB columns (`snapshot_data`, `tweets`) are passed as JS objects and the
+  // pg driver serializes them automatically — no manual JSON.stringify needed.
+
+  /**
+   * Insert a new weekly summary row. Caller provides the entire payload
+   * (status, snapshot_data, llm_context_text, tweets, etc.). The unique
+   * constraint on `week_start` will reject duplicates — orchestration is
+   * responsible for discarding any stale pending row first.
+   */
+  async insertWeeklySummary(
+    summary: Omit<WeeklySummary, 'id' | 'createdAt' | 'updatedAt'>
+  ): Promise<number> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(
+        `
+        INSERT INTO weekly_summaries (
+          week_start, week_end, status, generated_at, posted_at,
+          snapshot_data, llm_context_text, tweets, error_message,
+          model_used, prompt_tokens, completion_tokens, cost_usd
+        ) VALUES (
+          $1, $2, $3, $4, $5,
+          $6::jsonb, $7, $8::jsonb, $9,
+          $10, $11, $12, $13
+        )
+        RETURNING id
+      `,
+        [
+          summary.weekStart,
+          summary.weekEnd,
+          summary.status,
+          summary.generatedAt,
+          summary.postedAt ?? null,
+          JSON.stringify(summary.snapshotData),
+          summary.llmContextText ?? null,
+          JSON.stringify(summary.tweets ?? []),
+          summary.errorMessage ?? null,
+          summary.modelUsed ?? null,
+          summary.promptTokens ?? null,
+          summary.completionTokens ?? null,
+          summary.costUsd ?? null,
+        ],
+      );
+
+      const id = result.rows[0].id as number;
+      logger.info(`📝 Inserted weekly summary id=${id} status=${summary.status} weekStart=${summary.weekStart}`);
+      return id;
+    } catch (error: any) {
+      logger.error('Failed to insert weekly summary:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Partial update — only the provided fields are written. `tweets` and
+   * `snapshotData` are JSONB columns and replace any prior value when present.
+   * `updated_at` is always bumped to CURRENT_TIMESTAMP.
+   *
+   * Designed to be called repeatedly during the posting flow:
+   *   1. After tweet 1 posts → updateWeeklySummary(id, { tweets: [...with tweet1 id] })
+   *   2. After tweet 2 posts → updateWeeklySummary(id, { tweets: [...with both ids] })
+   *   3. After all tweets post → updateWeeklySummary(id, { status, postedAt, tweets })
+   */
+  async updateWeeklySummary(id: number, updates: Partial<WeeklySummary>): Promise<void> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    // Build dynamic SET clause from provided fields.
+    // Whitelist what's updatable so we don't accidentally allow id/createdAt/weekStart writes.
+    const fieldMap: Array<{ column: string; value: any; isJsonb?: boolean }> = [];
+
+    if (updates.status !== undefined) fieldMap.push({ column: 'status', value: updates.status });
+    if (updates.weekEnd !== undefined) fieldMap.push({ column: 'week_end', value: updates.weekEnd });
+    if (updates.postedAt !== undefined) fieldMap.push({ column: 'posted_at', value: updates.postedAt });
+    if (updates.snapshotData !== undefined)
+      fieldMap.push({ column: 'snapshot_data', value: JSON.stringify(updates.snapshotData), isJsonb: true });
+    if (updates.llmContextText !== undefined)
+      fieldMap.push({ column: 'llm_context_text', value: updates.llmContextText });
+    if (updates.tweets !== undefined)
+      fieldMap.push({ column: 'tweets', value: JSON.stringify(updates.tweets), isJsonb: true });
+    if (updates.errorMessage !== undefined)
+      fieldMap.push({ column: 'error_message', value: updates.errorMessage });
+    if (updates.modelUsed !== undefined) fieldMap.push({ column: 'model_used', value: updates.modelUsed });
+    if (updates.promptTokens !== undefined)
+      fieldMap.push({ column: 'prompt_tokens', value: updates.promptTokens });
+    if (updates.completionTokens !== undefined)
+      fieldMap.push({ column: 'completion_tokens', value: updates.completionTokens });
+    if (updates.costUsd !== undefined) fieldMap.push({ column: 'cost_usd', value: updates.costUsd });
+
+    if (fieldMap.length === 0) {
+      logger.debug(`updateWeeklySummary(${id}) called with no updatable fields — skipping`);
+      return;
+    }
+
+    try {
+      const setClauses: string[] = [];
+      const params: any[] = [];
+      let paramIdx = 1;
+      for (const { column, value, isJsonb } of fieldMap) {
+        setClauses.push(`${column} = $${paramIdx}${isJsonb ? '::jsonb' : ''}`);
+        params.push(value);
+        paramIdx++;
+      }
+      setClauses.push(`updated_at = CURRENT_TIMESTAMP`);
+      params.push(id);
+
+      const sql = `UPDATE weekly_summaries SET ${setClauses.join(', ')} WHERE id = $${paramIdx}`;
+      const result = await this.pool.query(sql, params);
+
+      if (result.rowCount === 0) {
+        logger.warn(`updateWeeklySummary(${id}): no row matched — id may not exist`);
+      } else {
+        logger.debug(`updateWeeklySummary(${id}): updated columns [${fieldMap.map(f => f.column).join(', ')}]`);
+      }
+    } catch (error: any) {
+      logger.error(`Failed to update weekly summary ${id}:`, error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get the single in-flight pending row, regardless of which week it belongs
+   * to. There should only ever be at most one pending row at a time (the
+   * unique constraint on week_start + the orchestration discard-old-pending
+   * logic guarantees this), so we LIMIT 1 and return null otherwise.
+   *
+   * Caller is responsible for any "is this for *this* week?" date check.
+   */
+  async getCurrentPendingWeeklySummary(): Promise<WeeklySummary | null> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(`
+        SELECT * FROM weekly_summaries
+        WHERE status = 'pending'
+        ORDER BY generated_at DESC
+        LIMIT 1
+      `);
+      if (result.rows.length === 0) return null;
+      return this.mapWeeklySummaryRows(result.rows)[0];
+    } catch (error: any) {
+      logger.error('Failed to get current pending weekly summary:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get the most recent posted (or partial_posted) summary whose week_start is
+   * strictly before `beforeDate`. Used by the aggregator to load the previous
+   * week's snapshot for week-over-week deltas.
+   *
+   * Returns null on first run (no prior posted row) — the LLM prompt then
+   * degrades the comparison angle gracefully.
+   */
+  async getLastPostedWeeklySummary(beforeDate: Date): Promise<WeeklySummary | null> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(
+        `
+        SELECT * FROM weekly_summaries
+        WHERE status IN ('posted', 'partial_posted')
+          AND week_start < $1
+        ORDER BY week_start DESC
+        LIMIT 1
+      `,
+        [beforeDate.toISOString()],
+      );
+      if (result.rows.length === 0) return null;
+      return this.mapWeeklySummaryRows(result.rows)[0];
+    } catch (error: any) {
+      logger.error('Failed to get last posted weekly summary:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get the most recent N summaries (any status) for the dashboard history view.
+   */
+  async getWeeklySummariesHistory(limit: number = 12): Promise<WeeklySummary[]> {
+    if (!this.pool) throw new Error('Database not initialized');
+
+    try {
+      const result = await this.pool.query(
+        `
+        SELECT * FROM weekly_summaries
+        ORDER BY week_start DESC
+        LIMIT $1
+      `,
+        [limit],
+      );
+      return this.mapWeeklySummaryRows(result.rows);
+    } catch (error: any) {
+      logger.error('Failed to get weekly summaries history:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Map snake_case rows from `weekly_summaries` to camelCase `WeeklySummary`.
+   * JSONB columns come back from `pg` as already-parsed objects — no JSON.parse
+   * needed (this mirrors how `pg` handles JSONB by default).
+   */
+  private mapWeeklySummaryRows(rows: any[]): WeeklySummary[] {
+    return rows.map((row: any) => ({
+      id: row.id,
+      weekStart: row.week_start instanceof Date ? row.week_start.toISOString() : row.week_start,
+      weekEnd: row.week_end instanceof Date ? row.week_end.toISOString() : row.week_end,
+      status: row.status as WeeklySummaryStatus,
+      generatedAt: row.generated_at instanceof Date ? row.generated_at.toISOString() : row.generated_at,
+      postedAt: row.posted_at
+        ? (row.posted_at instanceof Date ? row.posted_at.toISOString() : row.posted_at)
+        : null,
+      snapshotData: row.snapshot_data, // JSONB → already an object
+      llmContextText: row.llm_context_text,
+      tweets: Array.isArray(row.tweets) ? row.tweets : [], // JSONB → already an array
+      errorMessage: row.error_message,
+      modelUsed: row.model_used,
+      promptTokens: row.prompt_tokens,
+      completionTokens: row.completion_tokens,
+      costUsd: row.cost_usd !== null && row.cost_usd !== undefined ? Number(row.cost_usd) : null,
+      createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
+      updatedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at,
+    }));
   }
 }

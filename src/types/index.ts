@@ -1,4 +1,16 @@
 import { Pool } from 'pg';
+import {
+  GrailsMarketAnalytics,
+  GrailsRegistrationAnalytics,
+  GrailsTopSale,
+  GrailsTopRegistration,
+  GrailsTopOffer,
+  GrailsVolumeChart,
+  GrailsSalesChart,
+  GrailsVolumeDistribution,
+  GrailsSearchName,
+} from './bids';
+import { TwitterV2Tweet, TwitterPublicMetrics } from './twitter';
 
 // NFT Sales API Response Types
 export interface NFTSale {
@@ -386,6 +398,20 @@ export interface IDatabaseService {
   setupRenewalNotificationTriggers(): Promise<void>; // Statement-level triggers; one notify per tx_hash
   setupAIReplyNotificationTriggers(): Promise<void>; // Phase 3.4
   checkSaleNotificationTriggers(): Promise<boolean>;
+
+  // Weekly summary methods (Friday market recap thread)
+  insertWeeklySummary(summary: Omit<WeeklySummary, 'id' | 'createdAt' | 'updatedAt'>): Promise<number>;
+  /** Partial update — only the provided fields are written. `tweets` and
+   *  `snapshotData` are JSONB and will be replaced wholesale when present. */
+  updateWeeklySummary(id: number, updates: Partial<WeeklySummary>): Promise<void>;
+  /** The single in-flight pending row for the current week, or null. Returns
+   *  null if there's no pending row at all (regardless of week). */
+  getCurrentPendingWeeklySummary(): Promise<WeeklySummary | null>;
+  /** The most recent posted (or partial_posted) summary whose week_start is
+   *  strictly before `beforeDate`. Used to load the previous-week snapshot
+   *  for week-over-week deltas. */
+  getLastPostedWeeklySummary(beforeDate: Date): Promise<WeeklySummary | null>;
+  getWeeklySummariesHistory(limit?: number): Promise<WeeklySummary[]>;
 }
 
 // ENS Bids Types
@@ -448,4 +474,241 @@ export interface ApiResponse<T = any> {
   data?: T;
   error?: string;
   message?: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Weekly Market Summary types
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Lifecycle:
+//   pending  → row inserted by the 19:00 generation job (Friday Madrid time)
+//   posted   → all tweets in the thread posted successfully
+//   failed   → generation itself failed (no tweets exist on Twitter for this row)
+//   discarded → admin discarded the pending summary via the dashboard
+//   partial_posted → some thread tweets posted, some failed mid-stream; the
+//                    `tweets[]` array carries `postedTweetId` for the ones that
+//                    landed and `null` for the ones that didn't
+export type WeeklySummaryStatus =
+  | 'pending'
+  | 'posted'
+  | 'failed'
+  | 'discarded'
+  | 'partial_posted';
+
+/**
+ * One tweet in the generated thread. `postedTweetId` is filled in immediately
+ * after each successful post so a partial-failure leaves the row in an
+ * inspectable, resumable state.
+ */
+export interface WeeklySummaryTweet {
+  text: string;
+  postedTweetId?: string | null;
+}
+
+/**
+ * Row in the `weekly_summaries` table — 1:1 with the schema (snake_case ↔
+ * camelCase). `snapshotData` is stored as JSONB; `tweets` is JSONB; everything
+ * else is a scalar column.
+ */
+export interface WeeklySummary {
+  id?: number;
+  weekStart: string;                   // ISO 8601, UTC
+  weekEnd: string;                     // ISO 8601, UTC
+  status: WeeklySummaryStatus;
+  generatedAt: string;
+  postedAt?: string | null;
+  snapshotData: WeeklySnapshotData;    // JSONB column
+  llmContextText?: string | null;      // Full prompt sent to the LLM (debug)
+  tweets: WeeklySummaryTweet[];        // JSONB column; ordered top → bottom of thread
+  errorMessage?: string | null;
+  modelUsed?: string | null;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
+  /** Combined LLM + Twitter cost for the run. Twitter component is the
+   *  upper-bound cost (24h dedup may make actual bill smaller). */
+  costUsd?: number | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/**
+ * The headline numbers we persist to `snapshot_data` after a successful post.
+ * Loaded by next week's run to compute deltas. Keep this lean — anything not
+ * needed for week-over-week comparison should NOT live here.
+ *
+ * If you add a field, the first run after deployment will see `undefined` for
+ * it on the previous-week snapshot. Treat all fields as optional from the
+ * comparison consumer's perspective.
+ */
+export interface WeeklySnapshotData {
+  weekStart: string;
+  weekEnd: string;
+
+  // Sales (from analytics/market.volume)
+  salesCount: number;
+  salesVolumeEth: number;
+  salesVolumeUsd: number;
+  uniqueBuyers: number;
+  uniqueSellers: number;
+  uniqueNamesSold: number;
+
+  // Registrations (from analytics/registrations.summary)
+  registrationCount: number;
+  registrationCostEth: number;
+  registrationCostUsd: number;
+  premiumRegistrations: number;
+  uniqueRegistrants: number;
+
+  // Renewals (from self DB; Grails has no renewals endpoints)
+  renewalCount: number;       // Distinct ens_renewals rows (= names renewed)
+  renewalTxCount: number;     // Distinct transactions
+  renewalVolumeEth: number;
+  renewalVolumeUsd: number;
+
+  // Offers + market state (from analytics/market)
+  offersCount: number;
+  activeListings: number;
+  activeOffers: number;
+
+  // ETH price at week end (Alchemy historical)
+  ethPriceUsd: number | null;
+}
+
+// ─── Self-DB sub-shapes (populated by Phase 3 helpers) ───────────────────────
+
+/**
+ * Aggregated renewal stats for the week. Returned by
+ * `DatabaseService.getWeeklyRenewalsStats`.
+ */
+export interface WeeklyRenewalsStats {
+  count: number;             // Total ens_renewals rows in window
+  txCount: number;           // Distinct tx_hashes
+  totalVolumeEth: number;
+  totalVolumeUsd: number;
+  topByVolume: ENSRenewal[]; // Top N rows by per-name cost (limit set by caller)
+}
+
+/**
+ * One participant in the weekly top-N list. We compute combined per-address
+ * volume across buys / sells / registrations / renewals, then surface the
+ * breakdown so the LLM can pick the most interesting story (not necessarily
+ * the highest total).
+ */
+export interface WeeklyTopParticipant {
+  address: string;
+  ensName: string | null;        // Resolved at aggregation time when known
+  buys: { count: number; volumeEth: number; volumeUsd: number };
+  sells: { count: number; volumeEth: number; volumeUsd: number };
+  registrations: { count: number; costEth: number; costUsd: number };
+  renewals: { count: number; costEth: number; costUsd: number };
+  totalEth: number;              // Ranking key
+  totalUsd: number;
+}
+
+/**
+ * Wash-trade detection signals for the week. Pulled raw — the LLM decides if
+ * and how to surface them in the thread.
+ */
+export interface WeeklyWashSignals {
+  blacklistMatches: {
+    count: number;
+    volumeEth: number;
+    volumeUsd: number;
+    sales: ProcessedSale[];   // First N sales for context (limit set by caller)
+  };
+  aiReplyWashMentions: {
+    count: number;
+    replies: AIReply[];       // First N AI replies that mentioned 'wash'
+  };
+}
+
+/**
+ * One bot-posted item in the weekly self-tweet feed. RAW text, no compression.
+ *
+ * `type` distinguishes between transaction tweets (sale/registration/bid/renewal)
+ * and AI replies (which are threaded children of transaction tweets). For
+ * transactions, `tweetId` is the bot's own tweet id; for AI replies it's the
+ * `reply_tweet_id`. `text` is the actual text we posted (or generated for
+ * ai_replies).
+ *
+ * `metrics` is filled in for own tweets when we batch-fetch via
+ * `getTweetsWithMetrics`. Not all rows will have metrics (e.g. ai_replies
+ * within the bot's own thread cost the same to fetch — we DO fetch metrics on
+ * those — but if the API call fails for a batch we leave `metrics` undefined).
+ */
+export interface WeeklyBotPost {
+  type: 'sale' | 'registration' | 'bid' | 'renewal' | 'ai_reply';
+  postedAt: string;             // ISO 8601
+  tweetId: string;              // Always non-null in the feed (we filter rows without it)
+  text: string;                 // The exact tweet text (or generated reply text for ai_replies)
+  conversationId?: string | null;
+  // Cross-references for joining back to source rows:
+  sourceId?: number;            // Numeric row id for sale/registration/bid/ai_reply
+  sourceTxHash?: string;        // Tx hash for renewals (per-tx, not per-row)
+  metrics?: TwitterPublicMetrics; // Filled by batch hydrate; undefined on failure
+}
+
+/**
+ * The canonical aggregated data shape consumed by the LLM (Phase 4) and the
+ * future weekly-summary image template (v2). Built by `WeeklySummaryDataService`
+ * (Phase 3) from Grails + self-DB + Twitter + Alchemy sources.
+ *
+ * Each Grails source is `null` on transport failure; each list source returns
+ * `[]` rather than `null` so the consumer doesn't need a separate "empty vs
+ * unavailable" check for those. The `partialSourceFailures` array lists the
+ * names of any source that returned null/threw, so the prompt can be honest
+ * with the LLM about what's missing.
+ */
+export interface WeeklySummaryData {
+  // Time window
+  weekStart: string;
+  weekEnd: string;
+
+  // ── Grails sources ────────────────────────────────────────────────────────
+  marketAnalytics: GrailsMarketAnalytics | null;
+  registrationAnalytics: GrailsRegistrationAnalytics | null;
+  topSales: GrailsTopSale[];
+  topRegistrations: GrailsTopRegistration[];
+  topOffers: GrailsTopOffer[];
+  volumeChart: GrailsVolumeChart | null;
+  salesChart: GrailsSalesChart | null;
+  volumeDistribution: GrailsVolumeDistribution | null;
+  premiumByWatchers: GrailsSearchName[];
+  graceByWatchers: GrailsSearchName[];
+
+  // ── Self-DB sources ───────────────────────────────────────────────────────
+  renewalsStats: WeeklyRenewalsStats;
+  topParticipants: WeeklyTopParticipant[];
+  washSignals: WeeklyWashSignals;
+  botPosts: WeeklyBotPost[];
+
+  // ── Twitter sources ───────────────────────────────────────────────────────
+  /**
+   * Bot's own tweets posted in the window WITH freshly fetched engagement
+   * metrics. May overlap with `botPosts` rows for transaction tweets (we
+   * include in both: `botPosts` for the LLM to read raw text and reference
+   * cross-types, this list specifically for engagement-by-tweet analysis).
+   */
+  ownTweetsWithFreshMetrics: TwitterV2Tweet[];
+  /**
+   * Up to 100 third-party replies for each conversation (= each bot tweet)
+   * that had reply_count > 0. The 100/conv cap is enforced upstream in
+   * `TwitterService.getRepliesToTweet` to bound per-week cost.
+   */
+  thirdPartyReplies: Array<{ conversationId: string; replies: TwitterV2Tweet[] }>;
+  ensTwitterChatter: TwitterV2Tweet[];
+
+  // ── Alchemy ───────────────────────────────────────────────────────────────
+  ethPriceNow: number | null;
+  ethPrice7dAgo: number | null;
+
+  // ── Comparison ────────────────────────────────────────────────────────────
+  /** Snapshot of the previous week's posted summary; null on first run. */
+  previousSnapshot: WeeklySnapshotData | null;
+
+  // ── Aggregator metadata (for prompt + cost tracking) ─────────────────────
+  /** Sum of TwitterReadResult.costUsd from all Twitter calls during this run. */
+  twitterCostUsd: number;
+  /** Names of sources whose fetch failed (so the prompt can be honest with the LLM). */
+  partialSourceFailures: string[];
 }
