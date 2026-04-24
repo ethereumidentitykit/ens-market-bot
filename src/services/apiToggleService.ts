@@ -10,6 +10,14 @@ export interface APIToggleState {
   openaiEnabled: boolean;
   autoPostingEnabled: boolean;
   aiAutoPostingEnabled: boolean;
+  /**
+   * Gates the Friday-cadence weekly summary scheduler. Defaults to false —
+   * the scheduler will silently skip its 19:00 + 20:00 Madrid runs until an
+   * admin flips this on from the dashboard. Manual "Generate now" / "Post"
+   * actions from the dashboard are NOT gated by this — they always work
+   * regardless of the toggle (that's the whole point of manual override).
+   */
+  weeklySummaryAutoEnabled: boolean;
 }
 
 export class APIToggleService {
@@ -18,7 +26,8 @@ export class APIToggleService {
     twitterEnabled: true,
     openaiEnabled: true,
     autoPostingEnabled: false,
-    aiAutoPostingEnabled: false
+    aiAutoPostingEnabled: false,
+    weeklySummaryAutoEnabled: false
   };
   private dbService: IDatabaseService | null = null;
   private initialized = false;
@@ -47,6 +56,7 @@ export class APIToggleService {
       const openaiState = await this.dbService.getSystemState('api_toggle_openai');
       const autoPostState = await this.dbService.getSystemState('api_toggle_auto_post');
       const aiAutoPostState = await this.dbService.getSystemState('api_toggle_ai_auto_post');
+      const weeklySummaryAutoState = await this.dbService.getSystemState('api_toggle_weekly_summary_auto');
 
       if (twitterState) {
         this.state.twitterEnabled = twitterState === 'true';
@@ -59,6 +69,9 @@ export class APIToggleService {
       }
       if (aiAutoPostState) {
         this.state.aiAutoPostingEnabled = aiAutoPostState === 'true';
+      }
+      if (weeklySummaryAutoState) {
+        this.state.weeklySummaryAutoEnabled = weeklySummaryAutoState === 'true';
       }
 
       logger.info('Toggle states loaded from database:', this.state);
@@ -75,6 +88,7 @@ export class APIToggleService {
       await this.dbService.setSystemState('api_toggle_openai', this.state.openaiEnabled.toString());
       await this.dbService.setSystemState('api_toggle_auto_post', this.state.autoPostingEnabled.toString());
       await this.dbService.setSystemState('api_toggle_ai_auto_post', this.state.aiAutoPostingEnabled.toString());
+      await this.dbService.setSystemState('api_toggle_weekly_summary_auto', this.state.weeklySummaryAutoEnabled.toString());
       
       logger.debug('Toggle states saved to database');
     } catch (error: any) {
@@ -98,6 +112,10 @@ export class APIToggleService {
     return this.state.aiAutoPostingEnabled;
   }
 
+  isWeeklySummaryAutoEnabled(): boolean {
+    return this.state.weeklySummaryAutoEnabled;
+  }
+
   getState(): APIToggleState {
     return { ...this.state };
   }
@@ -107,6 +125,12 @@ export class APIToggleService {
     
     if (!enabled && this.state.autoPostingEnabled) {
       this.state.autoPostingEnabled = false;
+    }
+    // Cascade: killing Twitter must also kill weekly-summary auto, since the
+    // post leg of the weekly job needs Twitter. Same UX contract as the
+    // autoPostingEnabled cascade above.
+    if (!enabled && this.state.weeklySummaryAutoEnabled) {
+      this.state.weeklySummaryAutoEnabled = false;
     }
     
     await this.saveToDatabase();
@@ -133,6 +157,23 @@ export class APIToggleService {
       throw new Error('Cannot enable AI auto-posting when OpenAI API is disabled');
     }
     this.state.aiAutoPostingEnabled = enabled;
+    await this.saveToDatabase();
+  }
+
+  /**
+   * Enable / disable the weekly-summary auto scheduler. Same dependency
+   * contract as `setAIAutoPostingEnabled`: turning ON requires both Twitter
+   * and OpenAI to be enabled first. Manual dashboard actions are NOT gated
+   * by this; only the cron-driven 19:00 + 20:00 Madrid runs are.
+   */
+  async setWeeklySummaryAutoEnabled(enabled: boolean): Promise<void> {
+    if (enabled && !this.state.twitterEnabled) {
+      throw new Error('Cannot enable weekly summary auto-posting when Twitter API is disabled');
+    }
+    if (enabled && !this.state.openaiEnabled) {
+      throw new Error('Cannot enable weekly summary auto-posting when OpenAI API is disabled');
+    }
+    this.state.weeklySummaryAutoEnabled = enabled;
     await this.saveToDatabase();
   }
 }
