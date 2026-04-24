@@ -293,23 +293,76 @@ export class WeeklySummaryDataService {
       }
     }
 
-    // ── Wave 3: enrich top participants with ENS names ──────────────────────
+    // ── Wave 3: enrich top participants with ENS names + Twitter handles ───
+    // Two parallel passes:
+    //   - resolveAddresses() → ENS display name (used in prompt's "ensname.eth")
+    //   - getSocialHandles() → twitter handle from com.twitter record (used by
+    //     T5 Top Player tweet to @-mention the actual person if they have one)
+    // Both fall through cleanly to null on individual failures. Per-address
+    // calls to getSocialHandles are independent → wrapped in Promise.allSettled.
     if (topParticipants.length > 0) {
       try {
-        const resolved = await this.ensWorkerService.resolveAddresses(
-          topParticipants.map(p => p.address),
-        );
+        const [resolved, socialResults] = await Promise.all([
+          this.ensWorkerService.resolveAddresses(topParticipants.map(p => p.address)),
+          Promise.allSettled(
+            topParticipants.map(p => this.ensWorkerService.getSocialHandles(p.address)),
+          ),
+        ]);
+
         const ensByAddr = new Map(resolved.map(r => [r.address.toLowerCase(), r]));
+        const handleByAddr = new Map<string, string | null>();
+        topParticipants.forEach((p, idx) => {
+          const r = socialResults[idx];
+          if (r.status === 'fulfilled') {
+            const raw = r.value.twitter ?? null;
+            // Strip any leading @ + whitespace; treat empty as null.
+            const cleaned = raw ? raw.replace(/^@/, '').trim() : null;
+            handleByAddr.set(p.address.toLowerCase(), cleaned && cleaned.length > 0 ? cleaned : null);
+          } else {
+            handleByAddr.set(p.address.toLowerCase(), null);
+          }
+        });
+
         topParticipants = topParticipants.map(p => {
           const r = ensByAddr.get(p.address.toLowerCase());
-          // hasEns + ensName present means we got a real ENS name back.
-          // Otherwise leave ensName null and let the prompt show the address.
-          return { ...p, ensName: r?.hasEns && r.ensName ? r.ensName : null };
+          return {
+            ...p,
+            ensName: r?.hasEns && r.ensName ? r.ensName : null,
+            twitterHandle: handleByAddr.get(p.address.toLowerCase()) ?? null,
+          };
         });
       } catch (err: any) {
         partialSourceFailures.push('enrichment:topParticipantsEns');
-        logger.warn(`📊 [WeeklyData] Top-participants ENS enrichment failed: ${err.message}`);
+        logger.warn(`📊 [WeeklyData] Top-participants ENS/social enrichment failed: ${err.message}`);
       }
+    }
+
+    // ── F3 (post-Wave 1): filter blacklisted addresses out of topSales ─────
+    // Sales involving blacklisted addresses are NOT tweeted by our pipeline,
+    // so they shouldn't be referenced by the LLM as "headline trades" either.
+    // Fetch the blacklist and filter — done here (not at Grails-fetch time) so
+    // the filter is applied with our own DB's authoritative blacklist.
+    let topSalesFiltered = topSales;
+    try {
+      const blacklist = await this.databaseService.getAddressBlacklist();
+      if (blacklist.length > 0 && topSales.length > 0) {
+        const blSet = new Set(blacklist.map(a => a.toLowerCase()));
+        const before = topSales.length;
+        topSalesFiltered = topSales.filter(s => {
+          const buyer = (s.buyer_address ?? '').toLowerCase();
+          const seller = (s.seller_address ?? '').toLowerCase();
+          return !blSet.has(buyer) && !blSet.has(seller);
+        });
+        const removed = before - topSalesFiltered.length;
+        if (removed > 0) {
+          logger.info(
+            `📊 [WeeklyData] Filtered ${removed} blacklisted sale(s) from topSales (${before} → ${topSalesFiltered.length})`,
+          );
+        }
+      }
+    } catch (err: any) {
+      partialSourceFailures.push('filter:blacklistTopSales');
+      logger.warn(`📊 [WeeklyData] Blacklist filter failed, passing topSales through: ${err.message}`);
     }
 
     const elapsedMs = Date.now() - startedAt;
@@ -328,7 +381,7 @@ export class WeeklySummaryDataService {
 
       marketAnalytics,
       registrationAnalytics,
-      topSales,
+      topSales: topSalesFiltered,
       topRegistrations,
       topOffers,
       volumeChart,

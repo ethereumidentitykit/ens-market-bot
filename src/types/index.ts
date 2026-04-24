@@ -440,8 +440,18 @@ export interface IDatabaseService {
    * which equals owner_address when no separate executor was set. `ensName` is
    * left null — the caller (aggregator) enriches via ENSWorkerService.
    * Window filter uses `block_timestamp`.
+   *
+   * @param excludeRenewals (TEMP) When true, omits the renewals UNION from
+   *   the activity CTE entirely so renewals don't contribute to ranking.
+   *   Used by the weekly summary feature while we have a known data gap on
+   *   the renewals side. Defaults false.
    */
-  getWeeklyTopParticipants(start: Date, end: Date, topN?: number): Promise<WeeklyTopParticipant[]>;
+  getWeeklyTopParticipants(
+    start: Date,
+    end: Date,
+    topN?: number,
+    excludeRenewals?: boolean,
+  ): Promise<WeeklyTopParticipant[]>;
 
   /**
    * Wash-trade signals for the window — pulled raw, the LLM decides whether
@@ -668,6 +678,10 @@ export interface WeeklyRenewalsStats {
 export interface WeeklyTopParticipant {
   address: string;
   ensName: string | null;        // Resolved at aggregation time when known
+  /** Twitter handle from ENS records (`com.twitter`), no `@` prefix. Null if
+   *  the address has no ENS twitter record OR resolution failed. Used by the
+   *  Top Player tweet (T5) so the lead-in can `@`-mention the actual person. */
+  twitterHandle: string | null;
   buys: { count: number; volumeEth: number; volumeUsd: number };
   sells: { count: number; volumeEth: number; volumeUsd: number };
   registrations: { count: number; costEth: number; costUsd: number };

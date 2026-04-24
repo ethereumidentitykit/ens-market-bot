@@ -1193,7 +1193,7 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
    * accordingly) — same pattern we use elsewhere in the codebase for the
    * per-event AI replies (where "AI insight:" is auto-prefixed).
    */
-  private static readonly WEEKLY_HEADLINE_HEADER = 'This Week in ENS Market (by GrailsAI ✨)';
+  private static readonly WEEKLY_HEADLINE_HEADER = 'ENS Market Weekly Digest --- by GrailsAI ✨';
   /**
    * The five lanes of the weekly thread, in the order they MUST appear.
    * The system prompt + JSON schema both anchor on this ordering; the
@@ -1479,7 +1479,8 @@ TWEET 2 — section: "by_the_numbers"
 The hard-data tweet. The headline numbers a market watcher needs to know:
 
   - Sales: count + total volume (ETH and USD)
-  - Registrations/renewals: count + total cost + total premium paid
+  - Registrations: count + total cost + total premium paid (premium = the auction-clearing portion above base reg cost; high premium spend = high demand)
+  - Renewals: count + total volume (conviction signal — owners paying to keep names)
   - Bids/offers: how active was the bid layer
   - Week-over-week delta on the BIGGEST mover (use PREVIOUS WEEK SNAPSHOT if provided; skip the comparison entirely if it isn't)
   - ETH price context if move is ≥5% AND how it may effect sentiment.
@@ -1491,12 +1492,23 @@ TWEET 3 — section: "spotlight"
 ══════════════════════════════════════════════════════════════════════════
 The dynamic deep-focus tweet. Pick ONE angle from the menu below — whichever is loudest in the week's data — and go DEEP on it. ONE thing, well-explored.
 
-DEFAULT angle: NAMES TO WATCH. Use the data in NAMES TO WATCH: PREMIUM DECAY (top names with high watcher concentration in the premium auction phase) and NAMES TO WATCH: GRACE → PREMIUM SOON (names dropping into the premium auction within 7 days if current owner doesn't renew). Lead with premium-decay names — that's where the auction action is happening this week. Mention 1-2 grace-soon names as a tail ("and watching these enter the auction this week:").
+DEFAULT angle: NAMES TO WATCH. Use the data in NAMES TO WATCH: PREMIUM DECAY (live auction names) and NAMES TO WATCH: GRACE → PREMIUM SOON (entering the auction within 7 days if owner doesn't renew).
+
+KEY CONTEXT on premium decay: ENS premium starts at $100M when a name enters the auction (90 days after expiry) and HALVES EVERY DAY for 21 days, ending at $0. So Day 1 = $50M, Day 5 = ~$3M, Day 10 = ~$98k, Day 14 = ~$6k, Day 17 = ~$760, Day 19 = ~$190, Day 20 = ~$95, Day 21 = $0. The cheaper the current premium, the more likely the name CLEARS soon — and the more accessible to organic registrants.
+
+WHAT TO TALK ABOUT (not what to list):
+  - The NAMES themselves: what makes them grail-quality? Short? Brandable? Tied to a real concept? Dictionary words? Common first names? Crypto-native (ai/zk/cpu/agent)? Club members (999/10k/3-letter/prepunk)?
+  - CURRENT PREMIUM PRICE — surface it for names where it's already cheap (under $5k = anyone can reach; under $1k = will likely clear this week). High premium ($100k+) = collector territory, only mention if it's a true grail
+  - DAYS LEFT in the auction — for names with low days remaining ("3 days left, premium ~$1.5k"), lean into "this is the moment to act"
+  - For grace-soon names: frame as "watch list for next week" — these aren't biddable yet
+  - LAST SALE PRICE if present — useful as a fair-value anchor ("last cleared at 2 ETH in 2022, currently at $390 premium")
+
+DO NOT cite watcher counts. Watcher counts are a backend filter mechanism that surfaces these names to you in the first place — they're not interesting data for readers.
 
 PIVOT angles (use INSTEAD of names-to-watch only if clearly louder):
   - ENGAGING POST OF YOURS: One of YOUR OWN posts from earlier this week drove unusually high engagement or a juicy reply thread. Lead with what you said and why it landed. Reference the actual replies for context (PARAPHRASE — never quote verbatim).
   - CATEGORY HEATING UP: 2+ of the week's top sales or registrations share a club tag (999 club, 10k club, 3-letter, prepunks, etc.). Identify the cluster and what it means.
-  - NOTABLE SINGLE TRADE: One individual sale or registration is genuinely the story of the week — a steal, a wash, an absurd overpay, a name with a backstory. Different from the headline insight (which is broader).
+  - NOTABLE SINGLE TRADE: One individual sale or registration is genuinely the story of the week — a steal, an absurd overpay, a name with a backstory. Different from the headline insight (which is broader).
 
 Whatever you pick, go DEEP — give the reader specifics, numbers, names. Don't list multiple angles. ONE thing.
 
@@ -1505,39 +1517,56 @@ TWEET 4 — section: "community_pulse"
 ══════════════════════════════════════════════════════════════════════════
 Broad sentiment sweep. Zoom OUT (vs tweet 3 which goes deep on one thing). Aggregate themes across:
 
-  - ENS CHATTER: themes from broad ENS-related tweets in the past 7d. Common topics, narrative threads, vibe shifts.
+  - ENS CHATTER: themes from ENS-specific tweets in the past 7d. The search is now anchored on @ensdomains mentions and phrase queries like "ENS domain", "ENS name", "ENS subname" — so chatter SHOULD be on-topic. Look for narrative threads, vibe shifts, common discussion topics.
   - YOUR OWN ENGAGEMENT: which kinds of YOUR posts are landing this week (which categories of sale/reg/bid drove the most engagement), without repeating any specific post you already covered in tweet 3.
-  - Notable accounts mentioning ENS or relevant news/launches if surfaced in chatter.
+  - Notable accounts mentioning ENS or relevant ENS news/launches if surfaced in chatter.
 
 NEVER quote third-party tweets verbatim. PARAPHRASE community sentiment, never reproduce it.
 
 ══════════════════════════════════════════════════════════════════════════
 TWEET 5 — section: "top_player"
 ══════════════════════════════════════════════════════════════════════════
-Climactic actor reveal. Lead with the literal phrase "Top Player of the Week:" followed by the address handle (their ENS name if they have one, otherwise a short address like 0xabcd…1234).
+Climactic actor reveal. Lead with the literal phrase "Top Player of the Week:" followed by the chosen handle. Handle resolution priority:
 
-Then 2-4 sentences explaining what they did this week. Reference TOP PARTICIPANTS data — full breakdown of buys / sells / registrations / renewals with actual ETH amounts. Pick the address with the most interesting STORY given the rest of the week's context — it does NOT have to be #1 by volume. The math gave you the top 3 candidates from OUR DATABASE.
+  1. If the candidate has a Twitter handle (look for "twitter: @handle" in the candidate breakdown) → use "@handle" — this is the strongest because it actually mentions the person on Twitter
+  2. Else if they have an ENS name → use "ensname.eth"
+  3. Else fallback to the short address ("0xabcd…1234")
+
+Then 2-4 sentences explaining what they did this week. Reference TOP PLAYER OF THE WEEK CANDIDATES data — break down their buys / sells / registrations / renewals with actual ETH amounts. Pick the address with the most interesting STORY given the rest of the week's context — it does NOT have to be #1 by volume. The math gave you the top 3 candidates from OUR DATABASE only (we miss micro-actions below our notability thresholds).
 
 ══════════════════════════════════════════════════════════════════════════
 GENERAL FRAMING RULES
 ══════════════════════════════════════════════════════════════════════════
 
-WASH-TRADE DATA: You'll see WASH SIGNALS — sales involving blacklisted addresses, plus AI replies that mentioned "wash" this week. NEITHER is a verdict — they're inputs. Surface in tweet 1 if washes were a meaningful share of volume; footnote in tweet 3 spotlight if there's a notable single wash; otherwise skip.
+TONE — OPTIMISTIC MARKET ANALYST:
+You are bullish on ENS as a market and as an identity primitive. Your default lens is "what's working, what's interesting, what's growing". When you spot a contrast or a quiet week, frame it as setup for what's coming next — not as an indictment. Lean into the upside angle where one exists. You are honest, never delusional — if numbers genuinely cratered, say so. But you are NOT bearish by default, and you do not mock buyers, sellers, or holders.
+
+Examples of the right energy:
+  - "Secondary was thin this week, but registration spend tells the real story — buyers are going straight to the source"
+  - "Premium decay leaderboard is loaded with quality drops" (frame as opportunity)
+  - "Volume held flat at $XXk despite ETH dropping 5% — the floor is sticky"
+  - "Three-letter names cleared at premium twice this week. The grail tier is awake"
+
+AVOID (these are the wrong energy):
+  - "Volume cratered", "buyers fled", "the market is dead"
+  - Snide framing of buyers ("right before they overpay", "pretending they never overpay")
+  - "Patience of a saint, returns of a savings account" — not in this format
+  - Any hedging like "weak", "tepid", "thin", "barely registered" without a follow-up upside angle
+
+WASH-TRADE DATA: You'll see WASH SIGNALS — sales involving blacklisted addresses (these are pre-filtered OUT of TOP SALES so they won't appear there), plus AI replies that mentioned "wash" this week. Surface in tweet 1 if washes were a meaningful share of volume; footnote in tweet 3 spotlight if there's a notable single wash; otherwise skip entirely.
 
 WEEK-OVER-WEEK: If PREVIOUS WEEK SNAPSHOT is present, use deltas in tweet 2 ("volume +40% w/w"). If NOT present, skip the comparison angle entirely — DO NOT say "no comparison available".
 
 PARTIAL SOURCE FAILURES: If a section is listed as failed, work without it. NEVER fabricate numbers to fill gaps.
 
 WRITING STYLE:
-- Short, punchy sentences. Get to the point fast.
-- Be confident. No hedging. "Volume cratered 40% week-on-week" not "volume seems to have decreased somewhat".
-- Mock gently when warranted: "67 names renewed in one tx by an address that's never sold. Call it conviction or call it indecision."
-- Highlight steals and overpays with actual numbers.
-- Humor comes from data contrasts, not forced jokes.
+- Short, confident sentences. Get to the point fast.
+- Specifics beat vagueness. "47 ETH across 23 sales" > "lots of activity".
+- Humor comes from data contrasts, not from putting people down.
 - Use "onchain" not "on-chain", "multichain" not "multi-chain".
 - ETH values: 2 decimals max for ≥0.01 ETH, more precision only for tiny values.
 - USD: rounded ($14k, $1.2M, $850).
-- Avoid: "scooped up", "snapped up", "nabbed", "on a tear", emojis (the ✨ in the auto-prepended tweet 1 header is the only one — your text fields should contain none).
+- Avoid: "scooped up", "snapped up", "nabbed", "on a tear", "cratered", "fled", "dead", "tepid". No emojis (the ✨ in the auto-prepended tweet 1 header is the only one — your text fields should contain none).
 
 CONTINUOUS IDENTITY:
 You are GrailsAI Weekly. The data you'll see under YOUR PAST POSTS, YOUR OWN TWEET ENGAGEMENT, and THIRD-PARTY REPLIES is YOUR OWN past output and the engagement on it — NOT some external bot's. Speak in first person. Use "we" or "I" when referencing past takes ("we covered this on Tuesday", "our take on the X sale aged well"). NEVER refer to yourself as "the bot" or "the AI" in third person — that breaks the voice.
@@ -1745,24 +1774,64 @@ Each tweet stands on its own — a reader who only sees tweet 1 should still get
     }
 
     // ── Names to watch — primary input for the spotlight (tweet 3) ───────────
-    // Premium-decay names are weighted 80% (the auction action is happening
-    // here NOW), grace-soon names are weighted 20% (they enter the auction
-    // within 7 days). We surface premium prominently and grace as a tail.
+    //
+    // Watcher counts are intentionally OMITTED — they're a backend filter
+    // mechanism (the API surfaces these names to us BECAUSE they have many
+    // watchers), not interesting reader-facing data. Instead we surface what
+    // matters for the spotlight tweet:
+    //   - Premium decay: days remaining in auction + current premium price
+    //     (computed from the daily-halving formula) + last sale anchor
+    //   - Grace soon: days until premium auction starts + last sale anchor
+    //
+    // Decay formula: ENS premium starts at $100M when a name enters the
+    // auction (day 90 post-expiry), then HALVES every full day. So the
+    // current premium at day D into the auction is $100M × 2^(-D), capped
+    // at 21 days (after which it's effectively 0).
     if (data.premiumByWatchers.length > 0) {
-      lines.push(`NAMES TO WATCH: PREMIUM DECAY (top ${Math.min(25, data.premiumByWatchers.length)} by watcher count — auction is live, registrants competing):`);
+      lines.push(`NAMES TO WATCH: PREMIUM DECAY (live auction — registrants can register these RIGHT NOW for the listed premium price):`);
+      const nowMs = Date.now();
       for (const n of data.premiumByWatchers.slice(0, 25)) {
         const clubs = n.clubs && n.clubs.length > 0 ? `  [${n.clubs.join(', ')}]` : '';
-        lines.push(`  ${n.name} — ${n.watchers_count} watcher(s), expired ${n.expiry_date.slice(0, 10)}${clubs}`);
+        const expiryMs = new Date(n.expiry_date).getTime();
+        if (!Number.isFinite(expiryMs)) {
+          lines.push(`  ${n.name} — (expiry parse failed)${clubs}`);
+          continue;
+        }
+        const daysSinceExpiry = (nowMs - expiryMs) / (24 * 60 * 60 * 1000);
+        const daysIntoAuction = Math.max(0, daysSinceExpiry - 90);
+        const daysLeft = Math.max(0, 21 - daysIntoAuction);
+        const currentPremiumUsd = daysIntoAuction >= 21
+          ? 0
+          : 100_000_000 / Math.pow(2, daysIntoAuction);
+        const lastSale = n.last_sale_price_usd
+          ? `  last sold ${(n.last_sale_date ?? '').slice(0, 10) || '?'} for ${fmtUsd(n.last_sale_price_usd)}`
+          : '';
+        lines.push(
+          `  ${n.name} — ${daysLeft.toFixed(1)} days left in auction, current premium ~${fmtUsdLowDigits(currentPremiumUsd)}${lastSale}${clubs}`,
+        );
       }
       lines.push('');
     }
     if (data.graceByWatchers.length > 0) {
       // Grace list is already pre-filtered by the aggregator to names that
       // enter premium auction within 7 days (expiry 83-90 days ago).
-      lines.push(`NAMES TO WATCH: GRACE → PREMIUM SOON (top ${Math.min(10, data.graceByWatchers.length)} by watcher count — these enter the premium auction within ~7 days):`);
+      lines.push(`NAMES TO WATCH: GRACE → PREMIUM SOON (entering the premium auction within ~7 days IF the current owner doesn't renew first):`);
+      const nowMs = Date.now();
       for (const n of data.graceByWatchers.slice(0, 10)) {
         const clubs = n.clubs && n.clubs.length > 0 ? `  [${n.clubs.join(', ')}]` : '';
-        lines.push(`  ${n.name} — ${n.watchers_count} watcher(s), expired ${n.expiry_date.slice(0, 10)}${clubs}`);
+        const expiryMs = new Date(n.expiry_date).getTime();
+        if (!Number.isFinite(expiryMs)) {
+          lines.push(`  ${n.name} — (expiry parse failed)${clubs}`);
+          continue;
+        }
+        const daysSinceExpiry = (nowMs - expiryMs) / (24 * 60 * 60 * 1000);
+        const daysUntilAuction = Math.max(0, 90 - daysSinceExpiry);
+        const lastSale = n.last_sale_price_usd
+          ? `  last sold ${(n.last_sale_date ?? '').slice(0, 10) || '?'} for ${fmtUsd(n.last_sale_price_usd)}`
+          : '';
+        lines.push(
+          `  ${n.name} — enters auction in ${daysUntilAuction.toFixed(1)} days${lastSale}${clubs}`,
+        );
       }
       lines.push('');
     }
@@ -1844,11 +1913,16 @@ Each tweet stands on its own — a reader who only sees tweet 1 should still get
 
   /**
    * Format one top participant entry — multi-line with per-bucket breakdown.
+   * Header line includes the twitter handle (if available) so the LLM can
+   * `@`-mention them in the Top Player tweet per the system prompt rules.
    */
   private formatTopParticipant(p: WeeklyTopParticipant, rank: number): string {
     const lines: string[] = [];
-    const ensLabel = p.ensName ? ` (${p.ensName})` : '';
-    lines.push(`  #${rank}: ${shortAddrLocal(p.address)}${ensLabel}  — total ${p.totalEth.toFixed(4)} ETH (${fmtUsd(p.totalUsd)})`);
+    const handleLabels: string[] = [];
+    if (p.ensName) handleLabels.push(p.ensName);
+    if (p.twitterHandle) handleLabels.push(`twitter: @${p.twitterHandle}`);
+    const handleSuffix = handleLabels.length > 0 ? ` (${handleLabels.join(', ')})` : '';
+    lines.push(`  #${rank}: ${shortAddrLocal(p.address)}${handleSuffix}  — total ${p.totalEth.toFixed(4)} ETH (${fmtUsd(p.totalUsd)})`);
     if (p.buys.count > 0) lines.push(`     Buys:  ${p.buys.count} for ${p.buys.volumeEth.toFixed(4)} ETH (${fmtUsd(p.buys.volumeUsd)})`);
     if (p.sells.count > 0) lines.push(`     Sells: ${p.sells.count} for ${p.sells.volumeEth.toFixed(4)} ETH (${fmtUsd(p.sells.volumeUsd)})`);
     if (p.registrations.count > 0) lines.push(`     Regs:  ${p.registrations.count} for ${p.registrations.costEth.toFixed(4)} ETH (${fmtUsd(p.registrations.costUsd)})`);
@@ -1921,6 +1995,19 @@ function fmtUsd(usd: number | null | undefined): string {
   if (usd === null || usd === undefined || !Number.isFinite(usd)) return '$?';
   if (usd === 0) return '$0';
   return `$${usd.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+}
+
+/**
+ * Like `fmtUsd` but keeps a couple of decimals when the value is small
+ * (under $100) so premium-decay names that have decayed deep into the
+ * auction don't all read as "$0". Used by the NAMES TO WATCH renderer.
+ */
+function fmtUsdLowDigits(usd: number | null | undefined): string {
+  if (usd === null || usd === undefined || !Number.isFinite(usd)) return '$?';
+  if (usd === 0) return '$0';
+  if (usd >= 100) return `$${usd.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+  if (usd >= 1) return `$${usd.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+  return `$${usd.toLocaleString('en-US', { maximumFractionDigits: 4 })}`;
 }
 
 function pct(num: number, denom: number): string {

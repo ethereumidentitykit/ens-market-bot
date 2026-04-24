@@ -492,6 +492,30 @@ export class DatabaseService implements IDatabaseService {
         CREATE INDEX IF NOT EXISTS idx_admin_sessions_session_id ON admin_sessions(session_id);
       `);
 
+      // Create name_research table BEFORE ai_replies, since ai_replies has a
+      // foreign key (`name_research_id`) into it. Without this, any database
+      // missing `name_research` (e.g. a fresh DB or a prod dump that was never
+      // run through migration-name-research.sql) would fail startup with
+      // `relation "name_research" does not exist` either when CREATE TABLE
+      // ai_replies first runs, or in the ai_replies migration block that adds
+      // `name_research_id` via ALTER TABLE … REFERENCES name_research(id).
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS name_research (
+          id SERIAL PRIMARY KEY,
+          ens_name VARCHAR(255) NOT NULL UNIQUE,
+          research_text TEXT NOT NULL,
+          researched_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          source VARCHAR(50) DEFAULT 'web_search',
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_name_research_ens_name ON name_research(ens_name);
+        CREATE INDEX IF NOT EXISTS idx_name_research_researched_at ON name_research(researched_at);
+      `);
+
       // Create ai_replies table for AI-generated contextual replies.
       //
       // NOTE: renewal AI replies are tx-keyed (renewal_tx_hash) rather than row-keyed
@@ -4020,6 +4044,7 @@ export class DatabaseService implements IDatabaseService {
     start: Date,
     end: Date,
     topN: number = 3,
+    excludeRenewals: boolean = false,
   ): Promise<WeeklyTopParticipant[]> {
     if (!this.pool) throw new Error('Database not initialized');
 
@@ -4030,6 +4055,21 @@ export class DatabaseService implements IDatabaseService {
       // Single CTE that UNIONs each per-event contribution into a uniform
       // (address, bucket, eth, usd) shape, then GROUPs and ranks. This keeps
       // the query bounded and lets PG do the heavy lifting in one round-trip.
+      //
+      // `excludeRenewals` (TEMP, defaults false): when true, the renewals
+      // UNION is omitted from the activity CTE entirely. Used by the weekly
+      // summary feature while there's a known data gap on the renewals side
+      // — without this, single-renewal addresses can rank #1 in Top Player
+      // candidates and make the LLM lead with stale/incomplete data.
+      const renewalsClause = excludeRenewals
+        ? ''
+        : `
+          UNION ALL
+          SELECT LOWER(renewer_address) AS address, 'renewals' AS bucket,
+                 COALESCE(cost_eth, 0) AS eth, COALESCE(cost_usd, 0) AS usd
+          FROM ens_renewals
+          WHERE block_timestamp >= $1 AND block_timestamp < $2`;
+
       const result = await this.pool.query(
         `
         WITH activity AS (
@@ -4046,12 +4086,7 @@ export class DatabaseService implements IDatabaseService {
           SELECT LOWER(COALESCE(executor_address, owner_address)) AS address, 'regs' AS bucket,
                  COALESCE(cost_eth, 0) AS eth, COALESCE(cost_usd, 0) AS usd
           FROM ens_registrations
-          WHERE block_timestamp >= $1 AND block_timestamp < $2
-          UNION ALL
-          SELECT LOWER(renewer_address) AS address, 'renewals' AS bucket,
-                 COALESCE(cost_eth, 0) AS eth, COALESCE(cost_usd, 0) AS usd
-          FROM ens_renewals
-          WHERE block_timestamp >= $1 AND block_timestamp < $2
+          WHERE block_timestamp >= $1 AND block_timestamp < $2${renewalsClause}
         )
         SELECT
           address,
@@ -4080,7 +4115,8 @@ export class DatabaseService implements IDatabaseService {
 
       const participants: WeeklyTopParticipant[] = result.rows.map((row: any) => ({
         address: row.address,
-        ensName: null, // Aggregator (T3.2) enriches this via ENSWorkerService
+        ensName: null,        // Aggregator (T3.2) enriches via ENSWorkerService
+        twitterHandle: null,  // Aggregator (T3.2) enriches via ENS records (com.twitter)
         buys: {
           count: Number(row.buys_count) || 0,
           volumeEth: Number(row.buys_eth) || 0,

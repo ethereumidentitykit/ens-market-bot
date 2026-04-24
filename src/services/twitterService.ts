@@ -721,9 +721,21 @@ export class TwitterService {
   async searchEnsContent(maxResults: number = 100): Promise<TwitterReadResult<TwitterV2Tweet[]>> {
     if (!this.checkApiEnabled()) return { data: [], costUsd: 0 };
 
+    // Query design notes:
+    //   - Twitter search ignores periods, so the old `".eth"` clause was just
+    //     matching `eth` (= every Ethereum-related tweet). Useless signal.
+    //   - We anchor on @-mentions of @ensdomains and the bare token `ensdomains`
+    //     to catch official-account references.
+    //   - Phrase queries `"ENS domain"`, `"ENS name"`, `"ENS subname"` catch
+    //     organic discussion of the protocol/product without matching the
+    //     unrelated ENS acronyms (Eyewear News Service, etc).
+    //   - Excluded `is:retweet` so we get original takes, not amplification.
+    //   - lang:en for the LLM's prompt budget; broaden later if needed.
+    const query = '(@ensdomains OR ensdomains OR "ENS domain" OR "ENS domains" OR "ENS name" OR "ENS names" OR "ENS subname" OR "ENS subnames") -is:retweet lang:en';
+
     const capped = Math.min(Math.max(maxResults, 10), 100);
     const result = await this.signedGet('https://api.twitter.com/2/tweets/search/recent', {
-      query: '(ens OR ".eth") -is:retweet lang:en',
+      query,
       max_results: capped,
       'tweet.fields': 'author_id,created_at,public_metrics,conversation_id',
     });
