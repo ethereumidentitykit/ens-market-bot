@@ -25,6 +25,12 @@ export interface TwitterPublicMetrics {
  * `public_metrics` is only populated when `tweet.fields=public_metrics` is in
  * the request. `conversation_id` requires the same field flag. `author_id` is
  * always returned when a user-context token is used.
+ *
+ * `authorUsername` + `authorDisplayName` are NOT raw Twitter v2 fields — they
+ * are joined client-side from `expansions=author_id&user.fields=name,username`
+ * by the TwitterService methods that fetch tweets (search/recent, replies,
+ * quote_tweets). Available on any TwitterV2Tweet returned by those methods;
+ * may be undefined if the expansion failed or the tweet pre-dates the join.
  */
 export interface TwitterV2Tweet {
   id: string;
@@ -33,6 +39,8 @@ export interface TwitterV2Tweet {
   conversation_id?: string;     // Top-of-thread tweet id (=== id for root tweets)
   author_id?: string;
   public_metrics?: TwitterPublicMetrics;
+  authorUsername?: string;      // e.g. "vitalikbuterin" — no @ prefix
+  authorDisplayName?: string;   // e.g. "vitalik.eth" — display name from profile
 }
 
 /**

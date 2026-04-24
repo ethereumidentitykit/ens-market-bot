@@ -25,6 +25,7 @@ import {
   WeeklyTopParticipant,
   WeeklyWashSignals,
   WeeklySnapshotData,
+  WeeklyBotPost,
 } from '../types';
 import { GrailsApiService } from './grailsApiService';
 import { AlchemyService } from './alchemyService';
@@ -53,8 +54,12 @@ const TUNABLES = {
   GRACE_LIMIT: 50,
   /** Top-N renewal rows by per-name cost. */
   RENEWALS_TOP_N: 10,
-  /** Top-N participants for "Star of the week" candidate pool. */
-  TOP_PARTICIPANTS_N: 3,
+  /**
+   * Top-N participants for the "Top Player of the Week" candidate pool.
+   * Bumped from 3 → 5 so the LLM has a wider pool to pick the most
+   * interesting STORY (not just the top of the volume leaderboard).
+   */
+  TOP_PARTICIPANTS_N: 5,
   /** First N blacklist sales returned for context (full count + sum is unbounded). */
   WASH_SALES_LIMIT: 20,
   /** First N AI replies that mentioned 'wash' (full count is unbounded). */
@@ -270,67 +275,131 @@ export class WeeklySummaryDataService {
     // (e.g. manual posts via Twitter UI) won't be in `botPosts` and so
     // won't be hydrated. For the weekly summary use case that's fine — we
     // report on the bot's automated content, not its manual content.
-    const ownTweetIds = Array.from(
+    // Hydrate fresh engagement metrics for every bot tweet ID we know about.
+    // Uses DB tweet IDs (works in any env — see prior comment block).
+    // Also resolves the bot's own user (id + username) — username is needed
+    // by the prompt builder to strip self-mentions from third-party text.
+    const allBotTweetIds = Array.from(
       new Set(botPosts.map(p => p.tweetId).filter((id): id is string => !!id)),
     );
-    let ownTweetsWithFreshMetrics: TwitterV2Tweet[] = [];
-    if (ownTweetIds.length > 0) {
-      logger.info(
-        `📊 [WeeklyData] Hydrating engagement metrics on ${ownTweetIds.length} bot tweet ID(s) from DB`,
-      );
-      try {
-        const res = await this.twitterService.getTweetsWithMetrics(ownTweetIds);
-        ownTweetsWithFreshMetrics = res.data;
-        twitterCostUsd += res.costUsd;
-      } catch (err: any) {
-        fail('twitter:hydrateOwnMetrics', err);
+    const [ownUserResult, metricsByTweetId] = await Promise.all([
+      (async () => {
+        try {
+          return await this.twitterService.getOwnUser();
+        } catch (err: any) {
+          fail('twitter:ownUser', err);
+          return null;
+        }
+      })(),
+      (async (): Promise<Map<string, TwitterV2Tweet>> => {
+        const map = new Map<string, TwitterV2Tweet>();
+        if (allBotTweetIds.length === 0) return map;
+        logger.info(
+          `📊 [WeeklyData] Hydrating engagement metrics on ${allBotTweetIds.length} bot tweet ID(s) from DB`,
+        );
+        try {
+          const res = await this.twitterService.getTweetsWithMetrics(allBotTweetIds);
+          twitterCostUsd += res.costUsd;
+          for (const t of res.data) map.set(t.id, t);
+        } catch (err: any) {
+          fail('twitter:hydrateOwnMetrics', err);
+        }
+        return map;
+      })(),
+    ]);
+    const botUsername = ownUserResult?.username ?? null;
+
+    // ── Wave 2: build conversation tree per parent tweet ─────────────────────
+    //
+    // Each parent (sale/registration/bid/renewal) becomes a thread group:
+    //   parent → ourAiReply (matched by conversation_id) → third-party replies
+    //   + third-party quotes
+    //
+    // We fetch replies + quotes only for parents whose hydrated metrics show
+    // engagement on that side (reply_count > 0 / quote_count > 0). Saves
+    // money on quiet tweets.
+    const parents = botPosts.filter(p => p.type !== 'ai_reply');
+    const aiReplies = botPosts.filter(p => p.type === 'ai_reply');
+
+    // Index AI replies by their parent tweet id (= the AI reply's
+    // conversationId, which we set to ai_replies.original_tweet_id upstream).
+    // A parent could in theory have multiple AI replies — we keep the most
+    // recent one by postedAt so the thread group is one-to-one.
+    const aiReplyByParentId = new Map<string, WeeklyBotPost>();
+    for (const r of aiReplies) {
+      if (!r.conversationId) continue;
+      const existing = aiReplyByParentId.get(r.conversationId);
+      if (!existing || r.postedAt > existing.postedAt) {
+        aiReplyByParentId.set(r.conversationId, r);
       }
     }
 
-    // ── Wave 2: third-party replies for each engaged own tweet ──────────────
-    //
-    // We pull replies for EVERY tweet with reply_count > 0 (per plan), capped
-    // at 100 replies per conversation by `getRepliesToTweet`. Sub-calls are
-    // also `Promise.allSettled` so one failed conversation doesn't break the
-    // batch.
-    const engagedTweets = ownTweetsWithFreshMetrics.filter(
-      t => (t.public_metrics?.reply_count ?? 0) > 0,
-    );
+    // Decide which parents need replies / quotes fetched.
+    // Both calls go in the same Promise.allSettled batch for max parallelism.
+    type FetchKind = 'replies' | 'quotes';
+    const fetchTasks: Array<{ tweetId: string; kind: FetchKind }> = [];
+    for (const parent of parents) {
+      const m = metricsByTweetId.get(parent.tweetId)?.public_metrics;
+      if ((m?.reply_count ?? 0) > 0) fetchTasks.push({ tweetId: parent.tweetId, kind: 'replies' });
+      if ((m?.quote_count ?? 0) > 0) fetchTasks.push({ tweetId: parent.tweetId, kind: 'quotes' });
+    }
 
-    const thirdPartyReplies: WeeklySummaryData['thirdPartyReplies'] = [];
-    if (engagedTweets.length > 0) {
+    const repliesByParentId = new Map<string, TwitterV2Tweet[]>();
+    const quotesByParentId = new Map<string, TwitterV2Tweet[]>();
+
+    if (fetchTasks.length > 0) {
       logger.info(
-        `📊 [WeeklyData] Fetching replies for ${engagedTweets.length} engaged conversation(s)`,
+        `📊 [WeeklyData] Fetching ${fetchTasks.filter(t => t.kind === 'replies').length} reply set(s) + ` +
+          `${fetchTasks.filter(t => t.kind === 'quotes').length} quote set(s) for engaged parents`,
       );
-      const replyResults = await Promise.allSettled(
-        engagedTweets.map(async t => {
-          const conversationId = t.conversation_id ?? t.id;
-          const res = await this.twitterService.getRepliesToTweet(
-            conversationId,
-            TUNABLES.REPLIES_PER_CONV_CAP,
-          );
-          return { conversationId, res };
+      const fetchResults = await Promise.allSettled(
+        fetchTasks.map(async task => {
+          const res =
+            task.kind === 'replies'
+              ? await this.twitterService.getRepliesToTweet(task.tweetId, TUNABLES.REPLIES_PER_CONV_CAP)
+              : await this.twitterService.getQuoteTweets(task.tweetId, TUNABLES.REPLIES_PER_CONV_CAP);
+          return { task, res };
         }),
       );
-      for (const r of replyResults) {
+      for (const r of fetchResults) {
         if (r.status === 'fulfilled') {
-          thirdPartyReplies.push({
-            conversationId: r.value.conversationId,
-            replies: r.value.res.data,
-          });
           twitterCostUsd += r.value.res.costUsd;
+          if (r.value.task.kind === 'replies') {
+            repliesByParentId.set(r.value.task.tweetId, r.value.res.data);
+          } else {
+            quotesByParentId.set(r.value.task.tweetId, r.value.res.data);
+          }
         } else {
-          // Don't spam partialSourceFailures with one entry per failed conv —
-          // collapse to a single counted source name.
-          if (!partialSourceFailures.includes('twitter:repliesPartial')) {
-            partialSourceFailures.push('twitter:repliesPartial');
+          // Collapse all per-task failures into a single source-failure entry.
+          if (!partialSourceFailures.includes('twitter:repliesQuotesPartial')) {
+            partialSourceFailures.push('twitter:repliesQuotesPartial');
           }
           logger.warn(
-            `📊 [WeeklyData] Reply fetch failed for one conversation: ${(r.reason as any)?.message ?? r.reason}`,
+            `📊 [WeeklyData] Reply/quote fetch failed for one parent: ${(r.reason as any)?.message ?? r.reason}`,
           );
         }
       }
     }
+
+    // Assemble thread groups. Sorted newest-first by parent.postedAt so the
+    // prompt builder doesn't have to re-sort.
+    const threadGroups: WeeklySummaryData['threadGroups'] = parents
+      .map(parent => ({
+        parent,
+        ourAiReply: aiReplyByParentId.get(parent.tweetId) ?? null,
+        metrics: metricsByTweetId.get(parent.tweetId)?.public_metrics ?? null,
+        thirdPartyReplies: repliesByParentId.get(parent.tweetId) ?? [],
+        thirdPartyQuotes: quotesByParentId.get(parent.tweetId) ?? [],
+      }))
+      .sort((a, b) => (a.parent.postedAt < b.parent.postedAt ? 1 : a.parent.postedAt > b.parent.postedAt ? -1 : 0));
+
+    // AI replies whose parent is OUTSIDE this week's window — surface
+    // separately so they don't get lost. Rare in practice (parent + reply
+    // usually land within minutes of each other).
+    const parentTweetIds = new Set(parents.map(p => p.tweetId));
+    const orphanedAiReplies: WeeklyBotPost[] = aiReplies.filter(
+      r => !r.conversationId || !parentTweetIds.has(r.conversationId),
+    );
 
     // ── Wave 3: enrich top participants with ENS names + Twitter handles ───
     // Two parallel passes:
@@ -404,11 +473,16 @@ export class WeeklySummaryDataService {
       logger.warn(`📊 [WeeklyData] Blacklist filter failed, passing topSales through: ${err.message}`);
     }
 
+    const totalReplies = threadGroups.reduce((acc, g) => acc + g.thirdPartyReplies.length, 0);
+    const totalQuotes = threadGroups.reduce((acc, g) => acc + g.thirdPartyQuotes.length, 0);
+    const groupsWithEngagement = threadGroups.filter(
+      g => g.thirdPartyReplies.length > 0 || g.thirdPartyQuotes.length > 0,
+    ).length;
     const elapsedMs = Date.now() - startedAt;
     logger.info(
       `📊 [WeeklyData] Done in ${elapsedMs}ms. ` +
-        `${botPosts.length} bot post(s), ${ownTweetsWithFreshMetrics.length} own tweet(s) ` +
-        `with metrics, ${thirdPartyReplies.length} engaged conv(s), ` +
+        `${threadGroups.length} thread group(s) (${groupsWithEngagement} with engagement: ${totalReplies} repl(ies) + ${totalQuotes} quote(s)), ` +
+        `${orphanedAiReplies.length} orphan AI repl(ies), ` +
         `${ensTwitterChatter.length} chatter tweet(s). ` +
         `Twitter cost ~$${twitterCostUsd.toFixed(3)}. ` +
         `Source failures: ${partialSourceFailures.length === 0 ? 'none' : partialSourceFailures.join(', ')}`,
@@ -432,10 +506,10 @@ export class WeeklySummaryDataService {
       renewalsStats,
       topParticipants,
       washSignals,
-      botPosts,
 
-      ownTweetsWithFreshMetrics,
-      thirdPartyReplies,
+      threadGroups,
+      orphanedAiReplies,
+
       ensTwitterChatter,
 
       ethPriceNow,
@@ -445,6 +519,7 @@ export class WeeklySummaryDataService {
 
       twitterCostUsd,
       partialSourceFailures,
+      botUsername,
     };
   }
 }

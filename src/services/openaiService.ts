@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import { logger } from '../utils/logger';
 import { LLMPromptContext } from './dataProcessingService';
-import { CLUB_LABELS } from '../constants/clubMetadata';
+import { CLUB_LABELS, CLUB_TWITTER_HANDLES } from '../constants/clubMetadata';
 import {
   WeeklySummaryData,
   WeeklySnapshotData,
@@ -10,6 +10,7 @@ import {
   WeeklyThreadTweet,
   WeeklyTweetSection,
 } from '../types';
+import { TwitterV2Tweet } from '../types/twitter';
 
 /**
  * Response from OpenAI containing generated tweet and metadata
@@ -1212,7 +1213,7 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
    * obvious to readers who land on a single tweet.
    */
   private static readonly WEEKLY_SECTION_HEADERS: Record<WeeklyTweetSection, string> = {
-    headline: '💥 ENS Market Weekly Digest ~ by GrailsAI ✨',
+    headline: '💥 ENS Market Weekly Digest ~ GrailsAI',
     by_the_numbers: '2/5 ~ Numbers 📊',
     spotlight: '3/5 ~ Looking Forward 🔮',
     community_pulse: '4/5 ~ Community Overview 💬',
@@ -1251,7 +1252,7 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
   private static readonly WEEKLY_THREAD_SCHEMA = {
     type: 'object',
     additionalProperties: false,
-    required: ['tweets'],
+    required: ['tweets', 'topPlayerAddress'],
     properties: {
       tweets: {
         type: 'array',
@@ -1283,6 +1284,16 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
             },
           },
         },
+      },
+      topPlayerAddress: {
+        type: 'string',
+        description:
+          'The FULL 0x-prefixed 40-hex-character address of the participant chosen for tweet 5 ' +
+          '(Top Player). MUST be the complete untruncated address — copy it verbatim from the ' +
+          '"address (use this exact string for topPlayerAddress if chosen): 0x..." line in the ' +
+          'TOP PLAYER OF THE WEEK CANDIDATES section. Do NOT use the shortened "0xabcd…wxyz" ' +
+          'display form. Used to auto-append a Grails profile link ' +
+          '(https://grails.app/profile/{address}) at the end of tweet 5.',
       },
     },
   } as const;
@@ -1419,6 +1430,18 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
       throw new Error('Weekly summary: model output is missing the "tweets" array');
     }
 
+    // Validate the new `topPlayerAddress` field — used to build the Grails
+    // profile link auto-appended to tweet 5. Must be a 0x-prefixed 40-hex
+    // address (case-insensitive). The schema enforces it's a string, but
+    // we re-check the format here to catch anything malformed.
+    const topPlayerAddressRaw = (parsed as any).topPlayerAddress;
+    if (typeof topPlayerAddressRaw !== 'string' || !/^0x[a-fA-F0-9]{40}$/.test(topPlayerAddressRaw)) {
+      throw new Error(
+        `Weekly summary: invalid topPlayerAddress "${topPlayerAddressRaw}" — expected 0x-prefixed 40-hex address`,
+      );
+    }
+    const topPlayerAddress = topPlayerAddressRaw.toLowerCase();
+
     const expectedOrder = OpenAIService.WEEKLY_TWEET_ORDER;
     if (tweetsRaw.length !== expectedOrder.length) {
       throw new Error(
@@ -1459,8 +1482,9 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
       tweets.push({ section: section as WeeklyTweetSection, text });
     }
 
-    // Decoration: prepend section header to every tweet, and append the
-    // thread footer to tweet 1 only. The system prompt tells the model NOT
+    // Decoration: prepend section header to every tweet, append the thread
+    // footer to tweet 1 only, and append the Grails profile link to tweet 5
+    // (the chosen Top Player address). The system prompt tells the model NOT
     // to write any of these — it provides only the body. Same pattern as
     // the per-event AI reply pipeline's "AI insight:" prefix.
     //
@@ -1468,11 +1492,15 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
     // WEEKLY_TWEET_LLM_MAX_CHARS (970) and headers/footers max ~30 chars,
     // re-check the post-decoration total against the FINAL cap (1000) so a
     // chrome change can never silently push tweets over the post limit.
+    const grailsProfileUrl = `https://grails.app/profile/${topPlayerAddress}`;
     return tweets.map(t => {
       const header = OpenAIService.WEEKLY_SECTION_HEADERS[t.section];
       let decorated = `${header}\n\n${t.text}`;
       if (t.section === 'headline') {
         decorated = `${decorated}\n\n${OpenAIService.WEEKLY_HEADLINE_FOOTER}`;
+      }
+      if (t.section === 'top_player') {
+        decorated = `${decorated}\n\n${grailsProfileUrl}`;
       }
       if (decorated.length > OpenAIService.WEEKLY_TWEET_FINAL_MAX_CHARS) {
         throw new Error(
@@ -1549,9 +1577,9 @@ VISUAL BREATHING ROOM:
 ══════════════════════════════════════════════════════════════════════════
 TWEET 1 — section: "headline"
 ══════════════════════════════════════════════════════════════════════════
-The single most interesting fact, trend, or contrast of the week. Could be a market shift, a whale move, a category waking up, an unusual price action — whatever the data points to most clearly. Pick ONE angle.
+give a spicy and engaging summary of the week's ENS market.
 
-The header "${OpenAIService.WEEKLY_SECTION_HEADERS.headline}" is auto-prepended and "${OpenAIService.WEEKLY_HEADLINE_FOOTER}" is auto-appended. Keep your body under 200 characters so the final tweet renders cleanly under Twitter's 280-char default limit. Punchy, factual, leaves the reader wanting tweet 2.
+The header "${OpenAIService.WEEKLY_SECTION_HEADERS.headline}" is auto-prepended and "${OpenAIService.WEEKLY_HEADLINE_FOOTER}" is auto-appended. Keep your body under 280 chars. be Punchy, factual, leaves the reader wanting tweet 2.
 
 ══════════════════════════════════════════════════════════════════════════
 TWEET 2 — section: "by_the_numbers"
@@ -1562,8 +1590,8 @@ The hard-data tweet. The numbers a market watcher needs to know this week:
   - Registrations: count + total cost + total premium paid (premium = auction-clearing portion above base reg cost; high premium spend = high demand)
   - Renewals: count + total volume (conviction signal — owners paying to keep names)
   - Bids/offers: how active was the offer side
-  - Week-over-week delta on the BIGGEST mover (use PREVIOUS WEEK SNAPSHOT if provided; skip the comparison entirely if it isn't)
-  - ETH price context if move is ≥5% AND how it may affect sentiment
+  - Week-over-week delta on the BIGGEST mover (use PREVIOUS WEEK SNAPSHOT if provided; skip the comparison entirely if it isn't). Skip sub-3% deltas — they're noise, not signal.
+  - ETH price context if move is ≥10% AND how it may affect sentiment. Sub-10% moves are usual market drift; not worth thread real estate.
 
 Be selective — don't list every number. Surface 4-6 numbers that actually matter, in plain reporter language. The auto-prepended "2/5 Numbers 📊" header tells the reader what's coming; you don't need to repeat it.
 
@@ -1572,16 +1600,16 @@ TWEET 3 — section: "spotlight"
 ══════════════════════════════════════════════════════════════════════════
 ONE angle, deep. The auto-prepended "3/5 Looking Forward 🔮" header signals this is the forward-looking lane. Pick from the menu — whichever is loudest in the week's data:
 
-DEFAULT: NAMES TO WATCH. Use the data in NAMES TO WATCH: PREMIUM DECAY (live auction names — registerable RIGHT NOW for the listed premium price) and NAMES TO WATCH: GRACE → PREMIUM SOON (entering the auction within 7 days if owner doesn't renew).
+DEFAULT: NAMES TO WATCH. Use the data in NAMES TO WATCH: PREMIUM DECAY (live auction names — registerable RIGHT NOW once premium drops to a price someone wants to pay) and NAMES TO WATCH: GRACE → PREMIUM SOON (entering the auction within 7 days if owner doesn't renew).
 
-KEY CONTEXT on premium decay: ENS premium starts at $100M when a name enters the auction (90 days after expiry) and HALVES EVERY DAY for 21 days, ending at $0. So Day 1 = $50M, Day 5 = ~$3M, Day 10 = ~$98k, Day 14 = ~$6k, Day 17 = ~$760, Day 19 = ~$190, Day 20 = ~$95, Day 21 = $0. The cheaper the current premium, the more likely the name CLEARS soon — and the more accessible to organic registrants.
+CONTEXT on premium decay: ENS premium starts very high when a name enters the auction (~$100M, "fresh") and halves every day for 21 days down to $0. The data you'll see lists each name with its days-left and a price-tier band ("fresh / early / mid / late / final-day"). Use the band naturally; don't recite exact dollar figures unless they're genuinely small (sub-$1k) and worth highlighting as accessible.
 
-WHAT TO TALK ABOUT (not what to list):
-  - The NAMES themselves: what makes them grail-quality? Short? Brandable? Tied to a real concept? Dictionary words? Common first names? Crypto-native (ai/zk/cpu/agent)? Club members (999/10k/3-letter/prepunk)?
-  - CURRENT PREMIUM PRICE — surface it for names where it's already cheap (under $5k = anyone can reach; under $1k = will likely clear this week). High premium ($100k+) = collector territory, only mention if it's a true grail
-  - DAYS LEFT in the auction — for names with low days remaining, lean into "this is the moment"
-  - For grace-soon names: frame as "watch list for next week" — these aren't biddable yet
-  - LAST SALE PRICE if present — useful as a fair-value anchor
+WHAT TO TALK ABOUT — focus on the NAMES, not the data:
+  - What makes them grail-quality? Short? Brandable? Tied to a real concept? Dictionary words? Common first names? Crypto-native (ai/zk/cpu/agent)? Club members (999/10k/3-letter/prepunk)?
+  - SURFACE QUALITY GRAILS EVEN IN EARLY DECAY: a 4-day-left name at $50M might not clear, but if it's a genuinely top-tier word (send.eth, prompt.eth tier), call it out as "the headliner of the watchlist this week" — readers want to know what's on the auction floor, even if the price isn't accessible to most. Don't filter to only the cheap names.
+  - For names where price IS accessible (late-decay tier, "final-day" tier), lean into "this is the moment to act" framing.
+  - For grace-soon names: frame as "watch list for next week" — these aren't biddable yet, but anticipation matters.
+  - LAST SALE PRICE if present is useful as a fair-value anchor (e.g., "last cleared at 2 ETH in 2022, now mid-decay").
 
 DO NOT cite watcher counts. Watcher counts are a backend filter mechanism that surfaces these names — they're not interesting data for readers.
 
@@ -1608,12 +1636,16 @@ TWEET 5 — section: "top_player"
 ══════════════════════════════════════════════════════════════════════════
 The auto-prepended "5/5 Player of the Week 🏆" header introduces this lane. DO NOT write "Top Player of the Week:" yourself — start your text directly with the chosen handle.
 
-Handle resolution priority:
+A Grails profile link (https://grails.app/profile/{address}) is also AUTO-APPENDED at the end of this tweet — DO NOT include the link yourself. Just write the body. We pull the address from the JSON's "topPlayerAddress" field (see schema below).
+
+Handle resolution priority for the OPENING of the tweet body:
   1. If the candidate has a Twitter handle (look for "twitter: @handle" in the candidate breakdown) → use "@handle" — this is the strongest because it actually mentions the person on Twitter
   2. Else if they have an ENS name → use "ensname.eth"
   3. Else fallback to the short address ("0xabcd…1234")
 
-Then 2-4 sentences explaining what they did this week. Reference TOP PLAYER OF THE WEEK CANDIDATES data — break down their buys / sells / registrations / renewals with actual ETH amounts. Pick the address with the most interesting STORY given the rest of the week's context — it does NOT have to be #1 by volume. The math gave you the top 3 candidates from our DB only (we miss micro-actions below our notability thresholds).
+Then 2-4 sentences explaining what they did this week. Reference TOP PLAYER OF THE WEEK CANDIDATES data — break down their buys / sells / registrations / renewals with actual ETH amounts. Pick the address with the most interesting STORY given the rest of the week's context — it does NOT have to be #1 by volume. The math gave you the top 5 candidates from our DB only (we miss micro-actions below our notability thresholds).
+
+YOU MUST also return the chosen address in the JSON's top-level "topPlayerAddress" field (alongside "tweets"). It MUST be the FULL 0x-prefixed 40-hex address — copy it verbatim from the "address (use this exact string for topPlayerAddress if chosen): 0x..." line under the chosen candidate. DO NOT use the shortened "0xabcd…wxyz" display form that appears in the header line — that's just for human readability. Lowercased or original case is fine (we normalize). The Grails profile link is built from this.
 
 ══════════════════════════════════════════════════════════════════════════
 GENERAL FRAMING RULES
@@ -1641,7 +1673,7 @@ JARGON BAN — DO NOT USE these crypto-trader phrases (they sound out of place f
   - "wall formed" / "stacked the wall" / "thin the book"
   - "venue" used to mean a marketplace ("the registry was the venue") — just say "the registry" or "the marketplace"
 
-WASH-TRADE DATA: You'll see WASH SIGNALS — sales the bot caught and BLOCKED from publishing because the addresses involved are flagged as wash traders (pre-filtered OUT of TOP SALES so they won't appear there), plus AI replies that mentioned "wash" this week. When you write about these in a tweet, frame them as "blocked as wash trades" or "filtered as suspected wash trades" — NEVER use the word "blacklisted" in tweet text (that's internal jargon — readers don't know what list). Surface in tweet 1 if washes were a meaningful share of volume; footnote in tweet 3 spotlight if there's a notable single wash; otherwise skip entirely.
+WASH-TRADE DATA: You'll see WASH SIGNALS — sales the bot caught and IGNORED (didn't post to its feed) because the addresses are flagged as wash traders. Pre-filtered OUT of TOP SALES so they won't appear there. When you write about these in a tweet, use plain language readers understand: "we ignored N suspected wash trades this week" or "N sales were ignored as suspected wash trades". NEVER use the word "blocked" (sounds like Twitter moderation) or "blacklisted" (readers don't know what list). Surface in tweet 1 if washes were a meaningful share of volume; footnote in tweet 3 spotlight if there's a notable single wash; otherwise skip entirely.
 
 WEEK-OVER-WEEK: If PREVIOUS WEEK SNAPSHOT is present, use deltas in tweet 2 ("volume +40% w/w"). If NOT present, skip the comparison angle entirely — DO NOT say "no comparison available".
 
@@ -1780,13 +1812,14 @@ Each tweet stands on its own — a reader who only sees tweet 1 should still get
       data.topParticipants.forEach((p, idx) => {
         lines.push(this.formatTopParticipant(p, idx + 1));
       });
-      lines.push('  ↑ For tweet 5: pick the most interesting story from above — does NOT have to be #1.');
+      lines.push('  ↑ For tweet 5: pick the most interesting STORY from above — does NOT have to be #1.');
+      lines.push('  ↑ Return the chosen address in the JSON\'s top-level `topPlayerAddress` field. Use the FULL 0x-prefixed 40-hex address from the "address (use this exact string..." line above — NOT the shortened "0xabcd…wxyz" display form. We auto-append a Grails profile link to tweet 5 from this.');
       lines.push('');
     }
 
     // ── Wash signals ─────────────────────────────────────────────────────────
-    lines.push('WASH SIGNALS (7d, raw — surface only if meaningful). When writing about these, frame as "blocked as wash trades" or "filtered as suspected wash trades" — NEVER use the word "blacklisted" in tweet text (that is internal jargon):');
-    lines.push(`  Sales blocked as suspected wash trades (filtered out of regular tweet output): ${data.washSignals.blacklistMatches.count.toLocaleString()}, volume ${data.washSignals.blacklistMatches.volumeEth.toFixed(4)} ETH (${fmtUsd(data.washSignals.blacklistMatches.volumeUsd)})`);
+    lines.push('WASH SIGNALS (7d, raw — surface only if meaningful). When writing about these, use plain language: "we ignored N suspected wash trades this week" or "N sales were ignored as suspected wash trades" — NEVER use the words "blocked" or "blacklisted" in tweet text (readers don\'t know what list, and "blocked" sounds like Twitter moderation):');
+    lines.push(`  Sales ignored as suspected wash trades (filtered out of our regular tweet output): ${data.washSignals.blacklistMatches.count.toLocaleString()}, volume ${data.washSignals.blacklistMatches.volumeEth.toFixed(4)} ETH (${fmtUsd(data.washSignals.blacklistMatches.volumeUsd)})`);
     lines.push(`  AI replies mentioning 'wash': ${data.washSignals.aiReplyWashMentions.count.toLocaleString()}`);
     if (data.washSignals.blacklistMatches.sales.length > 0) {
       lines.push(`  Sample blacklist sales (first ${data.washSignals.blacklistMatches.sales.length}):`);
@@ -1875,9 +1908,17 @@ Each tweet stands on its own — a reader who only sees tweet 1 should still get
     // Render up to 50 names — gives the model enough breadth that genuine
     // grail names (short/dictionary/brandable) don't get crowded out by
     // niche names that happened to spike in watcher count this week.
+    //
+    // PRICE TIER BAND (instead of exact $ figure): the LLM was mis-rounding
+    // our exact decimal premium amounts and the prompt was getting verbose
+    // with the day-by-day breakdown. We now hand it a categorical tier
+    // ("fresh / early / mid / late / final-day") computed from days-left,
+    // which is more robust and reads naturally in the tweet body. Days-left
+    // remains the primary numeric — the LLM can lead with that.
     if (data.premiumByWatchers.length > 0) {
       const renderCap = 50;
-      lines.push(`NAMES TO WATCH: PREMIUM DECAY — live auction, top ${Math.min(renderCap, data.premiumByWatchers.length)} by watcher count. Anyone can register these RIGHT NOW for the listed premium. Pick the GRAILS (short/dictionary/brandable/club members), not just the top of the list:`);
+      lines.push(`NAMES TO WATCH: PREMIUM DECAY — live auction, top ${Math.min(renderCap, data.premiumByWatchers.length)} by watcher count. Surface the GRAILS (short/dictionary/brandable/club members), not just the top of the list. Even early-decay (high-priced) grails are worth calling out as headliners of the auction floor.`);
+      lines.push('  Tier band: fresh = days 16-21 (millions), early = 11-15 (~$10k+), mid = 6-10 (~$100-$10k), late = 2-5 (sub-$100, often clears), final-day = 0-1 (basically free, will clear).');
       const nowMs = Date.now();
       for (const n of data.premiumByWatchers.slice(0, renderCap)) {
         const clubs = n.clubs && n.clubs.length > 0 ? `  [${n.clubs.join(', ')}]` : '';
@@ -1889,20 +1930,13 @@ Each tweet stands on its own — a reader who only sees tweet 1 should still get
         const daysSinceExpiry = (nowMs - expiryMs) / (24 * 60 * 60 * 1000);
         const daysIntoAuction = Math.max(0, daysSinceExpiry - 90);
         const daysLeftRaw = Math.max(0, 21 - daysIntoAuction);
-        // Round to nearest whole day — the LLM was rendering "5.2 days" /
-        // "1.1 days" verbatim, which felt awkward for a recap. Day granularity
-        // is the right read for the reader.
         const daysLeft = Math.round(daysLeftRaw);
-        const currentPremiumUsd = daysIntoAuction >= 21
-          ? 0
-          : 100_000_000 / Math.pow(2, daysIntoAuction);
+        const tier = priceTierForDaysLeft(daysLeft);
         const lastSale = n.last_sale_price_usd
           ? `  last sold ${(n.last_sale_date ?? '').slice(0, 10) || '?'} for ${fmtUsd(n.last_sale_price_usd)}`
           : '';
         const dayLabel = daysLeft === 1 ? 'day' : 'days';
-        lines.push(
-          `  ${n.name} — ${daysLeft} ${dayLabel} left in auction, current premium ~${fmtUsdLowDigits(currentPremiumUsd)}${lastSale}${clubs}`,
-        );
+        lines.push(`  ${n.name} — ${daysLeft} ${dayLabel} left, ${tier} tier${lastSale}${clubs}`);
       }
       lines.push('');
     }
@@ -1942,68 +1976,120 @@ Each tweet stands on its own — a reader who only sees tweet 1 should still get
       lines.push('');
     }
 
-    // ── Recent posted content (the bot's own published tweets + AI replies) ─
-    // Framed in third person ("the account's recent posts") rather than first
-    // person — the digest is written ABOUT the bot's activity, not BY the bot
-    // narrating its own takes.
-    if (data.botPosts.length > 0) {
-      lines.push(`RECENT POSTED CONTENT — tweets + AI replies published by this account in the past 7 days, RAW (${data.botPosts.length} item(s), newest first):`);
-      for (const p of data.botPosts) {
-        lines.push(this.formatBotPost(p));
+    // ── Conversation trees (parent → our reply → 3p replies + quotes) ───────
+    // Each thread group bundles ONE bot parent tweet with its full conversation
+    // tree. Replaces the prior 3 disconnected sections (RECENT POSTED CONTENT
+    // / POSTED CONTENT ENGAGEMENT / THIRD-PARTY REPLIES) — same data, but the
+    // LLM no longer has to mentally join by ID.
+    //
+    // Each third-party reply / quote shows the author's @handle + display name
+    // so the LLM can attribute sentiment without us @-tagging anyone in the
+    // final output. Self-mentions and known club mentions are stripped from
+    // text bodies (Twitter prepends "@OurBot" to replies; we don't want the
+    // LLM to repeat that).
+    //
+    // Engagement metrics are rendered on the parent line so the LLM can
+    // compare engagement across posts at a glance. Quiet groups (no engagement
+    // and no AI reply) are still included — they show what kinds of posts
+    // landed flat, which is itself useful signal for the community pulse tweet.
+    const stripRegex = buildKnownMentionRegex([
+      data.botUsername,
+      ...Object.values(CLUB_TWITTER_HANDLES),
+    ]);
+    const cleanText = (raw: string | null | undefined): string => {
+      const t = (raw ?? '').replace(/\s+/g, ' ').trim();
+      if (!t) return '';
+      if (!stripRegex) return t;
+      return tidyAfterMentionStrip(t.replace(stripRegex, ''));
+    };
+    const formatAuthor = (t: TwitterV2Tweet): string => {
+      // Skip authoring on self-replies (rare — usually the bot's AI reply).
+      if (data.botUsername && t.authorUsername?.toLowerCase() === data.botUsername.toLowerCase()) {
+        return 'us';
       }
-      lines.push('');
-    }
-
-    // ── Twitter engagement metrics on this account's tweets ─────────────────
-    if (data.ownTweetsWithFreshMetrics.length > 0) {
-      lines.push(`POSTED CONTENT ENGAGEMENT (${data.ownTweetsWithFreshMetrics.length} tweet(s) by this account with fresh metrics):`);
-      // Sort by impressions desc to surface the highest-engagement ones first.
-      const sorted = [...data.ownTweetsWithFreshMetrics].sort((a, b) => {
-        const ai = a.public_metrics?.impression_count ?? 0;
-        const bi = b.public_metrics?.impression_count ?? 0;
-        return bi - ai;
-      });
-      // Cap to the top 25 for token sanity; the LLM only needs the engagement
-      // distribution shape, not every single tweet's metrics.
-      for (const t of sorted.slice(0, 25)) {
-        const m = t.public_metrics;
-        if (!m) continue;
-        const created = t.created_at ? t.created_at.slice(0, 10) : '?';
-        lines.push(`  [${created}] ${m.impression_count.toLocaleString()} imp, ${m.like_count} likes, ${m.reply_count} replies, ${m.retweet_count} RT, ${m.quote_count} quotes — id ${t.id}`);
+      if (t.authorUsername && t.authorDisplayName) {
+        return `@${t.authorUsername} (${t.authorDisplayName})`;
       }
-      lines.push('');
-    }
+      if (t.authorUsername) return `@${t.authorUsername}`;
+      if (t.authorDisplayName) return t.authorDisplayName;
+      return '<unknown author>';
+    };
 
-    // ── Third-party replies on this account's tweets (RAW) ───────────────────
-    if (data.thirdPartyReplies.length > 0) {
-      const totalReplies = data.thirdPartyReplies.reduce((acc, c) => acc + c.replies.length, 0);
-      lines.push(`THIRD-PARTY REPLIES — actual reply text from other accounts on this account's posts (${data.thirdPartyReplies.length} engaged conv(s), ${totalReplies} repl(ies) total):`);
-      for (const conv of data.thirdPartyReplies) {
-        lines.push(`  Conversation ${conv.conversationId} (${conv.replies.length} repl(ies)):`);
-        for (const r of conv.replies) {
-          // Compress text to a single line to keep the prompt readable.
-          const text = (r.text ?? '').replace(/\s+/g, ' ').trim();
-          if (text.length === 0) continue;
-          lines.push(`    "${text}"`);
+    if (data.threadGroups.length > 0) {
+      lines.push(`POSTED CONVERSATION TREES — every transaction tweet by this account this week, with its AI reply, third-party replies (with author handles), and third-party quotes hydrated. Newest first. ${data.threadGroups.length} thread group(s).`);
+      lines.push('NOTE on author handles: shown as "@username (Display Name)" so you can attribute sentiment in the community pulse tweet. NEVER @-mention these handles in your output — they are context only. Self-mentions and club account mentions are pre-stripped from reply/quote text.');
+      lines.push('');
+      data.threadGroups.forEach((g, idx) => {
+        lines.push(`── THREAD GROUP ${idx + 1} of ${data.threadGroups.length} ──`);
+
+        // Parent line: type + date + tweet id + engagement (if any) + text.
+        const parentDate = g.parent.postedAt.slice(0, 10);
+        const m = g.metrics;
+        const engagement = m
+          ? `  📊 ${m.impression_count.toLocaleString()} imp, ${m.like_count} likes, ${m.reply_count} replies, ${m.retweet_count} RT, ${m.quote_count} quotes`
+          : '';
+        lines.push(`  ▸ PARENT [${parentDate} ${g.parent.type.toUpperCase()} id=${g.parent.tweetId}]${engagement}`);
+        lines.push(`     ${g.parent.text}`);
+
+        // Our AI reply (level 2).
+        if (g.ourAiReply) {
+          const aiDate = g.ourAiReply.postedAt.slice(0, 10);
+          lines.push(`     ↳ OUR AI REPLY [${aiDate} id=${g.ourAiReply.tweetId}]`);
+          lines.push(`        ${g.ourAiReply.text}`);
         }
+
+        // Third-party replies (level 3 under parent).
+        if (g.thirdPartyReplies.length > 0) {
+          lines.push(`     ↳ THIRD-PARTY REPLIES (${g.thirdPartyReplies.length}):`);
+          for (const r of g.thirdPartyReplies) {
+            const text = cleanText(r.text);
+            if (!text) continue;
+            lines.push(`        ${formatAuthor(r)}: "${text}"`);
+          }
+        }
+
+        // Third-party quotes (level 3 under parent).
+        if (g.thirdPartyQuotes.length > 0) {
+          lines.push(`     ↳ THIRD-PARTY QUOTES (${g.thirdPartyQuotes.length}):`);
+          for (const q of g.thirdPartyQuotes) {
+            const text = cleanText(q.text);
+            if (!text) continue;
+            lines.push(`        ${formatAuthor(q)}: "${text}"`);
+          }
+        }
+
+        lines.push('');
+      });
+    }
+
+    // ── Orphan AI replies (parent posted before this week) ──────────────────
+    if (data.orphanedAiReplies.length > 0) {
+      lines.push(`OTHER AI REPLIES POSTED THIS WEEK (parent transaction tweet was posted BEFORE this week — no thread tree to attach):`);
+      for (const r of data.orphanedAiReplies) {
+        const date = r.postedAt.slice(0, 10);
+        lines.push(`  [${date} id=${r.tweetId}] ${r.text}`);
       }
       lines.push('');
     }
 
     // ── Broad ENS Twitter chatter ────────────────────────────────────────────
+    // Same author-handle treatment as thread-group replies. Already pre-sorted
+    // by engagement (TwitterService.searchEnsContent sorts client-side) and
+    // pre-filtered for spam (3+ @-mention tweets dropped upstream). Self/club
+    // mentions are stripped from text before render.
     if (data.ensTwitterChatter.length > 0) {
-      lines.push(`ENS CHATTER (${data.ensTwitterChatter.length} broad ENS tweets from past 7d, raw — for sentiment/themes context only, do not quote verbatim or @-mention):`);
+      lines.push(`ENS CHATTER (${data.ensTwitterChatter.length} broad ENS tweets from past 7d, sorted by engagement, raw — for sentiment/themes context only. Do NOT quote verbatim, do NOT @-mention these handles in your output):`);
       for (const t of data.ensTwitterChatter) {
-        const text = (t.text ?? '').replace(/\s+/g, ' ').trim();
-        if (text.length === 0) continue;
-        lines.push(`  "${text}"`);
+        const text = cleanText(t.text);
+        if (!text) continue;
+        lines.push(`  ${formatAuthor(t)}: "${text}"`);
       }
       lines.push('');
     }
 
     // ── Final reminder ───────────────────────────────────────────────────────
     lines.push('---');
-    lines.push(`Now write the thread. Return JSON matching the WeeklySummaryThread schema: exactly 5 tweets, in the section order headline → by_the_numbers → spotlight → community_pulse → top_player. Each tweet's section header is auto-prepended to your text — DO NOT write any header (no "1/5", no "Top Player of the Week:", no GrailsAI line). Tweet 1 body: aim for <200 chars. Tweets 2-5 body: max ${OpenAIService.WEEKLY_TWEET_LLM_MAX_CHARS} chars each, but shorter is better. No numbering, no TL;DR, no @-mentions of third-party accounts. Report in third-person — you are not the bot, you are writing the digest. Lead with ETH amounts; only convert to USD when the dollar figure adds meaningful context.`);
+    lines.push(`Now write the thread. Return JSON matching the WeeklySummaryThread schema: { topPlayerAddress: "0x...", tweets: [...5 entries...] } — exactly 5 tweets, in the section order headline → by_the_numbers → spotlight → community_pulse → top_player. Each tweet's section header is auto-prepended to your text — DO NOT write any header (no "1/5", no "Top Player of the Week:", no GrailsAI line). Tweet 5 also gets a Grails profile link auto-appended from your topPlayerAddress — don't write the link yourself. Tweet 1 body: aim for <200 chars. Tweets 2-5 body: max ${OpenAIService.WEEKLY_TWEET_LLM_MAX_CHARS} chars each, but shorter is better. No numbering, no TL;DR, no @-mentions of third-party accounts. Report in third-person — you are not the bot, you are writing the digest. Lead with ETH amounts; only convert to USD when the dollar figure adds meaningful context.`);
 
     return lines.join('\n');
   }
@@ -2020,6 +2106,7 @@ Each tweet stands on its own — a reader who only sees tweet 1 should still get
     if (p.twitterHandle) handleLabels.push(`twitter: @${p.twitterHandle}`);
     const handleSuffix = handleLabels.length > 0 ? ` (${handleLabels.join(', ')})` : '';
     lines.push(`  #${rank}: ${shortAddrLocal(p.address)}${handleSuffix}  — total ${p.totalEth.toFixed(4)} ETH (${fmtUsd(p.totalUsd)})`);
+    lines.push(`     address (use this exact string for topPlayerAddress if chosen): ${p.address}`);
     if (p.buys.count > 0) lines.push(`     Buys:  ${p.buys.count} for ${p.buys.volumeEth.toFixed(4)} ETH (${fmtUsd(p.buys.volumeUsd)})`);
     if (p.sells.count > 0) lines.push(`     Sells: ${p.sells.count} for ${p.sells.volumeEth.toFixed(4)} ETH (${fmtUsd(p.sells.volumeUsd)})`);
     if (p.registrations.count > 0) lines.push(`     Regs:  ${p.registrations.count} for ${p.registrations.costEth.toFixed(4)} ETH (${fmtUsd(p.registrations.costUsd)})`);
@@ -2116,5 +2203,59 @@ function shortAddrLocal(addr: string | null | undefined): string {
   if (!addr) return '<unknown>';
   if (addr.length < 10) return addr;
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+}
+
+/**
+ * Map premium-decay days-left to a categorical tier band. The LLM was
+ * rounding our exact decimal $ figures inconsistently, and the day-by-day
+ * dollar breakdown was bloating the prompt. Tier bands give a stable,
+ * readable signal the LLM can repeat verbatim without doing math.
+ *
+ * Bands (derived from the $100M halving formula):
+ *   fresh      — days 16-21 → premium in millions (collector tier)
+ *   early      — days 11-15 → premium ~$10k–millions (deep-pocketed buyers)
+ *   mid        — days 6-10  → premium ~$100–$10k (active buyers)
+ *   late       — days 2-5   → premium sub-$100 (often clears)
+ *   final-day  — days 0-1   → premium basically free, will clear
+ */
+function priceTierForDaysLeft(daysLeft: number): string {
+  if (daysLeft <= 1) return 'final-day';
+  if (daysLeft <= 5) return 'late';
+  if (daysLeft <= 10) return 'mid';
+  if (daysLeft <= 15) return 'early';
+  return 'fresh';
+}
+
+/**
+ * Build a regex that matches `@<handle>` for any of the given handles
+ * (case-insensitive, word-boundary anchored). Used to strip self-mentions
+ * and known club mentions from third-party reply / quote / chatter text.
+ *
+ * Empty/falsy handles in the input are filtered out. Handles may be
+ * `@`-prefixed or bare; we strip the prefix internally so the regex is
+ * stable. Returns `null` if no valid handles to match (caller should skip
+ * the strip step in that case).
+ */
+function buildKnownMentionRegex(handles: Array<string | null | undefined>): RegExp | null {
+  const cleaned = handles
+    .filter((h): h is string => !!h)
+    .map(h => h.replace(/^@/, '').trim())
+    .filter(h => h.length > 0 && /^[A-Za-z0-9_]{1,15}$/.test(h));
+  if (cleaned.length === 0) return null;
+  // Escape isn't needed since the regex above only allowed [A-Za-z0-9_].
+  // Use a non-capturing group + word-boundary on both sides.
+  return new RegExp(`@(?:${cleaned.join('|')})\\b`, 'gi');
+}
+
+/**
+ * Collapse runs of whitespace + trim leading commas/whitespace left behind
+ * after stripping mentions (replies on Twitter often start with "@user, "
+ * which leaves an awkward fragment after the @user is removed).
+ */
+function tidyAfterMentionStrip(text: string): string {
+  return text
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s,.:;!?-]+/, '') // drop dangling punctuation at start
+    .trim();
 }
 

@@ -505,8 +505,13 @@ export class TwitterService {
   // crash the run. Errors are logged at warn level.
   // ───────────────────────────────────────────────────────────────────────────
 
-  /** Cached own-user lookup. Cleared only on process restart. */
-  private ownUserIdCache: string | null = null;
+  /**
+   * Cached own-user lookup. Cleared only on process restart. Stores both id
+   * AND username — username is needed by the weekly summary's prompt builder
+   * to strip self-mentions from third-party reply text. The /2/users/me
+   * endpoint returns both in one call so caching together is free.
+   */
+  private ownUserCache: { id: string; username: string; name: string } | null = null;
 
   /**
    * GET helper that signs the URL+query with OAuth 1.0a (user context) and
@@ -551,27 +556,67 @@ export class TwitterService {
   }
 
   /**
-   * Get the bot's own Twitter user ID via /2/users/me. Cached for the lifetime
-   * of the process (the bot is a single account; the ID never changes).
+   * Get the bot's own Twitter user info (id + username + display name) via
+   * /2/users/me. Cached for the lifetime of the process — the bot is a
+   * single account; these values never change.
    *
    * Cost: $0.001 on first call, $0 on cached subsequent calls.
    */
-  async getOwnUserId(): Promise<string | null> {
-    if (this.ownUserIdCache) {
-      return this.ownUserIdCache;
+  async getOwnUser(): Promise<{ id: string; username: string; name: string } | null> {
+    if (this.ownUserCache) {
+      return this.ownUserCache;
     }
     if (!this.checkApiEnabled()) return null;
 
     const result = await this.signedGet('https://api.twitter.com/2/users/me');
     if (!result.success || !result.json?.data?.id) {
-      logger.warn(`[Twitter] getOwnUserId failed: ${result.error || 'no data.id in response'}`);
+      logger.warn(`[Twitter] getOwnUser failed: ${result.error || 'no data.id in response'}`);
       return null;
     }
 
-    const userId = result.json.data.id as string;
-    this.ownUserIdCache = userId;
-    logger.info(`[Twitter] Own user id resolved: ${userId} (cost ~$0.001)`);
-    return userId;
+    const data = result.json.data;
+    this.ownUserCache = {
+      id: data.id as string,
+      username: (data.username as string) ?? '',
+      name: (data.name as string) ?? '',
+    };
+    logger.info(
+      `[Twitter] Own user resolved: id=${this.ownUserCache.id} @${this.ownUserCache.username} ("${this.ownUserCache.name}") (cost ~$0.001)`,
+    );
+    return this.ownUserCache;
+  }
+
+  /**
+   * Convenience wrapper — same data as `getOwnUser` but returns just the id.
+   * Kept for backward compatibility with existing call sites.
+   */
+  async getOwnUserId(): Promise<string | null> {
+    return (await this.getOwnUser())?.id ?? null;
+  }
+
+  /**
+   * Helper: given a search/recent or quote_tweets response with `expansions=author_id`,
+   * builds a Map of author_id → {username, name} from the `includes.users`
+   * array, then enriches each tweet's `authorUsername` + `authorDisplayName`
+   * fields. Returns a new array (does not mutate input). Tweets whose author
+   * isn't in `includes.users` (rare — deleted/protected accounts) keep
+   * undefined author fields.
+   */
+  private enrichTweetsWithAuthors(json: any, tweets: TwitterV2Tweet[]): TwitterV2Tweet[] {
+    const usersArr = json?.includes?.users;
+    if (!Array.isArray(usersArr)) return tweets;
+    const userById = new Map<string, { username: string; name: string }>();
+    for (const u of usersArr) {
+      if (u?.id && u.username) {
+        userById.set(u.id, { username: u.username, name: u.name ?? '' });
+      }
+    }
+    return tweets.map(t => {
+      if (!t.author_id) return t;
+      const author = userById.get(t.author_id);
+      if (!author) return t;
+      return { ...t, authorUsername: author.username, authorDisplayName: author.name };
+    });
   }
 
   /**
@@ -697,6 +742,8 @@ export class TwitterService {
       query: `conversation_id:${conversationId}`,
       max_results: capped,
       'tweet.fields': 'author_id,created_at,public_metrics,conversation_id',
+      expansions: 'author_id',
+      'user.fields': 'name,username',
     });
 
     if (!result.success) {
@@ -704,7 +751,8 @@ export class TwitterService {
       return { data: [], costUsd: 0 };
     }
 
-    const replies: TwitterV2Tweet[] = result.json?.data ?? [];
+    const rawReplies: TwitterV2Tweet[] = result.json?.data ?? [];
+    const replies = this.enrichTweetsWithAuthors(result.json, rawReplies);
     const costUsd = replies.length * 0.005;
     logger.info(
       `[Twitter] getRepliesToTweet(${conversationId}) fetched ${replies.length} repl(ies) ` +
@@ -733,15 +781,23 @@ export class TwitterService {
     //   - Phrase queries `"ENS domain"`, `"ENS name"`, `"ENS subname"` catch
     //     organic discussion of the protocol/product without matching the
     //     unrelated ENS acronyms (Eyewear News Service, etc).
-    //   - Excluded `is:retweet` so we get original takes, not amplification.
+    //   - `-is:retweet` so we get original takes, not amplification.
+    //   - `-is:reply` filters out reply-spam — we want top-level discussion,
+    //     not threading noise. `/search/recent` is already 7-day windowed.
     //   - lang:en for the LLM's prompt budget; broaden later if needed.
-    const query = '(@ensdomains OR ensdomains OR "ENS domain" OR "ENS domains" OR "ENS name" OR "ENS names" OR "ENS subname" OR "ENS subnames") -is:retweet lang:en';
+    //
+    // Spam filtering + engagement sort happen post-fetch (see below) — Twitter
+    // v2 search has no `sortBy=engagement` parameter, so we fetch by recency,
+    // drop 3+ @-mention spam, and sort client-side by an engagement score.
+    const query = '(@ensdomains OR ensdomains OR "ENS domain" OR "ENS domains" OR "ENS name" OR "ENS names" OR "ENS subname" OR "ENS subnames") -is:retweet -is:reply lang:en';
 
     const capped = Math.min(Math.max(maxResults, 10), 100);
     const result = await this.signedGet('https://api.twitter.com/2/tweets/search/recent', {
       query,
       max_results: capped,
-      'tweet.fields': 'author_id,created_at,public_metrics,conversation_id',
+      'tweet.fields': 'author_id,created_at,public_metrics,conversation_id,entities',
+      expansions: 'author_id',
+      'user.fields': 'name,username',
     });
 
     if (!result.success) {
@@ -749,12 +805,77 @@ export class TwitterService {
       return { data: [], costUsd: 0 };
     }
 
-    const tweets: TwitterV2Tweet[] = result.json?.data ?? [];
-    const costUsd = tweets.length * 0.005;
+    const rawTweets: TwitterV2Tweet[] = result.json?.data ?? [];
+    const allTweets = this.enrichTweetsWithAuthors(result.json, rawTweets);
+    // We pay for what the API returned, not what we keep — log full cost.
+    const costUsd = allTweets.length * 0.005;
+
+    // Spam filter: drop tweets that @-mention 3 or more accounts. These are
+    // almost always tagging-storm spam (giveaways, mass-shoutouts, etc.) and
+    // pollute the sentiment signal. Count by regex (entities.mentions would
+    // be more accurate but isn't always populated; regex over text is robust).
+    const mentionPattern = /@[A-Za-z0-9_]{1,15}/g;
+    const filtered = allTweets.filter(t => {
+      const matches = (t.text ?? '').match(mentionPattern);
+      return !matches || matches.length < 3;
+    });
+    const droppedSpam = allTweets.length - filtered.length;
+
+    // Sort by engagement (likes + replies + RTs + quotes), descending. We
+    // don't include impressions because they're heavily skewed by virality
+    // and would push outlier tweets way up. Best-engaged tweet at index 0.
+    const engagement = (t: TwitterV2Tweet): number => {
+      const m = t.public_metrics;
+      if (!m) return 0;
+      return m.like_count + m.reply_count + m.retweet_count + m.quote_count;
+    };
+    filtered.sort((a, b) => engagement(b) - engagement(a));
+
     logger.info(
-      `[Twitter] searchEnsContent fetched ${tweets.length} tweet(s) (cost ~$${costUsd.toFixed(3)})`,
+      `[Twitter] searchEnsContent: ${allTweets.length} fetched, ${droppedSpam} dropped as 3+ @-mention spam, ` +
+        `${filtered.length} kept and sorted by engagement (cost ~$${costUsd.toFixed(3)})`,
     );
-    return { data: tweets, costUsd };
+    return { data: filtered, costUsd };
+  }
+
+  /**
+   * Fetch up to `maxResults` (max 100) third-party QUOTE tweets of a given
+   * tweet, via /2/tweets/:id/quote_tweets. Cap of 100 = one page. Used by
+   * the weekly summary's thread-group restructure so the LLM sees full
+   * conversation tree (parent → our reply → replies + quotes) per bot tweet.
+   *
+   * Cost: $0.005 per returned quote (third-party-read rate). Caller should
+   * gate on `public_metrics.quote_count > 0` to avoid empty calls.
+   */
+  async getQuoteTweets(
+    tweetId: string,
+    maxResults: number = 100,
+  ): Promise<TwitterReadResult<TwitterV2Tweet[]>> {
+    if (!this.checkApiEnabled()) return { data: [], costUsd: 0 };
+
+    const capped = Math.min(Math.max(maxResults, 10), 100);
+    const result = await this.signedGet(
+      `https://api.twitter.com/2/tweets/${tweetId}/quote_tweets`,
+      {
+        max_results: capped,
+        'tweet.fields': 'author_id,created_at,public_metrics,conversation_id',
+        expansions: 'author_id',
+        'user.fields': 'name,username',
+      },
+    );
+
+    if (!result.success) {
+      logger.warn(`[Twitter] getQuoteTweets(${tweetId}) failed: ${result.error}`);
+      return { data: [], costUsd: 0 };
+    }
+
+    const rawQuotes: TwitterV2Tweet[] = result.json?.data ?? [];
+    const quotes = this.enrichTweetsWithAuthors(result.json, rawQuotes);
+    const costUsd = quotes.length * 0.005;
+    logger.info(
+      `[Twitter] getQuoteTweets(${tweetId}) fetched ${quotes.length} quote(s) (cost ~$${costUsd.toFixed(3)})`,
+    );
+    return { data: quotes, costUsd };
   }
 
   /**

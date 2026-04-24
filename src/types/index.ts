@@ -734,6 +734,28 @@ export interface WeeklyBotPost {
 }
 
 /**
+ * One conversation tree from the bot's published content this week. Built by
+ * the aggregator from `botPosts` + own-tweet metrics + third-party replies +
+ * quotes — one group per parent transaction tweet.
+ *
+ * Tree shape:
+ *   parent (sale/reg/bid/renewal tweet posted by us)
+ *     ├── ourAiReply (the AI's threaded reply to that parent, if any)
+ *     ├── thirdPartyReplies (everyone else's replies in the conversation)
+ *     └── thirdPartyQuotes (everyone else's quote tweets of the parent)
+ *
+ * `metrics` is the parent tweet's public metrics from a fresh hydrate. Used
+ * by the prompt builder to render engagement at the top of each group.
+ */
+export interface WeeklyThreadGroup {
+  parent: WeeklyBotPost;
+  ourAiReply: WeeklyBotPost | null;
+  metrics: TwitterPublicMetrics | null;
+  thirdPartyReplies: TwitterV2Tweet[];
+  thirdPartyQuotes: TwitterV2Tweet[];
+}
+
+/**
  * The canonical aggregated data shape consumed by the LLM (Phase 4) and the
  * future weekly-summary image template (v2). Built by `WeeklySummaryDataService`
  * (Phase 3) from Grails + self-DB + Twitter + Alchemy sources.
@@ -765,22 +787,29 @@ export interface WeeklySummaryData {
   renewalsStats: WeeklyRenewalsStats;
   topParticipants: WeeklyTopParticipant[];
   washSignals: WeeklyWashSignals;
-  botPosts: WeeklyBotPost[];
 
-  // ── Twitter sources ───────────────────────────────────────────────────────
+  // ── Bot's own published content + conversation trees ────────────────────
   /**
-   * Bot's own tweets posted in the window WITH freshly fetched engagement
-   * metrics. May overlap with `botPosts` rows for transaction tweets (we
-   * include in both: `botPosts` for the LLM to read raw text and reference
-   * cross-types, this list specifically for engagement-by-tweet analysis).
+   * One thread group per parent transaction tweet the bot posted this week.
+   * Each group bundles the parent + the bot's own AI reply + third-party
+   * replies + third-party quotes, hydrated with fresh engagement metrics.
+   * Replaces the prior flat `botPosts` / `ownTweetsWithFreshMetrics` /
+   * `thirdPartyReplies` triple — same data, organised so the LLM doesn't
+   * have to mentally join by ID.
+   *
+   * Sorted newest-first by parent.postedAt.
    */
-  ownTweetsWithFreshMetrics: TwitterV2Tweet[];
+  threadGroups: WeeklyThreadGroup[];
+
   /**
-   * Up to 100 third-party replies for each conversation (= each bot tweet)
-   * that had reply_count > 0. The 100/conv cap is enforced upstream in
-   * `TwitterService.getRepliesToTweet` to bound per-week cost.
+   * Bot AI replies whose parent transaction tweet was posted OUTSIDE the
+   * current 7-day window. Rare (parents and their AI replies usually land
+   * close together). Surfaced in a small dedicated section so the LLM has
+   * full visibility on AI output without polluting the threadGroups tree.
    */
-  thirdPartyReplies: Array<{ conversationId: string; replies: TwitterV2Tweet[] }>;
+  orphanedAiReplies: WeeklyBotPost[];
+
+  // ── Twitter chatter (the broader ENS conversation) ──────────────────────
   ensTwitterChatter: TwitterV2Tweet[];
 
   // ── Alchemy ───────────────────────────────────────────────────────────────
@@ -796,4 +825,12 @@ export interface WeeklySummaryData {
   twitterCostUsd: number;
   /** Names of sources whose fetch failed (so the prompt can be honest with the LLM). */
   partialSourceFailures: string[];
+
+  /**
+   * The bot's own Twitter username (no `@` prefix). Resolved from
+   * `/2/users/me` and used by the prompt builder to strip self-mentions
+   * from third-party reply / quote / chatter text — readers shouldn't see
+   * "@ENSMarketBot" repeated by the LLM. Null if the resolution failed.
+   */
+  botUsername: string | null;
 }
