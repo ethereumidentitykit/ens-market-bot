@@ -1166,6 +1166,13 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
   /** Twitter Premium+ ceiling for thread tweets. */
   private static readonly WEEKLY_TWEET_MAX_CHARS = 1200;
   /**
+   * Hardcoded first line prepended to the headline tweet after parsing.
+   * The LLM is told NOT to write its own header (and to budget chars
+   * accordingly) — same pattern we use elsewhere in the codebase for the
+   * per-event AI replies (where "AI insight:" is auto-prefixed).
+   */
+  private static readonly WEEKLY_HEADLINE_HEADER = 'This Week in ENS Market (by GrailsAI ✨)';
+  /**
    * The five lanes of the weekly thread, in the order they MUST appear.
    * The system prompt + JSON schema both anchor on this ordering; the
    * post-parse validator double-checks it.
@@ -1382,6 +1389,19 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
       tweets.push({ section: section as WeeklyTweetSection, text });
     }
 
+    // Apply the hardcoded headline header. The system prompt tells the model
+    // NOT to write its own header (and to budget the tweet 1 character count
+    // accordingly), so we prepend ours here. Same pattern as the per-event AI
+    // reply pipeline ("AI insight:" prefix). Single literal newline keeps the
+    // header on its own line followed immediately by the model's text.
+    const headlineIdx = tweets.findIndex(t => t.section === 'headline');
+    if (headlineIdx !== -1) {
+      tweets[headlineIdx] = {
+        section: 'headline',
+        text: `${OpenAIService.WEEKLY_HEADLINE_HEADER}\n\n${tweets[headlineIdx].text}`,
+      };
+    }
+
     return tweets;
   }
 
@@ -1419,7 +1439,7 @@ TWEET 1 — section: "headline"
 ══════════════════════════════════════════════════════════════════════════
 The single most interesting take of the week. Could be a trend, a whale, a market shift, a wash-trade pattern, a category waking up — whatever the data screams loudest about. Pick ONE angle and go hard.
 
-FORMAT: Start with the literal header "GrailsAI Weekly ✨" on its own line, then a blank line, then the headline take. Aim under 280 characters total so it renders cleanly on every client. Punchy, opinionated, leaves the reader wanting tweet 2.
+DO NOT write a header line. The string "${OpenAIService.WEEKLY_HEADLINE_HEADER}" plus a blank line will be prepended to your tweet automatically — your "text" field should contain ONLY your headline take, no header. Aim for under 240 characters in your text so the final tweet (with our header) renders under Twitter's 280-char default limit. Punchy, opinionated, leaves the reader wanting tweet 2.
 
 ══════════════════════════════════════════════════════════════════════════
 TWEET 2 — section: "by_the_numbers"
@@ -1427,11 +1447,10 @@ TWEET 2 — section: "by_the_numbers"
 The hard-data tweet. The headline numbers a market watcher needs to know:
 
   - Sales: count + total volume (ETH and USD)
-  - Registrations: count + total cost + total premium paid
+  - Registrations/renewals: count + total cost + total premium paid
   - Bids/offers: how active was the bid layer
-  - Renewals: count + volume (this is OUR data, Grails doesn't have it)
   - Week-over-week delta on the BIGGEST mover (use PREVIOUS WEEK SNAPSHOT if provided; skip the comparison entirely if it isn't)
-  - ETH price context if move is ≥3% AND it explains a USD-volume vs ETH-volume divergence
+  - ETH price context if move is ≥5% AND how it may effect sentiment.
 
 Be selective — don't list every number you have. Surface 4-6 numbers that actually matter. Numbers prefer specificity ("47 ETH across 23 sales" > "lots of activity"). Round USD to nice units ($14k, $1.2M).
 
@@ -1440,12 +1459,11 @@ TWEET 3 — section: "spotlight"
 ══════════════════════════════════════════════════════════════════════════
 The dynamic deep-focus tweet. Pick ONE angle from the menu below — whichever is loudest in the week's data — and go DEEP on it. ONE thing, well-explored.
 
-DEFAULT angle: NAMES TO WATCH. Use the data in NAMES TO WATCH: PREMIUM DECAY (top names with high watcher concentration in the premium auction phase) and NAMES TO WATCH: GRACE → PREMIUM SOON (names dropping into the premium auction within 7 days). Lead with premium-decay names — that's where the auction action is happening this week. Mention 1-2 grace-soon names as a tail ("and watching these enter the auction this week:").
+DEFAULT angle: NAMES TO WATCH. Use the data in NAMES TO WATCH: PREMIUM DECAY (top names with high watcher concentration in the premium auction phase) and NAMES TO WATCH: GRACE → PREMIUM SOON (names dropping into the premium auction within 7 days if current owner doesn't renew). Lead with premium-decay names — that's where the auction action is happening this week. Mention 1-2 grace-soon names as a tail ("and watching these enter the auction this week:").
 
 PIVOT angles (use INSTEAD of names-to-watch only if clearly louder):
-  - ENGAGING BOT TWEET: One specific bot post drove unusually high engagement or a juicy reply thread. Lead with what landed and why. Reference the actual replies for context (PARAPHRASE — never quote verbatim, never @-mention).
+  - ENGAGING POST OF YOURS: One of YOUR OWN posts from earlier this week drove unusually high engagement or a juicy reply thread. Lead with what you said and why it landed. Reference the actual replies for context (PARAPHRASE — never quote verbatim).
   - CATEGORY HEATING UP: 2+ of the week's top sales or registrations share a club tag (999 club, 10k club, 3-letter, prepunks, etc.). Identify the cluster and what it means.
-  - HOT LIVE OFFER ACTIVITY: A specific name has unusually stacked active offers, or top current offers are clustering in a way that signals where bidders are circling.
   - NOTABLE SINGLE TRADE: One individual sale or registration is genuinely the story of the week — a steal, a wash, an absurd overpay, a name with a backstory. Different from the headline insight (which is broader).
 
 Whatever you pick, go DEEP — give the reader specifics, numbers, names. Don't list multiple angles. ONE thing.
@@ -1456,19 +1474,17 @@ TWEET 4 — section: "community_pulse"
 Broad sentiment sweep. Zoom OUT (vs tweet 3 which goes deep on one thing). Aggregate themes across:
 
   - ENS CHATTER: themes from broad ENS-related tweets in the past 7d. Common topics, narrative threads, vibe shifts.
-  - OWN TWEET ENGAGEMENT: which kinds of bot posts are landing this week (which categories of sale/reg/bid drove the most engagement on average), without repeating any specific tweet you covered in tweet 3.
+  - YOUR OWN ENGAGEMENT: which kinds of YOUR posts are landing this week (which categories of sale/reg/bid drove the most engagement), without repeating any specific post you already covered in tweet 3.
   - Notable accounts mentioning ENS or relevant news/launches if surfaced in chatter.
 
-If chatter is quiet and there's no clear sentiment thread, lead with the most-engaged bot post of the week and what made it land — without re-using whatever was already in tweet 3.
-
-NEVER quote third-party tweets verbatim. NEVER @-mention any third-party account. PARAPHRASE community sentiment, never reproduce it.
+NEVER quote third-party tweets verbatim. PARAPHRASE community sentiment, never reproduce it.
 
 ══════════════════════════════════════════════════════════════════════════
 TWEET 5 — section: "top_player"
 ══════════════════════════════════════════════════════════════════════════
 Climactic actor reveal. Lead with the literal phrase "Top Player of the Week:" followed by the address handle (their ENS name if they have one, otherwise a short address like 0xabcd…1234).
 
-Then 2-4 sentences explaining what they did this week. Reference TOP PARTICIPANTS data — full breakdown of buys / sells / registrations / renewals with actual ETH amounts. Pick the address with the most interesting STORY given the rest of the week's context — it does NOT have to be #1 by volume. The math gave you the top 3 candidates from OUR DATABASE ONLY (we miss micro-actions below our notability thresholds), so be honest about that limitation if natural ("from what we tracked", "from our feed").
+Then 2-4 sentences explaining what they did this week. Reference TOP PARTICIPANTS data — full breakdown of buys / sells / registrations / renewals with actual ETH amounts. Pick the address with the most interesting STORY given the rest of the week's context — it does NOT have to be #1 by volume. The math gave you the top 3 candidates from OUR DATABASE.
 
 ══════════════════════════════════════════════════════════════════════════
 GENERAL FRAMING RULES
@@ -1489,17 +1505,19 @@ WRITING STYLE:
 - Use "onchain" not "on-chain", "multichain" not "multi-chain".
 - ETH values: 2 decimals max for ≥0.01 ETH, more precision only for tiny values.
 - USD: rounded ($14k, $1.2M, $850).
-- Avoid: "scooped up", "snapped up", "nabbed", "on a tear", emojis except the ✨ in the tweet 1 header.
+- Avoid: "scooped up", "snapped up", "nabbed", "on a tear", emojis (the ✨ in the auto-prepended tweet 1 header is the only one — your text fields should contain none).
+
+CONTINUOUS IDENTITY:
+You are GrailsAI Weekly. The data you'll see under YOUR PAST POSTS, YOUR OWN TWEET ENGAGEMENT, and THIRD-PARTY REPLIES is YOUR OWN past output and the engagement on it — NOT some external bot's. Speak in first person. Use "we" or "I" when referencing past takes ("we covered this on Tuesday", "our take on the X sale aged well"). NEVER refer to yourself as "the bot" or "the AI" in third person — that breaks the voice.
 
 CRITICAL RULES:
 - NEVER fabricate numbers. If a section is missing, work without it.
-- NEVER quote third-party tweets verbatim. NEVER @-mention any account other than @-handles already present in the bot's own previous output (and even then, sparingly).
+- NEVER quote third-party tweets verbatim.
 - NEVER use the word "edgy". NEVER use "rather than", "instead of", "as opposed to".
 - NEVER mention legal / trademark / IP / copyright issues.
 - NEVER mention the absence of something ("no wash trades", "no notable whales").
 - NEVER apologise for missing data. State what you have and move on.
 - NEVER ask questions. You're writing a recap, not a survey.
-- The thread will be posted by an automated bot. You ARE the bot's voice — don't refer to "the bot" in third person.
 
 Each tweet stands on its own — a reader who only sees tweet 1 should still get value. Tweets 2-5 build context, detail, sentiment, and the actor reveal.`;
   }
@@ -1727,18 +1745,20 @@ Each tweet stands on its own — a reader who only sees tweet 1 should still get
       lines.push('');
     }
 
-    // ── Bot's own posted tweets + AI replies (RAW) ───────────────────────────
+    // ── Your own posted tweets + AI replies from this week (RAW) ────────────
+    // Framed as "yours" rather than "the bot's" — the LLM IS GrailsAI Weekly
+    // and these are its own past posts. Continuous identity matters for voice.
     if (data.botPosts.length > 0) {
-      lines.push(`BOT POSTS — your own posted tweets + AI replies for the week, RAW (${data.botPosts.length} item(s), newest first):`);
+      lines.push(`YOUR PAST POSTS — your own posted tweets + AI replies from this week, RAW (${data.botPosts.length} item(s), newest first):`);
       for (const p of data.botPosts) {
         lines.push(this.formatBotPost(p));
       }
       lines.push('');
     }
 
-    // ── Twitter engagement metrics on bot's own tweets ───────────────────────
+    // ── Twitter engagement metrics on your own tweets ────────────────────────
     if (data.ownTweetsWithFreshMetrics.length > 0) {
-      lines.push(`OWN TWEET ENGAGEMENT (${data.ownTweetsWithFreshMetrics.length} tweet(s) with fresh metrics):`);
+      lines.push(`YOUR OWN TWEET ENGAGEMENT (${data.ownTweetsWithFreshMetrics.length} of your tweets with fresh metrics):`);
       // Sort by impressions desc to surface the highest-engagement ones first.
       const sorted = [...data.ownTweetsWithFreshMetrics].sort((a, b) => {
         const ai = a.public_metrics?.impression_count ?? 0;
@@ -1756,10 +1776,10 @@ Each tweet stands on its own — a reader who only sees tweet 1 should still get
       lines.push('');
     }
 
-    // ── Third-party replies on bot's tweets (RAW) ────────────────────────────
+    // ── Third-party replies on your tweets (RAW) ─────────────────────────────
     if (data.thirdPartyReplies.length > 0) {
       const totalReplies = data.thirdPartyReplies.reduce((acc, c) => acc + c.replies.length, 0);
-      lines.push(`THIRD-PARTY REPLIES — actual reply text from other accounts (${data.thirdPartyReplies.length} engaged conv(s), ${totalReplies} repl(ies) total):`);
+      lines.push(`THIRD-PARTY REPLIES — actual reply text from other accounts to YOUR posts (${data.thirdPartyReplies.length} engaged conv(s), ${totalReplies} repl(ies) total):`);
       for (const conv of data.thirdPartyReplies) {
         lines.push(`  Conversation ${conv.conversationId} (${conv.replies.length} repl(ies)):`);
         for (const r of conv.replies) {
@@ -1785,7 +1805,7 @@ Each tweet stands on its own — a reader who only sees tweet 1 should still get
 
     // ── Final reminder ───────────────────────────────────────────────────────
     lines.push('---');
-    lines.push(`Now write the thread. Return JSON matching the WeeklySummaryThread schema: exactly 5 tweets, in order: headline → by_the_numbers → spotlight → community_pulse → top_player. Tweet 1 starts with "GrailsAI Weekly ✨" header on its own line; ideally <280 chars. Tweets 2-5 max ${OpenAIService.WEEKLY_TWEET_MAX_CHARS} chars each. Tweet 5 leads with the literal phrase "Top Player of the Week:" followed by the chosen handle. No numbering, no TL;DR, no @-mentions of third-party accounts.`);
+    lines.push(`Now write the thread. Return JSON matching the WeeklySummaryThread schema: exactly 5 tweets, in order: headline → by_the_numbers → spotlight → community_pulse → top_player. Tweet 1 (headline): aim for <240 chars in your text — the literal header "${OpenAIService.WEEKLY_HEADLINE_HEADER}" plus a blank line will be auto-prepended, so do NOT write a header yourself. Tweets 2-5 max ${OpenAIService.WEEKLY_TWEET_MAX_CHARS} chars each. Tweet 5 leads with the literal phrase "Top Player of the Week:" followed by the chosen handle. No numbering, no TL;DR, no @-mentions of third-party accounts. Speak in first person — you are GrailsAI Weekly; the past posts you'll see are yours.`);
 
     return lines.join('\n');
   }
@@ -1805,7 +1825,10 @@ Each tweet stands on its own — a reader who only sees tweet 1 should still get
   }
 
   /**
-   * Format one bot-post entry. RAW text — no compression.
+   * Format one of your past-post entries (a tweet you posted earlier this week
+   * — sale/registration/bid/renewal tweet, or an AI reply). RAW text, no
+   * compression. The "you" framing is intentional: from the LLM's POV these
+   * are its own past posts, not some external bot's.
    */
   private formatBotPost(p: WeeklyBotPost): string {
     const date = p.postedAt.slice(0, 10);
