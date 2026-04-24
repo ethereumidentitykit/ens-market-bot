@@ -79,9 +79,31 @@ export class OpenAIService {
     weekly: {
       name: 'gpt-5.4-2026-03-05',
       maxInputTokens: 1_050_000,
+      // ⚠️ TEMP: thinking effort lowered to 'low' for testing the flow end-to-end.
+      // Flip WEEKLY_REASONING_EFFORT back to 'xhigh' before going live (see below).
       description: 'GPT-5.4 with xhigh reasoning for weekly market summary'
     }
   };
+
+  /**
+   * ⚠️ TEMP: set to 'low' for fast testing while iterating on the prompt /
+   * schema / output shape. Flip back to 'xhigh' before any live posting —
+   * 'low' won't produce thread-quality output. The SDK's `ReasoningEffort`
+   * type only goes up to 'high' (no 'xhigh'); `as any` cast applied at the
+   * call site for that case.
+   */
+  private static readonly WEEKLY_REASONING_EFFORT: 'low' | 'medium' | 'high' | 'xhigh' = 'high';
+
+  /**
+   * Hard ceiling on the OpenAI Responses API call for the weekly summary.
+   * The SDK's default 10-min timeout silently failed to fire on a stuck
+   * request during initial testing — this explicit per-call timeout
+   * guarantees we surface a clear error within 30 minutes no matter what.
+   * 30 min is generous (xhigh + 40k-token prompt + JSON schema can
+   * legitimately take 5-10 min); should be tightened to ~10 min once the
+   * flow is proven.
+   */
+  private static readonly WEEKLY_API_TIMEOUT_MS = 30 * 60 * 1000;
 
   constructor() {
     const apiKey = process.env.OPENAI_API_KEY;
@@ -1259,32 +1281,42 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
       `📰 Source failures (${data.partialSourceFailures.length}): ${data.partialSourceFailures.join(', ') || 'none'}`,
     );
 
-    // Call the Responses API with retry. Two `as any` casts:
-    //   - `effort: 'xhigh'`: the installed `openai` SDK (6.2.0) only types
-    //     ReasoningEffort up to 'high', but the OpenAI API accepts 'xhigh' as
-    //     a higher tier on the gpt-5.4 family. If the API rejects 'xhigh' at
-    //     runtime, swap to 'high' here.
-    //   - `schema: ... as any`: the SDK types `schema: { [k: string]: unknown }`
-    //     which doesn't accept a `readonly` const-asserted object directly. The
-    //     literal we pass is a perfectly valid JSON Schema; the cast is purely
-    //     to satisfy TS. The model slug `gpt-5.4-2026-03-05` is also outside
-    //     the SDK's known ChatModel union but works at runtime for the same
-    //     reason.
+    // Call the Responses API with retry + an explicit 30-min timeout. Casts:
+    //   - `effort: WEEKLY_REASONING_EFFORT as any`: the installed SDK (6.2.0)
+    //     types ReasoningEffort up to 'high'; the OpenAI API accepts 'xhigh'
+    //     as a higher tier. The constant is currently set to 'low' for testing.
+    //   - `schema: ... as any`: SDK types `schema: { [k: string]: unknown }`
+    //     which doesn't accept our `readonly` const-asserted literal directly.
+    //   - `model` slug `gpt-5.4-2026-03-05` is outside the SDK's `ChatModel`
+    //     union but works at runtime (the union allows arbitrary strings).
+    //
+    // Timeout: per-call override (passed as the 2nd `RequestOptions` arg) —
+    // the SDK default 10-min timeout failed to fire on a stuck request
+    // during initial testing, so we set it explicitly. 30 min is generous;
+    // tighten once the flow is proven.
+    logger.info(
+      `📰 Calling OpenAI Responses API: model=${this.models.weekly.name} ` +
+        `effort=${OpenAIService.WEEKLY_REASONING_EFFORT} ` +
+        `timeout=${OpenAIService.WEEKLY_API_TIMEOUT_MS / 1000}s`,
+    );
     const response = await this.withRetry(
       async () => {
-        return await this.client.responses.create({
-          model: this.models.weekly.name,
-          input: fullPrompt,
-          reasoning: { effort: 'xhigh' as any },
-          text: {
-            format: {
-              type: 'json_schema',
-              name: 'WeeklySummaryThread',
-              strict: true,
-              schema: OpenAIService.WEEKLY_THREAD_SCHEMA as any,
+        return await this.client.responses.create(
+          {
+            model: this.models.weekly.name,
+            input: fullPrompt,
+            reasoning: { effort: OpenAIService.WEEKLY_REASONING_EFFORT as any },
+            text: {
+              format: {
+                type: 'json_schema',
+                name: 'WeeklySummaryThread',
+                strict: true,
+                schema: OpenAIService.WEEKLY_THREAD_SCHEMA as any,
+              },
             },
           },
-        });
+          { timeout: OpenAIService.WEEKLY_API_TIMEOUT_MS },
+        );
       },
       `Weekly summary generation (window ${data.weekStart} → ${data.weekEnd})`,
     );

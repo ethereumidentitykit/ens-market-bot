@@ -60,7 +60,7 @@ export class EthIdentityService {
       logger.debug(`Resolving address: ${address}`);
       
       const response = await axios.get<EthIdentityAccount>(
-        `${this.baseUrl}/users/${address}/account?cache=fresh`,
+        `${this.baseUrl}/users/${address}/account`,
         {
           timeout: 10000, // 10 second timeout
           headers: {
@@ -119,7 +119,7 @@ export class EthIdentityService {
       logger.debug(`Getting profile for address: ${address}`);
       
       const response = await axios.get<EthIdentityAccount>(
-        `${this.baseUrl}/users/${address}/account?cache=fresh`,
+        `${this.baseUrl}/users/${address}/account`,
         {
           timeout: 10000, // 10 second timeout
           headers: {
