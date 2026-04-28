@@ -217,6 +217,7 @@ export class OpenAIService {
         const isLastAttempt = attempt === this.maxRetries;
         
         if (!isRetryable || isLastAttempt) {
+          logger.error(`${context} failed: ${this.formatApiErrorDetails(error)}`);
           throw error; // Don't retry or no more retries left
         }
         
@@ -234,6 +235,23 @@ export class OpenAIService {
     }
     
     throw lastError;
+  }
+
+  private formatApiErrorDetails(error: any): string {
+    const details = {
+      status: error?.status,
+      code: error?.code,
+      type: error?.type,
+      message: error?.message,
+      error: error?.error,
+      response: error?.response?.data,
+    };
+
+    try {
+      return JSON.stringify(details);
+    } catch {
+      return error?.message || String(error);
+    }
   }
 
   /**
@@ -1305,11 +1323,11 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
   private static readonly WEEKLY_OUTPUT_USD_PER_TOKEN = 15 / 1_000_000;
 
   /**
-   * Strict JSON schema enforcing exactly 5 thread tweets in fixed order. The
-   * `section` enum + `tweets` minItems/maxItems make the API itself reject
-   * any malformed output. `text` length is bounded server-side at the LLM
-   * raw cap (970) — the post-decoration final cap (1000) is then re-checked
-   * by `parseAndValidateWeeklyTweets` after we add section headers + footer.
+   * JSON schema for the weekly thread. Anthropic's structured-output schema
+   * validator rejects array minItems/maxItems values other than 0 or 1, so
+   * exact tweet count is enforced in `parseAndValidateWeeklyTweets()` instead
+   * of the provider schema. `section` enum and `text` length remain
+   * server-enforced.
    */
   private static readonly WEEKLY_THREAD_SCHEMA = {
     type: 'object',
@@ -1318,8 +1336,8 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
     properties: {
       tweets: {
         type: 'array',
-        minItems: 5,
-        maxItems: 5,
+        description:
+          'Exactly 5 tweets, in this order: headline, by_the_numbers, spotlight, community_pulse, top_player.',
         items: {
           type: 'object',
           additionalProperties: false,
@@ -1391,37 +1409,46 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
       `📰 Source failures (${data.partialSourceFailures.length}): ${data.partialSourceFailures.join(', ') || 'none'}`,
     );
 
-    // Call the OpenRouter Responses API with retry + an explicit 30-min timeout.
+    // Call OpenRouter Chat Completions with retry + an explicit 30-min timeout.
+    // OpenRouter's structured-output docs use Chat Completions' `response_format`
+    // shape; the OpenAI Responses `text.format` shape can be rejected by
+    // Anthropic providers.
+    //
     // Casts:
-    //   - `schema: ... as any`: SDK types `schema: { [k: string]: unknown }`
-    //     which doesn't accept our `readonly` const-asserted literal directly.
-    //   - `model` is an OpenRouter slug outside the SDK's known model union.
+    //   - `schema: ... as any`: SDK types don't accept our `readonly`
+    //     const-asserted literal directly.
+    //   - `model` and `reasoning` are OpenRouter-specific for this SDK path.
     //
     // Timeout: per-call override (passed as the 2nd `RequestOptions` arg) —
     // the SDK default 10-min timeout failed to fire on a stuck request
     // during initial testing, so we set it explicitly. 30 min is generous;
     // tighten once the flow is proven.
     logger.info(
-      `📰 Calling OpenRouter Responses API: model=${this.models.weekly.name} ` +
+      `📰 Calling OpenRouter Chat Completions API: model=${this.models.weekly.name} ` +
         `effort=${OpenAIService.WEEKLY_REASONING_EFFORT} ` +
         `timeout=${OpenAIService.WEEKLY_API_TIMEOUT_MS / 1000}s`,
     );
     const response = await this.withRetry(
       async () => {
-        return await this.client.responses.create(
+        return await this.client.chat.completions.create(
           {
             model: this.models.weekly.name,
-            input: fullPrompt,
-            reasoning: { effort: OpenAIService.WEEKLY_REASONING_EFFORT as any },
-            text: {
-              format: {
-                type: 'json_schema',
+            messages: [
+              {
+                role: 'user',
+                content: fullPrompt,
+              },
+            ],
+            reasoning: { effort: OpenAIService.WEEKLY_REASONING_EFFORT },
+            response_format: {
+              type: 'json_schema',
+              json_schema: {
                 name: 'WeeklySummaryThread',
                 strict: true,
                 schema: OpenAIService.WEEKLY_THREAD_SCHEMA as any,
               },
             },
-          },
+          } as any,
           { timeout: OpenAIService.WEEKLY_API_TIMEOUT_MS },
         );
       },
