@@ -181,6 +181,9 @@ function dashboard() {
         generatedAIReply: null,
         aiReplyGenerating: false,
         aiReplySending: false,
+        aiReplyRedoNameResearch: false,
+        aiReplyNameResearchPreview: null,
+        aiReplyNameResearchLoading: false,
         aiReplyMessage: '',
         aiReplyMessageType: 'info',
         _aiReplyPollTimer: null,
@@ -2441,6 +2444,84 @@ Issued At: ${issuedAt}`;
             }
         },
 
+        clearAIReplyNameResearchPreview() {
+            this.aiReplyNameResearchPreview = null;
+            this.aiReplyNameResearchLoading = false;
+        },
+
+        async handleAIReplySelectionChange() {
+            this.clearAIReply();
+            await this.loadAIReplyNameResearchPreview();
+        },
+
+        async loadAIReplyNameResearchPreview() {
+            const isRenewal = this.aiReplyType === 'renewal';
+            const selectedKey = isRenewal ? this.aiReplyRenewalTxHash : this.aiReplyTransactionId;
+
+            this.aiReplyNameResearchPreview = null;
+
+            if (!selectedKey) {
+                return;
+            }
+
+            try {
+                this.aiReplyNameResearchLoading = true;
+                const params = isRenewal
+                    ? `type=${this.aiReplyType}&txHash=${encodeURIComponent(selectedKey)}`
+                    : `type=${this.aiReplyType}&id=${encodeURIComponent(selectedKey)}`;
+                const response = await this.fetch(`/api/ai-reply-name-research?${params}`);
+
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    this.aiReplyNameResearchPreview = {
+                        ensName: '',
+                        text: '',
+                        source: '',
+                        researchedAt: '',
+                        error: data.error || 'Failed to load name research'
+                    };
+                    return;
+                }
+
+                const data = await response.json();
+                this.aiReplyNameResearchPreview = {
+                    ensName: data.ensName,
+                    id: data.research?.id || null,
+                    text: data.research?.text || '',
+                    source: data.research?.source || '',
+                    researchedAt: data.research?.researchedAt || '',
+                    updatedAt: data.research?.updatedAt || ''
+                };
+            } catch (error) {
+                console.error('Load name research preview failed:', error);
+                this.aiReplyNameResearchPreview = {
+                    ensName: '',
+                    text: '',
+                    source: '',
+                    researchedAt: '',
+                    error: error.message || 'Failed to load name research'
+                };
+            } finally {
+                this.aiReplyNameResearchLoading = false;
+            }
+        },
+
+        applyAIReplyPayload(reply, alreadyExists = false) {
+            this.generatedAIReply = reply;
+            this.generatedAIReply.alreadyExists = alreadyExists;
+
+            if (reply?.nameResearch) {
+                this.aiReplyNameResearchPreview = {
+                    ensName: this.aiReplyNameResearchPreview?.ensName || '',
+                    id: reply.nameResearchId || this.aiReplyNameResearchPreview?.id || null,
+                    text: reply.nameResearch,
+                    source: this.aiReplyNameResearchPreview?.source || 'generated_reply',
+                    researchedAt: this.aiReplyNameResearchPreview?.researchedAt || '',
+                    updatedAt: this.aiReplyNameResearchPreview?.updatedAt || ''
+                };
+            }
+        },
+
         _stopPolling() {
             if (this._aiReplyPollTimer) {
                 clearInterval(this._aiReplyPollTimer);
@@ -2470,8 +2551,7 @@ Issued At: ${issuedAt}`;
 
                     if (data.status === 'completed' && data.reply) {
                         this._stopPolling();
-                        this.generatedAIReply = data.reply;
-                        this.generatedAIReply.alreadyExists = false;
+                        this.applyAIReplyPayload(data.reply, false);
                         this.aiReplyGenerating = false;
                         this.showAIReplyMessage(
                             forceRegenerate ? 'New AI reply generated successfully' : 'AI reply generated successfully',
@@ -2524,8 +2604,18 @@ Issued At: ${issuedAt}`;
                 const type = this.aiReplyType;
                 // Renewals send txHash instead of numeric id
                 const bodyPayload = isRenewal
-                    ? { type, txHash: this.aiReplyRenewalTxHash, forceRegenerate }
-                    : { type, id: parseInt(this.aiReplyTransactionId), forceRegenerate };
+                    ? {
+                        type,
+                        txHash: this.aiReplyRenewalTxHash,
+                        forceRegenerate,
+                        redoNameResearch: this.aiReplyRedoNameResearch
+                    }
+                    : {
+                        type,
+                        id: parseInt(this.aiReplyTransactionId),
+                        forceRegenerate,
+                        redoNameResearch: this.aiReplyRedoNameResearch
+                    };
 
                 const response = await this.fetch('/api/ai-reply-generate', {
                     method: 'POST',
@@ -2543,8 +2633,7 @@ Issued At: ${issuedAt}`;
 
                 // Reply already exists — returned synchronously
                 if (data.alreadyExists && data.reply) {
-                    this.generatedAIReply = data.reply;
-                    this.generatedAIReply.alreadyExists = true;
+                    this.applyAIReplyPayload(data.reply, true);
                     this.aiReplyGenerating = false;
                     this.showAIReplyMessage(
                         'Reply already exists. Click "Regenerate" to create a new one.',

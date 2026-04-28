@@ -2749,7 +2749,13 @@ export class DatabaseService implements IDatabaseService {
     transaction_type as "transactionType", transaction_hash as "transactionHash",
     model_used as "modelUsed", prompt_tokens as "promptTokens",
     completion_tokens as "completionTokens", total_tokens as "totalTokens",
-    cost_usd as "costUsd", reply_text as "replyText", name_research as "nameResearch", status,
+    cost_usd as "costUsd", reply_text as "replyText",
+    name_research_id as "nameResearchId",
+    COALESCE(
+      name_research,
+      (SELECT nr.research_text FROM name_research nr WHERE nr.id = ai_replies.name_research_id)
+    ) as "nameResearch",
+    status,
     error_message as "errorMessage", created_at as "createdAt",
     posted_at as "postedAt"
   `;

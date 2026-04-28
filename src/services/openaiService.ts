@@ -34,28 +34,22 @@ interface ModelConfig {
 }
 
 /**
- * OpenAI Service for generating contextual tweet replies
- * Uses GPT-5-mini with web search capability to create insightful, natural-language replies
- * Automatically switches to thinking model for large inputs
+ * OpenAI-compatible service for generating contextual tweet replies.
+ * Research uses OpenAI directly for web-search quality; final generation routes
+ * through OpenRouter so we can compare output models independently.
  */
 export class OpenAIService {
   private client: OpenAI;
+  private searchClient: OpenAI;
   private readonly temperature = 0.7; // Balance creativity and consistency
   private readonly maxRetries = 2; // Retry up to 2 times (3 total attempts)
   private readonly baseRetryDelay = 1000; // 1 second base delay
-  
-  // Model configurations (token limits based on Oct 2025 OpenAI specs)
-  //
-  // NOTE: `base` and `weekly` intentionally point at the same model slug
-  // (`gpt-5.4-2026-03-05`) but with different `maxInputTokens` — and the
-  // weekly path passes `reasoning.effort: 'xhigh'` while the per-event reply
-  // path does not. Two entries instead of one because:
-  //   - Per-event AI replies use selectModel(estimatedTokens) which compares
-  //     against `base.maxInputTokens` (128k) to decide whether to escalate to
-  //     the o1 thinking model. Bumping `base.maxInputTokens` to 1.05M would
-  //     silently disable that escalation and change reply quality.
-  //   - The weekly summary uses the model's full 1.05M context window plus
-  //     xhigh reasoning. It never escalates.
+
+  private static readonly OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
+  private static readonly OPENROUTER_MODEL = 'anthropic/claude-sonnet-4.6';
+  private static readonly OPENAI_SEARCH_MODEL = 'gpt-5.5';
+
+  // Model configurations for split-provider testing.
   private readonly models: {
     search: ModelConfig;
     base: ModelConfig;
@@ -63,65 +57,76 @@ export class OpenAIService {
     weekly: ModelConfig;
   } = {
     search: {
-      name: 'gpt-5-mini',
-      maxInputTokens: 128000, // Web search tool has 128k limit
-      description: 'GPT-5-mini with web search for name research'
+      name: OpenAIService.OPENAI_SEARCH_MODEL,
+      maxInputTokens: 128000,
+      description: 'OpenAI GPT-5.5 with native web search for name research'
     },
     base: {
-      name: 'gpt-5.4-2026-03-05',
-      maxInputTokens: 128000,
-      description: 'GPT-5.4 for tweet generation'
+      name: OpenAIService.OPENROUTER_MODEL,
+      maxInputTokens: 200000,
+      description: 'Claude Sonnet 4.6 via OpenRouter for tweet generation'
     },
     thinking: {
-      name: 'o1', // Thinking model with larger context window
-      maxInputTokens: 200000, // O1 extended context window
-      description: 'Advanced reasoning model for complex/long inputs'
+      name: OpenAIService.OPENROUTER_MODEL,
+      maxInputTokens: 200000,
+      description: 'Claude Sonnet 4.6 via OpenRouter for long inputs'
     },
     weekly: {
-      name: 'gpt-5.4-2026-03-05',
-      maxInputTokens: 1_050_000,
-      // ⚠️ TEMP: thinking effort lowered to 'low' for testing the flow end-to-end.
-      // Flip WEEKLY_REASONING_EFFORT back to 'xhigh' before going live (see below).
-      description: 'GPT-5.4 with xhigh reasoning for weekly market summary'
+      name: OpenAIService.OPENROUTER_MODEL,
+      maxInputTokens: 200000,
+      description: 'Claude Sonnet 4.6 via OpenRouter for weekly market summary'
     }
   };
 
   /**
-   * ⚠️ TEMP: set to 'low' for fast testing while iterating on the prompt /
-   * schema / output shape. Flip back to 'xhigh' before any live posting —
-   * 'low' won't produce thread-quality output. The SDK's `ReasoningEffort`
-   * type only goes up to 'high' (no 'xhigh'); `as any` cast applied at the
-   * call site for that case.
+   * OpenRouter's Responses API supports minimal/low/medium/high reasoning.
    */
-  private static readonly WEEKLY_REASONING_EFFORT: 'low' | 'medium' | 'high' | 'xhigh' = 'high';
+  private static readonly WEEKLY_REASONING_EFFORT: 'minimal' | 'low' | 'medium' | 'high' = 'high';
 
   /**
-   * Hard ceiling on the OpenAI Responses API call for the weekly summary.
+   * Hard ceiling on the OpenRouter Responses API call for the weekly summary.
    * The SDK's default 10-min timeout silently failed to fire on a stuck
    * request during initial testing — this explicit per-call timeout
    * guarantees we surface a clear error within 30 minutes no matter what.
-   * 30 min is generous (xhigh + 40k-token prompt + JSON schema can
+   * 30 min is generous (reasoning + 40k-token prompt + JSON schema can
    * legitimately take 5-10 min); should be tightened to ~10 min once the
    * flow is proven.
    */
   private static readonly WEEKLY_API_TIMEOUT_MS = 30 * 60 * 1000;
 
   constructor() {
-    const apiKey = process.env.OPENAI_API_KEY;
+    const openRouterApiKey = process.env.OPENROUTER_API_KEY;
+    const openaiApiKey = process.env.OPENAI_API_KEY;
+    const baseURL = process.env.OPENROUTER_BASE_URL || OpenAIService.OPENROUTER_BASE_URL;
     
-    if (!apiKey) {
-      throw new Error('OPENAI_API_KEY environment variable is required');
+    if (!openRouterApiKey) {
+      throw new Error('OPENROUTER_API_KEY environment variable is required for final-output generation');
+    }
+
+    if (!openaiApiKey) {
+      throw new Error('OPENAI_API_KEY environment variable is required for name research web search');
     }
 
     this.client = new OpenAI({
-      apiKey: apiKey,
+      apiKey: openRouterApiKey,
+      baseURL,
+      defaultHeaders: {
+        'HTTP-Referer': process.env.OPENROUTER_HTTP_REFERER || 'https://grails.app',
+        'X-OpenRouter-Title': process.env.OPENROUTER_TITLE || 'ENS Market Bot',
+      },
     });
 
-    logger.info('🤖 OpenAIService initialized');
-    logger.info(`   Search model: ${this.models.search.name} (with web search)`);
+    this.searchClient = new OpenAI({
+      apiKey: openaiApiKey,
+    });
+
+    logger.info('🤖 OpenAI-compatible LLM service initialized');
+    logger.info(`   Search API base URL: OpenAI default`);
+    logger.info(`   Search model: ${this.models.search.name} (OpenAI native web search)`);
+    logger.info(`   Generation API base URL: ${baseURL}`);
     logger.info(`   Generation model: ${this.models.base.name} (max ${this.models.base.maxInputTokens.toLocaleString()} tokens)`);
     logger.info(`   Fallback model: ${this.models.thinking.name} (max ${this.models.thinking.maxInputTokens.toLocaleString()} tokens)`);
-    logger.info(`   Weekly summary model: ${this.models.weekly.name} (max ${this.models.weekly.maxInputTokens.toLocaleString()} tokens, xhigh reasoning)`);
+    logger.info(`   Weekly summary model: ${this.models.weekly.name} (max ${this.models.weekly.maxInputTokens.toLocaleString()} tokens, ${OpenAIService.WEEKLY_REASONING_EFFORT} reasoning)`);
   }
 
   /**
@@ -232,6 +237,60 @@ export class OpenAIService {
   }
 
   /**
+   * OpenAI's SDK exposes `output_text`; OpenRouter's Responses API may only
+   * return the raw `output[].content[].text` shape. Support both.
+   */
+  private extractResponseText(response: any): string {
+    if (typeof response?.output_text === 'string' && response.output_text.trim()) {
+      return response.output_text.trim();
+    }
+
+    const outputText: string[] = [];
+    const output = Array.isArray(response?.output) ? response.output : [];
+
+    for (const item of output) {
+      const content = Array.isArray(item?.content) ? item.content : [];
+
+      for (const part of content) {
+        if (typeof part?.text === 'string') {
+          outputText.push(part.text);
+        }
+      }
+    }
+
+    if (outputText.length > 0) {
+      return outputText.join('').trim();
+    }
+
+    const firstChoiceContent = response?.choices?.[0]?.message?.content;
+    if (typeof firstChoiceContent === 'string') {
+      return firstChoiceContent.trim();
+    }
+
+    return '';
+  }
+
+  private extractUsageTokens(response: any): {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    costUsd?: number;
+  } {
+    const usage = response?.usage || {};
+    const promptTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0;
+    const completionTokens = usage.output_tokens ?? usage.completion_tokens ?? 0;
+    const totalTokens = usage.total_tokens ?? promptTokens + completionTokens;
+    const costUsd = typeof usage.cost === 'number' ? usage.cost : undefined;
+
+    return {
+      promptTokens,
+      completionTokens,
+      totalTokens,
+      costUsd,
+    };
+  }
+
+  /**
    * Estimate token count for a string
    * Uses rough approximation: ~4 characters per token for English text
    * This is a conservative estimate to avoid exceeding limits
@@ -245,9 +304,9 @@ export class OpenAIService {
   }
 
   /**
-   * Research an ENS name using GPT-5-mini with web search
-   * Uses a detailed domain research prompt to gather comprehensive information
-   * 
+   * Research an ENS name using OpenAI's native web search path.
+   * Uses a detailed domain research prompt to gather comprehensive information.
+   *
    * @param tokenName - Full ENS name (e.g., "example.eth")
    * @returns Research summary about the name
    */
@@ -299,7 +358,7 @@ IMPORTANT PERSPECTIVE:
 - Names that cross boundaries (e.g., person name + crypto term + gaming reference) = HIGH MARKET DEMAND
 - "Search noise" or "ambiguity" are NOT negatives - they indicate cross-market appeal
 - Think usernames, not web2 domains: versatility and multiple interpretations = valuable
-- never ask questions, you are making a report. if you are uncertain about something, put that in your report.
+- NEVER ask questions , you are making a report. if you are uncertain about something, put that in your report.
 
 SKIP:
 - Legal/trademark/IP/copyright issues (not relevant for web3 usernames)
@@ -311,10 +370,10 @@ Be honest. If there's nothing interesting or significant about this name, say so
 
 Research: ${sanitizedLabel}`;
 
-      // Call GPT-5 with web search (with retry logic)
+      // Keep search on direct OpenAI: this path had the best research quality.
       const response = await this.withRetry(
         async () => {
-          return await this.client.responses.create({
+          return await this.searchClient.responses.create({
             model: this.models.search.name,
             input: researchPrompt,
             tools: [{ type: "web_search" }],
@@ -323,7 +382,7 @@ Research: ${sanitizedLabel}`;
         `Name research for "${label}"`
       );
 
-      const research = response.output_text?.trim() || '';
+      const research = this.extractResponseText(response);
       
       logger.info(`✅ Name research complete: ${research.length} characters`);
       logger.debug(`   Research preview: ${research.slice(0, 200)}...`);
@@ -368,8 +427,8 @@ Research: ${sanitizedLabel}`;
   /**
    * Generate a contextual reply tweet based on sale/registration data
    * TWO-STEP PROCESS:
-   * 1. Research the name using GPT-5 with web search
-   * 2. Generate tweet using GPT-5 with research + transaction context
+   * 1. Research the name using the OpenRouter online model
+   * 2. Generate tweet using the configured OpenRouter model + transaction context
    * 
    * @param context - Complete LLM prompt context with event, token, and user data
    * @param preComputedResearch - Optional pre-computed name research (to avoid duplicate API calls)
@@ -401,7 +460,7 @@ Research: ${sanitizedLabel}`;
       logger.info(`   Estimated input: ${estimatedTokens.toLocaleString()} tokens`);
       logger.info(`   Selected model: ${selectedModel.name} (${selectedModel.description})`);
 
-      // Call OpenAI Responses API (with retry logic)
+      // Call Responses API (with retry logic)
       const response = await this.withRetry(
         async () => {
           return await this.client.responses.create({
@@ -412,7 +471,7 @@ Research: ${sanitizedLabel}`;
         `Tweet generation for "${context.event.tokenName}"`
       );
 
-      const rawText = response.output_text?.trim() || '';
+      const rawText = this.extractResponseText(response);
       
       // Add title/header to the tweet
       const tweetText = `GrailsAI ✨\n\n${rawText}`;
@@ -422,13 +481,13 @@ Research: ${sanitizedLabel}`;
         throw new Error(`Invalid response: ${tweetText.length} characters (max 900)`);
       }
 
-      const usage = response.usage;
+      const usage = this.extractUsageTokens(response);
       const result: GeneratedReply = {
         tweetText,
-        modelUsed: response.model,
-        promptTokens: usage?.input_tokens || 0,
-        completionTokens: usage?.output_tokens || 0,
-        totalTokens: (usage?.input_tokens || 0) + (usage?.output_tokens || 0),
+        modelUsed: response.model || selectedModel.name,
+        promptTokens: usage.promptTokens,
+        completionTokens: usage.completionTokens,
+        totalTokens: usage.totalTokens,
         nameResearch: nameResearch || undefined,
       };
 
@@ -438,16 +497,16 @@ Research: ${sanitizedLabel}`;
       return result;
 
     } catch (error: any) {
-      logger.error('❌ OpenAI generation error:', error.message);
+      logger.error('❌ LLM generation error:', error.message);
       
       // Enhance error messages (retry logic already applied)
       if (error?.status === 429) {
-        throw new Error('OpenAI rate limit exceeded after retries. Please try again later.');
+        throw new Error('LLM API rate limit exceeded after retries. Please try again later.');
       }
       
       // Handle other API errors
       if (error?.status) {
-        throw new Error(`OpenAI API error (${error.status}): ${error.message}`);
+        throw new Error(`LLM API error (${error.status}): ${error.message}`);
       }
 
       throw error;
@@ -1168,15 +1227,15 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
   // Weekly Market Summary (Phase 4)
   // ───────────────────────────────────────────────────────────────────────────
   //
-  // Single Responses-API call against the `weekly` model with xhigh reasoning
+  // Single Responses-API call against the `weekly` model with reasoning
   // and a strict JSON schema for output. The aggregator
   // (`WeeklySummaryDataService`) hands us a fully populated `WeeklySummaryData`;
   // we serialize it deterministically, prepend a long-form system prompt, and
   // ask the model to return JSON matching `WEEKLY_THREAD_SCHEMA` — five
   // tweets, one per dedicated lane, in fixed order.
   //
-  // We never escalate to the o1 thinking model here — the weekly model
-  // already has 1.05M context and built-in reasoning. The token estimator and
+  // We do not escalate here — the weekly model config is already the chosen
+  // high-quality model for this testing path. The token estimator and
   // selectModel() machinery used by the per-event reply path is intentionally
   // bypassed; cost matters less than quality on a once-a-week run.
   //
@@ -1238,8 +1297,11 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
     'community_pulse',
     'top_player',
   ] as const;
-  /** Pricing (USD per token) for `gpt-5.4-2026-03-05` per OpenAI model card. */
-  private static readonly WEEKLY_INPUT_USD_PER_TOKEN = 2.5 / 1_000_000;
+  /**
+   * Fallback pricing only. OpenRouter may return `usage.cost`; prefer that
+   * when present because routed provider pricing can vary.
+   */
+  private static readonly WEEKLY_INPUT_USD_PER_TOKEN = 3 / 1_000_000;
   private static readonly WEEKLY_OUTPUT_USD_PER_TOKEN = 15 / 1_000_000;
 
   /**
@@ -1329,21 +1391,18 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
       `📰 Source failures (${data.partialSourceFailures.length}): ${data.partialSourceFailures.join(', ') || 'none'}`,
     );
 
-    // Call the Responses API with retry + an explicit 30-min timeout. Casts:
-    //   - `effort: WEEKLY_REASONING_EFFORT as any`: the installed SDK (6.2.0)
-    //     types ReasoningEffort up to 'high'; the OpenAI API accepts 'xhigh'
-    //     as a higher tier. The constant is currently set to 'low' for testing.
+    // Call the OpenRouter Responses API with retry + an explicit 30-min timeout.
+    // Casts:
     //   - `schema: ... as any`: SDK types `schema: { [k: string]: unknown }`
     //     which doesn't accept our `readonly` const-asserted literal directly.
-    //   - `model` slug `gpt-5.4-2026-03-05` is outside the SDK's `ChatModel`
-    //     union but works at runtime (the union allows arbitrary strings).
+    //   - `model` is an OpenRouter slug outside the SDK's known model union.
     //
     // Timeout: per-call override (passed as the 2nd `RequestOptions` arg) —
     // the SDK default 10-min timeout failed to fire on a stuck request
     // during initial testing, so we set it explicitly. 30 min is generous;
     // tighten once the flow is proven.
     logger.info(
-      `📰 Calling OpenAI Responses API: model=${this.models.weekly.name} ` +
+      `📰 Calling OpenRouter Responses API: model=${this.models.weekly.name} ` +
         `effort=${OpenAIService.WEEKLY_REASONING_EFFORT} ` +
         `timeout=${OpenAIService.WEEKLY_API_TIMEOUT_MS / 1000}s`,
     );
@@ -1369,19 +1428,20 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
       `Weekly summary generation (window ${data.weekStart} → ${data.weekEnd})`,
     );
 
-    const rawText = response.output_text?.trim() || '';
+    const rawText = this.extractResponseText(response);
     if (!rawText) {
       throw new Error('Weekly summary: model returned empty output');
     }
 
     const tweets = this.parseAndValidateWeeklyTweets(rawText);
 
-    const usage = response.usage;
-    const promptTokens = usage?.input_tokens || 0;
-    const completionTokens = usage?.output_tokens || 0;
+    const usage = this.extractUsageTokens(response);
+    const promptTokens = usage.promptTokens;
+    const completionTokens = usage.completionTokens;
     const costUsd =
+      usage.costUsd ??
       promptTokens * OpenAIService.WEEKLY_INPUT_USD_PER_TOKEN +
-      completionTokens * OpenAIService.WEEKLY_OUTPUT_USD_PER_TOKEN;
+        completionTokens * OpenAIService.WEEKLY_OUTPUT_USD_PER_TOKEN;
 
     const elapsedMs = Date.now() - startTime;
     logger.info(
@@ -1392,7 +1452,7 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
 
     return {
       tweets,
-      modelUsed: response.model,
+      modelUsed: response.model || this.models.weekly.name,
       promptTokens,
       completionTokens,
       costUsd,
