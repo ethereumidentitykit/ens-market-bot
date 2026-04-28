@@ -32,6 +32,10 @@ import { AlchemyService } from './alchemyService';
 export type ReplyTargetType = 'sale' | 'registration' | 'bid' | 'renewal';
 export type ReplyTargetKey = number | string; // number for sale/reg/bid, string (tx_hash) for renewal
 
+export interface GenerateReplyOptions {
+  forceNameResearch?: boolean;
+}
+
 /**
  * The "transaction" value the AIReplyService threads through its pipeline.
  * For renewals, this is the FULL array of ens_renewals rows for the tx (sorted
@@ -92,7 +96,8 @@ export class AIReplyService {
    */
   async generateReply(
     type: ReplyTargetType,
-    recordIdOrTxHash: ReplyTargetKey
+    recordIdOrTxHash: ReplyTargetKey,
+    options: GenerateReplyOptions = {}
   ): Promise<number> {
     const startTime = Date.now();
     logger.info(`🤖 [AI Reply] Starting generation for ${type} ${recordIdOrTxHash}`);
@@ -123,7 +128,8 @@ export class AIReplyService {
       logger.debug(`   [AI Reply] Step 3: Fetching context data in parallel...`);
       const contextData = await this.fetchContextData(
         transaction,
-        eventData
+        eventData,
+        options
       );
 
       // Step 3.5: Enrich activities with current ETH price (Grails API returns usd: 0)
@@ -617,7 +623,7 @@ export class AIReplyService {
    * @param ensName - The ENS name to research
    * @returns Research text or empty string on failure
    */
-  private async getOrFetchNameResearch(ensName: string): Promise<string> {
+  private async getOrFetchNameResearch(ensName: string, forceRefresh: boolean = false): Promise<string> {
     try {
       // Normalize name to always include .eth suffix for consistency
       const normalizedName = ensName.toLowerCase().endsWith('.eth') ? ensName : `${ensName}.eth`;
@@ -625,7 +631,7 @@ export class AIReplyService {
       // 1. Check if research exists in database
       const existingResearch = await this.databaseService.getNameResearch(normalizedName);
       
-      if (existingResearch) {
+      if (existingResearch && !forceRefresh) {
         // 2. Check if research is fresh
         const researchAge = Date.now() - new Date(existingResearch.researchedAt).getTime();
         const ageInDays = researchAge / (1000 * 60 * 60 * 24);
@@ -636,6 +642,8 @@ export class AIReplyService {
         } else {
           logger.info(`🔄 Research for ${normalizedName} is stale (${ageInDays.toFixed(1)} days), refreshing...`);
         }
+      } else if (existingResearch && forceRefresh) {
+        logger.info(`🔁 Force-refreshing name research for ${normalizedName}`);
       }
       
       // 3. Fetch new research with timeout
@@ -684,7 +692,8 @@ export class AIReplyService {
    */
   private async fetchContextData(
     transaction: ReplyTransaction,
-    eventData: any
+    eventData: any,
+    options: GenerateReplyOptions = {}
   ): Promise<{
     tokenActivities: TokenActivity[];
     buyerActivities: TokenActivity[];
@@ -770,7 +779,7 @@ export class AIReplyService {
         : Promise.resolve(null),
       
       // Name research - check cache first, fetch if needed
-      this.getOrFetchNameResearch(eventData.tokenName),
+      this.getOrFetchNameResearch(eventData.tokenName, options.forceNameResearch || false),
 
       // Recipient activity history (only when executor ≠ owner)
       eventData.recipientAddress

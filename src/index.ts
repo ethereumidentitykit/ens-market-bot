@@ -713,12 +713,121 @@ async function startApplication(): Promise<void> {
       }
     }
 
+    function formatAIReplyPayload(reply: any) {
+      return {
+        id: reply.id,
+        text: reply.replyText,
+        tokens: {
+          prompt: reply.promptTokens,
+          completion: reply.completionTokens,
+          total: reply.totalTokens
+        },
+        modelUsed: reply.modelUsed,
+        status: reply.status,
+        createdAt: reply.createdAt,
+        nameResearchId: reply.nameResearchId || null,
+        nameResearch: reply.nameResearch || ''
+      };
+    }
+
+    function normalizeEnsNameForResearch(name: string): string {
+      const trimmedName = name.trim();
+      return trimmedName.toLowerCase().endsWith('.eth') ? trimmedName : `${trimmedName}.eth`;
+    }
+
+    async function resolveAIReplyResearchName(
+      type: string,
+      transactionId: number,
+      txHash?: string
+    ): Promise<string | null> {
+      if (type === 'sale') {
+        const sale = await databaseService.getSaleById(transactionId);
+        return sale?.nftName ? normalizeEnsNameForResearch(sale.nftName) : null;
+      }
+
+      if (type === 'registration') {
+        const registration = await databaseService.getRegistrationById(transactionId);
+        return registration?.fullName ? normalizeEnsNameForResearch(registration.fullName) : null;
+      }
+
+      if (type === 'bid') {
+        const bid = await databaseService.getBidById(transactionId);
+        return bid?.ensName ? normalizeEnsNameForResearch(bid.ensName) : null;
+      }
+
+      if (type === 'renewal' && txHash) {
+        const renewals = await databaseService.getRenewalsByTxHash(txHash);
+        if (renewals.length === 0) return null;
+
+        renewals.sort((a, b) => parseFloat(b.costEth || '0') - parseFloat(a.costEth || '0'));
+        return renewals[0].fullName ? normalizeEnsNameForResearch(renewals[0].fullName) : null;
+      }
+
+      return null;
+    }
+
+    app.get('/api/ai-reply-name-research', requireAuth, async (req, res) => {
+      try {
+        const { type, id, txHash } = req.query;
+
+        if (!type || typeof type !== 'string') {
+          return res.status(400).json({ success: false, error: 'Missing type query param' });
+        }
+
+        if (type !== 'sale' && type !== 'registration' && type !== 'bid' && type !== 'renewal') {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid type. Must be "sale", "registration", "bid", or "renewal"'
+          });
+        }
+
+        const isRenewal = type === 'renewal';
+        if (isRenewal) {
+          if (!txHash || typeof txHash !== 'string' || !txHash.startsWith('0x')) {
+            return res.status(400).json({ success: false, error: 'For type=renewal, "txHash" query param is required' });
+          }
+        } else if (!id) {
+          return res.status(400).json({ success: false, error: 'Missing id query param' });
+        }
+
+        const transactionId = !isRenewal ? parseInt(id as string, 10) : 0;
+        if (!isRenewal && isNaN(transactionId)) {
+          return res.status(400).json({ success: false, error: 'Invalid id' });
+        }
+
+        const ensName = await resolveAIReplyResearchName(type, transactionId, txHash as string | undefined);
+        if (!ensName) {
+          return res.status(404).json({ success: false, error: 'Could not resolve ENS name for selected item' });
+        }
+
+        const research = await databaseService.getNameResearch(ensName);
+
+        return res.json({
+          success: true,
+          ensName,
+          research: research
+            ? {
+                id: research.id,
+                text: research.researchText,
+                researchedAt: research.researchedAt,
+                updatedAt: research.updatedAt,
+                source: research.source
+              }
+            : null
+        });
+      } catch (error: any) {
+        logger.error('❌ AI Reply name research preview error:', error.message);
+        res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
     // AI Reply Generation Endpoint — fires off generation in the background.
     // For sale/registration/bid: pass `id` (numeric).
     // For renewal: pass `txHash` (string) instead of `id` — renewals are tx-keyed.
     app.post('/api/ai-reply-generate', requireAuth, async (req, res) => {
       try {
-        const { type, id, txHash, forceRegenerate } = req.body;
+        const { type, id, txHash, forceRegenerate, redoNameResearch, forceNameResearch } = req.body;
+        const shouldRedoNameResearch = Boolean(redoNameResearch || forceNameResearch);
 
         // Validate inputs
         if (!type) {
@@ -762,7 +871,11 @@ async function startApplication(): Promise<void> {
 
         const recordKey: number | string = isRenewal ? (txHash as string) : transactionId;
         const taskKey = `${type}-${recordKey}`;
-        logger.info(`🤖 AI Reply Generation requested: ${type} ${recordKey}${forceRegenerate ? ' (regenerate)' : ''}`);
+        logger.info(
+          `🤖 AI Reply Generation requested: ${type} ${recordKey}` +
+            `${forceRegenerate ? ' (regenerate)' : ''}` +
+            `${shouldRedoNameResearch ? ' (redo name research)' : ''}`
+        );
 
         // Check if AI replies are enabled
         const aiEnabled = await databaseService.isAIRepliesEnabled();
@@ -788,18 +901,7 @@ async function startApplication(): Promise<void> {
             success: true,
             alreadyExists: true,
             message: 'Reply already exists. Set forceRegenerate=true to generate a new one.',
-            reply: {
-              id: existingReply.id,
-              text: existingReply.replyText,
-              tokens: {
-                prompt: existingReply.promptTokens,
-                completion: existingReply.completionTokens,
-                total: existingReply.totalTokens
-              },
-              modelUsed: existingReply.modelUsed,
-              status: existingReply.status,
-              createdAt: existingReply.createdAt
-            }
+            reply: formatAIReplyPayload(existingReply)
           });
         }
 
@@ -844,7 +946,8 @@ async function startApplication(): Promise<void> {
 
         bgAiReplyService.generateReply(
           type as 'sale' | 'registration' | 'bid' | 'renewal',
-          recordKey
+          recordKey,
+          { forceNameResearch: shouldRedoNameResearch }
         ).then(async (replyId) => {
           aiGenerationTasks.set(taskKey, { status: 'completed', startedAt: Date.now(), replyId });
           logger.info(`✅ Background AI generation completed for ${taskKey} → reply ${replyId}`);
@@ -917,18 +1020,7 @@ async function startApplication(): Promise<void> {
             return res.json({
               success: true,
               status: 'completed',
-              reply: {
-                id: taskReply.id,
-                text: taskReply.replyText,
-                tokens: {
-                  prompt: taskReply.promptTokens,
-                  completion: taskReply.completionTokens,
-                  total: taskReply.totalTokens
-                },
-                modelUsed: taskReply.modelUsed,
-                status: taskReply.status,
-                createdAt: taskReply.createdAt
-              }
+              reply: formatAIReplyPayload(taskReply)
             });
           }
         }
@@ -949,18 +1041,7 @@ async function startApplication(): Promise<void> {
           return res.json({
             success: true,
             status: 'completed',
-            reply: {
-              id: reply.id,
-              text: reply.replyText,
-              tokens: {
-                prompt: reply.promptTokens,
-                completion: reply.completionTokens,
-                total: reply.totalTokens
-              },
-              modelUsed: reply.modelUsed,
-              status: reply.status,
-              createdAt: reply.createdAt
-            }
+            reply: formatAIReplyPayload(reply)
           });
         }
 
@@ -1429,7 +1510,7 @@ async function startApplication(): Promise<void> {
     app.get('/api/admin/ai-replies-status', requireAuth, async (req, res) => {
       try {
         const enabled = await databaseService.isAIRepliesEnabled();
-        const openaiConfigured = !!process.env.OPENAI_API_KEY;
+        const openaiConfigured = !!(process.env.OPENROUTER_API_KEY && process.env.OPENAI_API_KEY);
         
         // Get count of generated replies
         const recentReplies = await databaseService.getRecentAIReplies(1000);
