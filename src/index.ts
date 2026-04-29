@@ -4332,6 +4332,37 @@ async function startApplication(): Promise<void> {
     // Payload may contain events from MULTIPLE txs in one block (QuickNode delivers per block).
     // The service groups by tx_hash and does one batched INSERT per tx, so the statement-level
     // PostgreSQL trigger fires exactly one pg_notify('new_renewal_tx', txHash) per distinct tx.
+    //
+    // ACK-FIRST PATTERN: We respond 200 to QuickNode immediately after signature verification
+    // and payload validation, then process in the background. Bulk-renewer txs can carry
+    // 100+ names and each requires 3-5 enrichment HTTP calls; synchronous processing easily
+    // exceeds QuickNode's ~30s delivery timeout, which causes them to retry the identical
+    // payload — doubling load and feeding a retry loop.
+    //
+    // Belt-and-suspenders: a small in-memory recently-seen signature set short-circuits any
+    // retry that does sneak in (e.g. one already in flight when we ACK'd). The DB layer also
+    // dedupes via INSERT … ON CONFLICT DO NOTHING, so duplicate rows are impossible regardless.
+    const RENEWAL_SIGNATURE_TTL_MS = 10 * 60 * 1000; // 10 min (QuickNode retries within seconds)
+    const RENEWAL_SIGNATURE_MAX = 1000;             // hard upper bound on memory use
+    const recentRenewalSignatures = new Map<string, number>(); // signature -> expiresAt (ms)
+
+    const seenRenewalSignature = (sig: string): boolean => {
+      const expiresAt = recentRenewalSignatures.get(sig);
+      if (expiresAt && expiresAt > Date.now()) return true;
+      // Opportunistic eviction of one expired entry; cheaper than a full sweep per request.
+      if (expiresAt) recentRenewalSignatures.delete(sig);
+      return false;
+    };
+
+    const recordRenewalSignature = (sig: string): void => {
+      // Map preserves insertion order, so we can evict the oldest in O(1) at the cap.
+      if (recentRenewalSignatures.size >= RENEWAL_SIGNATURE_MAX) {
+        const oldestKey = recentRenewalSignatures.keys().next().value;
+        if (oldestKey !== undefined) recentRenewalSignatures.delete(oldestKey);
+      }
+      recentRenewalSignatures.set(sig, Date.now() + RENEWAL_SIGNATURE_TTL_MS);
+    };
+
     app.post('/webhook/quicknode-renewals', (req, res) => {
       // Capture raw body manually since QuickNode doesn't send Content-Type
       let rawBody = Buffer.alloc(0);
@@ -4457,47 +4488,66 @@ async function startApplication(): Promise<void> {
             });
           }
 
-          // Process renewal events through QuickNodeRenewalService
-          let stats;
-          try {
-            stats = await quickNodeRenewalService.processRenewals(webhookData);
-            logger.info('✅ QuickNode renewal processing complete', stats);
-          } catch (processingError: any) {
-            logger.error('❌ QuickNode renewal processing failed:', processingError.message);
-            return res.status(500).json({
-              success: false,
-              error: 'Renewal processing failed',
-              details: processingError.message
+          const eventsReceived = webhookData.nameRenewed.length;
+
+          // Short-circuit retries of an identical signed payload that we've already
+          // started processing. Cheap, in-memory, bounded.
+          if (qnSignature && seenRenewalSignature(qnSignature)) {
+            logger.warn(`♻️ QuickNode renewal webhook duplicate detected (sig=${qnSignature.slice(0, 12)}…), skipping reprocess`);
+            return res.status(200).json({
+              success: true,
+              message: 'QuickNode renewal webhook duplicate (signature already seen)',
+              type: 'quicknode-renewals',
+              duplicate: true,
+              results: { eventsReceived }
             });
           }
+          if (qnSignature) recordRenewalSignature(qnSignature);
 
+          // ACK QuickNode immediately so it doesn't time out and retry. Enrichment
+          // for a bulk-renewer batch can take 30–60+ seconds, well past QuickNode's
+          // ~30s delivery timeout.
           res.status(200).json({
             success: true,
-            message: 'QuickNode renewal webhook processed successfully',
+            message: 'QuickNode renewal webhook accepted for background processing',
             type: 'quicknode-renewals',
-            results: {
-              eventsReceived: webhookData.nameRenewed.length,
-              ...stats
-            }
+            results: { eventsReceived }
           });
+
+          // Fire-and-forget: process in the background. Errors are logged; never
+          // re-thrown (the response has already been sent).
+          quickNodeRenewalService.processRenewals(webhookData)
+            .then(stats => {
+              logger.info('✅ QuickNode renewal processing complete (background)', stats);
+            })
+            .catch(processingError => {
+              logger.error(
+                '❌ QuickNode renewal background processing failed:',
+                processingError?.message || processingError
+              );
+            });
 
         } catch (error: any) {
           logger.error('❌ Error processing QuickNode renewal webhook:', error.message);
-          res.status(500).json({
-            success: false,
-            error: 'Webhook processing failed',
-            message: error.message
-          });
+          if (!res.headersSent) {
+            res.status(500).json({
+              success: false,
+              error: 'Webhook processing failed',
+              message: error.message
+            });
+          }
         }
       });
 
       req.on('error', (err) => {
         logger.error('❌ QuickNode renewal webhook request error:', err);
-        res.status(500).json({
-          success: false,
-          error: 'Request error',
-          message: err.message
-        });
+        if (!res.headersSent) {
+          res.status(500).json({
+            success: false,
+            error: 'Request error',
+            message: err.message
+          });
+        }
       });
     });
 
