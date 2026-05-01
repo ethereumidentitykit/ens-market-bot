@@ -1290,11 +1290,11 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
    * obvious to readers who land on a single tweet.
    */
   private static readonly WEEKLY_SECTION_HEADERS: Record<WeeklyTweetSection, string> = {
-    headline: '💥 ENS Market Weekly Digest ~ GrailsAI',
-    by_the_numbers: '2/5 ~ Numbers 📊',
-    spotlight: '3/5 ~ Looking Forward 🔮',
-    community_pulse: '4/5 ~ Community Overview 💬',
-    top_player: '5/5 ~ Player of the Week 🏆',
+    headline: '💥 ENS Market Weekly Digest ~ GrailsAI 💥',
+    by_the_numbers: '2/5 📊 Numbers 📊',
+    spotlight: '3/5 🔮 Looking Forward 🔮',
+    community_pulse: '4/5 💬 Community Overview 💬',
+    top_player: '5/5 🏆 Player of the Week 🏆',
   };
 
   /**
