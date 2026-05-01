@@ -1358,9 +1358,10 @@ Write 4-6 punchy sentences. Most important insight first. Be spicy. Call out ove
               maxLength: 970,
               description:
                 'Body of the tweet — DO NOT include any header. Section header (and footer for tweet 1) ' +
-                'is auto-prepended to your text. Tweet 1 body should ideally be <200 chars so the final ' +
-                'tweet (with auto-chrome) renders under 280 chars on every client. Tweets 2-5 max 970 ' +
-                'chars in this field; final post is capped at 1000 chars after auto-chrome is added.',
+                'is auto-prepended to your text. Prefer short hyphen-led bullet points ("- item") as the ' +
+                'dominant shape in every tweet body. Tweet 1 body should ideally be <240 chars so the final ' +
+                'tweet (with auto-chrome) renders under 280 chars on every client. Tweets 2-5 max 970 chars ' +
+                'in this field; final post is capped at 1000 chars after auto-chrome is added.',
             },
           },
         },
@@ -1629,22 +1630,22 @@ Each \`text\` field must be ≤ 970 characters. The schema enforces this. Aim sh
 
 EVERY tweet has a section header (and tweet 1 has a thread footer) AUTO-PREPENDED/APPENDED at post time. DO NOT write headers, DO NOT write "1/5", DO NOT write "Top Player of the Week:" — all of that is added for you. Your "text" field is the BODY ONLY.
 
-DO NOT add a TL;DR. DO NOT use dashes (—, –, or - at start of lines). Use periods, commas, short paragraphs.
+DO NOT add a TL;DR. Prefer a bullet-led body in every tweet. Use plain hyphen bullets ("- item") as the dominant shape. Bullets are a style target, not a schema requirement, but they should carry the thread.
 
 ══════════════════════════════════════════════════════════════════════════
 READABILITY (read this BEFORE writing anything)
 ══════════════════════════════════════════════════════════════════════════
 The thread should be a PLEASURE to read. The reader's eyes should fall over it without effort. Every choice you make should serve that.
 
-PARAGRAPH BREAKS — non-negotiable:
-- ONE distinct point = ONE paragraph. If a tweet covers two distinct ideas, they go in TWO paragraphs separated by a blank line ("\\n\\n" inside the JSON string).
-- Even if a tweet is short. Even if you can technically fit both ideas in one paragraph. The eye needs the white space to process the shift.
-- Example of WRONG (two ideas mushed):
-    "Two trades made up most of weekly sales. The clearest live demand signal came at the registry, where prompt.eth cost 5.25 ETH."
-- Example of RIGHT (same content, two paragraphs):
-    "Two trades made up most of weekly sales.
-
-    The clearest live demand signal came at the registry, where prompt.eth cost 5.25 ETH."
+BULLET SHAPE — default style:
+- Use short hyphen bullets ("- item") for the main body of every tweet.
+- One distinct point = one bullet.
+- Most tweets should have 2-4 bullets. Tweet 1 can have 1-3 bullets if that hits harder.
+- Keep each bullet tight. Usually one sentence. Two short sentences only when the second adds punch.
+- A single non-bullet opener is allowed if it materially improves the tweet, but bullets should still be the dominant shape.
+- Example shape:
+    "- Sales cooled, but premium registrations carried the story.
+    - prompt.eth cleared at 5.25 ETH and gave the registry the week's cleanest demand signal."
 
 SENTENCE LENGTH:
 - Mostly short sentences. 8-15 words is the sweet spot.
@@ -1657,16 +1658,16 @@ PLAIN LANGUAGE:
 - "ENS premium decay" is fine (it's the actual ENS feature name). "The decay ladder" is not (it's coded jargon).
 
 VISUAL BREATHING ROOM:
-- Tweets 2-5 should have 2-4 short paragraphs each, separated by blank lines.
-- Tweet 1 (headline) should be 1-2 short paragraphs max — punchy.
-- DO NOT write a wall of text. Even tight 600-char tweets benefit from a paragraph break in the middle.
+- Use one bullet per line.
+- Do not write a wall of text. If a bullet gets long, split it or cut it.
+- Avoid long intro paragraphs. The header already gives context.
 
 ══════════════════════════════════════════════════════════════════════════
 TWEET 1 — section: "headline"
 ══════════════════════════════════════════════════════════════════════════
-give a spicy and engaging summary of the week's ENS market.
+Give a spicy and engaging summary of the week's ENS market.
 
-The header "${OpenAIService.WEEKLY_SECTION_HEADERS.headline}" is auto-prepended and "${OpenAIService.WEEKLY_HEADLINE_FOOTER}" is auto-appended. Keep your body under 280 chars. be Punchy, factual, leaves the reader wanting tweet 2.
+The header "${OpenAIService.WEEKLY_SECTION_HEADERS.headline}" is auto-prepended and "${OpenAIService.WEEKLY_HEADLINE_FOOTER}" is auto-appended. Keep your body under 280 chars. Use 1-3 punchy bullets. Be factual, spicy, and make readers want tweet 2.
 
 ══════════════════════════════════════════════════════════════════════════
 TWEET 2 — section: "by_the_numbers"
@@ -1680,12 +1681,12 @@ The hard-data tweet. The numbers a market watcher needs to know this week:
   - Week-over-week delta on the BIGGEST mover (use PREVIOUS WEEK SNAPSHOT if provided; skip the comparison entirely if it isn't). Skip sub-3% deltas — they're noise, not signal.
   - ETH price context if move is ≥10% AND how it may affect sentiment. Sub-10% moves are usual market drift; not worth thread real estate.
 
-Be selective — don't list every number. Surface 4-6 numbers that actually matter, in plain reporter language. The auto-prepended "2/5 Numbers 📊" header tells the reader what's coming; you don't need to repeat it.
+Be selective — don't list every number. Surface 4-6 numbers that actually matter as punchy bullets, in plain reporter language. The auto-prepended "2/5 Numbers 📊" header tells the reader what's coming; you don't need to repeat it.
 
 ══════════════════════════════════════════════════════════════════════════
 TWEET 3 — section: "spotlight"
 ══════════════════════════════════════════════════════════════════════════
-ONE angle, deep. The auto-prepended "3/5 Looking Forward 🔮" header signals this is the forward-looking lane. Pick from the menu — whichever is loudest in the week's data:
+ONE angle, deep. Use 2-4 bullets around that angle. The auto-prepended "3/5 Looking Forward 🔮" header signals this is the forward-looking lane. Pick from the menu — whichever is loudest in the week's data:
 
 DEFAULT: NAMES TO WATCH. Use the data in NAMES TO WATCH: PREMIUM DECAY (live auction names — registerable RIGHT NOW once premium drops to a price someone wants to pay) and NAMES TO WATCH: GRACE → PREMIUM SOON (entering the auction within 7 days if owner doesn't renew).
 
@@ -1708,13 +1709,13 @@ PIVOT angles (use INSTEAD of names-to-watch only if clearly louder this week):
 ══════════════════════════════════════════════════════════════════════════
 TWEET 4 — section: "community_pulse"
 ══════════════════════════════════════════════════════════════════════════
-Report on broader sentiment. Zoom OUT (vs tweet 3 which goes deep on one thing). Aggregate themes from:
+Report on broader sentiment in 2-4 bullets. Zoom OUT (vs tweet 3 which goes deep on one thing). Aggregate themes from:
 
   - ENS CHATTER: themes from ENS-specific tweets in the past 7d. The search is anchored on @ensdomains mentions and phrase queries like "ENS domain", "ENS name", "ENS subname" — so chatter SHOULD be on-topic. Look for narrative threads, vibe shifts, common topics.
   - POSTED CONTENT ENGAGEMENT: which kinds of recent posts drove the highest engagement (which categories of sale / reg / bid landed best) — without re-using any specific post already covered in tweet 3.
   - Notable accounts mentioning ENS or relevant ENS news/launches if surfaced in chatter.
 
-The framing here is third-person reporting on what the community is talking about. NOT "we noticed", NOT "on our feed", NOT "my take". Just "the community focused on X this week" or "discussion centered on Y" or "engagement was strongest on Z-type posts".
+The framing here is third-person reporting on what the community is talking about. NOT "we noticed", NOT "on our feed", NOT "my take". Use bullets like "Discussion centered on Y" or "Engagement was strongest on Z-type posts".
 
 NEVER quote third-party tweets verbatim. PARAPHRASE community sentiment, never reproduce it.
 
@@ -1730,7 +1731,7 @@ Handle resolution priority for the OPENING of the tweet body:
   2. Else if they have an ENS name → use "ensname.eth"
   3. Else fallback to the short address ("0xabcd…1234")
 
-Then 2-4 sentences explaining what they did this week. Reference TOP PLAYER OF THE WEEK CANDIDATES data — break down their buys / sells / registrations / renewals with actual ETH amounts. Pick the address with the most interesting STORY given the rest of the week's context — it does NOT have to be #1 by volume. The math gave you the top 5 candidates from our DB only (we miss micro-actions below our notability thresholds).
+Then use 2-4 bullets explaining what they did this week. The first bullet should start with the chosen handle/name/address. Reference TOP PLAYER OF THE WEEK CANDIDATES data — break down their buys / sells / registrations / renewals with actual ETH amounts. Pick the address with the most interesting STORY given the rest of the week's context — it does NOT have to be #1 by volume. The math gave you the top 5 candidates from our DB only (we miss micro-actions below our notability thresholds).
 
 YOU MUST also return the chosen address in the JSON's top-level "topPlayerAddress" field (alongside "tweets"). It MUST be the FULL 0x-prefixed 40-hex address — copy it verbatim from the "address (use this exact string for topPlayerAddress if chosen): 0x..." line under the chosen candidate. DO NOT use the shortened "0xabcd…wxyz" display form that appears in the header line — that's just for human readability. Lowercased or original case is fine (we normalize). The Grails profile link is built from this.
 
@@ -1768,6 +1769,7 @@ PARTIAL SOURCE FAILURES: If a section is listed as failed, work without it. NEVE
 
 WRITING STYLE:
 - Short, declarative sentences. Get to the point fast.
+- Bullet-led by default. Use hyphen bullets for the main body of each tweet.
 - Specifics beat vagueness. "47 ETH across 23 sales" > "lots of activity".
 - LEAD WITH ETH amounts, not USD. Convert to USD ONLY when (a) the amount is large enough that USD is a clearer anchor (e.g. $100k+ matters more than 40 ETH), or (b) you're explicitly comparing to a non-ETH benchmark. Do NOT append "$X" to every ETH figure — most ETH figures stand alone.
 - Use "onchain" not "on-chain", "multichain" not "multi-chain".
@@ -2176,7 +2178,7 @@ Each tweet stands on its own — a reader who only sees tweet 1 should still get
 
     // ── Final reminder ───────────────────────────────────────────────────────
     lines.push('---');
-    lines.push(`Now write the thread. Return JSON matching the WeeklySummaryThread schema: { topPlayerAddress: "0x...", tweets: [...5 entries...] } — exactly 5 tweets, in the section order headline → by_the_numbers → spotlight → community_pulse → top_player. Each tweet's section header is auto-prepended to your text — DO NOT write any header (no "1/5", no "Top Player of the Week:", no GrailsAI line). Tweet 5 also gets a Grails profile link auto-appended from your topPlayerAddress — don't write the link yourself. Tweet 1 body: aim for <200 chars. Tweets 2-5 body: max ${OpenAIService.WEEKLY_TWEET_LLM_MAX_CHARS} chars each, but shorter is better. No numbering, no TL;DR, no @-mentions of third-party accounts. Report in third-person — you are not the bot, you are writing the digest. Lead with ETH amounts; only convert to USD when the dollar figure adds meaningful context.`);
+    lines.push(`Now write the thread. Return JSON matching the WeeklySummaryThread schema: { topPlayerAddress: "0x...", tweets: [...5 entries...] } — exactly 5 tweets, in the section order headline → by_the_numbers → spotlight → community_pulse → top_player. Each tweet's section header is auto-prepended to your text — DO NOT write any header (no "1/5", no "Top Player of the Week:", no GrailsAI line). Tweet 5 also gets a Grails profile link auto-appended from your topPlayerAddress — don't write the link yourself. Prefer short hyphen bullets ("- item") as the dominant shape in every tweet body. Tweet 1 body: aim for <200 chars. Tweets 2-5 body: max ${OpenAIService.WEEKLY_TWEET_LLM_MAX_CHARS} chars each, but shorter is better. No numbering, no TL;DR, no @-mentions of third-party accounts. Report in third-person — you are not the bot, you are writing the digest. Lead with ETH amounts; only convert to USD when the dollar figure adds meaningful context.`);
 
     return lines.join('\n');
   }
