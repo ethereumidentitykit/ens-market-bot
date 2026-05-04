@@ -688,6 +688,30 @@ export class AIReplyService {
   }
 
   /**
+   * Resolve name research for an event. Bulk renewal replies are about the whole
+   * renewed portfolio, so researching only the top-cost representative name is misleading.
+   */
+  private async getNameResearchForEventData(
+    eventData: {
+      type: ReplyTargetType;
+      tokenName: string;
+      renewalContext?: { nameCount: number };
+    },
+    options: GenerateReplyOptions
+  ): Promise<string> {
+    const isBulkRenewal = eventData.type === 'renewal' && (eventData.renewalContext?.nameCount ?? 1) > 1;
+
+    if (isBulkRenewal) {
+      logger.info(
+        `⏭️ Skipping name research for bulk renewal (${eventData.renewalContext?.nameCount} names); using renewal list context instead`
+      );
+      return '';
+    }
+
+    return this.getOrFetchNameResearch(eventData.tokenName, options.forceNameResearch || false);
+  }
+
+  /**
    * Helper: Fetch all context data in parallel (Grails API, holdings, name research)
    */
   private async fetchContextData(
@@ -778,8 +802,8 @@ export class AIReplyService {
           })
         : Promise.resolve(null),
       
-      // Name research - check cache first, fetch if needed
-      this.getOrFetchNameResearch(eventData.tokenName, options.forceNameResearch || false),
+      // Name research - skipped for bulk renewals because the reply covers the full portfolio.
+      this.getNameResearchForEventData(eventData, options),
 
       // Recipient activity history (only when executor ≠ owner)
       eventData.recipientAddress
