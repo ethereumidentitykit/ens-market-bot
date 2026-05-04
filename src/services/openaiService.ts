@@ -79,8 +79,9 @@ export class OpenAIService {
   };
 
   /**
-   * OpenRouter's Responses API supports minimal/low/medium/high reasoning.
+   * Reasoning-effort controls for LLM paths.
    */
+  private static readonly SEARCH_REASONING_EFFORT: 'low' | 'medium' | 'high' = 'low';
   private static readonly WEEKLY_REASONING_EFFORT: 'minimal' | 'low' | 'medium' | 'high' = 'high';
 
   /**
@@ -122,7 +123,7 @@ export class OpenAIService {
 
     logger.info('🤖 OpenAI-compatible LLM service initialized');
     logger.info(`   Search API base URL: OpenAI default`);
-    logger.info(`   Search model: ${this.models.search.name} (OpenAI native web search)`);
+    logger.info(`   Search model: ${this.models.search.name} (OpenAI native web search, ${OpenAIService.SEARCH_REASONING_EFFORT} reasoning)`);
     logger.info(`   Generation API base URL: ${baseURL}`);
     logger.info(`   Generation model: ${this.models.base.name} (max ${this.models.base.maxInputTokens.toLocaleString()} tokens)`);
     logger.info(`   Fallback model: ${this.models.thinking.name} (max ${this.models.thinking.maxInputTokens.toLocaleString()} tokens)`);
@@ -394,6 +395,7 @@ Research: ${sanitizedLabel}`;
           return await this.searchClient.responses.create({
             model: this.models.search.name,
             input: researchPrompt,
+            reasoning: { effort: OpenAIService.SEARCH_REASONING_EFFORT },
             tools: [{ type: "web_search" }],
           });
         },
