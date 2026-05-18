@@ -303,8 +303,8 @@ export class BidsProcessingService {
       const lowestThreshold = Math.min(parseFloat(defaultMin), parseFloat(club10kMin), parseFloat(club999Min));
 
       if (bidAmount < lowestThreshold) {
-        logger.debug(`⚡ EARLY REJECT: ${bidAmount} ETH < ${lowestThreshold} ETH (lowest threshold) - skipping name lookup`);
-        return 999;
+        logger.debug(`⚡ EARLY REJECT: ${bidAmount} ETH < ${lowestThreshold} ETH (below all thresholds) - skipping name lookup`);
+        return lowestThreshold;
       }
 
       let ensName = bid.ensName || '';
