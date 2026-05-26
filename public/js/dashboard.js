@@ -1508,7 +1508,7 @@ function dashboard() {
         // Modal block helpers - add name to bid blacklist
         async addToBlacklistFromModal(name) {
             if (!name) return;
-            if (!confirm(`Block name "${name}"?\n\nThis will prevent bids for this name from being tweeted.`)) return;
+            if (!confirm(`Block name "${name}"?\n\nThis will prevent bids, sales, and registrations for this name from being tweeted.`)) return;
             try {
                 const response = await this.fetch('/api/admin/bid-blacklist', {
                     method: 'POST',
@@ -1784,7 +1784,7 @@ function dashboard() {
         async addToBlacklist() {
             const name = this.newBlacklistName.trim();
             if (!name) return;
-            if (!confirm(`Block name "${name}"?\n\nThis will prevent bids for this name from being tweeted.`)) return;
+            if (!confirm(`Block name "${name}"?\n\nThis will prevent bids, sales, and registrations for this name from being tweeted.`)) return;
 
             this.blacklistLoading = true;
             try {

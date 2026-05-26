@@ -237,6 +237,18 @@ export class AutoTweetService {
       };
     }
 
+    // Check name blacklist
+    if (sale.nftName && await this.databaseService.isNameBlacklisted(sale.nftName)) {
+      logger.info(`🚫 NAME BLACKLIST: Skipping sale ${sale.nftName} - name is blacklisted`);
+      return {
+        success: false,
+        saleId,
+        skipped: true,
+        reason: `Name ${sale.nftName} is blacklisted`,
+        type: 'sale'
+      };
+    }
+
     // Check if sale is too old (use sales-specific settings)
     if (!(await this.isWithinTimeLimit(sale, settings.sales.maxAgeHours))) {
       return {
@@ -370,6 +382,19 @@ export class AutoTweetService {
         registrationId,
         skipped: true,
         reason: 'Subdomain registrations are not posted',
+        type: 'registration'
+      };
+    }
+
+    // Check name blacklist (use fullName which includes .eth suffix to match blacklist format)
+    const blacklistName = registration.fullName || regName;
+    if (blacklistName && await this.databaseService.isNameBlacklisted(blacklistName)) {
+      logger.info(`🚫 NAME BLACKLIST: Skipping registration ${blacklistName} - name is blacklisted`);
+      return {
+        success: false,
+        registrationId,
+        skipped: true,
+        reason: `Name ${blacklistName} is blacklisted`,
         type: 'registration'
       };
     }
