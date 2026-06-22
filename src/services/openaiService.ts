@@ -83,6 +83,8 @@ export class OpenAIService {
    */
   private static readonly SEARCH_REASONING_EFFORT: 'low' | 'medium' | 'high' = 'low';
   private static readonly WEEKLY_REASONING_EFFORT: 'minimal' | 'low' | 'medium' | 'high' = 'high';
+  private static readonly MINT_FLIP_WASH_HARD_CUTOFF_DAYS = 30;
+  private static readonly MINT_FLIP_WASH_SOFT_CUTOFF_DAYS = 60;
 
   /**
    * Hard ceiling on the OpenRouter Responses API call for the weekly summary.
@@ -164,6 +166,18 @@ export class OpenAIService {
         .join(', ');
       return `${h.name} [${labels}]`;
     }).join(', ');
+  }
+
+  /**
+   * Format a hold duration for prompt context.
+   */
+  private formatHoldDuration(hours: number): string {
+    const days = Math.max(0, Math.round(hours / 24));
+    if (days <= 30) return `${days} days`;
+    if (days <= 60) return '~1 month';
+    if (days < 365) return `~${Math.round(days / 30)} months`;
+    if (days < 730) return '~1 year';
+    return `~${Math.round(days / 365)} years`;
   }
 
   /**
@@ -673,15 +687,16 @@ FORMATTING:
 - 4-6 sentences total. Front-load the interesting stuff
 
 🚩 **WASH TRADING DETECTION (for sales ONLY, NOT bids, registrations or renewals)**:
-ANY of these combinations = CALL IT A WASH TRADE. Do not hedge. Do not say "either/or." State it as fact:
-- Fresh/empty buyer wallet + seller who mints and flips = WASH TRADE. Say so directly
-- Buyer and seller are the same address = WASH TRADE. Say so directly
-- Name minted and sold same day or within days at inflated price = WASH TRADE. Say so directly
-- Seller has a pattern of minting cheap names and selling them to fresh wallets = WASH TRADE. Say so directly
+Be careful with accusations. Call something a wash trade only when the timing and wallet evidence are strong:
+- Buyer and seller are the same address = WASH TRADE / self-trade. Say so directly
+- Name minted and sold within 30 days at an inflated price + fresh/empty buyer wallet = strong wash-trade signal
+- Name minted and sold 31-60 days later = weaker signal. Mention quick flip / markup if interesting, but do NOT call it wash based on timing alone
+- Name held more than 60 days = do NOT treat mint-flip markup as wash-trade evidence. Multiple months of holding means it is inventory/speculation unless there is direct wallet coordination
+- Fresh/empty buyer wallet alone is NOT enough for a wash accusation
+- Seller having a broad pattern of minting cheap names and later selling at markup is NOT enough if this specific name was held more than 60 days
 
-NEVER hedge with "either X happened or Y." If the signals are there, the conclusion is wash trading. Period.
-NEVER frame wash trading as clever strategy ("found a lane to print"). Call it what it is
-The word "wash" MUST appear in your response when you detect these patterns
+NEVER frame wash trading as clever strategy ("found a lane to print"). If you truly detect direct wash-trade evidence, call it what it is
+The word "wash" MUST appear in your response only when you detect strong/direct wash-trade evidence
 
 When it's NOT a wash trade:
 - 10k and 999 clubs with established buyer wallets: be more lenient, these are highly liquid
@@ -957,7 +972,10 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
       
       if (tokenInsights.sellerAcquisitionTracked && tokenInsights.sellerPnl !== null) {
         const profitSign = tokenInsights.sellerPnl >= 0 ? '+' : '';
-        prompt += `- Seller ${tokenInsights.sellerAcquisitionType === 'mint' ? 'minted' : 'bought'} for ${tokenInsights.sellerBuyPrice?.toFixed(4)} ETH, PNL: ${profitSign}${tokenInsights.sellerPnl.toFixed(4)} ETH (${profitSign}$${tokenInsights.sellerPnlUsd?.toFixed(0)})\n`;
+        const holdDuration = tokenInsights.sellerHoldDuration !== null
+          ? `, held ${this.formatHoldDuration(tokenInsights.sellerHoldDuration)}`
+          : '';
+        prompt += `- Seller ${tokenInsights.sellerAcquisitionType === 'mint' ? 'minted' : 'bought'} for ${tokenInsights.sellerBuyPrice?.toFixed(4)} ETH${holdDuration}, PNL: ${profitSign}${tokenInsights.sellerPnl.toFixed(4)} ETH (${profitSign}$${tokenInsights.sellerPnlUsd?.toFixed(0)})\n`;
       }
 
       // Flag re-registrations of expired names
@@ -985,7 +1003,7 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
       prompt += `- Activity: ${buyerStats.transactionsPerMonth.toFixed(1)} txns/month\n`;
 
       if (event.type !== 'bid' && buyerStats.buysCount + buyerStats.sellsCount <= 1) {
-        prompt += `- ⚠️ FRESH WALLET: Buyer has little or no ENS trading history. Wash trade signal if seller is a mint-flipper.\n`;
+        prompt += `- ⚠️ FRESH WALLET: Buyer has little or no ENS trading history. This is context only; do not call wash trade from a fresh buyer alone.\n`;
       }
     }
     
@@ -1077,7 +1095,8 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
         prompt += `- ${date}: ${activity.type} ${tokenName} for ${activity.price.toFixed(4)} ETH [${activity.role}]\n`;
       }
 
-      // Detect mint-flipper pattern: seller has mints + quick sells at much higher prices
+      // Detect mint-flipper pattern: seller has mints + sells at much higher prices.
+      // Only short current-name holds should become wash-trade prompt evidence.
       if (event.type === 'sale') {
         const sellerMints = sellerActivityHistory.filter(a => a.type === 'mint');
         const sellerSells = sellerActivityHistory.filter(a => a.role === 'seller' && a.type === 'sale');
@@ -1085,7 +1104,21 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
           const avgMintPrice = sellerMints.reduce((s, a) => s + a.price, 0) / sellerMints.length;
           const avgSellPrice = sellerSells.reduce((s, a) => s + a.price, 0) / sellerSells.length;
           if (avgMintPrice > 0 && avgSellPrice / avgMintPrice >= 10) {
-            prompt += `- ⚠️ MINT-FLIPPER: Seller mints at avg ${avgMintPrice.toFixed(4)} ETH and sells at avg ${avgSellPrice.toFixed(4)} ETH (${Math.round(avgSellPrice / avgMintPrice)}x markup). Wash trade signal if buyer is a fresh wallet.\n`;
+            const sellerHoldHours = tokenInsights.sellerHoldDuration;
+            const sellerHoldDays = sellerHoldHours !== null
+              ? sellerHoldHours / 24
+              : null;
+            const markup = Math.round(avgSellPrice / avgMintPrice);
+
+            if (sellerHoldDays !== null && sellerHoldDays <= OpenAIService.MINT_FLIP_WASH_HARD_CUTOFF_DAYS) {
+              prompt += `- ⚠️ SHORT-HOLD MINT FLIP: Seller mints at avg ${avgMintPrice.toFixed(4)} ETH and sells at avg ${avgSellPrice.toFixed(4)} ETH (${markup}x markup); this name was held ${this.formatHoldDuration(sellerHoldHours!)}. Wash-trade signal if buyer is a fresh wallet.\n`;
+            } else if (sellerHoldDays !== null && sellerHoldDays <= OpenAIService.MINT_FLIP_WASH_SOFT_CUTOFF_DAYS) {
+              prompt += `- ⚠️ RECENT MINT FLIP: Seller mints at avg ${avgMintPrice.toFixed(4)} ETH and sells at avg ${avgSellPrice.toFixed(4)} ETH (${markup}x markup); this name was held ${this.formatHoldDuration(sellerHoldHours!)}. Treat as weaker context, not a wash-trade conclusion by itself.\n`;
+            } else if (sellerHoldDays !== null) {
+              prompt += `- LONG-HELD MINT: Seller mints at avg ${avgMintPrice.toFixed(4)} ETH and sells at avg ${avgSellPrice.toFixed(4)} ETH (${markup}x markup), but this name was held ${this.formatHoldDuration(sellerHoldHours!)}. Do NOT treat this as mint-flip wash-trade evidence.\n`;
+            } else {
+              prompt += `- SELLER MINT/SALE PATTERN: Seller mints at avg ${avgMintPrice.toFixed(4)} ETH and sells at avg ${avgSellPrice.toFixed(4)} ETH (${markup}x markup). Hold duration for this name is unknown, so do NOT call wash trade from this pattern alone.\n`;
+            }
           }
         }
       }
