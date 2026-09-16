@@ -437,17 +437,17 @@ export class PuppeteerImageService {
 
     // ----- Right side: cards -----
     //
-    // Each card's visual is THE NFT IMAGE ITSELF — not an HTML overlay. The ENS NFT
-    // art already contains the logo and name (it's part of the rendered .eth NFT),
-    // so no HTML label is needed. Artwork comes pre-rendered from the EthID metadata
-    // service; if that fails, the ens.png placeholder (logo + ".eth" text) is used.
+    // Each card's visual is THE NFT CARD ITSELF — the ENS NFT art already contains
+    // the logo and name, so no HTML label is needed. The card comes from the EthID
+    // metadata service as inline SVG with the bot's Apple emoji (or EthID's PNG as
+    // fallback); if EthID cannot serve the name, the ens.png placeholder is used.
     const resolvedCards = await Promise.all(
       data.topNames.map(async (card) => {
-        const ethIdImage = await EthIdImageService.fetchNftImage(card.ensName);
-        if (!ethIdImage) {
+        const nftCard = await EthIdImageService.fetchNftCard(card.ensName);
+        if (!nftCard) {
           logger.warn(`EthID NFT image unavailable for renewal card ${card.ensName}, using placeholder`);
         }
-        return { imageDataUri: ethIdImage || ensPlaceholderDataUri };
+        return { html: nftCard?.html ?? `<img src="${ensPlaceholderDataUri}" alt="ENS NFT">` };
       })
     );
 
@@ -469,10 +469,10 @@ export class PuppeteerImageService {
       visibleCards === 2 ? 'layout-2' :
       'layout-2x2'; // 3 or 4 visible cards → 2x2 grid (3-card case leaves bottom-right empty)
 
-    // Render the NFT-image cards. Background-image gives us proper cover/scale behaviour
-    // for the EthID PNG and the placeholder alike.
+    // Render the NFT cards. Each cell clips its child (inline SVG, PNG or placeholder)
+    // to a rounded square; the child fills the cell (see .renewal-card > svg/img).
     const dataCardsHtml = resolvedCards.map((card) => `
-      <div class="renewal-card" style="background-image: url('${card.imageDataUri}')"></div>
+      <div class="renewal-card">${card.html}</div>
     `).join('');
 
     // Overflow card ("+N more") is the ONLY HTML-rendered card — it's not an NFT, just a count.
@@ -622,18 +622,23 @@ export class PuppeteerImageService {
                 grid-template-rows: 221px 221px;
             }
 
-            /* Each renewal card IS the NFT image (background-image set inline).
+            /* Each renewal card IS the NFT card (inline SVG or <img> child).
                No HTML overlay — the NFT art already contains the ENS logo + name (it's
                part of the rendered .eth NFT artwork, same as the registration template).
                aspect-ratio is enforced by the explicit cell sizing above so cover-cropping
                doesn't distort the square NFT art. */
             .renewal-card {
-                background-color: #2a3990;  /* Faint fallback while image loads */
-                background-size: cover;
-                background-position: center;
-                background-repeat: no-repeat;
+                background-color: #2a3990;  /* Faint fallback while the card loads */
                 border-radius: 19px;
                 box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+                overflow: hidden;
+            }
+            .renewal-card > svg,
+            .renewal-card > img {
+                display: block;
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
             }
 
             /* Overflow card ("+N more") — only HTML-styled card. Placed last in the cards
@@ -868,12 +873,13 @@ export class PuppeteerImageService {
     // Use actual images or fallbacks
     const templateImagePath = `data:image/png;base64,${backgroundImageBase64}`;
     
-    // ENS NFT artwork comes pre-rendered from the EthID metadata service (PNG).
-    // Falls back to the bundled ens.png placeholder if EthID cannot serve it.
-    let nftImageBase64 = `data:image/png;base64,${ensPlaceholderBase64}`;
-    const ethIdImage = await EthIdImageService.fetchNftImage(data.ensName);
-    if (ethIdImage) {
-      nftImageBase64 = ethIdImage;
+    // ENS NFT card from the EthID metadata service: inline SVG with the bot's Apple
+    // emoji (or EthID's PNG as fallback). The bundled ens.png placeholder is used if
+    // EthID cannot serve the name.
+    let nftCardHtml = `<img src="data:image/png;base64,${ensPlaceholderBase64}" alt="ENS NFT">`;
+    const nftCard = await EthIdImageService.fetchNftCard(data.ensName);
+    if (nftCard) {
+      nftCardHtml = nftCard.html;
     } else {
       logger.warn(`❌ EthID NFT image unavailable for ${data.ensName}, using placeholder`);
     }
@@ -989,7 +995,7 @@ export class PuppeteerImageService {
                 background-repeat: no-repeat;
             }
 
-            /* ENS NFT Image (Right Side) */
+            /* ENS NFT card (Right Side) — clips its child (inline SVG, PNG or placeholder) */
             .ens-nft {
                 position: absolute;
                 left: 500px;
@@ -997,11 +1003,14 @@ export class PuppeteerImageService {
                 width: 455px;
                 height: 455px;
                 border-radius: 19px;
+                overflow: hidden;
+            }
+            .ens-nft > svg,
+            .ens-nft > img {
+                display: block;
+                width: 100%;
+                height: 100%;
                 object-fit: cover;
-                background-image: url("${nftImageBase64}");
-                background-size: cover;
-                background-position: center;
-                background-repeat: no-repeat;
             }
 
             /* USD Price (Left Side - Center Aligned) */
@@ -1099,10 +1108,8 @@ export class PuppeteerImageService {
             <!-- Background Template -->
             <div class="background"></div>
 
-            <!-- ENS NFT Image (EthID PNG) -->
-            <img src="${nftImageBase64}" alt="ENS NFT" class="ens-nft" 
-                 onload="console.log('NFT image loaded successfully');"
-            >
+            <!-- ENS NFT card (EthID SVG with Apple emoji, or PNG / placeholder fallback) -->
+            <div class="ens-nft">${nftCardHtml}</div>
 
             <!-- USD Price -->
             <div class="usd-price">
