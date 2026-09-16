@@ -1,11 +1,9 @@
 import { logger } from '../utils/logger';
-import { ImageData, RenewalImageData, RenewalNameCard } from '../types/imageTypes';
+import { ImageData, RenewalImageData } from '../types/imageTypes';
 import { IDatabaseService } from '../types';
 import { emojiMappingService } from './emojiMappingService';
 import { RealImageData } from './realDataImageService';
-import { SvgConverter } from '../utils/svgConverter';
-import { UnicodeEmojiService } from './unicodeEmojiService';
-import { OpenSeaService } from './openSeaService';
+import { EthIdImageService } from './ethIdImageService';
 import * as fs from 'fs';
 import * as path from 'path';
 import axios from 'axios';
@@ -18,13 +16,12 @@ export class PuppeteerImageService {
   /**
    * Generate ENS registration image using Puppeteer
    */
-  public static async generateRegistrationImage(data: RealImageData, databaseService?: IDatabaseService, openSeaService?: OpenSeaService): Promise<Buffer> {
+  public static async generateRegistrationImage(data: RealImageData, databaseService?: IDatabaseService): Promise<Buffer> {
     // Convert RealImageData to ImageData format for compatibility
     const mockData: ImageData = {
       priceEth: data.priceEth,
       priceUsd: data.priceUsd,
       ensName: data.ensName,
-      nftImageUrl: data.nftImageUrl,
       buyerAddress: '0x0000000000000000000000000000000000000000', // Placeholder
       buyerEns: data.buyerEns, // New owner
       buyerAvatar: data.buyerAvatar,
@@ -32,26 +29,24 @@ export class PuppeteerImageService {
       sellerEns: data.sellerEns, // "ENS DAO"
       sellerAvatar: this.getDaoProfileBase64(), // Use DAO avatar for registrations
       transactionHash: data.transactionHash || '0x0000',
-      timestamp: new Date(),
-      contractAddress: data.contractAddress,
-      tokenId: data.tokenId
+      timestamp: new Date()
     };
 
-    return await this.generateImageWithBackground(mockData, 'registration', databaseService, openSeaService);
+    return await this.generateImageWithBackground(mockData, 'registration', databaseService);
   }
 
   /**
    * Generate ENS sale image using Puppeteer
    */
-  public static async generateSaleImage(data: ImageData, databaseService?: IDatabaseService, openSeaService?: OpenSeaService): Promise<Buffer> {
-    return await this.generateImageWithBackground(data, 'sale', databaseService, openSeaService);
+  public static async generateSaleImage(data: ImageData, databaseService?: IDatabaseService): Promise<Buffer> {
+    return await this.generateImageWithBackground(data, 'sale', databaseService);
   }
 
   /**
    * Generate ENS bid image using Puppeteer
    */
-  public static async generateBidImage(data: ImageData, databaseService?: IDatabaseService, openSeaService?: OpenSeaService): Promise<Buffer> {
-    return await this.generateImageWithBackground(data, 'bid', databaseService, openSeaService);
+  public static async generateBidImage(data: ImageData, databaseService?: IDatabaseService): Promise<Buffer> {
+    return await this.generateImageWithBackground(data, 'bid', databaseService);
   }
 
   /**
@@ -66,10 +61,9 @@ export class PuppeteerImageService {
    */
   public static async generateRenewalImage(
     data: RenewalImageData,
-    databaseService?: IDatabaseService,
-    openSeaService?: OpenSeaService
+    databaseService?: IDatabaseService
   ): Promise<Buffer> {
-    return await this.generateRenewalImageInternal(data, databaseService, openSeaService);
+    return await this.generateRenewalImageInternal(data, databaseService);
   }
 
   /**
@@ -78,8 +72,7 @@ export class PuppeteerImageService {
   private static async generateImageWithBackground(
     data: ImageData, 
     imageType: 'sale' | 'registration' | 'bid', 
-    databaseService?: IDatabaseService,
-    openSeaService?: OpenSeaService
+    databaseService?: IDatabaseService
   ): Promise<Buffer> {
     // Environment-aware Puppeteer setup
     const isVercel = process.env.VERCEL === '1';
@@ -127,7 +120,7 @@ export class PuppeteerImageService {
       });
 
       // Generate HTML content with emoji replacement and background type
-      const htmlContent = await this.generateHTML(data, imageType, databaseService, openSeaService);
+      const htmlContent = await this.generateHTML(data, imageType, databaseService);
       logger.debug(`Generated HTML content length: ${htmlContent.length} chars`);
       
       // Set the HTML content
@@ -297,8 +290,7 @@ export class PuppeteerImageService {
    */
   private static async generateRenewalImageInternal(
     data: RenewalImageData,
-    databaseService?: IDatabaseService,
-    openSeaService?: OpenSeaService
+    databaseService?: IDatabaseService
   ): Promise<Buffer> {
     const isVercel = process.env.VERCEL === '1';
 
@@ -337,7 +329,7 @@ export class PuppeteerImageService {
         deviceScaleFactor: 1
       });
 
-      const htmlContent = await this.generateRenewalHTML(data, databaseService, openSeaService);
+      const htmlContent = await this.generateRenewalHTML(data, databaseService);
       logger.debug(`Generated renewal HTML content length: ${htmlContent.length} chars`);
 
       await page.setContent(htmlContent, {
@@ -413,8 +405,7 @@ export class PuppeteerImageService {
    */
   private static async generateRenewalHTML(
     data: RenewalImageData,
-    databaseService?: IDatabaseService,
-    openSeaService?: OpenSeaService
+    databaseService?: IDatabaseService
   ): Promise<string> {
     const templatePath = await this.getRenewalTemplatePath(data.totalCostUsd, databaseService);
     const backgroundImageBase64 = this.loadAsBase64(templatePath);
@@ -446,39 +437,17 @@ export class PuppeteerImageService {
 
     // ----- Right side: cards -----
     //
-    // Each card's visual is THE NFT IMAGE ITSELF — not an HTML overlay. This matches
-    // the existing registration/sale/bid pipeline where `.ens-nft` uses the resolved
-    // NFT image as a full-bleed background. The ENS NFT art already contains the logo
-    // and name (it's part of the rendered .eth NFT), so no HTML label is needed.
-    //
-    // Resolution order per card (same as `processNftImageUrl` + OpenSea fallback used elsewhere):
-    //   1. Provided nftImageUrl → run through processNftImageUrl (handles raster + SVG)
-    //   2. If that fails and we have contract+tokenId → try OpenSea metadata as fallback
-    //   3. If everything fails → use the ens.png placeholder (already includes logo + ".eth" text)
+    // Each card's visual is THE NFT IMAGE ITSELF — not an HTML overlay. The ENS NFT
+    // art already contains the logo and name (it's part of the rendered .eth NFT),
+    // so no HTML label is needed. Artwork comes pre-rendered from the EthID metadata
+    // service; if that fails, the ens.png placeholder (logo + ".eth" text) is used.
     const resolvedCards = await Promise.all(
       data.topNames.map(async (card) => {
-        let imageDataUri = ensPlaceholderDataUri;
-        if (card.nftImageUrl) {
-          try {
-            const result = await this.processNftImageUrl(card.nftImageUrl);
-            if (result) imageDataUri = result;
-          } catch (error: any) {
-            logger.debug(`NFT image fetch failed for ${card.ensName}: ${error.message}`);
-          }
+        const ethIdImage = await EthIdImageService.fetchNftImage(card.ensName);
+        if (!ethIdImage) {
+          logger.warn(`EthID NFT image unavailable for renewal card ${card.ensName}, using placeholder`);
         }
-        // OpenSea fallback if URL processing failed (or no URL was provided)
-        if (imageDataUri === ensPlaceholderDataUri && openSeaService && card.contractAddress && card.tokenId) {
-          try {
-            const metadata = await openSeaService.getSimplifiedMetadata(card.contractAddress, card.tokenId);
-            if (metadata?.image) {
-              const fallback = await this.processNftImageUrl(metadata.image);
-              if (fallback) imageDataUri = fallback;
-            }
-          } catch {
-            // Already using placeholder; nothing to do
-          }
-        }
-        return { imageDataUri };
+        return { imageDataUri: ethIdImage || ensPlaceholderDataUri };
       })
     );
 
@@ -501,7 +470,7 @@ export class PuppeteerImageService {
       'layout-2x2'; // 3 or 4 visible cards → 2x2 grid (3-card case leaves bottom-right empty)
 
     // Render the NFT-image cards. Background-image gives us proper cover/scale behaviour
-    // for both raster (PNG/JPG) and converted SVG (PNG via SvgConverter).
+    // for the EthID PNG and the placeholder alike.
     const dataCardsHtml = resolvedCards.map((card) => `
       <div class="renewal-card" style="background-image: url('${card.imageDataUri}')"></div>
     `).join('');
@@ -738,38 +707,6 @@ export class PuppeteerImageService {
   }
 
   /**
-   * Load NFT image with fallback chain: original URL → ENS metadata service → placeholder
-   */
-  private static async loadNftImageWithFallbacks(
-    originalUrl: string, 
-    ensName: string, 
-    placeholderBase64: string
-  ): Promise<string> {
-    // Try original URL first with short timeout
-    logger.debug(`Attempting to load NFT image: ${originalUrl.substring(0, 100)}...`);
-    
-    const originalImageBase64 = await this.loadRemoteImageAsBase64(originalUrl, 5000); // 5s timeout
-    if (originalImageBase64) {
-      logger.debug(`Successfully loaded original NFT image`);
-      return originalImageBase64;
-    }
-    
-    // Try ENS metadata service as fallback
-    const ensMetadataUrl = `https://metadata.ens.domains/mainnet/avatar/${ensName}`;
-    logger.debug(`Original NFT image failed, trying ENS metadata service: ${ensMetadataUrl}`);
-    
-    const ensImageBase64 = await this.loadRemoteImageAsBase64(ensMetadataUrl, 5000); // 5s timeout
-    if (ensImageBase64) {
-      logger.debug(`Successfully loaded ENS metadata image as fallback`);
-      return ensImageBase64;
-    }
-    
-    // Final fallback to placeholder
-    logger.warn(`Both NFT image sources failed, using placeholder for: ${ensName}`);
-    return `data:image/png;base64,${placeholderBase64}`;
-  }
-
-  /**
    * Load remote image URL as base64 data URL
    */
   private static async loadRemoteImageAsBase64(imageUrl: string, timeoutMs: number = 10000): Promise<string | null> {
@@ -914,8 +851,7 @@ export class PuppeteerImageService {
   private static async generateHTML(
     data: ImageData, 
     imageType: 'sale' | 'registration' | 'bid' = 'sale',
-    databaseService?: IDatabaseService,
-    openSeaService?: OpenSeaService
+    databaseService?: IDatabaseService
   ): Promise<string> {
     
     // Get dynamic template path based on transaction type and price tier
@@ -932,50 +868,14 @@ export class PuppeteerImageService {
     // Use actual images or fallbacks
     const templateImagePath = `data:image/png;base64,${backgroundImageBase64}`;
     
-    // Convert NFT image to base64 (handles both SVG and raster formats) with OpenSea fallback
-    let nftImageBase64 = `data:image/png;base64,${ensPlaceholderBase64}`; // Default fallback
-    if (data.nftImageUrl) {
-      let imageProcessed = false;
-      try {
-        logger.info(`🖼️ Processing NFT image: ${data.nftImageUrl}`);
-        const result = await this.processNftImageUrl(data.nftImageUrl);
-        if (result) {
-          nftImageBase64 = result;
-          imageProcessed = true;
-        }
-      } catch (error: any) {
-        logger.warn(`❌ Failed to process original NFT image: ${data.nftImageUrl}`, error.message);
-      }
-      
-      // Try OpenSea fallback if original failed
-      if (!imageProcessed && openSeaService && data.contractAddress && data.tokenId) {
-        try {
-          logger.info(`🔄 Trying OpenSea fallback for NFT image: ${data.ensName} (${data.contractAddress}/${data.tokenId})`);
-          const metadata = await openSeaService.getSimplifiedMetadata(data.contractAddress, data.tokenId);
-          
-          if (metadata?.image) {
-            logger.info(`📥 Found OpenSea image URL: ${metadata.image}`);
-            const fallbackResult = await this.processNftImageUrl(metadata.image);
-            if (fallbackResult) {
-              nftImageBase64 = fallbackResult;
-              logger.info(`✅ Successfully used OpenSea fallback image for ${data.ensName}`);
-              imageProcessed = true;
-            } else {
-              logger.warn(`⚠️ OpenSea fallback image produced empty result for ${data.ensName}`);
-            }
-          } else {
-            logger.warn(`⚠️ OpenSea returned no image for ${data.contractAddress}/${data.tokenId}`);
-          }
-        } catch (fallbackError: any) {
-          logger.warn(`❌ OpenSea fallback also failed: ${fallbackError.message}`);
-        }
-      }
-      
-      if (!imageProcessed) {
-        logger.warn(`❌ All image sources failed for ${data.ensName}, using placeholder`);
-      }
+    // ENS NFT artwork comes pre-rendered from the EthID metadata service (PNG).
+    // Falls back to the bundled ens.png placeholder if EthID cannot serve it.
+    let nftImageBase64 = `data:image/png;base64,${ensPlaceholderBase64}`;
+    const ethIdImage = await EthIdImageService.fetchNftImage(data.ensName);
+    if (ethIdImage) {
+      nftImageBase64 = ethIdImage;
     } else {
-      logger.info(`ℹ️  No NFT image URL provided, using placeholder`);
+      logger.warn(`❌ EthID NFT image unavailable for ${data.ensName}, using placeholder`);
     }
     
     // Convert avatar URLs to base64 data URLs (SEQUENTIAL to prevent resource exhaustion)
@@ -1199,7 +1099,7 @@ export class PuppeteerImageService {
             <!-- Background Template -->
             <div class="background"></div>
 
-            <!-- ENS NFT Image (Converted PNG) -->
+            <!-- ENS NFT Image (EthID PNG) -->
             <img src="${nftImageBase64}" alt="ENS NFT" class="ens-nft" 
                  onload="console.log('NFT image loaded successfully');"
             >
@@ -1340,84 +1240,6 @@ export class PuppeteerImageService {
   }
 
   /**
-   * Replace Unicode emojis in SVG content with Apple emoji SVGs
-   */
-  private static async replaceEmojisInSvg(svgContent: string): Promise<string> {
-    let result = svgContent;
-    
-    logger.info(`🔍 Starting emoji replacement in NFT SVG content (${svgContent.length} chars):`);
-    logger.info(`📄 SVG content preview: ${svgContent.substring(0, 200)}...`);
-    
-    // Use sophisticated Unicode emoji detection (handles ZWJ sequences properly)
-    const emojis = UnicodeEmojiService.detectEmojis(result);
-    
-    logger.info(`🎯 UnicodeEmojiService detected ${emojis.length} emojis in NFT SVG:`);
-    emojis.forEach((emojiInfo, index) => {
-      const codePoints = emojiInfo.emoji.split('').map(c => 
-        '\\u{' + c.codePointAt(0)!.toString(16).toUpperCase() + '}'
-      ).join('');
-      logger.info(`  ${index + 1}. "${emojiInfo.emoji}" at position ${emojiInfo.position} (${codePoints}) - ${emojiInfo.description}`);
-    });
-    
-    if (emojis.length === 0) {
-      logger.info(`⚠️  No emojis detected in NFT SVG content`);
-      return result;
-    }
-    
-    // Process emojis in reverse order (by position) to avoid index shifting
-    const sortedEmojis = emojis.sort((a, b) => b.position - a.position);
-    
-    let replacementCount = 0;
-    for (const emojiInfo of sortedEmojis) {
-      logger.info(`🔄 Processing NFT SVG emoji "${emojiInfo.emoji}" at position ${emojiInfo.position}...`);
-      
-      const appleSvgContent = await emojiMappingService.getEmojiSvg(emojiInfo.emoji);
-      if (appleSvgContent) {
-        // Calculate end position
-        const endPosition = emojiInfo.position + emojiInfo.emoji.length;
-        
-        // Log the replacement context
-        const beforeContext = result.substring(Math.max(0, emojiInfo.position - 10), emojiInfo.position);
-        const afterContext = result.substring(endPosition, Math.min(result.length, endPosition + 10));
-        logger.info(`🔀 Replacing "${emojiInfo.emoji}" in context: "${beforeContext}[${emojiInfo.emoji}]${afterContext}"`);
-        
-        // Extract just the SVG path/shape content from the Apple emoji (remove <svg> wrapper)
-        let emojiSvgContent = appleSvgContent;
-        
-        // Remove the outer <svg> wrapper and extract inner content
-        const svgMatch = emojiSvgContent.match(/<svg[^>]*>(.*?)<\/svg>/s);
-        if (svgMatch) {
-          const innerContent = svgMatch[1];
-          // Create a tspan with inline SVG for text compatibility  
-          emojiSvgContent = `<tspan><svg viewBox="0 0 64 64" width="1em" height="1em" style="display: inline-block; vertical-align: -0.125em;">${innerContent}</svg></tspan>`;
-        } else {
-          // Fallback: use the emoji as-is (Unicode)
-          logger.warn(`⚠️ Could not extract SVG content from Apple emoji, keeping Unicode: "${emojiInfo.emoji}"`);
-          continue;
-        }
-        
-        // Replace the emoji
-        result = result.substring(0, emojiInfo.position) + emojiSvgContent + result.substring(endPosition);
-        replacementCount++;
-        
-        logger.info(`✅ Successfully replaced NFT SVG emoji "${emojiInfo.emoji}" (${emojiInfo.description}) with inline Apple SVG`);
-      } else {
-        logger.warn(`❌ No Apple SVG found for NFT emoji "${emojiInfo.emoji}" (${emojiInfo.description})`);
-        logger.info(`🔍 Checking if emojiMappingService supports this emoji...`);
-        const isSupported = await emojiMappingService.isEmojiSupported(emojiInfo.emoji);
-        logger.info(`📋 emojiMappingService.isEmojiSupported("${emojiInfo.emoji}"): ${isSupported}`);
-      }
-    }
-    
-    logger.info(`🎉 NFT SVG emoji replacement complete: ${replacementCount}/${emojis.length} emojis replaced`);
-    if (replacementCount > 0) {
-      logger.info(`📄 Final NFT SVG content preview: ${result.substring(0, 200)}...`);
-    }
-    
-    return result;
-  }
-
-  /**
    * Get mock data for testing
    */
   public static getMockData(): ImageData {
@@ -1425,7 +1247,6 @@ export class PuppeteerImageService {
       priceEth: 5.51,
       priceUsd: 22560.01,
       ensName: 'name.eth', // Back to simple name for blue pill display
-      nftImageUrl: undefined, // No NFT image URL for mock data, will use placeholder
       buyerAddress: '0x1234567890abcdef1234567890abcdef12345678',
       buyerEns: 'james.eth',
       buyerAvatar: 'https://metadata.ens.domains/mainnet/avatar/vitalik.eth',
@@ -1435,242 +1256,5 @@ export class PuppeteerImageService {
       transactionHash: '0xtest123456789abcdef',
       timestamp: new Date()
     };
-  }
-
-  /**
-   * Detect whether a downloaded image buffer is SVG (text) or a raster format.
-   * Checks content-type header first, then falls back to magic byte sniffing.
-   */
-  private static detectImageFormat(buffer: Buffer, contentType: string): { isSvg: boolean; mimeType: string } {
-    const ct = contentType.toLowerCase();
-    if (ct.includes('svg')) return { isSvg: true, mimeType: 'image/svg+xml' };
-    if (ct.includes('avif')) return { isSvg: false, mimeType: 'image/avif' };
-    if (ct.includes('webp')) return { isSvg: false, mimeType: 'image/webp' };
-    if (ct.includes('png')) return { isSvg: false, mimeType: 'image/png' };
-    if (ct.includes('jpeg') || ct.includes('jpg')) return { isSvg: false, mimeType: 'image/jpeg' };
-    if (ct.includes('gif')) return { isSvg: false, mimeType: 'image/gif' };
-
-    if (buffer.length >= 4) {
-      if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) {
-        return { isSvg: false, mimeType: 'image/png' };
-      }
-      if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
-        return { isSvg: false, mimeType: 'image/jpeg' };
-      }
-      if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) {
-        return { isSvg: false, mimeType: 'image/gif' };
-      }
-      if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 && buffer.length >= 12 &&
-          buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50) {
-        return { isSvg: false, mimeType: 'image/webp' };
-      }
-    }
-    if (buffer.length >= 12) {
-      const boxType = buffer.toString('ascii', 4, 8);
-      if (boxType === 'ftyp') {
-        return { isSvg: false, mimeType: 'image/avif' };
-      }
-    }
-
-    const textStart = buffer.toString('utf-8', 0, Math.min(buffer.length, 200)).trim();
-    if (textStart.startsWith('<') || textStart.startsWith('<?xml')) {
-      return { isSvg: true, mimeType: 'image/svg+xml' };
-    }
-
-    return { isSvg: false, mimeType: contentType || 'image/png' };
-  }
-
-  /**
-   * Download an NFT image URL and return a base64 data URL.
-   * Handles both SVG (via the HTML conversion pipeline) and raster formats (direct use).
-   * Returns null if the image could not be processed or produced empty SVG output.
-   */
-  private static async processNftImageUrl(imageUrl: string): Promise<string | null> {
-    const response = await axios.get(imageUrl, {
-      responseType: 'arraybuffer',
-      timeout: 10000,
-      headers: { 'User-Agent': 'ENS-TwitterBot/1.0' }
-    });
-
-    const buffer = Buffer.from(response.data);
-    const contentType = response.headers['content-type'] || '';
-    const format = this.detectImageFormat(buffer, contentType);
-
-    if (!format.isSvg) {
-      logger.info(`📷 NFT image is raster format (${format.mimeType}, ${buffer.length} bytes), using directly`);
-      const base64 = buffer.toString('base64');
-      return `data:${format.mimeType};base64,${base64}`;
-    }
-
-    const svgContent = buffer.toString('utf-8');
-    logger.info(`📥 Downloaded NFT SVG (${svgContent.length} chars): ${svgContent.substring(0, 150)}...`);
-
-    const result = await this.convertSvgToHtmlWithEmojis(svgContent);
-    logger.info(`🔄 Converted SVG to HTML overlay with emoji processing`);
-
-    if (result.pathCount === 0 && result.textCount === 0) {
-      logger.warn(`⚠️ SVG parsing produced empty result (0 paths, 0 text elements) - treating as failure`);
-      return null;
-    }
-
-    const pngBuffer = await SvgConverter.convertSvgToPng(result.html);
-    const pngBase64 = pngBuffer.toString('base64');
-    logger.info(`✅ Successfully converted NFT SVG to PNG with Apple emojis`);
-    return `data:image/png;base64,${pngBase64}`;
-  }
-
-  /**
-   * Convert ENS SVG to HTML with proper emoji processing
-   * Extracts background image and text, rebuilds as HTML where emojiMappingService works
-   */
-  private static async convertSvgToHtmlWithEmojis(svgContent: string): Promise<{ html: string; pathCount: number; textCount: number }> {
-    logger.info(`🔍 Parsing SVG structure for HTML conversion`);
-    
-    // Extract background - could be a custom image OR use default ENS background
-    let backgroundStyle = '';
-    
-    // Check for image background (custom ENS avatar)
-    const imageMatch = svgContent.match(/<image[^>]*href="([^"]+)"/);
-    if (imageMatch) {
-      const backgroundImage = imageMatch[1];
-      backgroundStyle = `background: url('${backgroundImage}') no-repeat center/cover;`;
-      logger.info(`📷 Found custom background image`);
-    } else {
-      // Use default ENS gradient background image
-      const defaultBgPath = path.join(__dirname, '../../assets/ens-default-background.png');
-      const defaultBgBase64 = fs.readFileSync(defaultBgPath, 'base64');
-      backgroundStyle = `background: url('data:image/png;base64,${defaultBgBase64}') no-repeat center/cover;`;
-      logger.info(`🎨 Using default ENS background image`);
-    }
-    
-    // Extract all <path> elements (ENS logo)
-    const pathMatches = Array.from(svgContent.matchAll(/<path[^>]*d="([^"]+)"[^>]*fill="([^"]*)"[^>]*\/>/g));
-    logger.info(`🎨 Found ${pathMatches.length} path elements (ENS logo)`);
-    
-    // Build SVG for paths (ENS logo)
-    let svgPaths = '';
-    if (pathMatches.length > 0) {
-      const pathElements = pathMatches.map(match => 
-        `<path d="${match[1]}" fill="${match[2] || 'white'}" />`
-      ).join('\n');
-      
-      svgPaths = `
-        <svg style="position: absolute; top: 0; left: 0; width: 270px; height: 270px;"
-             viewBox="0 0 270 270" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <filter id="dropShadow" color-interpolation-filters="sRGB">
-              <feDropShadow dx="0" dy="2" stdDeviation="2" flood-opacity="0.3"/>
-            </filter>
-          </defs>
-          <g filter="url(#dropShadow)">
-            ${pathElements}
-          </g>
-        </svg>
-      `;
-    }
-    
-    // Extract text elements with ALL attributes
-    const textRegex = /<text[^>]*>([^<]+)<\/text>/g;
-    const textAttrRegex = /(\w+)="([^"]+)"/g;
-    let textMatch;
-    let htmlTextElements = [];
-    
-    // UNIFIED SCALING: Collect all text elements first, then apply the most restrictive scaling to all
-    let textElements = [];
-    
-    // STEP 1: Collect all text elements and their properties
-    while ((textMatch = textRegex.exec(svgContent)) !== null) {
-      const fullTextElement = textMatch[0];
-      const textContent = textMatch[1];
-      
-      // Extract all attributes
-      let attrs: any = {};
-      let attrMatch;
-      while ((attrMatch = textAttrRegex.exec(fullTextElement)) !== null) {
-        attrs[attrMatch[1]] = attrMatch[2];
-      }
-      
-      const x = attrs.x || '0';
-      const y = attrs.y || '0';
-      const fontSize = attrs['font-size'] || attrs.fontSize || '30px';
-      const fill = attrs.fill || 'white';
-      
-      // Trim whitespace from SVG text content (SVG can have indentation/newlines)
-      const trimmedTextContent = textContent.trim();
-      
-      // Count visual characters BEFORE emoji replacement
-      const visualCharCount = [...trimmedTextContent].length;
-      
-      // Collect element info instead of processing immediately
-      textElements.push({
-        x,
-        y,
-        fontSize: parseFloat(fontSize),
-        fill,
-        trimmedTextContent,
-        visualCharCount
-      });
-    }
-    
-    // STEP 2: Calculate required font size for each line and find the minimum (most restrictive)
-    const maxWidth = 270 - 60; // 270px container minus padding
-    const charWidthRatio = 0.7; // Character width estimation ratio
-    let unifiedFontSize = 30; // Start with original size
-    
-    for (const element of textElements) {
-      let requiredFontSize = element.fontSize;
-      const estimatedTextWidth = element.visualCharCount * (element.fontSize * charWidthRatio);
-      
-      if (estimatedTextWidth > maxWidth) {
-        // Calculate what font size is needed for this line to fit
-        const bufferedWidth = estimatedTextWidth * 0.8; // 20% buffer
-        const scaleFactor = maxWidth / bufferedWidth;
-        requiredFontSize = Math.max(Math.floor(element.fontSize * scaleFactor), 18); // Min 18px
-      }
-      
-      // Keep track of the smallest required size (most restrictive)
-      unifiedFontSize = Math.min(unifiedFontSize, requiredFontSize);
-    }
-    
-    // STEP 3: Process all text elements with the unified font size
-    for (const element of textElements) {
-      // Process emojis using our mapping service
-      const processedText = await emojiMappingService.replaceEmojisWithSvg(element.trimmedTextContent);
-      
-      // Create positioned div with correct font properties
-      // Adjust inline SVG emoji styling for proper baseline alignment
-      const alignedText = processedText.replace(/style="[^"]*"/g, 
-        'style="display: inline-block; vertical-align: text-bottom; width: 1em; height: 1em; margin: 0 0.05em; transform: translateY(-3px);"'
-      );
-      
-      // Use unified font size for all lines
-      const adjustedY = parseFloat(element.y) - (unifiedFontSize * 0.87); // Baseline offset
-      
-      htmlTextElements.push(`
-        <div style="position: absolute; left: ${element.x}px; top: ${adjustedY}px; 
-                    font-family: 'Inter', 'Noto Sans KR', 'Noto Sans Arabic', sans-serif;
-                    font-size: ${unifiedFontSize}px; font-weight: 500; color: ${element.fill};
-                    line-height: 1; 
-                    filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.15));">
-          ${alignedText}
-        </div>
-      `);
-    }
-    
-    // Build complete HTML with background, logo, and text
-    // Load Inter font from Google Fonts with weight 500
-    const html = `
-      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@500&family=Noto+Sans+KR:wght@500&family=Noto+Sans+Arabic:wght@500&display=swap" rel="stylesheet">
-      <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@500&family=Noto+Sans+KR:wght@500&family=Noto+Sans+Arabic:wght@500&display=swap');
-      </style>
-      <div style="width: 270px; height: 270px; position: relative; overflow: hidden; ${backgroundStyle}">
-        ${svgPaths}
-        ${htmlTextElements.join('')}
-      </div>
-    `;
-    
-    logger.info(`✨ Built HTML overlay with ${pathMatches.length} paths and ${htmlTextElements.length} text elements`);
-    return { html, pathCount: pathMatches.length, textCount: htmlTextElements.length };
   }
 }

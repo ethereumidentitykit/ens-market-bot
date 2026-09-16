@@ -90,7 +90,6 @@ export class ImageController {
           sellerEns: imageData.sellerEns,
           buyerAvatar: imageData.buyerAvatar ? 'Loaded' : 'Default',
           sellerAvatar: imageData.sellerAvatar ? 'Loaded' : 'Default',
-          nftImageUrl: imageData.nftImageUrl ? 'Available' : 'Not available',
           transactionHash: imageData.transactionHash,
           saleId: imageData.saleId
         },

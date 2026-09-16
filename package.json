@@ -11,6 +11,7 @@
     "lint:fix": "eslint src/**/*.ts --fix",
     "format": "prettier --write src/**/*.ts",
     "test": "echo \"No tests specified - skipping\"",
+    "image:test": "ts-node --transpile-only scripts/render-test-image.ts",
     "vercel-build": "npm run build"
   },
   "keywords": ["ens", "ethereum", "twitter-bot", "nft", "web3", "ai", "openai"],

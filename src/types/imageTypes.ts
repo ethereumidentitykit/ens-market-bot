@@ -4,8 +4,7 @@
 export interface ImageData {
   priceEth: number;
   priceUsd: number;
-  ensName: string;
-  nftImageUrl?: string;
+  ensName: string;        // Also keys the NFT artwork lookup (EthID metadata service)
   buyerAddress: string;
   buyerEns?: string;
   buyerAvatar?: string;
@@ -14,9 +13,6 @@ export interface ImageData {
   sellerAvatar?: string;
   transactionHash: string;
   timestamp: Date;
-  // NFT contract info for metadata fallbacks
-  contractAddress?: string;
-  tokenId?: string;
   currencySymbol?: string;
 }
 
@@ -27,9 +23,6 @@ export interface ImageData {
 export interface RenewalNameCard {
   ensName: string;        // Full name with .eth (e.g., "vitalik.eth")
   costEth: number;        // Per-name renewal cost in ETH
-  nftImageUrl?: string;   // ENS NFT image (if available); placeholder used otherwise
-  contractAddress?: string; // For metadata fallback
-  tokenId?: string;        // For metadata fallback
 }
 
 /**

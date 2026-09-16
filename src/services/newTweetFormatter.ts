@@ -74,7 +74,7 @@ export class NewTweetFormatter {
           const registrationImageData = await this.convertRegistrationToImageData(registration, minterAccount, minterAddress);
           
           // Generate image buffer using Puppeteer (registration-specific)
-          imageBuffer = await PuppeteerImageService.generateRegistrationImage(registrationImageData, this.databaseService, this.openSeaService);
+          imageBuffer = await PuppeteerImageService.generateRegistrationImage(registrationImageData, this.databaseService);
           
           if (imageBuffer) {
             // Save image for preview
@@ -148,7 +148,7 @@ export class NewTweetFormatter {
           const mockImageData = this.convertRealToImageDataForBid(bidImageData, bid);
           
           // Generate image buffer using Puppeteer (bid-specific)
-          imageBuffer = await PuppeteerImageService.generateBidImage(mockImageData, this.databaseService, this.openSeaService);
+          imageBuffer = await PuppeteerImageService.generateBidImage(mockImageData, this.databaseService);
           
           if (imageBuffer) {
             // Save image for preview
@@ -261,8 +261,7 @@ export class NewTweetFormatter {
 
           imageBuffer = await PuppeteerImageService.generateRenewalImage(
             renewalImageData,
-            this.databaseService,
-            this.openSeaService
+            this.databaseService
           );
 
           if (imageBuffer) {
@@ -317,32 +316,12 @@ export class NewTweetFormatter {
     const topRenewals = sortedRenewals.slice(0, 3);
     const extraCount = sortedRenewals.length - topRenewals.length;
 
-    // Build card data, retrying ENS metadata for cards missing an image (mirrors the
-    // registration image-recovery flow). Done sequentially per card so we can update
-    // imageData[i].nftImageUrl without a race; metadata API failures are non-fatal.
-    const topNames: RenewalNameCard[] = [];
-    for (const r of topRenewals) {
-      let nftImageUrl = r.image;
-      if (!nftImageUrl && r.tokenId && this.ensMetadataService) {
-        try {
-          logger.debug(`Renewal card image missing, retrying ENS metadata lookup for ${r.fullName}`);
-          const metadata = await this.ensMetadataService.getMetadataWithFallback(r.tokenId);
-          if (metadata?.image || metadata?.image_url) {
-            nftImageUrl = metadata.image || metadata.image_url;
-            logger.debug(`✅ Recovered renewal card image via ENS metadata: ${r.fullName}`);
-          }
-        } catch (error: any) {
-          logger.debug(`ENS metadata retry failed for renewal card ${r.fullName}: ${error.message}`);
-        }
-      }
-      topNames.push({
-        ensName: this.cleanEnsName(r.fullName),
-        costEth: parseFloat(r.costEth || '0'),
-        nftImageUrl,
-        contractAddress: r.contractAddress,
-        tokenId: r.tokenId
-      });
-    }
+    // Build card data. NFT artwork is fetched from the EthID metadata service at
+    // render time (keyed by ensName), so no image URL needs to be carried here.
+    const topNames: RenewalNameCard[] = topRenewals.map((r) => ({
+      ensName: this.cleanEnsName(r.fullName),
+      costEth: parseFloat(r.costEth || '0')
+    }));
 
     const renewerEns = this.getImageDisplayHandle(renewerAccount, renewerAddress);
     const renewerAvatar = renewerAccount?.avatar || renewerAccount?.records?.avatar;
@@ -385,7 +364,7 @@ export class NewTweetFormatter {
       if (this.databaseService) {
         try {
           logger.info(`Generating image for sale: ${sale.transactionHash}`);
-          const realDataService = new RealDataImageService(this.databaseService, this.ethIdentityService, this.openSeaService);
+          const realDataService = new RealDataImageService(this.databaseService, this.ethIdentityService);
           
           // Convert sale to image data
           const saleImageData = await realDataService.convertSaleToImageData(sale);
@@ -394,7 +373,7 @@ export class NewTweetFormatter {
           const mockImageData = this.convertRealToImageData(saleImageData, sale);
           
           // Generate image buffer using Puppeteer
-          imageBuffer = await PuppeteerImageService.generateSaleImage(mockImageData, this.databaseService, this.openSeaService);
+          imageBuffer = await PuppeteerImageService.generateSaleImage(mockImageData, this.databaseService);
           
           // Save image for preview
           const filename = `tweet-image-${sale.id}-${Date.now()}.png`;
@@ -1189,33 +1168,17 @@ export class NewTweetFormatter {
       sellerEns: 'ENS DAO', // ENS DAO is the "seller"
       buyerAvatar: minterAvatar,
       sellerAvatar: undefined, // Will be handled by PuppeteerImageService with dao-profile.png
-      nftImageUrl: registration.image, // Use ENS NFT image if available
       saleId: registration.id,
       transactionHash: registration.transactionHash,
       contractAddress: registration.contractAddress,
       tokenId: registration.tokenId
     };
 
-    // If image was missing from ingestion, retry via ENS Metadata API using correct token IDs derived from the name
-    if (!imageData.nftImageUrl && registration.tokenId && this.ensMetadataService) {
-      try {
-        logger.info(`🔄 Registration image missing, retrying ENS metadata lookup for ${ensName} (tokenId: ${registration.tokenId})`);
-        const ensMetadata = await this.ensMetadataService.getMetadataWithFallback(registration.tokenId);
-        if (ensMetadata?.image || ensMetadata?.image_url) {
-          imageData.nftImageUrl = ensMetadata.image || ensMetadata.image_url;
-          logger.info(`✅ Recovered registration image via ENS metadata retry: ${imageData.nftImageUrl?.substring(0, 80)}`);
-        }
-      } catch (error: any) {
-        logger.warn(`⚠️ ENS metadata retry failed for registration image: ${error.message}`);
-      }
-    }
-
     logger.info('Converted registration to image data:', {
       ensName: imageData.ensName,
       ownerEns: imageData.buyerEns,
       priceEth: imageData.priceEth,
       priceUsd: imageData.priceUsd,
-      hasNftImage: !!imageData.nftImageUrl,
       hasOwnerAvatar: !!imageData.buyerAvatar
     });
 
@@ -1363,7 +1326,6 @@ export class NewTweetFormatter {
       sellerEns: currentOwnerEns, // Owner (empty if lookup failed)
       buyerAvatar: bidderAvatar,
       sellerAvatar: currentOwnerAvatar,
-      nftImageUrl: bid.nftImage, // Use ENS NFT image if available
       saleId: bid.id,
       transactionHash: bid.bidId, // Use bid ID as transaction reference
       contractAddress: bid.contractAddress,
@@ -1377,7 +1339,6 @@ export class NewTweetFormatter {
       currentOwnerEns: imageData.sellerEns,
       priceEth: imageData.priceEth,
       priceUsd: imageData.priceUsd,
-      hasNftImage: !!imageData.nftImageUrl,
       hasBidderAvatar: !!imageData.buyerAvatar,
       hasCurrentOwnerAvatar: !!imageData.sellerAvatar
     });
@@ -1393,7 +1354,6 @@ export class NewTweetFormatter {
       priceEth: realData.priceEth,
       priceUsd: realData.priceUsd,
       ensName: realData.ensName,
-      nftImageUrl: realData.nftImageUrl,
       buyerAddress: sale.buyerAddress,
       buyerEns: realData.buyerEns,
       buyerAvatar: realData.buyerAvatar,
@@ -1402,8 +1362,6 @@ export class NewTweetFormatter {
       sellerAvatar: realData.sellerAvatar,
       transactionHash: sale.transactionHash,
       timestamp: new Date(),
-      contractAddress: sale.contractAddress,
-      tokenId: sale.tokenId,
       currencySymbol: realData.currencySymbol
     };
   }
@@ -1416,7 +1374,6 @@ export class NewTweetFormatter {
       priceEth: realData.priceEth,
       priceUsd: realData.priceUsd,
       ensName: realData.ensName,
-      nftImageUrl: realData.nftImageUrl,
       buyerAddress: bid.makerAddress, // Bidder is the potential buyer
       buyerEns: realData.buyerEns,
       buyerAvatar: realData.buyerAvatar,
@@ -1425,8 +1382,6 @@ export class NewTweetFormatter {
       sellerAvatar: realData.sellerAvatar,
       transactionHash: bid.bidId, // Use bid ID as transaction reference
       timestamp: new Date(), // Use current timestamp
-      contractAddress: bid.contractAddress,
-      tokenId: bid.tokenId,
       currencySymbol: realData.currencySymbol
     };
   }

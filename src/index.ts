@@ -3180,7 +3180,6 @@ async function startApplication(): Promise<void> {
           priceEth: mockData.priceEth,
           priceUsd: mockData.priceUsd,
           ensName: mockData.ensName,
-          nftImageUrl: mockData.nftImageUrl || '',
           buyerEns: mockData.buyerEns || 'New Owner',
           buyerAvatar: mockData.buyerAvatar || '',
           sellerEns: 'ENS DAO',

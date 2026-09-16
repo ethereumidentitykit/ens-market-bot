@@ -3,7 +3,6 @@ import { ProcessedSale } from '../types';
 import { ENSWorkerService, ResolvedProfile } from './ensWorkerService';
 import { ImageData } from '../types/imageTypes';
 import { PuppeteerImageService } from './puppeteerImageService';
-import { OpenSeaService } from './openSeaService';
 import { logger } from '../utils/logger';
 
 /**
@@ -17,10 +16,9 @@ export interface RealImageData {
   sellerEns: string;
   buyerAvatar?: string;
   sellerAvatar?: string;
-  nftImageUrl?: string;
   saleId?: number;
   transactionHash?: string;
-  // NFT contract info for metadata fallbacks
+  // NFT contract identity
   contractAddress?: string;
   tokenId?: string;
   currencySymbol?: string;
@@ -32,8 +30,7 @@ export interface RealImageData {
 export class RealDataImageService {
   constructor(
     private databaseService: IDatabaseService,
-    private ethIdentityService: ENSWorkerService,
-    private openSeaService?: OpenSeaService
+    private ethIdentityService: ENSWorkerService
   ) {}
 
   /**
@@ -175,7 +172,6 @@ export class RealDataImageService {
       sellerEns: sellerProfile.displayName,
       buyerAvatar: buyerProfile.avatar,
       sellerAvatar: sellerProfile.avatar,
-      nftImageUrl: sale.nftImage,
       saleId: sale.id,
       transactionHash: sale.transactionHash,
       contractAddress: sale.contractAddress,
@@ -189,7 +185,6 @@ export class RealDataImageService {
       sellerEns: imageData.sellerEns,
       priceEth: imageData.priceEth,
       priceUsd: imageData.priceUsd,
-      hasNftImage: !!imageData.nftImageUrl,
       hasBuyerAvatar: !!imageData.buyerAvatar,
       hasSellerAvatar: !!imageData.sellerAvatar
     });
@@ -243,7 +238,6 @@ export class RealDataImageService {
       priceEth: realData.priceEth,
       priceUsd: realData.priceUsd,
       ensName: realData.ensName,
-      nftImageUrl: realData.nftImageUrl,
       buyerAddress: '0x0000000000000000000000000000000000000000',
       buyerEns: realData.buyerEns,
       buyerAvatar: realData.buyerAvatar,
@@ -255,7 +249,7 @@ export class RealDataImageService {
       currencySymbol: realData.currencySymbol
     };
 
-    return await PuppeteerImageService.generateSaleImage(mockData, this.databaseService, this.openSeaService);
+    return await PuppeteerImageService.generateSaleImage(mockData, this.databaseService);
   }
 
   /**
