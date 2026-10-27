@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import { logger } from '../utils/logger';
 import { getBestEnsName, isTokenIdHash } from '../utils/nameUtils';
 import { IDatabaseService, ENSRegistration } from '../types';
@@ -6,28 +5,36 @@ import { OpenSeaService } from './openSeaService';
 import { ENSMetadataService } from './ensMetadataService';
 import { AlchemyService } from './alchemyService';
 import { ENSTokenUtils } from './ensTokenUtils';
+import { ENS_V2_REGISTRY, isENSV2PaymentContract } from '../config/ensContracts';
+import { ENSPaymentEvent, eventTimestamp, getENSAsset, normalizeENSPayment, parseEventInteger } from '../utils/ensEventUtils';
 
 // QuickNode webhook interfaces based on actual payload analysis
 export interface QuickNodeRegistrationData {
   nameRegistered: QuickNodeRegistrationEvent[];
 }
 
-export interface QuickNodeRegistrationEvent {
+export interface QuickNodeRegistrationEvent extends ENSPaymentEvent {
   blockNumber: string;
   contract: string;
   contractLabel: string;
   name: string;
   owner: string;
-  expires: string;
-  label: string;
+  expires?: string;
+  label?: string;
+  tokenId?: string;       // Actual V2 registry token, distinct from labelhash
+  registryAddress?: string;
+  duration?: string;
+  blockTimestamp?: string | number; // Unix seconds
   logIndex: string;
   txHash: string;
   // Cost fields vary by contract (NEW vs CURRENT vs OLD)
   baseCost?: string;      // NEW & CURRENT contracts
   premium?: string;       // NEW contract only
+  baseCostRaw?: string;   // V2 token base units
+  premiumRaw?: string;    // V2 token base units
   cost?: string;          // OLD contract only  
-  totalCostEth: string;   // All contracts (consistent field)
-  totalCostWei: string;   // All contracts (consistent field)
+  totalCostEth?: string;  // V1 only; V2 has paymentToken + totalCostRaw
+  totalCostWei?: string;  // V1 only
   referrer?: string;      // NEW contract only
   from?: string;          // Transaction executor (tx sender) address
 }
@@ -73,38 +80,28 @@ export class QuickNodeRegistrationService {
       logger.debug('Full event data:', JSON.stringify(event, null, 2));
       
       // Convert hex values to proper formats
-      const blockNumber = parseInt(event.blockNumber, 16);
+      const blockNumber = parseEventInteger(event.blockNumber);
+      const asset = getENSAsset(event);
+      const tokenIdDecimal = asset.tokenId;
+      const payment = await normalizeENSPayment(event, fallback => this.alchemyService.getETHPriceUSD(fallback));
+      const { costWei, costEth } = payment;
       
-      // Generate tokenId from the label hash (this matches the tokenId/topic1 from logs)
-      const tokenId = event.label; // Already in hex format from QuickNode
-      const tokenIdDecimal = BigInt(tokenId).toString();
-      
-      logger.debug(`Token ID conversion: ${tokenId} (hex) -> ${tokenIdDecimal} (decimal)`);
-
-      // Use the consistent totalCostWei field (all contracts have this)
-      const costWei = event.totalCostWei;
-      const costEth = (Number(costWei) / 1e18).toFixed(6);
-      
-      logger.info(`💰 Registration cost: ${costWei} wei (${costEth} ETH) [Contract: ${event.contractLabel}]`);
+      logger.info(`💰 Registration cost: ${costWei} equivalent wei (${costEth} ETH equivalent) [Contract: ${event.contractLabel}]`);
 
       // Enrich with metadata following existing pattern
-      const enrichedData = await this.enrichRegistrationData(event.name, tokenIdDecimal);
-      
-      // Get USD price conversion
-      let costUsd: string | undefined;
-      try {
-        const ethPriceUsd = await this.alchemyService.getETHPriceUSD();
-        if (ethPriceUsd) {
-          const costInUsd = parseFloat(costEth) * ethPriceUsd;
-          costUsd = costInUsd.toFixed(2);
-          logger.info(`💰 ETH price: $${ethPriceUsd}, Registration cost: ${costEth} ETH ($${costUsd})`);
-        }
-      } catch (error: any) {
-        logger.warn('Failed to fetch ETH price for USD conversion:', error.message);
+      const enrichedData = await this.enrichRegistrationData(event.name, tokenIdDecimal, asset.contract);
+      let timestamp = event.blockTimestamp;
+      if (timestamp == null && isENSV2PaymentContract(event.contract)) {
+        timestamp = (await this.alchemyService.getBlockTimestamp(blockNumber)) ?? undefined;
       }
-
-      // Create block timestamp from current time (QuickNode events don't include timestamp)
-      const blockTimestamp = new Date().toISOString();
+      const blockTimestamp = eventTimestamp(timestamp) || new Date().toISOString();
+      let expiresAt = eventTimestamp(event.expires);
+      if (!expiresAt && isENSV2PaymentContract(event.contract)) {
+        // V2 NameRegistered omits expiry. Prefer the registry companion event;
+        // otherwise derive it from the actual block timestamp, never wall time.
+        if (timestamp == null || event.duration == null) throw new Error('Missing ENSv2 registration expiry/block timestamp');
+        expiresAt = eventTimestamp(parseEventInteger(timestamp) + parseEventInteger(event.duration));
+      }
       
       // Build fullName with hash detection and fallback
       // Priority: webhook name (event.name) > metadata name (if not a hash)
@@ -123,16 +120,14 @@ export class QuickNodeRegistrationService {
         fullName: fullName,
         ownerAddress: event.owner,
         executorAddress: event.from || undefined,
-        costWei: costWei,
-        costEth: costEth,
-        costUsd: costUsd,
+        ...payment,
         blockNumber: blockNumber,
         blockTimestamp: blockTimestamp,
         processedAt: new Date().toISOString(),
         image: enrichedData.image,
         description: enrichedData.description,
         posted: false,
-        expiresAt: event.expires ? new Date(parseInt(event.expires) * 1000).toISOString() : undefined,
+        expiresAt,
       };
 
       logger.info('📋 Final registration data prepared:', {
@@ -161,8 +156,20 @@ export class QuickNodeRegistrationService {
    */
   private async enrichRegistrationData(
     ensName: string, 
-    tokenIdDecimal: string
+    tokenIdDecimal: string,
+    registryContract: string
   ): Promise<{ name?: string; image?: string; description?: string }> {
+    if (registryContract === ENS_V2_REGISTRY) {
+      // A labelhash on BaseRegistrar may describe a previous V1 owner/registration.
+      // Use only the V2 asset for V2 metadata, and tolerate indexing lag.
+      try {
+        const metadata = await this.openSeaService.getSimplifiedMetadata(registryContract, tokenIdDecimal);
+        if (metadata && (metadata.name || metadata.image || metadata.description)) return metadata;
+      } catch (error: any) {
+        logger.debug(`OpenSea ENSv2 metadata unavailable: ${error.message}`);
+      }
+      return (await this.ensMetadataService.getMetadata(registryContract, tokenIdDecimal).catch(() => null)) || {};
+    }
     
     // Generate contract-specific token IDs using ENSTokenUtils
     const fullEnsName = `${ensName}.eth`;

@@ -113,14 +113,18 @@ export interface ENSRegistration {
   id?: number;
   transactionHash: string;
   contractAddress: string;  // ENS ETH Registrar Controller address
-  tokenId: string;         // keccak256 hash of ENS name
+  tokenId: string;         // V1 labelhash or emitted V2 registry token ID
   ensName: string;         // The ENS name (e.g., "hsueh")
   fullName: string;        // Full ENS name (e.g., "hsueh.eth")
   ownerAddress: string;    // Address that received the ENS name
   executorAddress?: string; // Transaction executor (may differ from owner for gifted registrations)
-  costWei: string;         // Cost in wei
-  costEth?: string;        // Cost in ETH (calculated)
+  costWei: string;         // ETH-equivalent cost in wei (actual wei for ETH payments)
+  costEth?: string;        // ETH-equivalent cost (calculated)
   costUsd?: string;        // Cost in USD (if available)
+  paymentToken?: string;   // Original payment token address
+  paymentAmountRaw?: string; // Exact amount in original token base units
+  paymentAmount?: string;  // Decimal amount paid in original token
+  paymentSymbol?: string;  // ETH, USDC, or DAI
   blockNumber: number;
   blockTimestamp: string;
   processedAt: string;
@@ -145,15 +149,19 @@ export interface ENSRenewal {
   id?: number;
   transactionHash: string;
   contractAddress: string;  // ENS ETH Registrar Controller address
-  tokenId: string;          // keccak256 hash of ENS name
+  tokenId: string;          // V1 labelhash (including ETHRenewerV1), or V2 registry token ID
   logIndex: number;         // Event index within transaction (for unique identification)
   ensName: string;          // The ENS name (e.g., "hsueh")
   fullName: string;         // Full ENS name (e.g., "hsueh.eth")
   ownerAddress?: string;    // Current owner at time of renewal (lookup may fail → null)
   renewerAddress: string;   // Address that paid for the renewal (= tx.from); may differ from owner for gift renewals
-  costWei: string;          // Cost in wei
-  costEth?: string;         // Cost in ETH (calculated)
+  costWei: string;          // ETH-equivalent cost in wei (actual wei for ETH payments)
+  costEth?: string;         // ETH-equivalent cost (calculated)
   costUsd?: string;         // Cost in USD (if available)
+  paymentToken?: string;    // Original payment token address
+  paymentAmountRaw?: string; // Exact amount in original token base units
+  paymentAmount?: string;   // Decimal amount paid in original token
+  paymentSymbol?: string;   // ETH, USDC, or DAI
   durationSeconds?: number; // Renewal length added (nullable — derived from new vs. previous expires if available)
   blockNumber: number;
   blockTimestamp: string;

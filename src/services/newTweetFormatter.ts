@@ -329,6 +329,7 @@ export class NewTweetFormatter {
     return {
       totalCostEth: totalEth,
       totalCostUsd: totalUsd,
+      costIsEthEquivalent: sortedRenewals.some(r => this.isNonEthPayment(r)),
       nameCount: sortedRenewals.length,
       topNames,
       extraCount,
@@ -533,9 +534,30 @@ export class NewTweetFormatter {
     return `List Price: ${lowestPrice.toFixed(2)} ${displaySymbol} (${sourceTag})`;
   }
 
-  /**
-   * Format the tweet text for ENS registrations
-   */
+  /** Distinguish original payment currency from normalized ETH analytics. */
+  private isNonEthPayment(row: ENSRegistration | ENSRenewal): boolean {
+    return !!row.paymentSymbol && row.paymentSymbol !== 'ETH';
+  }
+
+  private registrationPaymentLabel(registration: ENSRegistration, eth: string): string {
+    if (!this.isNonEthPayment(registration)) return `${eth} ETH`;
+    if (registration.paymentAmount !== undefined) {
+      const amount = Number(registration.paymentAmount).toLocaleString('en-US', { maximumFractionDigits: 6 });
+      return `${amount} ${registration.paymentSymbol}`;
+    }
+    return `~${eth} ETH equivalent`;
+  }
+
+  private renewalPaymentLabel(renewals: ENSRenewal[], totalEth: number): string {
+    if (!renewals.some(r => this.isNonEthPayment(r))) return `${totalEth.toFixed(2)} ETH`;
+    const symbol = renewals[0].paymentSymbol;
+    if (symbol && renewals.every(r => r.paymentSymbol === symbol && r.paymentAmount !== undefined)) {
+      const totalPaid = renewals.reduce((sum, r) => sum + Number(r.paymentAmount), 0);
+      return `${totalPaid.toLocaleString('en-US', { maximumFractionDigits: 6 })} ${symbol}`;
+    }
+    return `~${totalEth.toFixed(2)} ETH equivalent`;
+  }
+
   private async formatRegistrationTweetText(
     registration: ENSRegistration, 
     minterAccount: ENSWorkerAccount | null,
@@ -551,7 +573,7 @@ export class NewTweetFormatter {
     const priceEthValue = parseFloat(registration.costEth || '0');
     
     let priceUsd = '';
-    if (this.alchemyService && priceEthValue > 0) {
+    if (this.alchemyService && priceEthValue > 0 && !this.isNonEthPayment(registration)) {
       try {
         const freshEthPriceUsd = await this.alchemyService.getETHPriceUSD();
         if (freshEthPriceUsd) {
@@ -566,7 +588,8 @@ export class NewTweetFormatter {
       priceUsd = registration.costUsd ? `$${parseFloat(registration.costUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
     }
     
-    const priceLine = priceUsd ? `For: ${priceUsd} (${priceEth} ETH)` : `For: ${priceEth} ETH`;
+    const paidPrice = this.registrationPaymentLabel(registration, priceEth);
+    const priceLine = priceUsd ? `For: ${priceUsd} (${paidPrice})` : `For: ${paidPrice}`;
     
     // Historical context line (NEW)
     let historicalLine = '';
@@ -652,14 +675,14 @@ export class NewTweetFormatter {
       : `🔁 RENEWED: ${nameCount} names`;
 
     // Price line (recalculate USD with fresh ETH rate, matching registration pattern)
-    const priceEth = totalEth.toFixed(2);
     let priceUsdStr = '';
     if (totalUsd > 0) {
       priceUsdStr = `$${totalUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
+    const paidPrice = this.renewalPaymentLabel(sortedRenewals, totalEth);
     const priceLine = priceUsdStr
-      ? `For: ${priceUsdStr} (${priceEth} ETH)`
-      : `For: ${priceEth} ETH`;
+      ? `For: ${priceUsdStr} (${paidPrice})`
+      : `For: ${paidPrice}`;
 
     // Owner line — resolve the owner of the top name (most expensive / representative)
     const topRow = sortedRenewals[0];
@@ -1137,7 +1160,7 @@ export class NewTweetFormatter {
     
     // Recalculate USD price with fresh ETH rate for accurate image generation
     let priceUsd = 0;
-    if (this.alchemyService && priceEth > 0) {
+    if (this.alchemyService && priceEth > 0 && !this.isNonEthPayment(registration)) {
       try {
         const freshEthPriceUsd = await this.alchemyService.getETHPriceUSD();
         if (freshEthPriceUsd) {
@@ -1161,7 +1184,10 @@ export class NewTweetFormatter {
     const minterAvatar = minterAccount?.avatar || minterAccount?.records?.avatar;
     
     const imageData: RealImageData = {
-      priceEth,
+      priceEth: this.isNonEthPayment(registration) && registration.paymentAmount !== undefined
+        ? Number(registration.paymentAmount) : priceEth,
+      currencySymbol: this.isNonEthPayment(registration)
+        ? (registration.paymentAmount !== undefined ? registration.paymentSymbol : 'ETH equivalent') : 'ETH',
       priceUsd,
       ensName,
       buyerEns: minterHandle, // Executor/minter is the "buyer"
@@ -1415,8 +1441,8 @@ export class NewTweetFormatter {
       errors.push('Registration tweet should include "For:" label');
     }
 
-    if (!content.includes('ETH')) {
-      errors.push('Registration tweet should include price in ETH');
+    if (!/\b(?:ETH|USDC|USDT|DAI)\b/.test(content)) {
+      errors.push('Registration tweet should include its payment currency');
     }
 
     if (!content.includes('Minter:')) {
@@ -1628,8 +1654,6 @@ export class NewTweetFormatter {
 
     const rawEnsName = registration.fullName || registration.ensName || 'Unknown ENS';
     const ensName = this.cleanEnsName(rawEnsName);
-    const priceEth = parseFloat(registration.costEth || '0').toFixed(2);
-    const priceUsd = registration.costUsd ? `($${parseFloat(registration.costUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})` : '';
     const minterHandle = this.getDisplayHandle(minterAccount, minterAddress);
     
     // Check for club mention
@@ -1641,7 +1665,7 @@ export class NewTweetFormatter {
     const breakdown = {
       header: `🏛️ REGISTERED: ${ensName}`,
       ensName: ensName,
-      priceLine: priceUsd ? `For: ${priceUsd.replace(/[()]/g, '')} (${priceEth} ETH)` : `For: ${priceEth} ETH`,
+      priceLine: tweet.text.split('\n').find(line => line.startsWith('For:')) || '',
       ownerLine: `Minter: ${minterHandle}`,
       categoryLine: categoryLine,
       marketplaceUrl: this.buildMarketplaceUrl(ensName),

@@ -1,299 +1,264 @@
 # QuickNode Stream Filter - ENS Registrations Monitoring
 
-This document describes the QuickNode Streams filter function used to monitor ENS domain registrations via the ETH Registrar Controller events.
+Monitor paid `NameRegistered` events from all three V1 controllers and the V2 ETHRegistrar. The webhook remains `/webhook/quicknode-registrations` with a `nameRegistered` array.
 
-## Overview
+The mainnet addresses and event ABIs below are from the [ENS deployments page](https://docs.ens.domains/learn/deployments/) and its pinned [`contracts-v2` deployment commit](https://github.com/ensdomains/contracts-v2/tree/4f47cbcc11462fb413196e6b5c0f8090247a6c08/contracts/deployments/mainnet). ENS currently documents mainnet V2 as deployed ahead of launch; V1 remains supported. This filter is for **Ethereum mainnet**, not Sepolia.
 
-The filter listens for `NameRegistered` events from ENS Registrar Controller contracts (legacy, current, and newest) and filters registrations that meet a minimum ETH threshold.
+V2 supports ERC20 payments, initially [USDC and DAI](https://docs.ens.domains/ensv2/eth-registrar/#multi-token-payments). Amounts are in each token's smallest unit (USDC: 6 decimals, DAI: 18). Never treat those amounts as ETH wei, use transaction value as the payment, or apply an ETH cutoff before currency conversion.
 
-## Configuration
+## Contracts
 
-### ENS Registrar Controller Contracts
+| Address | Label | Role |
+|---|---|---|
+| `0x283af0b28c62c092c9727f1ee09c02ca627eb7f5` | `ens_controller_first` | Legacy V1 controller |
+| `0x253553366da8546fc250f225fe3d25d0c782303b` | `ens_controller_current` | Wrapped V1 controller |
+| `0x59e16fccd424cc24e280be16e11bcd56fb0ce547` | `ens_controller_newest` | Latest V1 controller |
+| `0xd6d8369e55c94ae8afa714e6cf7ab5be54d5cc81` | `ens_v2_registrar` | V2 registrations and renewals |
+| `0x56c447f308f463a01121c41e72b0e7e7557fcb68` | `ens_v2_renewer_v1` | ERC20 renewals of names still in V1 |
 
-| Contract Address | Label | Notes |
-|-----------------|-------|-------|
-| `0x283af0b28c62c092c9727f1ee09c02ca627eb7f5` | `ens_controller_first` | Legacy controller (5-arg event) |
-| `0x253553366da8546fc250f225fe3d25d0c782303b` | `ens_controller_current` | Current controller (6-arg event) |
-| `0x59e16fccd424cc24e280be16e11bcd56fb0ce547` | `ens_controller_newest` | Newest controller (7-arg event with referrer) |
+The V2 `.eth` registry is `0xf60aba43e1f7f3dab1186ff03b561401c9df85e2`. The V1 BaseRegistrar is `0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85`.
 
-### Spam Filter
+The V2 renewer is included in the address reference for clarity; it does not emit registration rows. Registry `LabelRegistered` events enrich a matching paid registration but never become standalone rows, so migration/reservation events are not reported as purchases.
 
-- **Minimum ETH**: `0.04 ETH` (40,000,000,000,000,000 wei)
-- For controllers with `baseCost` + `premium`, the sum is used
+## Event and payload mapping
 
-## Event ABIs
+V1 keeps the existing ABIs and fields: legacy `cost`, current/newest `baseCost + premium`, label hash in `label`, and the newest controller's `referrer`. A V1 registration must cost at least **0.04 ETH**.
 
-The filter supports three different `NameRegistered` event formats:
+V2 uses the deployed signature:
 
-### Legacy Controller (5 arguments)
 ```solidity
 event NameRegistered(
-    string name,           // ENS label (e.g., "vitalik")
-    bytes32 indexed label, // keccak256 hash of name
-    address indexed owner, // Registrant address
-    uint256 cost,          // Total registration cost in wei
-    uint256 expires        // Expiration timestamp
+    uint256 indexed tokenId, string label, address owner, address subregistry,
+    address resolver, uint64 duration, address paymentToken,
+    bytes32 indexed referrer, uint256 base, uint256 premium
 );
 ```
 
-### Current Controller (6 arguments)
-```solidity
-event NameRegistered(
-    string name,            // ENS label
-    bytes32 indexed label,  // keccak256 hash of name
-    address indexed owner,  // Registrant address
-    uint256 baseCost,       // Base registration cost
-    uint256 premium,        // Premium (if any)
-    uint256 expires         // Expiration timestamp
-);
-```
+The filter forwards every paid V2 event for backend valuation and threshold checks. It emits the common transaction fields (`txHash`, `blockNumber`, `from`, `logIndex`, `contract`, `contractLabel`) plus:
 
-### Newest Controller (7 arguments with referrer)
-```solidity
-event NameRegistered(
-    string label,              // ENS label (note: field renamed from 'name')
-    bytes32 indexed labelhash, // keccak256 hash (note: field renamed)
-    address indexed owner,     // Registrant address
-    uint256 baseCost,          // Base registration cost
-    uint256 premium,           // Premium (if any)
-    uint256 expires,           // Expiration timestamp
-    bytes32 referrer           // Referrer identifier
-);
-```
+| Field | Meaning |
+|---|---|
+| `protocolVersion` | `2` |
+| `name` | Raw label, without `.eth` |
+| `tokenId` | Decimal mutable V2 token ID from the event; **not** the labelhash |
+| `registryAddress` | V2 ETHRegistry |
+| `owner` | Event recipient, independent of transaction sender |
+| `paymentToken` | Lowercase ERC20 contract address |
+| `baseCostRaw`, `premiumRaw`, `totalCostRaw` | Decimal integers in payment-token units; total is base + premium |
+| `duration` | Registration duration in seconds |
+| `expires`, `label` | Expiry and labelhash from the matching ETHRegistry `LabelRegistered` event |
+| `blockTimestamp` | Block timestamp, when included by the stream |
+| `subregistry`, `resolver`, `referrer` | Original event fields |
 
-## Filter Logic
+V2 deliberately omits `totalCostWei` and `totalCostEth`; the backend calculates ETH-equivalent and USD values using token decimals and prices. If the matching registry event is absent, expiry is derived from block timestamp + duration when available; otherwise the backend must fetch the block. The backend derives a missing labelhash from the raw label. It must preserve the separate mutable token ID.
 
-### Step 1: Collect Receipts
-Walks the stream data structure to extract transaction receipts.
-
-### Step 2: Decode Events
-Uses `decodeEVMReceipts()` with the ENS ABIs to decode `NameRegistered` events across all three formats.
-
-### Step 3: Field Extraction
-
-The filter uses robust field extraction to handle naming differences across controller versions:
-
-| Field | Legacy | Current | Newest |
-|-------|--------|---------|--------|
-| Name string | `name` | `name` | `label` |
-| Label hash | `label` | `label` | `labelhash` |
-| Cost | `cost` | `baseCost + premium` | `baseCost + premium` |
-| Referrer | N/A | N/A | `referrer` |
-
-### Step 4: Cost Calculation
-
-```javascript
-totalCost = (baseCost !== undefined || premium !== undefined) 
-  ? baseCost + premium 
-  : cost;
-```
-
-### Step 5: Filter Criteria
-
-1. **Contract Filter**: Only process events from labeled ENS controller contracts
-2. **Price Filter**: Require `totalCost ≥ 0.04 ETH`
-
-### Step 6: Output Structure
-
-```json
-{
-  "nameRegistered": [
-    {
-      "txHash": "0x...",
-      "blockNumber": "0x...",
-      "from": "0x...",
-      "logIndex": 0,
-      "contract": "0x253553366da8546fc250f225fe3d25d0c782303b",
-      "contractLabel": "ens_controller_current",
-      "name": "vitalik",
-      "label": "0xaf2caa1c2ca1d027f1ac823b529d0a67cd144264b2789fa2ea4d63a67c7103cc",
-      "owner": "0x...",
-      "cost": undefined,
-      "baseCost": "50000000000000000",
-      "premium": "0",
-      "expires": "1735689600",
-      "referrer": undefined,
-      "totalCostWei": "50000000000000000",
-      "totalCostEth": "0.05"
-    }
-  ]
-}
-```
+The companion registry signature is `LabelRegistered(uint256 indexed tokenId,bytes32 indexed labelHash,string label,address owner,uint64 expiry,address indexed sender)`. Matching requires the V2 registry address, registrar sender, transaction hash, token ID, label and owner.
 
 ## Full Filter Code
 
+Paste this complete function into the QuickNode registration stream. Keep full receipt logs to obtain the registry companion event. `decodeEVMReceipts` is provided by QuickNode.
+
 ```javascript
 function main(stream) {
-  // --- ABIs (exact per controllers) ---
+  // Deployed mainnet ABIs: V1's three formats plus ENSv2's ERC20 format.
   const ENS_ABI = [
     { type: 'event', name: 'NameRegistered', anonymous: false, inputs: [
-      { indexed: false, name: 'name',  type: 'string'  },
-      { indexed: true,  name: 'label', type: 'bytes32' },
-      { indexed: true,  name: 'owner', type: 'address' },
-      { indexed: false, name: 'cost',  type: 'uint256' },
+      { indexed: false, name: 'name', type: 'string' },
+      { indexed: true, name: 'label', type: 'bytes32' },
+      { indexed: true, name: 'owner', type: 'address' },
+      { indexed: false, name: 'cost', type: 'uint256' },
       { indexed: false, name: 'expires', type: 'uint256' }
     ]},
     { type: 'event', name: 'NameRegistered', anonymous: false, inputs: [
-      { indexed: false, name: 'name',     type: 'string'  },
-      { indexed: true,  name: 'label',    type: 'bytes32' },
-      { indexed: true,  name: 'owner',    type: 'address' },
+      { indexed: false, name: 'name', type: 'string' },
+      { indexed: true, name: 'label', type: 'bytes32' },
+      { indexed: true, name: 'owner', type: 'address' },
       { indexed: false, name: 'baseCost', type: 'uint256' },
-      { indexed: false, name: 'premium',  type: 'uint256' },
-      { indexed: false, name: 'expires',  type: 'uint256' }
+      { indexed: false, name: 'premium', type: 'uint256' },
+      { indexed: false, name: 'expires', type: 'uint256' }
     ]},
-    // newest: string 'label', indexed 'labelhash' (bytes32), 'referrer' (bytes32)
     { type: 'event', name: 'NameRegistered', anonymous: false, inputs: [
-      { indexed: false, name: 'label',     type: 'string'  },
-      { indexed: true,  name: 'labelhash', type: 'bytes32' },
-      { indexed: true,  name: 'owner',     type: 'address' },
-      { indexed: false, name: 'baseCost',  type: 'uint256' },
-      { indexed: false, name: 'premium',   type: 'uint256' },
-      { indexed: false, name: 'expires',   type: 'uint256' },
-      { indexed: false, name: 'referrer',  type: 'bytes32' }
+      { indexed: false, name: 'label', type: 'string' },
+      { indexed: true, name: 'labelhash', type: 'bytes32' },
+      { indexed: true, name: 'owner', type: 'address' },
+      { indexed: false, name: 'baseCost', type: 'uint256' },
+      { indexed: false, name: 'premium', type: 'uint256' },
+      { indexed: false, name: 'expires', type: 'uint256' },
+      { indexed: false, name: 'referrer', type: 'bytes32' }
+    ]},
+    { type: 'event', name: 'NameRegistered', anonymous: false, inputs: [
+      { indexed: true, name: 'tokenId', type: 'uint256' },
+      { indexed: false, name: 'label', type: 'string' },
+      { indexed: false, name: 'owner', type: 'address' },
+      { indexed: false, name: 'subregistry', type: 'address' },
+      { indexed: false, name: 'resolver', type: 'address' },
+      { indexed: false, name: 'duration', type: 'uint64' },
+      { indexed: false, name: 'paymentToken', type: 'address' },
+      { indexed: true, name: 'referrer', type: 'bytes32' },
+      { indexed: false, name: 'base', type: 'uint256' },
+      { indexed: false, name: 'premium', type: 'uint256' }
+    ]}
+  ];
+  // Decode separately so registry events can enrich, but never become paid rows.
+  const REGISTRY_ABI = [
+    { type: 'event', name: 'LabelRegistered', anonymous: false, inputs: [
+      { indexed: true, name: 'tokenId', type: 'uint256' },
+      { indexed: true, name: 'labelHash', type: 'bytes32' },
+      { indexed: false, name: 'label', type: 'string' },
+      { indexed: false, name: 'owner', type: 'address' },
+      { indexed: false, name: 'expiry', type: 'uint64' },
+      { indexed: true, name: 'sender', type: 'address' }
     ]}
   ];
 
-  // controllers (restrict)
+  const V2_REGISTRAR = '0xd6d8369e55c94ae8afa714e6cf7ab5be54d5cc81';
+  const V2_RENEWER_V1 = '0x56c447f308f463a01121c41e72b0e7e7557fcb68';
+  const V2_REGISTRY = '0xf60aba43e1f7f3dab1186ff03b561401c9df85e2';
+  const V1_REGISTRAR = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
+  const V1_WRAPPED_CONTROLLER = '0x253553366da8546fc250f225fe3d25d0c782303b';
   const CONTRACT_LABELS = new Map([
     ['0x283af0b28c62c092c9727f1ee09c02ca627eb7f5', 'ens_controller_first'],
-    ['0x253553366da8546fc250f225fe3d25d0c782303b', 'ens_controller_current'],
+    [V1_WRAPPED_CONTROLLER, 'ens_controller_current'],
     ['0x59e16fccd424cc24e280be16e11bcd56fb0ce547', 'ens_controller_newest'],
+    [V2_REGISTRAR, 'ens_v2_registrar'],
+    [V2_RENEWER_V1, 'ens_v2_renewer_v1'],
   ]);
-  const LIMIT_TO_LABELLED = true;
 
-  // price cutoff (set to 40_000_000_000_000_000n for 0.04 ETH, keep 0n while testing)
-  const MIN_TOTAL_WEI = 40_000_000_000_000_000n;
-
-  // helpers
-  const lc = (x) => (x || '').toLowerCase();
-  const toBI = (v) => (typeof v === 'bigint' ? v : BigInt(v));
-  const toDec = (v) => (typeof v === 'bigint') ? v.toString() :
-    (typeof v === 'string' && v.startsWith('0x')) ? BigInt(v).toString() : String(v);
-  const isBytes32 = (s) => typeof s === 'string' && /^0x[0-9a-fA-F]{64}$/.test(s);
-
+  const lc = (value) => typeof value === 'string' ? value.toLowerCase() : '';
+  const toDec = (value) => value === undefined ? undefined : BigInt(value).toString();
   const getArg = (log, key) => {
-    if (log?.args && typeof log.args === 'object' && Object.prototype.hasOwnProperty.call(log.args, key)) return log.args[key];
-    if (log && Object.prototype.hasOwnProperty.call(log, key)) return log[key];
-    if (Array.isArray(log?.params)) {
-      const p = log.params.find((x) => x.name === key);
-      if (p) return p.value;
+    if (log.args && Object.prototype.hasOwnProperty.call(log.args, key)) return log.args[key];
+    if (Array.isArray(log.params)) {
+      const param = log.params.find((p) => p.name === key);
+      if (param) return param.value;
     }
-    return undefined;
+    return log[key]; // QuickNode normally flattens decoded arguments onto the log.
   };
-
-  const totalCostWei = (log) => {
-    const base = getArg(log, 'baseCost');
-    const prem = getArg(log, 'premium');
-    const cost = getArg(log, 'cost');
-    return (base !== undefined || prem !== undefined) ? toBI(base ?? 0) + toBI(prem ?? 0) : toBI(cost ?? 0);
-  };
-
   const ethStr = (wei) => {
-    const w = toBI(wei), int = w / 1000000000000000000n, frac = (w % 1000000000000000000n).toString().padStart(18,'0').replace(/0+$/,'');
-    return frac ? `${int}.${frac}` : `${int}`;
+    const fraction = (wei % 1000000000000000000n).toString().padStart(18, '0').replace(/0+$/, '');
+    return `${wei / 1000000000000000000n}${fraction ? '.' + fraction : ''}`;
   };
 
-  // collect receipts
-  const root = stream.data ?? stream;
+  // Keep the containing block's timestamp when the stream includes block data.
+  // Receipts alone do not contain it. Never substitute the processing time.
   const receipts = [];
-  (function walk(n){ if (Array.isArray(n)) n.forEach(walk); else if (n && typeof n==='object' && Array.isArray(n.receipts)) receipts.push(...n.receipts); })(root);
+  const blockTimestamps = new Map();
+  const seenReceipts = new Set();
+  function collect(node, inheritedTimestamp) {
+    if (Array.isArray(node)) {
+      node.forEach((item) => collect(item, inheritedTimestamp));
+      return;
+    }
+    if (!node || typeof node !== 'object') return;
+    const timestamp = node.block?.timestamp ?? node.timestamp ?? inheritedTimestamp;
+    if (node.transactionHash && Array.isArray(node.logs)) {
+      const txHash = lc(node.transactionHash);
+      if (timestamp !== undefined) blockTimestamps.set(txHash, toDec(timestamp));
+      if (!seenReceipts.has(txHash)) {
+        seenReceipts.add(txHash);
+        receipts.push(node);
+      }
+      return;
+    }
+    for (const value of Object.values(node)) collect(value, timestamp);
+  }
+  collect(stream.data ?? stream);
   if (!receipts.length) return null;
+  const receiptCopies = () => receipts.map((receipt) => ({ ...receipt }));
+  const context = (receipt, log, contract) => ({
+    txHash: receipt.transactionHash,
+    blockNumber: receipt.blockNumber,
+    blockTimestamp: blockTimestamps.get(lc(receipt.transactionHash)),
+    from: receipt.from,
+    logIndex: log.logIndex,
+    contract,
+    contractLabel: CONTRACT_LABELS.get(contract),
+  });
 
-  // decode
-  const decoded = decodeEVMReceipts(receipts, [ENS_ABI]) || [];
-
-  const out = [];
-  for (const r of decoded) {
-    for (const log of (r.decodedLogs || [])) {
-      const contract = lc(log.address || '');
-      if (LIMIT_TO_LABELLED && !CONTRACT_LABELS.has(contract)) continue;
-
-      // robust field extraction
-      const nameCandidate  = getArg(log, 'name');       // string on first/current
-      const labelStr       = getArg(log, 'label');      // string (newest) OR bytes32 (first/current)
-      const labelHashField = getArg(log, 'labelhash');  // bytes32 (newest)
-
-      const nameStr =
-        (typeof labelStr === 'string' && !isBytes32(labelStr)) ? labelStr :
-        (typeof nameCandidate === 'string' && !isBytes32(nameCandidate) && nameCandidate !== 'NameRegistered') ? nameCandidate :
-        undefined;
-
-      const labelHash =
-        isBytes32(labelStr) ? labelStr :
-        isBytes32(labelHashField) ? labelHashField :
-        undefined;
-
-      const owner   = getArg(log, 'owner');
-      const cost    = getArg(log, 'cost');
-      const base    = getArg(log, 'baseCost');
-      const prem    = getArg(log, 'premium');
-      const expires = getArg(log, 'expires');
-      const referrer= getArg(log, 'referrer'); // bytes32 on newest
-
-      const totalWei = totalCostWei(log);
-      if (totalWei < MIN_TOTAL_WEI) continue;
-
-      out.push({
-        txHash: r.transactionHash,
-        blockNumber: r.blockNumber,
-        from: r.from,
-        logIndex: log.logIndex,
-        contract,
-        contractLabel: CONTRACT_LABELS.get(contract) || null,
-
-        name: nameStr,                     // human-readable label
-        label: labelHash,                  // bytes32 hash
-        owner,
-        cost:     cost !== undefined ? toDec(cost) : undefined,
-        baseCost: base !== undefined ? toDec(base) : undefined,
-        premium:  prem !== undefined ? toDec(prem) : undefined,
-        expires:  expires !== undefined ? toDec(expires) : undefined,
-        referrer,
-
-        totalCostWei: totalWei.toString(),
-        totalCostEth: ethStr(totalWei)
-      });
+  const MIN_TOTAL_WEI = 40_000_000_000_000_000n; // V1 only: 0.04 ETH per name.
+  const registrations = decodeEVMReceipts(receiptCopies(), [ENS_ABI]) || [];
+  const registryReceipts = decodeEVMReceipts(receiptCopies(), [REGISTRY_ABI]) || [];
+  const registryEvents = new Map();
+  for (const receipt of registryReceipts) {
+    for (const log of (receipt.decodedLogs || [])) {
+      if (lc(log.address) !== V2_REGISTRY || lc(getArg(log, 'sender')) !== V2_REGISTRAR) continue;
+      const key = `${lc(receipt.transactionHash)}:${toDec(getArg(log, 'tokenId'))}`;
+      const events = registryEvents.get(key) || [];
+      events.push(log);
+      registryEvents.set(key, events);
     }
   }
 
+  const out = [];
+  for (const receipt of registrations) {
+    for (const log of (receipt.decodedLogs || [])) {
+      const contract = lc(log.address);
+      if (!CONTRACT_LABELS.has(contract) || contract === V2_RENEWER_V1) continue;
+      const tokenId = getArg(log, 'tokenId');
+      const paymentToken = getArg(log, 'paymentToken');
+      if (contract === V2_REGISTRAR) {
+        if (tokenId === undefined || paymentToken === undefined) continue;
+        const name = getArg(log, 'label');
+        const owner = getArg(log, 'owner');
+        const duration = toDec(getArg(log, 'duration'));
+        const key = `${lc(receipt.transactionHash)}:${toDec(tokenId)}`;
+        const registryEvent = (registryEvents.get(key) || []).find((event) =>
+          getArg(event, 'label') === name && lc(getArg(event, 'owner')) === lc(owner));
+        const blockTimestamp = blockTimestamps.get(lc(receipt.transactionHash));
+        const expires = registryEvent ? toDec(getArg(registryEvent, 'expiry')) :
+          (blockTimestamp !== undefined && duration !== undefined ?
+            (BigInt(blockTimestamp) + BigInt(duration)).toString() : undefined);
+        const base = BigInt(getArg(log, 'base'));
+        const premium = BigInt(getArg(log, 'premium'));
+        out.push({
+          ...context(receipt, log, contract),
+          protocolVersion: 2,
+          name,
+          label: registryEvent ? getArg(registryEvent, 'labelHash') : undefined,
+          tokenId: toDec(tokenId), // Mutable registry token ID, distinct from labelhash.
+          registryAddress: V2_REGISTRY,
+          owner,
+          duration,
+          expires,
+          subregistry: getArg(log, 'subregistry'),
+          resolver: getArg(log, 'resolver'),
+          referrer: getArg(log, 'referrer'),
+          paymentToken: lc(paymentToken),
+          baseCostRaw: base.toString(),
+          premiumRaw: premium.toString(),
+          totalCostRaw: (base + premium).toString(),
+        });
+        // ERC20 units cannot be compared with an ETH cutoff. Backend converts and filters.
+        continue;
+      }
+      if (tokenId !== undefined || paymentToken !== undefined) continue;
+      const labelHash = getArg(log, 'labelhash');
+      const name = labelHash !== undefined ? getArg(log, 'label') : getArg(log, 'name');
+      const cost = getArg(log, 'cost');
+      const base = getArg(log, 'baseCost');
+      const premium = getArg(log, 'premium');
+      const totalWei = base !== undefined || premium !== undefined ?
+        BigInt(base ?? 0) + BigInt(premium ?? 0) : BigInt(cost ?? 0);
+      if (totalWei < MIN_TOTAL_WEI) continue;
+      out.push({
+        ...context(receipt, log, contract),
+        name,
+        label: labelHash ?? getArg(log, 'label'),
+        owner: getArg(log, 'owner'),
+        cost: toDec(cost),
+        baseCost: toDec(base),
+        premium: toDec(premium),
+        expires: toDec(getArg(log, 'expires')),
+        referrer: getArg(log, 'referrer'),
+        totalCostWei: totalWei.toString(),
+        totalCostEth: ethStr(totalWei),
+      });
+    }
+  }
   return out.length ? { nameRegistered: out } : null;
 }
 ```
 
-## Webhook Endpoint
+## Verification
 
-The webhook sends data to `/webhook/quicknode-registrations` on your server, which processes the `nameRegistered` array and:
-
-1. Validates HMAC-SHA256 signature using `QUICKNODE_SECRET_REGISTRATIONS`
-2. Extracts ENS name from `name` field (already human-readable)
-3. Uses `label` (bytes32) as the token ID for metadata lookup
-4. Fetches ENS metadata (image, description) from ENS Metadata Service
-5. Converts cost to USD via Alchemy price API
-6. Stores registration in database
-7. Triggers tweet generation
-
-## Field Mapping to Database
-
-| Webhook Field | Database Column | Notes |
-|---------------|-----------------|-------|
-| `txHash` | `transaction_hash` | |
-| `name` | `ens_name` | Label only (without .eth) |
-| `name + ".eth"` | `full_name` | Full ENS name |
-| `label` | `token_id` | bytes32 hash |
-| `owner` | `owner_address` | Name recipient |
-| `from` | `executor_address` | Transaction sender (may differ from owner) |
-| `totalCostWei` | `cost_wei` | |
-| `totalCostEth` | `cost_eth` | Calculated |
-| `expires` | `expires_at` | Unix timestamp |
-| `contractLabel` | Used for logging | Identifies controller version |
-| `referrer` | Logged only | Currently not stored |
-
-## Notes
-
-- The filter handles three different ABI versions transparently
-- Field names differ between controller versions (`name` vs `label`, `label` vs `labelhash`)
-- Premium registrations include `baseCost + premium` for total cost
-- The `referrer` field is new and used for affiliate tracking
-- Block number is returned in hex format
-- The `name` field is the raw label (e.g., "vitalik"), not the full domain ("vitalik.eth")
-
+Run `node --test tests/quicknode-filters.test.cjs`. The tests execute this embedded function against ABI-encoded receipts using independently captured deployed V2 event ABIs, including stablecoin payments, legacy formats, thresholds and unrelated logs. Apply the updated filter in the QuickNode dashboard after deploying the backend that accepts the V2 payload.

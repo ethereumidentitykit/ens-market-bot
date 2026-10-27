@@ -41,6 +41,7 @@ export interface RenewalNameCard {
 export interface RenewalImageData {
   totalCostEth: number;
   totalCostUsd: number;
+  costIsEthEquivalent?: boolean; // True if any row was paid in a non-ETH currency
   nameCount: number;        // Total names in the tx (used to compute extraCount)
   topNames: RenewalNameCard[];  // Length 1-3; sorted by costEth desc
   extraCount: number;       // = nameCount - topNames.length; 0 means no overflow card

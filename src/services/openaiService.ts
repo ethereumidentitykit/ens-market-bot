@@ -820,8 +820,17 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
       : null;
 
     // Format event details
+    const nonEthPayment = !!event.paymentSymbol && event.paymentSymbol !== 'ETH';
+    const ethUnit = event.costIsEthEquivalent || nonEthPayment ? 'ETH equivalent' : 'ETH';
+    const paidPrice = nonEthPayment && event.paymentAmount !== undefined
+      ? `${event.paymentAmount} ${event.paymentSymbol} (approximately ${event.price} ETH equivalent)`
+      : `${event.price} ${ethUnit}`;
+
     let prompt = `EVENT:\n`;
     prompt += `- Type: ${event.type}\n`;
+    if (nonEthPayment || event.costIsEthEquivalent) {
+      prompt += '- Currency note: ETH figures are valuation equivalents, not ETH paid. Use the original payment currency when available.\n';
+    }
 
     if (event.type === 'renewal') {
       // Renewals are tx-level: name is the top-by-cost representative; full list is in renewalContext.
@@ -834,7 +843,7 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
         prompt += `- Top Name: ${sanitizedTokenName} (representative; full list below)\n`;
         prompt += `- Bulk Renewal: ${nameCount} names in one tx\n`;
       }
-      prompt += `- Total Renewal Cost: ${event.price.toFixed(4)} ETH ($${event.priceUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })})\n`;
+      prompt += `- Total Renewal Cost: ${event.price.toFixed(4)} ${ethUnit} ($${event.priceUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })})\n`;
       prompt += `- Renewer: ${buyerHandle}\n`;
 
       // Recipient context for renewals: gift renewal / 3rd-party paid on behalf of owner
@@ -844,7 +853,7 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
     } else {
       // Existing sale/registration/bid event rendering (unchanged)
       prompt += `- Name: ${sanitizedTokenName}\n`;
-      prompt += `- Price: ${event.price} ETH ($${event.priceUsd.toLocaleString()})\n`;
+      prompt += `- Price: ${paidPrice} ($${event.priceUsd.toLocaleString()})\n`;
 
       if (event.type === 'bid') {
         prompt += `- Bidder: ${buyerHandle}\n`;
@@ -910,7 +919,10 @@ NOTE: Your response will be prefixed with "AI insight:" automatically, so don't 
         prompt += `\nRENEWAL BREAKDOWN:\n`;
         prompt += `- Top names by per-name renewal cost (these are the renewer's most valuable holdings in this tx):\n`;
         for (const t of ctx.topNames) {
-          prompt += `    ${t.name} — ${t.costEth.toFixed(4)} ETH\n`;
+          const paidCost = t.paymentSymbol && t.paymentSymbol !== 'ETH'
+            ? `${t.paymentAmount ?? '?'} ${t.paymentSymbol} (~${t.costEth.toFixed(4)} ETH equivalent)`
+            : `${t.costEth.toFixed(4)} ETH`;
+          prompt += `    ${t.name} — ${paidCost}\n`;
         }
         if (ctx.nameCount > ctx.topNames.length) {
           // Always include the FULL name list for pattern/theme detection.
@@ -1914,16 +1926,19 @@ Each tweet stands on its own — a reader who only sees tweet 1 should still get
     }
 
     // ── Self-DB renewals stats (Grails has none) ─────────────────────────────
+    lines.push('CURRENCY NOTE: Registration and renewal ETH totals are accounting equivalents and can include USDC/DAI payments. Do not describe an ETH equivalent as ETH paid. Original payment currency is shown where known.');
     lines.push('RENEWAL STATS (7d, from our DB — Grails has no renewal endpoints):');
     lines.push(`  Names renewed:         ${data.renewalsStats.count.toLocaleString()}`);
     lines.push(`  Distinct transactions: ${data.renewalsStats.txCount.toLocaleString()}`);
-    lines.push(`  Total volume:          ${data.renewalsStats.totalVolumeEth.toFixed(4)} ETH (${fmtUsd(data.renewalsStats.totalVolumeUsd)})`);
+    lines.push(`  Total volume:          ${data.renewalsStats.totalVolumeEth.toFixed(4)} ETH equivalent (${fmtUsd(data.renewalsStats.totalVolumeUsd)})`);
     if (data.renewalsStats.topByVolume.length > 0) {
       lines.push(`  Top renewals by per-name cost (top ${data.renewalsStats.topByVolume.length}):`);
       for (const r of data.renewalsStats.topByVolume) {
         const eth = r.costEth ? Number(r.costEth).toFixed(4) : '?';
         const usd = r.costUsd ? fmtUsd(Number(r.costUsd)) : '?';
-        lines.push(`    ${r.fullName} — ${eth} ETH (${usd}) — renewer ${shortAddrLocal(r.renewerAddress)}`);
+        const paidCost = r.paymentSymbol && r.paymentSymbol !== 'ETH'
+          ? `${r.paymentAmount ?? '?'} ${r.paymentSymbol} (~${eth} ETH equivalent)` : `${eth} ETH`;
+        lines.push(`    ${r.fullName} — ${paidCost} (${usd}) — renewer ${shortAddrLocal(r.renewerAddress)}`);
       }
     }
     lines.push('');
@@ -2233,8 +2248,8 @@ Each tweet stands on its own — a reader who only sees tweet 1 should still get
     lines.push(`     address (use this exact string for topPlayerAddress if chosen): ${p.address}`);
     if (p.buys.count > 0) lines.push(`     Buys:  ${p.buys.count} for ${p.buys.volumeEth.toFixed(4)} ETH (${fmtUsd(p.buys.volumeUsd)})`);
     if (p.sells.count > 0) lines.push(`     Sells: ${p.sells.count} for ${p.sells.volumeEth.toFixed(4)} ETH (${fmtUsd(p.sells.volumeUsd)})`);
-    if (p.registrations.count > 0) lines.push(`     Regs:  ${p.registrations.count} for ${p.registrations.costEth.toFixed(4)} ETH (${fmtUsd(p.registrations.costUsd)})`);
-    if (p.renewals.count > 0) lines.push(`     Renews: ${p.renewals.count} for ${p.renewals.costEth.toFixed(4)} ETH (${fmtUsd(p.renewals.costUsd)})`);
+    if (p.registrations.count > 0) lines.push(`     Regs:  ${p.registrations.count} for ${p.registrations.costEth.toFixed(4)} ETH equivalent (${fmtUsd(p.registrations.costUsd)})`);
+    if (p.renewals.count > 0) lines.push(`     Renews: ${p.renewals.count} for ${p.renewals.costEth.toFixed(4)} ETH equivalent (${fmtUsd(p.renewals.costUsd)})`);
     return lines.join('\n');
   }
 
@@ -2263,10 +2278,10 @@ Each tweet stands on its own — a reader who only sees tweet 1 should still get
     lines.push(`  Unique buyers:         ${s.uniqueBuyers.toLocaleString()}`);
     lines.push(`  Unique sellers:        ${s.uniqueSellers.toLocaleString()}`);
     lines.push(`  Unique names sold:     ${s.uniqueNamesSold.toLocaleString()}`);
-    lines.push(`  Registrations:         ${s.registrationCount.toLocaleString()} for ${s.registrationCostEth.toFixed(4)} ETH (${fmtUsd(s.registrationCostUsd)})`);
+    lines.push(`  Registrations:         ${s.registrationCount.toLocaleString()} for ${s.registrationCostEth.toFixed(4)} ETH equivalent (${fmtUsd(s.registrationCostUsd)})`);
     lines.push(`  Premium regs:          ${s.premiumRegistrations.toLocaleString()}`);
     lines.push(`  Unique registrants:    ${s.uniqueRegistrants.toLocaleString()}`);
-    lines.push(`  Renewals:              ${s.renewalCount.toLocaleString()} (${s.renewalTxCount.toLocaleString()} tx) for ${s.renewalVolumeEth.toFixed(4)} ETH (${fmtUsd(s.renewalVolumeUsd)})`);
+    lines.push(`  Renewals:              ${s.renewalCount.toLocaleString()} (${s.renewalTxCount.toLocaleString()} tx) for ${s.renewalVolumeEth.toFixed(4)} ETH equivalent (${fmtUsd(s.renewalVolumeUsd)})`);
     lines.push(`  Offers:                ${s.offersCount.toLocaleString()}`);
     lines.push(`  Active listings:       ${s.activeListings.toLocaleString()}`);
     lines.push(`  Active offers:         ${s.activeOffers.toLocaleString()}`);

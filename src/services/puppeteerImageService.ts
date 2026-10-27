@@ -21,6 +21,7 @@ export class PuppeteerImageService {
     const mockData: ImageData = {
       priceEth: data.priceEth,
       priceUsd: data.priceUsd,
+      currencySymbol: data.currencySymbol,
       ensName: data.ensName,
       buyerAddress: '0x0000000000000000000000000000000000000000', // Placeholder
       buyerEns: data.buyerEns, // New owner
@@ -546,6 +547,15 @@ export class PuppeteerImageService {
                 font-weight: normal;
             }
 
+            .eth-price.equivalent-price {
+                width: 450px;
+            }
+            .eth-price .equivalent-label {
+                display: block;
+                font-size: 22px;
+                line-height: 1.2;
+            }
+
             /* Owner profile (avatar + ENS name) — positioned to mirror the Figma reference
                for the renewal layout (NOT the registration .buyer-section, which is
                right-anchored). The "Owner" label is baked into the background PNG and
@@ -676,7 +686,7 @@ export class PuppeteerImageService {
             <div class="background"></div>
 
             <div class="usd-price">${formattedUsdPrice}</div>
-            <div class="eth-price">${formattedEthPrice} ETH</div>
+            <div class="eth-price${data.costIsEthEquivalent ? ' equivalent-price' : ''}">${data.costIsEthEquivalent ? '~' : ''}${formattedEthPrice} ETH${data.costIsEthEquivalent ? ' <span class="equivalent-label">equivalent</span>' : ''}</div>
 
             <div class="renewer-section">
                 <img src="${renewerAvatarPath}" alt="Renewer" class="renewer-avatar"

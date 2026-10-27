@@ -1,315 +1,238 @@
 # QuickNode Stream Filter - ENS Renewals Monitoring
 
-This document describes the QuickNode Streams filter function used to monitor ENS domain renewals via the ETH Registrar Controller events.
+Monitor `NameRenewed` from all three V1 controllers, the V2 ETHRegistrar, and ETHRenewerV1. The webhook remains `/webhook/quicknode-renewals` with a `nameRenewed` array.
 
-## Overview
+The mainnet addresses and event ABIs below are from the [ENS deployments page](https://docs.ens.domains/learn/deployments/) and its pinned [`contracts-v2` deployment commit](https://github.com/ensdomains/contracts-v2/tree/4f47cbcc11462fb413196e6b5c0f8090247a6c08/contracts/deployments/mainnet). ENS currently documents mainnet V2 as deployed ahead of launch; V1 remains supported. This filter is for **Ethereum mainnet**, not Sepolia.
 
-The filter listens for `NameRenewed` events from ENS Registrar Controller contracts (legacy, current, and newest) and forwards them. Unlike the registration filter (which filters per-event), this filter aggregates `cost` across all `NameRenewed` events sharing the same `txHash` and drops the entire transaction if the **total cost** is below a threshold. This mirrors what the bot does downstream and is safe for bulk renewals (a tx with 100 names at 0.001 ETH each = 0.1 ETH total still passes), while still cutting webhook traffic for lone single-name renewals.
+V2 supports ERC20 payments, initially [USDC and DAI](https://docs.ens.domains/ensv2/eth-registrar/#multi-token-payments). Amounts are in each token's smallest unit (USDC: 6 decimals, DAI: 18). Never treat those amounts as ETH wei, use transaction value as the payment, or apply an ETH cutoff before currency conversion.
 
-## Configuration
+## Contracts
 
-### ENS Registrar Controller Contracts
-
-Same three controllers as the registration filter (renewals fire from the same contracts):
-
-| Contract Address | Label | Notes |
-|-----------------|-------|-------|
-| `0x283af0b28c62c092c9727f1ee09c02ca627eb7f5` | `ens_controller_first` | Legacy controller (4-arg event) |
-| `0x253553366da8546fc250f225fe3d25d0c782303b` | `ens_controller_current` | Current controller (4-arg event) |
-| `0x59e16fccd424cc24e280be16e11bcd56fb0ce547` | `ens_controller_newest` | Newest controller (5-arg event with referrer) |
-
-> **Note on bulk renewal contracts.** ENS's official `BulkRenewal` contract (and any third-party bulk renewal services like `ensbatcher`, marketplace bulk-renewal flows, etc.) ultimately call `renew()` on one of the three controllers above per name. The `NameRenewed` events still emit from the controller addresses, so monitoring just these three is sufficient to capture all bulk renewal activity.
-
-### Per-Tx Total Cost Filter
-
-- **Minimum per-tx total cost**: `0.1 ETH` (`100_000_000_000_000_000n` wei)
-- Costs are summed across all `NameRenewed` events that share the same `txHash` (and pass the contract filter), so a bulk renewal of 100 names at 0.001 ETH each = 0.1 ETH total → all rows are forwarded.
-- A lone single-name renewal at 0.0001 ETH → dropped. A small bulk renewal totalling 0.05 ETH → dropped.
-- This threshold matches the bot's `autopost_renewals_min_eth_default` (default `0.1`), so anything filtered here would also have been rejected downstream — the QuickNode-layer filter just saves the webhook round-trip, DB write, owner lookup, and metadata fetches.
-
-If `autopost_renewals_min_eth_default` is changed in the bot, update `MIN_TX_TOTAL_WEI` in the filter to match (or set it lower, never higher — setting it higher would silently drop renewals the bot was configured to tweet).
-
-## Event ABIs
-
-The filter supports three different `NameRenewed` event formats:
-
-### Legacy Controller (4 arguments)
-
-```solidity
-event NameRenewed(
-    string name,           // ENS label (e.g., "vitalik")
-    bytes32 indexed label, // keccak256 hash of name
-    uint256 cost,          // Total renewal cost in wei
-    uint256 expires        // New expiration timestamp
-);
-```
-
-### Current Controller (4 arguments — same shape as legacy)
-
-```solidity
-event NameRenewed(
-    string name,           // ENS label
-    bytes32 indexed label, // keccak256 hash of name
-    uint256 cost,          // Total renewal cost in wei
-    uint256 expires        // New expiration timestamp
-);
-```
-
-### Newest Controller (5 arguments with referrer)
-
-```solidity
-event NameRenewed(
-    string label,              // ENS label (note: field renamed from 'name')
-    bytes32 indexed labelhash, // keccak256 hash (note: field renamed from 'label')
-    uint256 cost,              // Total renewal cost in wei
-    uint256 expires,           // New expiration timestamp
-    bytes32 referrer           // Referrer identifier (affiliate tracking)
-);
-```
-
-### Important Differences vs `NameRegistered`
-
-| Difference | NameRegistered | NameRenewed |
+| Address | Label | Role |
 |---|---|---|
-| `owner` field | ✅ Present (indexed) | ❌ **Not in event** — must be looked up separately |
-| Cost split | `baseCost + premium` (current/newest) | Single `cost` field (no premium) |
-| Renewer identity | `owner` is the new holder | **`tx.from`** is the renewer (anyone can renew anyone's name) |
+| `0x283af0b28c62c092c9727f1ee09c02ca627eb7f5` | `ens_controller_first` | Legacy V1 controller |
+| `0x253553366da8546fc250f225fe3d25d0c782303b` | `ens_controller_current` | Wrapped V1 controller |
+| `0x59e16fccd424cc24e280be16e11bcd56fb0ce547` | `ens_controller_newest` | Latest V1 controller |
+| `0xd6d8369e55c94ae8afa714e6cf7ab5be54d5cc81` | `ens_v2_registrar` | V2 registrations and renewals |
+| `0x56c447f308f463a01121c41e72b0e7e7557fcb68` | `ens_v2_renewer_v1` | ERC20 renewals of names still in V1 |
 
-The application layer (`QuickNodeRenewalService`) handles owner lookup at processing time via the ENS subgraph. Renewer is read from `tx.from`.
+The V2 `.eth` registry is `0xf60aba43e1f7f3dab1186ff03b561401c9df85e2`. The V1 BaseRegistrar is `0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85`.
 
-## Filter Logic
+Bulk-renewal helpers call one of these contracts; the paid events emit from the controller or renewer, not the helper. `ExpiryUpdated` on the registry and V1 BaseRegistrar bookkeeping events are not payment events and are not included in the decoder.
 
-### Step 1: Collect Receipts
-Walks the stream data structure to extract transaction receipts.
+## Event and payload mapping
 
-### Step 2: Decode Events
-Uses `decodeEVMReceipts()` with all three `NameRenewed` ABIs.
+V1 keeps its existing four-argument `NameRenewed(string,bytes32,uint256,uint256)` and newest five-argument version with `referrer`. Legacy/current share one ABI entry because their signatures are identical. V1-only transactions pass when their combined renewal cost is at least **0.1 ETH**; all rows in a qualifying bulk transaction are forwarded, even if each name costs less than the threshold. Keep `MIN_TX_TOTAL_WEI` at or below the backend's configured renewal threshold.
 
-### Step 3: Field Extraction
+Both V2 contracts emit the deployed signature:
 
-The filter handles naming differences across controller versions (same robustness pattern as the registration filter):
-
-| Field | Legacy | Current | Newest |
-|-------|--------|---------|--------|
-| Name string | `name` | `name` | `label` |
-| Label hash | `label` | `label` | `labelhash` |
-| Cost | `cost` | `cost` | `cost` |
-| Referrer | N/A | N/A | `referrer` |
-
-### Step 4: Filter Criteria
-
-1. **Contract Filter**: Only process events from labeled ENS controller contracts.
-2. **Per-Tx Aggregation**: For each receipt (= one tx), sum `cost` across all `NameRenewed` events that passed the contract filter.
-3. **Per-Tx Threshold**: Drop the entire tx (all rows) if the summed total is below `MIN_TX_TOTAL_WEI` (0.1 ETH). Otherwise, emit all rows for that tx.
-
-### Step 5: Output Structure
-
-```json
-{
-  "nameRenewed": [
-    {
-      "txHash": "0x...",
-      "blockNumber": "0x...",
-      "from": "0x...",
-      "logIndex": 0,
-      "contract": "0x253553366da8546fc250f225fe3d25d0c782303b",
-      "contractLabel": "ens_controller_current",
-      "name": "vitalik",
-      "label": "0xaf2caa1c2ca1d027f1ac823b529d0a67cd144264b2789fa2ea4d63a67c7103cc",
-      "cost": "5000000000000000",
-      "expires": "1735689600",
-      "referrer": null,
-      "totalCostWei": "5000000000000000",
-      "totalCostEth": "0.005"
-    }
-  ]
-}
+```solidity
+event NameRenewed(
+    uint256 indexed tokenId, string label, uint64 duration, uint64 newExpiry,
+    address paymentToken, bytes32 indexed referrer, uint256 amount
+);
 ```
 
-The `from` field carries the transaction sender (= renewer). The bot uses this as `renewer_address`.
+V2 emits the common transaction fields (`txHash`, `blockNumber`, `from`, `logIndex`, `contract`, `contractLabel`) plus:
+
+| Field | Meaning |
+|---|---|
+| `protocolVersion` | `2` (the event/payment protocol) |
+| `name` | Raw label, without `.eth`; backend derives labelhash |
+| `tokenId` | Decimal V2 registry token ID exactly as emitted |
+| `registryAddress` | V2 ETHRegistry for ETHRegistrar; V1 BaseRegistrar for ETHRenewerV1 |
+| `paymentToken`, `totalCostRaw` | ERC20 address and decimal amount in that token's smallest units |
+| `duration`, `expires` | Extension duration and actual name expiry, in seconds |
+| `reservationExpires` | ETHRenewerV1 only: `newExpiry` of the V2 reservation, including its migration bonus |
+| `referrer` | Original indexed referrer |
+| `blockTimestamp` | Block timestamp, when included by the stream |
+
+`tokenId` on ETHRenewerV1 refers to a **V2 reservation**, while the renewed name is still held in V1. The backend must use `keccak256(name)` for its V1 asset/owner lookup, not pair that emitted reservation ID with the V1 BaseRegistrar. For ETHRenewerV1, `expires` comes from a matching V1 wrapper-sync event; if absent, the backend must query the V1 expiry. Its emitted `newExpiry` includes a migration bonus and must not be used as the V1 name expiry. Neither renewal event contains the owner; `from` is the transaction sender, not necessarily the owner.
+
+V2 rows omit `cost`, `totalCostWei` and `totalCostEth`. Every transaction containing V2 rows is forwarded in full so the backend can convert each payment and apply its threshold to the combined ETH-equivalent amount. ETHRenewerV1 also synchronizes NameWrapper by calling the wrapped V1 controller with zero duration, producing an extra zero-cost V1 renewal. The filter removes only matching zero-cost wrapped-controller rows; independent paid renewals remain.
 
 ## Full Filter Code
 
+Paste this complete function into the QuickNode renewal stream. `decodeEVMReceipts` is provided by QuickNode.
+
 ```javascript
 function main(stream) {
-  // --- ABIs (exact per controllers) ---
-  // IMPORTANT: only TWO ABI entries are needed for the three controllers because the
-  // legacy and current controllers emit the IDENTICAL 4-arg event signature. Solidity
-  // event signature hashes are computed from the type tuple only (names are ignored),
-  // so adding both as separate entries produces a duplicate-signature collision that
-  // QuickNode's decoder silently rejects, returning zero matches across all logs.
+  // Legacy/current share one ABI entry: duplicate signatures break QuickNode decoding.
+  // Only NameRenewed signatures are decoded; flat log.name may be the label itself.
   const ENS_RENEWAL_ABI = [
-    // Legacy + Current controllers (same signature: NameRenewed(string,bytes32,uint256,uint256))
     { type: 'event', name: 'NameRenewed', anonymous: false, inputs: [
-      { indexed: false, name: 'name',    type: 'string'  },
-      { indexed: true,  name: 'label',   type: 'bytes32' },
-      { indexed: false, name: 'cost',    type: 'uint256' },
+      { indexed: false, name: 'name', type: 'string' },
+      { indexed: true, name: 'label', type: 'bytes32' },
+      { indexed: false, name: 'cost', type: 'uint256' },
       { indexed: false, name: 'expires', type: 'uint256' }
     ]},
-    // Newest controller: 5 args, fields renamed (label vs name, labelhash vs label), + referrer
     { type: 'event', name: 'NameRenewed', anonymous: false, inputs: [
-      { indexed: false, name: 'label',     type: 'string'  },
-      { indexed: true,  name: 'labelhash', type: 'bytes32' },
-      { indexed: false, name: 'cost',      type: 'uint256' },
-      { indexed: false, name: 'expires',   type: 'uint256' },
-      { indexed: false, name: 'referrer',  type: 'bytes32' }
+      { indexed: false, name: 'label', type: 'string' },
+      { indexed: true, name: 'labelhash', type: 'bytes32' },
+      { indexed: false, name: 'cost', type: 'uint256' },
+      { indexed: false, name: 'expires', type: 'uint256' },
+      { indexed: false, name: 'referrer', type: 'bytes32' }
+    ]},
+    { type: 'event', name: 'NameRenewed', anonymous: false, inputs: [
+      { indexed: true, name: 'tokenId', type: 'uint256' },
+      { indexed: false, name: 'label', type: 'string' },
+      { indexed: false, name: 'duration', type: 'uint64' },
+      { indexed: false, name: 'newExpiry', type: 'uint64' },
+      { indexed: false, name: 'paymentToken', type: 'address' },
+      { indexed: true, name: 'referrer', type: 'bytes32' },
+      { indexed: false, name: 'amount', type: 'uint256' }
     ]}
   ];
 
-  // controllers (restrict)
+  const V2_REGISTRAR = '0xd6d8369e55c94ae8afa714e6cf7ab5be54d5cc81';
+  const V2_RENEWER_V1 = '0x56c447f308f463a01121c41e72b0e7e7557fcb68';
+  const V2_REGISTRY = '0xf60aba43e1f7f3dab1186ff03b561401c9df85e2';
+  const V1_REGISTRAR = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85';
+  const V1_WRAPPED_CONTROLLER = '0x253553366da8546fc250f225fe3d25d0c782303b';
   const CONTRACT_LABELS = new Map([
     ['0x283af0b28c62c092c9727f1ee09c02ca627eb7f5', 'ens_controller_first'],
-    ['0x253553366da8546fc250f225fe3d25d0c782303b', 'ens_controller_current'],
+    [V1_WRAPPED_CONTROLLER, 'ens_controller_current'],
     ['0x59e16fccd424cc24e280be16e11bcd56fb0ce547', 'ens_controller_newest'],
+    [V2_REGISTRAR, 'ens_v2_registrar'],
+    [V2_RENEWER_V1, 'ens_v2_renewer_v1'],
   ]);
-  const LIMIT_TO_LABELLED = true;
 
-  // Per-tx total cost minimum (sum of `cost` across all NameRenewed events sharing
-  // the same txHash). Mirrors the bot's `autopost_renewals_min_eth_default` so any
-  // tx that wouldn't be tweeted gets dropped here, saving the webhook round-trip,
-  // DB write, owner lookup, and metadata fetches.
-  // 100_000_000_000_000_000n = 0.1 ETH. If you change `autopost_renewals_min_eth_default`
-  // in the bot, update this to match (or set lower — never higher, or you'll silently
-  // drop renewals the bot was configured to tweet).
-  const MIN_TX_TOTAL_WEI = 100_000_000_000_000_000n;
-
-  // helpers
-  const lc = (x) => (x || '').toLowerCase();
-  const toBI = (v) => (typeof v === 'bigint' ? v : BigInt(v));
-  const toDec = (v) => (typeof v === 'bigint') ? v.toString() :
-    (typeof v === 'string' && v.startsWith('0x')) ? BigInt(v).toString() : String(v);
-  const isBytes32 = (s) => typeof s === 'string' && /^0x[0-9a-fA-F]{64}$/.test(s);
-
-  // QuickNode's decodeEVMReceipts attaches decoded params as TOP-LEVEL fields on each
-  // entry of receipt.decodedLogs (not nested under .args). So `log.cost`, `log.label`,
-  // etc. are direct properties. There is NO event-name field on the decoded log — the
-  // only way we know it's a NameRenewed event is that we only registered NameRenewed
-  // in our ABI, so anything decoded must be one.
+  const lc = (value) => typeof value === 'string' ? value.toLowerCase() : '';
+  const toDec = (value) => value === undefined ? undefined : BigInt(value).toString();
+  const getArg = (log, key) => {
+    if (log.args && Object.prototype.hasOwnProperty.call(log.args, key)) return log.args[key];
+    if (Array.isArray(log.params)) {
+      const param = log.params.find((p) => p.name === key);
+      if (param) return param.value;
+    }
+    return log[key]; // QuickNode normally flattens decoded arguments onto the log.
+  };
   const ethStr = (wei) => {
-    const w = toBI(wei), int = w / 1000000000000000000n, frac = (w % 1000000000000000000n).toString().padStart(18,'0').replace(/0+$/,'');
-    return frac ? `${int}.${frac}` : `${int}`;
+    const fraction = (wei % 1000000000000000000n).toString().padStart(18, '0').replace(/0+$/, '');
+    return `${wei / 1000000000000000000n}${fraction ? '.' + fraction : ''}`;
   };
 
-  // collect receipts
-  const root = stream.data ?? stream;
+  // Keep the containing block's timestamp when the stream includes block data.
+  // Receipts alone do not contain it. Never substitute the processing time.
   const receipts = [];
-  (function walk(n){ if (Array.isArray(n)) n.forEach(walk); else if (n && typeof n==='object' && Array.isArray(n.receipts)) receipts.push(...n.receipts); })(root);
+  const blockTimestamps = new Map();
+  const seenReceipts = new Set();
+  function collect(node, inheritedTimestamp) {
+    if (Array.isArray(node)) {
+      node.forEach((item) => collect(item, inheritedTimestamp));
+      return;
+    }
+    if (!node || typeof node !== 'object') return;
+    const timestamp = node.block?.timestamp ?? node.timestamp ?? inheritedTimestamp;
+    if (node.transactionHash && Array.isArray(node.logs)) {
+      const txHash = lc(node.transactionHash);
+      if (timestamp !== undefined) blockTimestamps.set(txHash, toDec(timestamp));
+      if (!seenReceipts.has(txHash)) {
+        seenReceipts.add(txHash);
+        receipts.push(node);
+      }
+      return;
+    }
+    for (const value of Object.values(node)) collect(value, timestamp);
+  }
+  collect(stream.data ?? stream);
   if (!receipts.length) return null;
+  const receiptCopies = () => receipts.map((receipt) => ({ ...receipt }));
+  const context = (receipt, log, contract) => ({
+    txHash: receipt.transactionHash,
+    blockNumber: receipt.blockNumber,
+    blockTimestamp: blockTimestamps.get(lc(receipt.transactionHash)),
+    from: receipt.from,
+    logIndex: log.logIndex,
+    contract,
+    contractLabel: CONTRACT_LABELS.get(contract),
+  });
 
-  // decode
-  const decoded = decodeEVMReceipts(receipts, [ENS_RENEWAL_ABI]) || [];
-
-  const out = [];
-  for (const r of decoded) {
-    // Each receipt `r` is one transaction. Build candidate rows for the tx, sum
-    // their costs, then emit the whole batch only if the tx total clears the
-    // threshold. This is the key difference vs sales/regs: bulk-renewal txs have
-    // many cheap rows that individually look like junk but collectively are
-    // tweetable, so we must aggregate before deciding.
-    const txRows = [];
-    let txTotalWei = 0n;
-
-    for (const log of (r.decodedLogs || [])) {
-      // Only ABI we registered is NameRenewed, so any decoded log here IS one.
-      // (QuickNode's decoded log shape is flat — there's no `log.name === 'NameRenewed'`
-      // event-name field to check; the parameter `name` value lives in log.name instead.)
-
-      const contract = lc(log.address || '');
-      if (LIMIT_TO_LABELLED && !CONTRACT_LABELS.has(contract)) continue;
-
-      // Field name differs between controller versions:
-      //   legacy/current:  log.name (string), log.label (bytes32)
-      //   newest:          log.label (string), log.labelhash (bytes32), log.referrer (bytes32)
-      // Disambiguate by inspecting whether `log.label` is a bytes32 hash or a label string.
-      const nameCandidate  = log.name;       // string on legacy/current
-      const labelField     = log.label;      // bytes32 on legacy/current; string on newest
-      const labelHashField = log.labelhash;  // bytes32 on newest only
-
-      const nameStr =
-        (typeof labelField === 'string' && !isBytes32(labelField)) ? labelField :
-        (typeof nameCandidate === 'string' && !isBytes32(nameCandidate)) ? nameCandidate :
-        undefined;
-
-      const labelHash =
-        isBytes32(labelField) ? labelField :
-        isBytes32(labelHashField) ? labelHashField :
-        undefined;
-
-      const cost     = log.cost;
-      const expires  = log.expires;
-      const referrer = log.referrer; // bytes32 on newest only
-
-      const costWei = cost !== undefined ? toBI(cost) : 0n;
-      txTotalWei += costWei;
-
-      txRows.push({
-        txHash: r.transactionHash,
-        blockNumber: r.blockNumber,
-        from: r.from, // The renewer (= tx.from)
-        logIndex: log.logIndex,
-        contract,
-        contractLabel: CONTRACT_LABELS.get(contract) || null,
-
-        name: nameStr,                     // human-readable label (without .eth)
-        label: labelHash,                  // bytes32 hash
-        cost:    cost    !== undefined ? toDec(cost)    : undefined,
-        expires: expires !== undefined ? toDec(expires) : undefined,
-        referrer,
-
+  const MIN_TX_TOTAL_WEI = 100_000_000_000_000_000n; // V1-only transactions: 0.1 ETH.
+  const decoded = decodeEVMReceipts(receiptCopies(), [ENS_RENEWAL_ABI]) || [];
+  const transactions = new Map();
+  for (const receipt of decoded) {
+    const key = lc(receipt.transactionHash);
+    const tx = transactions.get(key) || { rows: [], totalWei: 0n, hasV2: false };
+    for (const log of (receipt.decodedLogs || [])) {
+      const contract = lc(log.address);
+      if (!CONTRACT_LABELS.has(contract)) continue;
+      const tokenId = getArg(log, 'tokenId');
+      const paymentToken = getArg(log, 'paymentToken');
+      if (contract === V2_REGISTRAR || contract === V2_RENEWER_V1) {
+        if (tokenId === undefined || paymentToken === undefined) continue;
+        const name = getArg(log, 'label');
+        tx.hasV2 = true;
+        tx.rows.push({
+          ...context(receipt, log, contract),
+          protocolVersion: 2,
+          name,
+          tokenId: toDec(tokenId), // Emitted V2 registry ID, including V1 renewal reservations.
+          registryAddress: contract === V2_RENEWER_V1 ? V1_REGISTRAR : V2_REGISTRY,
+          duration: toDec(getArg(log, 'duration')),
+          expires: contract === V2_REGISTRAR ? toDec(getArg(log, 'newExpiry')) : undefined,
+          reservationExpires: contract === V2_RENEWER_V1 ? toDec(getArg(log, 'newExpiry')) : undefined,
+          referrer: getArg(log, 'referrer'),
+          paymentToken: lc(paymentToken),
+          totalCostRaw: toDec(getArg(log, 'amount')),
+        });
+        continue;
+      }
+      if (tokenId !== undefined || paymentToken !== undefined) continue;
+      const labelHash = getArg(log, 'labelhash');
+      const costWei = BigInt(getArg(log, 'cost') ?? 0);
+      tx.totalWei += costWei;
+      tx.rows.push({
+        ...context(receipt, log, contract),
+        name: labelHash !== undefined ? getArg(log, 'label') : getArg(log, 'name'),
+        label: labelHash ?? getArg(log, 'label'),
+        cost: costWei.toString(),
+        expires: toDec(getArg(log, 'expires')),
+        referrer: getArg(log, 'referrer'),
         totalCostWei: costWei.toString(),
-        totalCostEth: ethStr(costWei)
+        totalCostEth: ethStr(costWei),
       });
     }
-
-    // Drop the whole tx if its summed cost is below threshold. This must happen
-    // AFTER the per-log loop so bulk renewals (many cheap rows summing to a big
-    // total) survive — applying the threshold per-log would drop them all.
-    if (txRows.length && txTotalWei >= MIN_TX_TOTAL_WEI) {
-      for (const row of txRows) out.push(row);
-    }
+    transactions.set(key, tx);
   }
 
+  const out = [];
+  for (const tx of transactions.values()) {
+    // Keep the entire mixed-currency tx for backend conversion and aggregation.
+    if (!tx.hasV2 && tx.totalWei < MIN_TX_TOTAL_WEI) continue;
+    const rows = tx.rows.sort((a, b) => {
+      if (a.logIndex === undefined || b.logIndex === undefined) return 0;
+      const first = BigInt(a.logIndex), second = BigInt(b.logIndex);
+      return first < second ? -1 : first > second ? 1 : 0;
+    });
+    const awaitingSync = new Map();
+    const wrapperSyncRows = new Set();
+    for (const row of rows) {
+      if (row.contract === V2_RENEWER_V1) {
+        const queue = awaitingSync.get(row.name) || [];
+        queue.push(row);
+        awaitingSync.set(row.name, queue);
+      } else if (row.contract === V1_WRAPPED_CONTROLLER && row.totalCostWei === '0') {
+        // renewBatch emits all paid events before all wrapper sync events, in
+        // the same per-name order. A queue also handles repeated labels.
+        const queue = awaitingSync.get(row.name);
+        if (queue?.length) {
+          const paid = queue.shift();
+          paid.expires = row.expires;
+          paid.label = row.label;
+          wrapperSyncRows.add(row);
+        }
+      }
+    }
+    for (const row of rows) {
+      // Remove only the matched bookkeeping event, never independent renewals.
+      if (!wrapperSyncRows.has(row)) out.push(row);
+    }
+  }
   return out.length ? { nameRenewed: out } : null;
 }
 ```
 
-## Webhook Endpoint
+## Verification
 
-The webhook sends data to `/webhook/quicknode-renewals` on your server, which processes the `nameRenewed` array and:
-
-1. Validates HMAC-SHA256 signature using `QUICKNODE_SECRET_RENEWALS`
-2. Groups events by `txHash` (a single QuickNode webhook may carry events from multiple txs in one block)
-3. For each tx group:
-   - Looks up current owner per name via the ENS subgraph (in parallel)
-   - Enriches metadata (image, description) via OpenSea → ENS Metadata fallback
-   - Converts cost to USD via Alchemy price API
-   - Inserts all rows for the tx in a single batched `INSERT ... ON CONFLICT (transaction_hash, log_index) DO NOTHING`
-4. The PostgreSQL statement-level trigger fires once per distinct tx_hash → emits `pg_notify('new_renewal_tx', txHash)`
-5. `DatabaseEventService` queues the tx for tweet generation
-
-## Field Mapping to Database
-
-| Webhook Field | Database Column | Notes |
-|---------------|-----------------|-------|
-| `txHash` | `transaction_hash` | Aggregation key for tx-level tweets |
-| `logIndex` | `log_index` | Event index within the transaction; part of dedup key |
-| `name` | `ens_name` | Label only (without .eth) |
-| `name + ".eth"` | `full_name` | Full ENS name |
-| `label` | `token_id` | bytes32 hash |
-| `from` | `renewer_address` | Transaction sender (= the actor who paid) |
-| (subgraph lookup) | `owner_address` | Current owner; nullable if lookup fails |
-| `totalCostWei` | `cost_wei` | Per-name cost (always = single `cost` field — no baseCost/premium for renewals) |
-| `totalCostEth` | `cost_eth` | Calculated |
-| `expires` | `expires_at` | New expiration unix timestamp after this renewal |
-| `contract` | `contract_address` | Which controller version |
-| `contractLabel` | Used for logging | Identifies controller version |
-| `referrer` | Logged only | Currently not stored (only present on newest controller) |
-
-## Notes
-
-- **No `owner` in the event.** Unlike `NameRegistered`, the `NameRenewed` event omits the owner. This is intentional — anyone can renew anyone else's name (gift renewals, third-party renewal services, marketplace bulk renewals). The bot uses `tx.from` as the renewer and looks up the current owner separately for tweet/AI context. Renewer ≠ owner is common.
-- **No baseCost/premium split.** Renewals only have a single `cost` field. There's no premium pricing on renewals (premium only applies to grace-period registrations).
-- **Bulk renewals.** A single tx can renew 100+ names via aggregator/marketplace contracts. The QuickNode webhook delivers all events from a block (potentially across multiple txs and many renewals each). The bot groups by `txHash` server-side and emits one tweet per tx.
-- **Per-tx threshold downstream.** The bot's `autopost_renewals_min_eth_default` setting (default 0.1 ETH) is checked against the **total cost across all rows in the tx**, not per name. A bulk renewal where each name costs 0.005 ETH but the tx total is 0.5 ETH → tweets. A lone renewal of 0.005 ETH → does not tweet.
-- **No premium club tiers.** Unlike sales/regs/bids, renewals don't use 999/10k club thresholds (decided: bulk renewals span many clubs so club logic doesn't map cleanly).
-- **`name` field is the raw label** (e.g., "vitalik"), not the full domain ("vitalik.eth"). The bot appends ".eth" to construct `full_name`.
+Run `node --test tests/quicknode-filters.test.cjs`. Tests cover deployed V2 ABIs, both renewal emitters, ERC20 units, per-transaction V1 thresholds, mixed payments, wrapper-sync duplicates and unrelated logs. Apply the updated filter in the QuickNode dashboard after deploying the backend that accepts the V2 payload.

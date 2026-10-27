@@ -6,23 +6,30 @@ import { ENSMetadataService } from './ensMetadataService';
 import { AlchemyService } from './alchemyService';
 import { ENSTokenUtils } from './ensTokenUtils';
 import { ensSubgraphService } from './ensSubgraphService';
+import { ENS_V2_REGISTRY, ENS_V2_RENEWER_V1 } from '../config/ensContracts';
+import { ENSPayment, ENSPaymentEvent, eventTimestamp, getENSAsset, normalizeENSPayment, parseEventInteger } from '../utils/ensEventUtils';
 
 // QuickNode webhook payload shape — see docs/quicknode-renewal-filter.md
 export interface QuickNodeRenewalData {
   nameRenewed: QuickNodeRenewalEvent[];
 }
 
-export interface QuickNodeRenewalEvent {
+export interface QuickNodeRenewalEvent extends ENSPaymentEvent {
   blockNumber: string;       // hex 0x-prefixed (from receipt-level)
   contract: string;          // controller address (lowercase)
   contractLabel: string | null;
   name: string;              // ENS label (without .eth)
-  label: string;             // bytes32 hash (hex)
+  label?: string;            // V1 bytes32 hash; derive from name if V2 omits it
+  tokenId?: string;          // V2 event token ID (may be an unminted V1 reservation)
+  registryAddress?: string;
+  duration?: string;
+  blockTimestamp?: string | number;
   cost?: string;             // decimal wei (single field, no baseCost/premium for renewals)
   expires?: string;          // unix timestamp (decimal)
+  reservationExpires?: string; // V2 reservation expiry; not the V1 NFT expiry
   referrer?: string;         // bytes32 (newest controller only)
-  totalCostWei: string;      // decimal wei
-  totalCostEth: string;      // decimal ETH string
+  totalCostWei?: string;     // V1 decimal wei; V2 uses totalCostRaw/paymentToken
+  totalCostEth?: string;
   // logIndex from QuickNode's decoded log is a hex string like "0x66".
   // Some sources also send decimal numbers, so accept either and normalize downstream.
   logIndex: string | number;
@@ -62,10 +69,30 @@ export class QuickNodeRenewalService {
   ) {}
 
   /**
+   * Price before acknowledging the webhook so a temporary quote failure can be
+   * retried by QuickNode. Share each quote across the batch (including cold cache).
+   */
+  async prepareRenewalPayments(data: QuickNodeRenewalData): Promise<Map<QuickNodeRenewalEvent, ENSPayment>> {
+    const quotes = new Map<boolean, Promise<number | null>>();
+    const getQuote = (allowFallback = true) => {
+      let quote = quotes.get(allowFallback);
+      if (!quote) {
+        quote = this.alchemyService.getETHPriceUSD(allowFallback);
+        quotes.set(allowFallback, quote);
+      }
+      return quote;
+    };
+    const payments = await Promise.all(data.nameRenewed.map(async event =>
+      [event, await normalizeENSPayment(event, getQuote)] as const
+    ));
+    return new Map(payments);
+  }
+
+  /**
    * Top-level entry point — called by the /webhook/quicknode-renewals handler.
    * Groups events by tx_hash, enriches each tx in parallel, batched-inserts per tx.
    */
-  async processRenewals(data: QuickNodeRenewalData): Promise<{
+  async processRenewals(data: QuickNodeRenewalData, payments?: Map<QuickNodeRenewalEvent, ENSPayment>): Promise<{
     txsProcessed: number;
     rowsInserted: number;
     rowsSkipped: number;
@@ -89,12 +116,24 @@ export class QuickNodeRenewalService {
       eventsByTx.set(event.txHash, existing);
     }
 
+    // ETHRenewerV1 synchronizes NameWrapper with a zero-duration V1 renewal.
+    // The paid V2 event already accounts for that name; do not tweet it twice.
+    for (const [txHash, events] of eventsByTx) {
+      const syncedNames = new Set(events
+        .filter(event => event.contract.toLowerCase() === ENS_V2_RENEWER_V1)
+        .map(event => event.name));
+      eventsByTx.set(txHash, events.filter(event => !(
+        event.contract.toLowerCase() === '0x253553366da8546fc250f225fe3d25d0c782303b' &&
+        syncedNames.has(event.name) && BigInt(event.totalCostWei ?? event.cost ?? '-1') === 0n
+      )));
+    }
+
     logger.info(`📝 Processing ${data.nameRenewed.length} renewal event(s) across ${eventsByTx.size} tx(es)`);
 
     // Process each tx independently, in parallel. A failure on one tx doesn't block others.
     const txResults = await Promise.allSettled(
       Array.from(eventsByTx.entries()).map(([txHash, events]) =>
-        this.processSingleTx(txHash, events)
+        this.processSingleTx(txHash, events, payments)
       )
     );
 
@@ -129,7 +168,8 @@ export class QuickNodeRenewalService {
 
   private async processSingleTx(
     txHash: string,
-    events: QuickNodeRenewalEvent[]
+    events: QuickNodeRenewalEvent[],
+    preparedPayments?: Map<QuickNodeRenewalEvent, ENSPayment>
   ): Promise<{ inserted: number; skipped: number }> {
     logger.info(`📝 Tx ${txHash.slice(0, 10)}…: enriching ${events.length} renewal event(s) (concurrency: ${QuickNodeRenewalService.ENRICHMENT_CONCURRENCY})`);
 
@@ -137,11 +177,17 @@ export class QuickNodeRenewalService {
     const rows: Omit<ENSRenewal, 'id'>[] = [];
     let enrichFailures = 0;
     const chunkSize = QuickNodeRenewalService.ENRICHMENT_CONCURRENCY;
+    // Validate/price the entire transaction before any insert. A missing quote
+    // must not produce a partial bulk-renewal total and fire an incomplete tweet.
+    const payments = preparedPayments ?? await this.prepareRenewalPayments({ nameRenewed: events });
+    for (const event of events) {
+      if (!payments.has(event)) throw new Error('Missing prepared renewal payment');
+    }
 
     for (let i = 0; i < events.length; i += chunkSize) {
       const chunk = events.slice(i, i + chunkSize);
       const chunkResults = await Promise.allSettled(
-        chunk.map(e => this.buildRenewalRow(e))
+        chunk.map(e => this.buildRenewalRow(e, payments.get(e)!))
       );
 
       for (const result of chunkResults) {
@@ -175,10 +221,10 @@ export class QuickNodeRenewalService {
    * Convert one QuickNode event into a fully-enriched ENSRenewal row ready to insert.
    * Returns null if the event is malformed beyond recovery.
    */
-  private async buildRenewalRow(event: QuickNodeRenewalEvent): Promise<Omit<ENSRenewal, 'id'> | null> {
+  private async buildRenewalRow(event: QuickNodeRenewalEvent, payment: ENSPayment): Promise<Omit<ENSRenewal, 'id'> | null> {
     try {
       // Basic field coercion
-      const blockNumber = parseInt(event.blockNumber, 16);
+      const blockNumber = parseEventInteger(event.blockNumber);
       // logIndex can come through as either a hex string ("0x66") from QuickNode's
       // decoded log shape, or a plain decimal number/string. Normalize both cases.
       const logIndex = typeof event.logIndex === 'number'
@@ -188,34 +234,21 @@ export class QuickNodeRenewalService {
         logger.warn(`Renewal event has malformed logIndex: ${event.logIndex} (tx ${event.txHash})`);
         return null;
       }
-      const tokenId = event.label;                        // bytes32 hex (matches BaseRegistrar labelhash)
-      const tokenIdDecimal = BigInt(tokenId).toString();  // decimal form for OpenSea / metadata API
-      const costWei = event.totalCostWei || event.cost || '0';
-      const costEth = (Number(costWei) / 1e18).toFixed(8);
+      const asset = getENSAsset(event);
+      const tokenIdDecimal = asset.tokenId;
 
       // Renewer = tx.from (anyone can renew anyone's name).
       // Defensive: if 'from' is missing, fall back to a placeholder zero address rather than
       // dropping the row — we still want to record the event for dashboards/analytics.
       const renewerAddress = (event.from || '0x0000000000000000000000000000000000000000').toLowerCase();
 
-      // USD pricing
-      let costUsd: string | undefined;
-      try {
-        const ethPriceUsd = await this.alchemyService.getETHPriceUSD();
-        if (ethPriceUsd) {
-          costUsd = (parseFloat(costEth) * ethPriceUsd).toFixed(2);
-        }
-      } catch (error: any) {
-        logger.debug(`Failed USD conversion for renewal ${event.name}: ${error.message}`);
-      }
-
-      // Owner lookup (subgraph). If it fails, we keep going — owner will be null in the row.
+      // V2 uses its registry state (including grace-period ownership); V1 names
+      // renewed through ETHRenewerV1 still use the legacy owner lookup.
       let ownerAddress: string | undefined;
       try {
-        const owner = await ensSubgraphService.getOwnerByTokenId(
-          tokenIdDecimal,
-          ENSTokenUtils.ENS_REGISTRY_CONTRACT // BaseRegistrar — labelhash lookup
-        );
+        const owner = asset.contract === ENS_V2_REGISTRY
+          ? await this.alchemyService.getENSV2Owner(asset.labelHash, blockNumber)
+          : await ensSubgraphService.getOwnerByTokenId(tokenIdDecimal, ENSTokenUtils.ENS_REGISTRY_CONTRACT);
         if (owner) {
           ownerAddress = owner;
         }
@@ -224,16 +257,19 @@ export class QuickNodeRenewalService {
       }
 
       // Metadata enrichment (image, description). Same OpenSea → ENS metadata fallback as registrations.
-      const enriched = await this.enrichRenewalData(event.name, tokenIdDecimal);
+      const enriched = await this.enrichRenewalData(event.name, tokenIdDecimal, asset.contract);
 
       // Choose the best available name (webhook is most reliable, metadata can be a hash).
       const fullName = getBestEnsName(event.name, enriched.name, event.name);
       const ensName = fullName.replace(/\.eth$/i, '');
 
-      // Block timestamp — QuickNode events don't include it; use current time.
-      // For renewals this is acceptable since we use it for time-based filtering only,
-      // and the webhook arrives within seconds of the actual block.
-      const blockTimestamp = new Date().toISOString();
+      // Prefer stream block time; preserve the receipt-only fallback for legacy streams.
+      const blockTimestamp = eventTimestamp(event.blockTimestamp) || new Date().toISOString();
+      let expiry = event.expires;
+      if (expiry == null && event.contract.toLowerCase() === ENS_V2_RENEWER_V1) {
+        const legacyExpiry = await this.alchemyService.getENSV1Expiry(asset.labelHash, blockNumber);
+        expiry = legacyExpiry == null ? undefined : String(legacyExpiry);
+      }
 
       return {
         transactionHash: event.txHash,
@@ -244,17 +280,15 @@ export class QuickNodeRenewalService {
         fullName,
         ownerAddress,
         renewerAddress,
-        costWei,
-        costEth,
-        costUsd,
-        durationSeconds: undefined, // Not directly exposed by NameRenewed; could be derived from prev_expires later
+        ...payment,
+        durationSeconds: event.duration == null ? undefined : parseEventInteger(event.duration),
         blockNumber,
         blockTimestamp,
         processedAt: new Date().toISOString(),
         image: enriched.image,
         description: enriched.description,
         posted: false,
-        expiresAt: event.expires ? new Date(parseInt(event.expires) * 1000).toISOString() : undefined,
+        expiresAt: eventTimestamp(expiry),
       };
     } catch (error: any) {
       logger.error(`❌ Failed to build renewal row for ${event.name} (tx ${event.txHash}):`, error.message);
@@ -269,8 +303,18 @@ export class QuickNodeRenewalService {
    */
   private async enrichRenewalData(
     ensName: string,
-    tokenIdDecimal: string
+    tokenIdDecimal: string,
+    registryContract: string
   ): Promise<{ name?: string; image?: string; description?: string }> {
+    if (registryContract === ENS_V2_REGISTRY) {
+      try {
+        const metadata = await this.openSeaService.getSimplifiedMetadata(registryContract, tokenIdDecimal);
+        if (metadata && (metadata.name || metadata.image || metadata.description)) return metadata;
+      } catch (error: any) {
+        logger.debug(`OpenSea ENSv2 metadata unavailable: ${error.message}`);
+      }
+      return (await this.ensMetadataService.getMetadata(registryContract, tokenIdDecimal).catch(() => null)) || {};
+    }
     const fullEnsName = `${ensName}.eth`;
     const baseRegistrarContract = ENSTokenUtils.ENS_REGISTRY_CONTRACT;
     const nameWrapperContract = ENSTokenUtils.NAME_WRAPPER_CONTRACT;

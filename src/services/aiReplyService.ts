@@ -493,6 +493,9 @@ export class AIReplyService {
     price: number;
     priceUsd: number;
     currency: string;
+    paymentAmount?: string;
+    paymentSymbol?: string;
+    costIsEthEquivalent?: boolean;
     timestamp: number;
     buyerAddress: string;
     sellerAddress?: string;
@@ -500,7 +503,7 @@ export class AIReplyService {
     txHash?: string;
     renewalContext?: {
       nameCount: number;
-      topNames: Array<{ name: string; costEth: number }>;
+      topNames: Array<{ name: string; costEth: number; paymentAmount?: string; paymentSymbol?: string }>;
       allNames: string[];
     };
   }> {
@@ -516,7 +519,9 @@ export class AIReplyService {
       const totalUsd = renewals.reduce((sum, r) => sum + parseFloat(r.costUsd || '0'), 0);
       const topNames = renewals.slice(0, 3).map(r => ({
         name: r.fullName,
-        costEth: parseFloat(r.costEth || '0')
+        costEth: parseFloat(r.costEth || '0'),
+        paymentAmount: r.paymentAmount,
+        paymentSymbol: r.paymentSymbol,
       }));
       const allNames = renewals.map(r => r.fullName);
 
@@ -533,7 +538,8 @@ export class AIReplyService {
         tokenName: topRow.fullName, // Representative; full list in renewalContext
         price: totalEth,
         priceUsd: totalUsd,
-        currency: 'ETH', // Renewals are always ETH (NameRenewed event has only `cost` in wei)
+        currency: 'ETH',
+        costIsEthEquivalent: renewals.some(r => !!r.paymentSymbol && r.paymentSymbol !== 'ETH'),
         timestamp: new Date(sample.blockTimestamp).getTime() / 1000,
         buyerAddress: sample.renewerAddress, // Renewer = tx.from = the actor who paid
         sellerAddress: undefined, // Renewals have no seller
@@ -576,6 +582,9 @@ export class AIReplyService {
       price: parseFloat(isSale ? sale!.priceAmount : isRegistration ? (registration!.costEth || '0') : bid!.priceDecimal),
       priceUsd: parseFloat(isSale ? (sale!.priceUsd || '0') : isRegistration ? (registration!.costUsd || '0') : (bid!.priceUsd || '0')),
       currency: isSale ? (sale!.currencySymbol || 'ETH') : isBid ? (bid!.currencySymbol || 'ETH') : 'ETH',
+      paymentAmount: registration?.paymentAmount,
+      paymentSymbol: registration?.paymentSymbol,
+      costIsEthEquivalent: !!registration?.paymentSymbol && registration.paymentSymbol !== 'ETH',
       timestamp: isBid 
         ? new Date(bid!.createdAtApi).getTime() / 1000 
         : new Date((sale || registration)!.blockTimestamp).getTime() / 1000,

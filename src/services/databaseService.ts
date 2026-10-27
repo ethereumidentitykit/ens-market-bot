@@ -240,6 +240,10 @@ export class DatabaseService implements IDatabaseService {
           cost_wei VARCHAR(100) NOT NULL,
           cost_eth DECIMAL(18,8),
           cost_usd DECIMAL(12,2),
+          payment_token VARCHAR(42),
+          payment_amount_raw VARCHAR(100),
+          payment_amount VARCHAR(100),
+          payment_symbol VARCHAR(20),
           block_number INTEGER NOT NULL,
           block_timestamp TIMESTAMP NOT NULL,
           processed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -282,6 +286,10 @@ export class DatabaseService implements IDatabaseService {
           cost_wei VARCHAR(100) NOT NULL,
           cost_eth DECIMAL(18,8),
           cost_usd DECIMAL(12,2),
+          payment_token VARCHAR(42),
+          payment_amount_raw VARCHAR(100),
+          payment_amount VARCHAR(100),
+          payment_symbol VARCHAR(20),
           duration_seconds BIGINT,
           block_number INTEGER NOT NULL,
           block_timestamp TIMESTAMP NOT NULL,
@@ -724,6 +732,22 @@ export class DatabaseService implements IDatabaseService {
 
     const migrations: { key: string; description: string; sql: string }[] = [
       {
+        key: 'migration_ens_payment_provenance_v2',
+        description: 'Preserve original registration and renewal payment currencies',
+        sql: `
+          ALTER TABLE ens_registrations
+            ADD COLUMN IF NOT EXISTS payment_token VARCHAR(42),
+            ADD COLUMN IF NOT EXISTS payment_amount_raw VARCHAR(100),
+            ADD COLUMN IF NOT EXISTS payment_amount VARCHAR(100),
+            ADD COLUMN IF NOT EXISTS payment_symbol VARCHAR(20);
+          ALTER TABLE ens_renewals
+            ADD COLUMN IF NOT EXISTS payment_token VARCHAR(42),
+            ADD COLUMN IF NOT EXISTS payment_amount_raw VARCHAR(100),
+            ADD COLUMN IF NOT EXISTS payment_amount VARCHAR(100),
+            ADD COLUMN IF NOT EXISTS payment_symbol VARCHAR(20);
+        `,
+      },
+      {
         key: 'migration_bids_offer_identity_v1',
         description: 'Add cross-pipeline dedup index on ens_bids',
         sql: `
@@ -946,7 +970,9 @@ export class DatabaseService implements IDatabaseService {
           token_id as "tokenId", ens_name as "ensName", full_name as "fullName",
           owner_address as "ownerAddress", executor_address as "executorAddress",
           cost_wei as "costWei", cost_eth as "costEth",
-          cost_usd as "costUsd", block_number as "blockNumber", block_timestamp as "blockTimestamp",
+          cost_usd as "costUsd", payment_token as "paymentToken",
+          payment_amount_raw as "paymentAmountRaw", payment_amount as "paymentAmount",
+          payment_symbol as "paymentSymbol", block_number as "blockNumber", block_timestamp as "blockTimestamp",
           processed_at as "processedAt", image, description, tweet_id as "tweetId", 
           posted, expires_at as "expiresAt", created_at as "createdAt", updated_at as "updatedAt"
         FROM ens_registrations 
@@ -1688,8 +1714,9 @@ export class DatabaseService implements IDatabaseService {
         INSERT INTO ens_registrations (
           transaction_hash, contract_address, token_id, ens_name, full_name,
           owner_address, executor_address, cost_wei, cost_eth, cost_usd, block_number,
-          block_timestamp, processed_at, image, description, expires_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+          block_timestamp, processed_at, image, description, expires_at,
+          payment_token, payment_amount_raw, payment_amount, payment_symbol
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
         RETURNING id
       `, [
         registration.transactionHash,
@@ -1707,7 +1734,11 @@ export class DatabaseService implements IDatabaseService {
         registration.processedAt,
         registration.image || null,
         registration.description || null,
-        registration.expiresAt || null
+        registration.expiresAt || null,
+        registration.paymentToken || null,
+        registration.paymentAmountRaw ?? null,
+        registration.paymentAmount ?? null,
+        registration.paymentSymbol || null
       ]);
 
       const id = result.rows[0].id;
@@ -1756,8 +1787,9 @@ export class DatabaseService implements IDatabaseService {
         INSERT INTO ens_registrations (
           transaction_hash, contract_address, token_id, ens_name, full_name,
           owner_address, executor_address, cost_wei, cost_eth, cost_usd, block_number,
-          block_timestamp, processed_at, image, description, expires_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+          block_timestamp, processed_at, image, description, expires_at,
+          payment_token, payment_amount_raw, payment_amount, payment_symbol
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
         RETURNING id
       `, [
         registration.transactionHash,
@@ -1775,7 +1807,11 @@ export class DatabaseService implements IDatabaseService {
         registration.processedAt,
         registration.image || null,
         registration.description || null,
-        registration.expiresAt || null
+        registration.expiresAt || null,
+        registration.paymentToken || null,
+        registration.paymentAmountRaw ?? null,
+        registration.paymentAmount ?? null,
+        registration.paymentSymbol || null
       ]);
 
       const id = result.rows[0].id;
@@ -1923,6 +1959,10 @@ export class DatabaseService implements IDatabaseService {
       ownerAddress: row.owner_address,
       executorAddress: row.executor_address || undefined,
       costWei: row.cost_wei,
+      paymentToken: row.payment_token || undefined,
+      paymentAmountRaw: row.payment_amount_raw ?? undefined,
+      paymentAmount: row.payment_amount ?? undefined,
+      paymentSymbol: row.payment_symbol || undefined,
       costEth: row.cost_eth,
       costUsd: row.cost_usd,
       blockNumber: row.block_number,
@@ -1959,8 +1999,9 @@ export class DatabaseService implements IDatabaseService {
         INSERT INTO ens_renewals (
           transaction_hash, log_index, contract_address, token_id, ens_name, full_name,
           owner_address, renewer_address, cost_wei, cost_eth, cost_usd, duration_seconds,
-          block_number, block_timestamp, processed_at, image, description, expires_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+          block_number, block_timestamp, processed_at, image, description, expires_at,
+          payment_token, payment_amount_raw, payment_amount, payment_symbol
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
         RETURNING id
       `, [
         renewal.transactionHash,
@@ -1980,7 +2021,11 @@ export class DatabaseService implements IDatabaseService {
         renewal.processedAt,
         renewal.image || null,
         renewal.description || null,
-        renewal.expiresAt || null
+        renewal.expiresAt || null,
+        renewal.paymentToken || null,
+        renewal.paymentAmountRaw ?? null,
+        renewal.paymentAmount ?? null,
+        renewal.paymentSymbol || null
       ]);
 
       const id = result.rows[0].id;
@@ -2005,8 +2050,8 @@ export class DatabaseService implements IDatabaseService {
     if (renewals.length === 0) return [];
 
     try {
-      // Build parameterized multi-row INSERT: 18 params per row.
-      const colsPerRow = 18;
+      // Build parameterized multi-row INSERT: 22 params per row.
+      const colsPerRow = 22;
       const valuesClauses: string[] = [];
       const params: any[] = [];
 
@@ -2032,7 +2077,11 @@ export class DatabaseService implements IDatabaseService {
           r.processedAt,
           r.image || null,
           r.description || null,
-          r.expiresAt || null
+          r.expiresAt || null,
+          r.paymentToken || null,
+          r.paymentAmountRaw ?? null,
+          r.paymentAmount ?? null,
+          r.paymentSymbol || null
         );
       });
 
@@ -2040,7 +2089,8 @@ export class DatabaseService implements IDatabaseService {
         INSERT INTO ens_renewals (
           transaction_hash, log_index, contract_address, token_id, ens_name, full_name,
           owner_address, renewer_address, cost_wei, cost_eth, cost_usd, duration_seconds,
-          block_number, block_timestamp, processed_at, image, description, expires_at
+          block_number, block_timestamp, processed_at, image, description, expires_at,
+          payment_token, payment_amount_raw, payment_amount, payment_symbol
         ) VALUES ${valuesClauses.join(', ')}
         ON CONFLICT (transaction_hash, log_index) DO NOTHING
         RETURNING id
@@ -2189,6 +2239,10 @@ export class DatabaseService implements IDatabaseService {
       ownerAddress: row.owner_address || undefined,
       renewerAddress: row.renewer_address,
       costWei: row.cost_wei,
+      paymentToken: row.payment_token || undefined,
+      paymentAmountRaw: row.payment_amount_raw ?? undefined,
+      paymentAmount: row.payment_amount ?? undefined,
+      paymentSymbol: row.payment_symbol || undefined,
       costEth: row.cost_eth ? row.cost_eth.toString() : undefined,
       costUsd: row.cost_usd ? row.cost_usd.toString() : undefined,
       durationSeconds: row.duration_seconds ? Number(row.duration_seconds) : undefined,
@@ -3843,7 +3897,7 @@ export class DatabaseService implements IDatabaseService {
         this.pool.query(
           `
           SELECT id, updated_at, tweet_id, transaction_hash,
-                 full_name, cost_eth, cost_usd,
+                 full_name, cost_eth, cost_usd, payment_amount, payment_symbol,
                  COALESCE(executor_address, owner_address) AS minter_address
           FROM ens_registrations
           WHERE posted = TRUE AND tweet_id IS NOT NULL
@@ -3874,6 +3928,7 @@ export class DatabaseService implements IDatabaseService {
             COUNT(*) AS name_count,
             SUM(cost_eth) AS total_eth,
             SUM(cost_usd) AS total_usd,
+            BOOL_OR(payment_symbol IS NOT NULL AND payment_symbol <> 'ETH') AS cost_is_eth_equivalent,
             STRING_AGG(full_name, ', ' ORDER BY cost_eth DESC NULLS LAST) AS names_csv,
             MAX(renewer_address) AS renewer_address
           FROM ens_renewals
@@ -3916,6 +3971,10 @@ export class DatabaseService implements IDatabaseService {
       }
 
       for (const row of regsRes.rows) {
+        const paidCost = row.payment_symbol && row.payment_symbol !== 'ETH'
+          ? (row.payment_amount != null ? `${row.payment_amount} ${row.payment_symbol}`
+            : `${DatabaseService.fmtEth(row.cost_eth)} equivalent`)
+          : DatabaseService.fmtEth(row.cost_eth);
         posts.push({
           type: 'registration',
           postedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at,
@@ -3923,7 +3982,7 @@ export class DatabaseService implements IDatabaseService {
           sourceId: row.id,
           sourceTxHash: row.transaction_hash,
           text:
-            `${row.full_name || '(unknown)'} registered for ${DatabaseService.fmtEth(row.cost_eth)} ` +
+            `${row.full_name || '(unknown)'} registered for ${paidCost} ` +
             `${DatabaseService.fmtUsd(row.cost_usd)} — ` +
             `minter ${DatabaseService.shortAddr(row.minter_address)}`,
         });
@@ -3958,7 +4017,7 @@ export class DatabaseService implements IDatabaseService {
           sourceTxHash: row.transaction_hash,
           text:
             `${nameCount} name${nameCount === 1 ? '' : 's'} renewed for ` +
-            `${DatabaseService.fmtEth(row.total_eth)} ${DatabaseService.fmtUsd(row.total_usd)} ` +
+            `${DatabaseService.fmtEth(row.total_eth)}${row.cost_is_eth_equivalent ? ' equivalent' : ''} ${DatabaseService.fmtUsd(row.total_usd)} ` +
             `by ${DatabaseService.shortAddr(row.renewer_address)} — top: ${namesPreview}${trailer}`,
         });
       }

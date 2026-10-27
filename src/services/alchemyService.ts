@@ -1,4 +1,7 @@
 import axios, { AxiosResponse } from 'axios';
+import { Interface } from 'ethers';
+import { ENS_V2_REGISTRY } from '../config/ensContracts';
+import { ENS_BASE_REGISTRAR } from '../utils/currencyConstants';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
 import { AlchemyNFTSalesResponse, NFTSale, AlchemyPriceResponse } from '../types';
@@ -338,11 +341,11 @@ export class AlchemyService {
    * Get current ETH price in USD with 30-minute caching to avoid API abuse
    * Uses Alchemy's prices API endpoint
    */
-  async getETHPriceUSD(): Promise<number | null> {
+  async getETHPriceUSD(allowFallback = true): Promise<number | null> {
     try {
       // Check for cached price first (30-minute cache)
       const cachedPrice = await this.getCachedETHPrice();
-      if (cachedPrice) {
+      if (cachedPrice && (allowFallback || !this.ethPriceCache?.isFallback)) {
         return cachedPrice;
       }
 
@@ -373,6 +376,7 @@ export class AlchemyService {
       }
 
       const priceValue = parseFloat(usdPrice.value);
+      if (!Number.isFinite(priceValue) || priceValue <= 0) throw new Error('Invalid ETH price');
       logger.debug(`ETH price fetched: $${priceValue} (last updated: ${usdPrice.lastUpdatedAt})`);
       
       // Cache the fresh price for 30 minutes
@@ -381,6 +385,7 @@ export class AlchemyService {
       return priceValue;
     } catch (error: any) {
       logger.warn('[Alchemy API] Failed to fetch ETH price:', error.message);
+      if (!allowFallback) return null;
       
       const fallbackPrice = 2000;
       logger.info(`💰 Using fallback ETH price: $${fallbackPrice} (API unavailable, will retry in 2m)`);
@@ -388,6 +393,57 @@ export class AlchemyService {
       await this.cacheETHPrice(fallbackPrice, true);
       
       return fallbackPrice;
+    }
+  }
+
+  /** Read the event block time when a stream receipt omitted its block timestamp. */
+  async getBlockTimestamp(blockNumber: number): Promise<number | null> {
+    try {
+      const response = await axios.post(`${this.baseUrl}/v2/${this.apiKey}`, {
+        jsonrpc: '2.0', id: 1, method: 'eth_getBlockByNumber',
+        params: [`0x${blockNumber.toString(16)}`, false]
+      }, { timeout: 10000 });
+      const timestamp = Number(response.data.result?.timestamp);
+      return Number.isSafeInteger(timestamp) && timestamp > 0 ? timestamp : null;
+    } catch (error: any) {
+      logger.debug(`Failed block timestamp lookup: ${error.message}`);
+      return null;
+    }
+  }
+
+  /** V2 IDs change with permissions; getState accepts the stable labelhash as well. */
+  async getENSV2Owner(labelHash: string, blockNumber: number): Promise<string | null> {
+    try {
+      const abi = new Interface([
+        'function getState(uint256 anyId) view returns ((uint8 status,uint64 expiry,address latestOwner,uint256 tokenId,uint256 resource))'
+      ]);
+      const response = await axios.post(`${this.baseUrl}/v2/${this.apiKey}`, {
+        jsonrpc: '2.0', id: 1, method: 'eth_call',
+        params: [{ to: ENS_V2_REGISTRY, data: abi.encodeFunctionData('getState', [labelHash]) }, `0x${blockNumber.toString(16)}`]
+      }, { timeout: 10000 });
+      const [state] = abi.decodeFunctionResult('getState', response.data.result);
+      const owner = state.latestOwner.toLowerCase();
+      return owner === '0x0000000000000000000000000000000000000000' ? null : owner;
+    } catch (error: any) {
+      logger.debug(`Failed ENSv2 owner lookup: ${error.message}`);
+      return null;
+    }
+  }
+
+  /** ETHRenewerV1 reports reservation expiry, which differs from the V1 NFT expiry. */
+  async getENSV1Expiry(labelHash: string, blockNumber: number): Promise<number | null> {
+    try {
+      const abi = new Interface(['function nameExpires(uint256 id) view returns (uint256)']);
+      const response = await axios.post(`${this.baseUrl}/v2/${this.apiKey}`, {
+        jsonrpc: '2.0', id: 1, method: 'eth_call',
+        params: [{ to: ENS_BASE_REGISTRAR, data: abi.encodeFunctionData('nameExpires', [labelHash]) }, `0x${blockNumber.toString(16)}`]
+      }, { timeout: 10000 });
+      const [expiry] = abi.decodeFunctionResult('nameExpires', response.data.result);
+      const timestamp = Number(expiry);
+      return Number.isSafeInteger(timestamp) && timestamp > 0 ? timestamp : null;
+    } catch (error: any) {
+      logger.debug(`Failed ENSv1 expiry lookup: ${error.message}`);
+      return null;
     }
   }
 

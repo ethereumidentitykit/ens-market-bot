@@ -10,7 +10,7 @@
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
     "format": "prettier --write src/**/*.ts",
-    "test": "echo \"No tests specified - skipping\"",
+    "test": "node --test tests/*.test.cjs",
     "image:test": "ts-node --transpile-only scripts/render-test-image.ts",
     "vercel-build": "npm run build"
   },

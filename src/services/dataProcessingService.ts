@@ -146,6 +146,9 @@ export interface LLMPromptContext {
     price: number;         // For renewals: total ETH cost across the tx (sum of per-name costs)
     priceUsd: number;      // For renewals: total USD cost across the tx
     currency: string;
+    paymentAmount?: string;
+    paymentSymbol?: string;
+    costIsEthEquivalent?: boolean;
     timestamp: number;
     buyerAddress: string;  // For renewals: the renewer (= tx.from); the actor who paid
     buyerEnsName: string | null; // Resolved ENS name for buyer (e.g., "trader.eth")
@@ -165,7 +168,7 @@ export interface LLMPromptContext {
   // and the full name list for portfolio-level pattern detection.
   renewalContext?: {
     nameCount: number;    // Total names renewed in the tx
-    topNames: Array<{ name: string; costEth: number }>; // Top 3 by cost (matches the tweet & image)
+    topNames: Array<{ name: string; costEth: number; paymentAmount?: string; paymentSymbol?: string }>; // Top 3 by cost (matches the tweet & image)
     allNames: string[];   // All names renewed (used by the LLM for pattern/theme detection)
   };
   
@@ -856,6 +859,9 @@ export class DataProcessingService {
       price: number;
       priceUsd: number;
       currency: string;
+      paymentAmount?: string;
+      paymentSymbol?: string;
+      costIsEthEquivalent?: boolean;
       timestamp: number;
       buyerAddress: string;
       sellerAddress?: string;
@@ -866,7 +872,7 @@ export class DataProcessingService {
       // (matches the tweet/image), and full name list for portfolio-level pattern detection.
       renewalContext?: {
         nameCount: number;
-        topNames: Array<{ name: string; costEth: number }>;
+        topNames: Array<{ name: string; costEth: number; paymentAmount?: string; paymentSymbol?: string }>;
         allNames: string[];
       };
     },
@@ -1183,6 +1189,9 @@ export class DataProcessingService {
         price: eventData.price,
         priceUsd: eventData.priceUsd,
         currency: eventData.currency,
+        paymentAmount: eventData.paymentAmount,
+        paymentSymbol: eventData.paymentSymbol,
+        costIsEthEquivalent: eventData.costIsEthEquivalent,
         timestamp: eventData.timestamp,
         buyerAddress: eventData.buyerAddress,
         buyerEnsName,

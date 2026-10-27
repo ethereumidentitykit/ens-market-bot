@@ -4501,9 +4501,14 @@ async function startApplication(): Promise<void> {
               results: { eventsReceived }
             });
           }
+          // V2 costs need a real ETH/USD quote for the existing ETH thresholds.
+          // Fail before ACK/signature caching so QuickNode can retry a quote outage.
+          // Reuse these payments in background enrichment to avoid a second quote.
+          const renewalPayments = await quickNodeRenewalService.prepareRenewalPayments(webhookData);
           if (qnSignature) recordRenewalSignature(qnSignature);
 
-          // ACK QuickNode immediately so it doesn't time out and retry. Enrichment
+          // ACK after payment validation so enrichment doesn't cause timeout retries.
+          // Enrichment
           // for a bulk-renewer batch can take 30–60+ seconds, well past QuickNode's
           // ~30s delivery timeout.
           res.status(200).json({
@@ -4515,7 +4520,7 @@ async function startApplication(): Promise<void> {
 
           // Fire-and-forget: process in the background. Errors are logged; never
           // re-thrown (the response has already been sent).
-          quickNodeRenewalService.processRenewals(webhookData)
+          quickNodeRenewalService.processRenewals(webhookData, renewalPayments)
             .then(stats => {
               logger.info('✅ QuickNode renewal processing complete (background)', stats);
             })

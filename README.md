@@ -219,6 +219,33 @@ Additional technical documentation is available in the `docs/` folder:
 - **[QuickNode Registration Stream Filter](docs/quicknode-registration-filter.md)** - NameRegistered event filter for ENS registrations
 - **[QuickNode Renewal Stream Filter](docs/quicknode-renewal-filter.md)** - NameRenewed event filter for ENS renewals (bulk-renewal aware)
 
+### ENSv2 registration and renewal ingestion
+
+The bot supports the mainnet V2 `ETHRegistrar` and `ETHRenewerV1` alongside the
+three V1 controllers. Addresses and event formats come from the official
+[deployments](https://docs.ens.domains/learn/deployments/) and
+[V2 registrar docs](https://docs.ens.domains/ensv2/eth-registrar/). The deployment
+page currently describes mainnet V2 as prelaunch; V1 ingestion remains enabled.
+
+Deploy the backend before replacing the registration and renewal **QuickNode
+Streams filter functions** with the full code in the two documents above. Updating
+this repository does not update hosted QuickNode filters. The backend applies an
+idempotent migration at startup to retain each payment's token, raw amount,
+decimal amount, and symbol. No new environment variables are required.
+
+V2 payments use token base units (USDC has 6 decimals; DAI has 18), not ETH wei.
+The stream forwards V2 payments without an ETH threshold; the bot converts them
+for its existing posting thresholds and analytics. Stablecoins use the same $1
+valuation as sales; ETH equivalents use the ingestion-time ETH/USD quote. A
+missing quote fails conversion instead of using the emergency fixed ETH price.
+Tweets preserve the paid currency, and mixed-currency totals are identified as
+ETH equivalents. V1 wrapper synchronization logs are excluded from paid renewal
+counts. V2 registry IDs and V1 NFT IDs are handled separately for metadata and
+owner lookups.
+
+Run `npm test` for offline ABI/filter, ingestion, payment, and storage/display
+regressions, and `npm run build` for the TypeScript check.
+
 ## Rate Limiting
 
 The bot implements intelligent rate limiting:
