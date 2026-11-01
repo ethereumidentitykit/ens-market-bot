@@ -14,6 +14,9 @@ export interface ImageData {
   transactionHash: string;
   timestamp: Date;
   currencySymbol?: string;
+  // Exact NFT the event is about. ENSv2 artwork is only found by its exact token ID.
+  nftContract?: string;
+  nftTokenId?: string;
 }
 
 /**

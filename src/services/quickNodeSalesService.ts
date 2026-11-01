@@ -4,6 +4,7 @@ import { ProcessedSale, IDatabaseService } from '../types';
 import { OpenSeaService } from './openSeaService';
 import { ENSMetadataService } from './ensMetadataService';
 import { AlchemyService } from './alchemyService';
+import { ENS_V2_REGISTRY } from '../config/ensContracts';
 
 interface SeaportOrder {
   orderHash: string;
@@ -48,6 +49,12 @@ interface QuickNodeWebhookData {
 export class QuickNodeSalesService {
   private readonly ENS_REGISTRY = '0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147eA85';
   private readonly ENS_NAMEWRAPPER = '0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401';
+  // ENSv2 names trade as ERC-1155 tokens on the V2 registry
+  private readonly ENS_TOKEN_CONTRACTS = new Set([
+    this.ENS_REGISTRY.toLowerCase(),
+    this.ENS_NAMEWRAPPER.toLowerCase(),
+    ENS_V2_REGISTRY
+  ]);
   private readonly WETH_ADDRESS = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
   private readonly USDC_ADDRESS = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
   private readonly USDT_ADDRESS = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
@@ -180,15 +187,9 @@ export class QuickNodeSalesService {
     try {
       // Find ENS token in either offer OR consideration 
       // (Seaport orders can represent either buyer or seller perspective)
-      const ensTokenInOffer = order.offer?.find(item => 
-        item.token.toLowerCase() === this.ENS_REGISTRY.toLowerCase() ||
-        item.token.toLowerCase() === this.ENS_NAMEWRAPPER.toLowerCase()
-      );
+      const ensTokenInOffer = order.offer?.find(item => this.isEnsToken(item.token));
       
-      const ensTokenInConsideration = order.consideration?.find(item => 
-        item.token.toLowerCase() === this.ENS_REGISTRY.toLowerCase() ||
-        item.token.toLowerCase() === this.ENS_NAMEWRAPPER.toLowerCase()
-      );
+      const ensTokenInConsideration = order.consideration?.find(item => this.isEnsToken(item.token));
 
       const ensToken = ensTokenInOffer || ensTokenInConsideration;
 
@@ -524,6 +525,10 @@ export class QuickNodeSalesService {
     }
   }
 
+  private isEnsToken(token: string): boolean {
+    return this.ENS_TOKEN_CONTRACTS.has(token.toLowerCase());
+  }
+
   /**
    * Get detailed reason why an order was skipped
    * @param order - Seaport orderFulfilled event
@@ -532,15 +537,9 @@ export class QuickNodeSalesService {
   private getSkipReason(order: SeaportOrder): string {
     try {
       // Check if it's an ENS token (in either offer or consideration)
-      const ensTokenInOffer = order.offer?.find(item => 
-        item.token.toLowerCase() === this.ENS_REGISTRY.toLowerCase() ||
-        item.token.toLowerCase() === this.ENS_NAMEWRAPPER.toLowerCase()
-      );
+      const ensTokenInOffer = order.offer?.find(item => this.isEnsToken(item.token));
       
-      const ensTokenInConsideration = order.consideration?.find(item => 
-        item.token.toLowerCase() === this.ENS_REGISTRY.toLowerCase() ||
-        item.token.toLowerCase() === this.ENS_NAMEWRAPPER.toLowerCase()
-      );
+      const ensTokenInConsideration = order.consideration?.find(item => this.isEnsToken(item.token));
 
       const ensToken = ensTokenInOffer || ensTokenInConsideration;
 
