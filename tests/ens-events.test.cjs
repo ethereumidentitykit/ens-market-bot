@@ -450,3 +450,36 @@ test('ENSv2 registry sales are stored with the V2 contract and token ID', async 
   assert.equal(stored[0].sellerAddress, seller);
   assert.deepEqual(metadataCalls, [[ENS_V2_REGISTRY, V2_TOKEN]], 'metadata is looked up on the V2 asset itself');
 });
+
+test('sale price is what the buyer paid: offer amount for accepted offers, full consideration for listings', async () => {
+  const { QuickNodeSalesService } = require('../src/services/quickNodeSalesService.ts');
+  const WETH = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
+  const ETH = '0x0000000000000000000000000000000000000000';
+  const buyer = '0x10b7ea5fc06c83115df6ba822a18106d949423bf';
+  const seller = '0x7398cf60c0bd190414fcd9f9dc87098d47fa54a5';
+  const osFee = '0x0000a26b00c1F0DF003000390027140000fAa719';
+  const base = { blockNumber: '0x1', contract: '0x0', contractLabel: 'seaport_v1_6', zone: '0x0' };
+  // Accepted offer from tx 0xce4d7ee9…7685: buyer offers 4.1 WETH, the 0.041 fee comes out of it
+  const acceptedOffer = { ...base, orderHash: '0xa', txHash: '0xaa', logIndex: '0x1', offerer: buyer, recipient: seller,
+    offer: [{ itemType: 1, token: WETH, identifier: '0', amount: '4100000000000000000' }],
+    consideration: [
+      { itemType: 3, token: ENS_V2_REGISTRY, identifier: '1', amount: '1', recipient: buyer },
+      { itemType: 1, token: WETH, identifier: '0', amount: '41000000000000000', recipient: osFee },
+    ] };
+  // Listing: buyer pays seller 0.99 ETH plus the 0.01 ETH fee
+  const listing = { ...base, orderHash: '0xb', txHash: '0xbb', logIndex: '0x1', offerer: seller, recipient: buyer,
+    offer: [{ itemType: 2, token: ENS_BASE_REGISTRAR, identifier: '2', amount: '1' }],
+    consideration: [
+      { itemType: 0, token: ETH, identifier: '0', amount: '990000000000000000', recipient: seller },
+      { itemType: 0, token: ETH, identifier: '0', amount: '10000000000000000', recipient: osFee },
+    ] };
+  const stored = [];
+  const service = new QuickNodeSalesService(
+    { async isSaleProcessed() { return false; }, async insertSale(sale) { stored.push(sale); return stored.length; } },
+    { async getSimplifiedMetadata() { return { name: 'name.eth', image: 'img' }; } },
+    { async getMetadata() { return null; } },
+    { async getETHPriceUSD() { return 3000; } },
+  );
+  await service.processWebhookData({ orderFulfilled: [acceptedOffer, listing] });
+  assert.deepEqual(stored.map((sale) => sale.priceAmount), ['4.1', '1']);
+});

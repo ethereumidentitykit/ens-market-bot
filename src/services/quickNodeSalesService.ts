@@ -198,14 +198,14 @@ export class QuickNodeSalesService {
       }
 
       // Find payments: try ETH/WETH first, then stablecoins
-      const allItems = [...(order.consideration || []), ...(order.offer || [])];
+      const pricedItems = this.getPricedItems(order, !!ensTokenInOffer, !!ensTokenInConsideration);
 
-      const ethPayments = allItems.filter(item =>
+      const ethPayments = pricedItems.filter(item =>
         item.itemType === this.NATIVE_ETH_ITEM_TYPE ||
         item.token.toLowerCase() === this.WETH_ADDRESS.toLowerCase()
       );
 
-      const stablecoinPayments = allItems.filter(item =>
+      const stablecoinPayments = pricedItems.filter(item =>
         item.token.toLowerCase() === this.USDC_ADDRESS.toLowerCase() ||
         item.token.toLowerCase() === this.USDT_ADDRESS.toLowerCase()
       );
@@ -530,6 +530,20 @@ export class QuickNodeSalesService {
   }
 
   /**
+   * Items that make up the price the buyer paid.
+   * Listing (ENS in offer): the buyer pays every consideration item (seller + fees).
+   * Accepted offer (ENS in consideration): the buyer pays the offer amount, and the fees
+   * in the consideration come out of it, so counting both would add the fees twice.
+   */
+  private getPricedItems(order: SeaportOrder, ensInOffer: boolean, ensInConsideration: boolean) {
+    const offer = order.offer || [];
+    const consideration = order.consideration || [];
+    if (ensInOffer && !ensInConsideration) return consideration;
+    if (ensInConsideration && !ensInOffer) return offer;
+    return [...consideration, ...offer];
+  }
+
+  /**
    * Get detailed reason why an order was skipped
    * @param order - Seaport orderFulfilled event
    * @returns Human-readable skip reason
@@ -563,7 +577,8 @@ export class QuickNodeSalesService {
       }
 
       if (hasEth) {
-        const totalWei = allItems
+        const pricedItems = this.getPricedItems(order, !!ensTokenInOffer, !!ensTokenInConsideration);
+        const totalWei = pricedItems
           .filter(item => item.itemType === this.NATIVE_ETH_ITEM_TYPE || item.token.toLowerCase() === this.WETH_ADDRESS.toLowerCase())
           .reduce((sum, p) => sum + BigInt(p.amount), BigInt(0));
         const priceEthVal = Number(totalWei) / 1e18;
