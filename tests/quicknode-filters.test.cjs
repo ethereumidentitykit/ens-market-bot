@@ -91,7 +91,7 @@ function execute(kind, receipts, { shape = 'flat', timestamp, rawStream } = {}) 
   vm.runInContext(code, context);
   const stream = rawStream ?? { data: [{ block: timestamp === undefined ? {} : { timestamp }, receipts }] };
   const result = context.main(stream);
-  return result === null ? null : JSON.parse(JSON.stringify(result));
+  return result === null ? null : JSON.parse(JSON.stringify(result, (_, v) => (typeof v === 'bigint' ? v.toString() : v)));
 }
 
 test('V1 registrations preserve all three deployed formats and the inclusive 0.04 ETH threshold', () => {
@@ -290,4 +290,14 @@ test('collects nested/direct receipts and deduplicates repeated receipts without
   assert.equal(execute('registration', [], { rawStream: [receipt([registration()])] }).nameRegistered.length, 1);
   assert.equal(execute('registration', []), null);
   assert.equal(execute('renewal', []), null);
+});
+
+test('sales filter passes an ENSv2 registry token sold through Seaport (gulp.eth accepted offer)', () => {
+  const sale = require('./fixtures/ensv2-sale-gulp-eth.json');
+  const orders = execute('sales', [sale], { shape: 'args' }).orderFulfilled;
+  assert.equal(orders.length, 2, 'both sides of the matched order are forwarded');
+  const nft = orders[0].consideration.find((item) => item.token.toLowerCase() === ethRegistry);
+  assert.equal(nft.itemType, 3, 'V2 names are ERC-1155');
+  assert.equal(nft.identifier, '49208711796435402224585040806750920334054338901032461126040053559105882685440');
+  assert.equal(orders[0].fee.amount, '41000000000000000');
 });

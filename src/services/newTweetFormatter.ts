@@ -1388,7 +1388,9 @@ export class NewTweetFormatter {
       sellerAvatar: realData.sellerAvatar,
       transactionHash: sale.transactionHash,
       timestamp: new Date(),
-      currencySymbol: realData.currencySymbol
+      currencySymbol: realData.currencySymbol,
+      nftContract: sale.contractAddress,
+      nftTokenId: sale.tokenId
     };
   }
 
@@ -1408,7 +1410,9 @@ export class NewTweetFormatter {
       sellerAvatar: realData.sellerAvatar,
       transactionHash: bid.bidId, // Use bid ID as transaction reference
       timestamp: new Date(), // Use current timestamp
-      currencySymbol: realData.currencySymbol
+      currencySymbol: realData.currencySymbol,
+      nftContract: bid.contractAddress,
+      nftTokenId: bid.tokenId
     };
   }
 

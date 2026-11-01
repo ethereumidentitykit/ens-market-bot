@@ -246,7 +246,9 @@ export class RealDataImageService {
       sellerAvatar: realData.sellerAvatar,
       transactionHash: realData.transactionHash || '0x0000000000000000000000000000000000000000000000000000000000000000',
       timestamp: new Date(),
-      currencySymbol: realData.currencySymbol
+      currencySymbol: realData.currencySymbol,
+      nftContract: realData.contractAddress,
+      nftTokenId: realData.tokenId
     };
 
     return await PuppeteerImageService.generateSaleImage(mockData, this.databaseService);

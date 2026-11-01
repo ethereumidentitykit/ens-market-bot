@@ -4,6 +4,7 @@ import { ProcessedSale, IDatabaseService } from '../types';
 import { OpenSeaService } from './openSeaService';
 import { ENSMetadataService } from './ensMetadataService';
 import { AlchemyService } from './alchemyService';
+import { ENS_V2_REGISTRY } from '../config/ensContracts';
 
 interface SeaportOrder {
   orderHash: string;
@@ -48,6 +49,12 @@ interface QuickNodeWebhookData {
 export class QuickNodeSalesService {
   private readonly ENS_REGISTRY = '0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147eA85';
   private readonly ENS_NAMEWRAPPER = '0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401';
+  // ENSv2 names trade as ERC-1155 tokens on the V2 registry
+  private readonly ENS_TOKEN_CONTRACTS = new Set([
+    this.ENS_REGISTRY.toLowerCase(),
+    this.ENS_NAMEWRAPPER.toLowerCase(),
+    ENS_V2_REGISTRY
+  ]);
   private readonly WETH_ADDRESS = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
   private readonly USDC_ADDRESS = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
   private readonly USDT_ADDRESS = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
@@ -180,15 +187,9 @@ export class QuickNodeSalesService {
     try {
       // Find ENS token in either offer OR consideration 
       // (Seaport orders can represent either buyer or seller perspective)
-      const ensTokenInOffer = order.offer?.find(item => 
-        item.token.toLowerCase() === this.ENS_REGISTRY.toLowerCase() ||
-        item.token.toLowerCase() === this.ENS_NAMEWRAPPER.toLowerCase()
-      );
+      const ensTokenInOffer = order.offer?.find(item => this.isEnsToken(item.token));
       
-      const ensTokenInConsideration = order.consideration?.find(item => 
-        item.token.toLowerCase() === this.ENS_REGISTRY.toLowerCase() ||
-        item.token.toLowerCase() === this.ENS_NAMEWRAPPER.toLowerCase()
-      );
+      const ensTokenInConsideration = order.consideration?.find(item => this.isEnsToken(item.token));
 
       const ensToken = ensTokenInOffer || ensTokenInConsideration;
 
@@ -197,14 +198,14 @@ export class QuickNodeSalesService {
       }
 
       // Find payments: try ETH/WETH first, then stablecoins
-      const allItems = [...(order.consideration || []), ...(order.offer || [])];
+      const pricedItems = this.getPricedItems(order, !!ensTokenInOffer, !!ensTokenInConsideration);
 
-      const ethPayments = allItems.filter(item =>
+      const ethPayments = pricedItems.filter(item =>
         item.itemType === this.NATIVE_ETH_ITEM_TYPE ||
         item.token.toLowerCase() === this.WETH_ADDRESS.toLowerCase()
       );
 
-      const stablecoinPayments = allItems.filter(item =>
+      const stablecoinPayments = pricedItems.filter(item =>
         item.token.toLowerCase() === this.USDC_ADDRESS.toLowerCase() ||
         item.token.toLowerCase() === this.USDT_ADDRESS.toLowerCase()
       );
@@ -524,6 +525,24 @@ export class QuickNodeSalesService {
     }
   }
 
+  private isEnsToken(token: string): boolean {
+    return this.ENS_TOKEN_CONTRACTS.has(token.toLowerCase());
+  }
+
+  /**
+   * Items that make up the price the buyer paid.
+   * Listing (ENS in offer): the buyer pays every consideration item (seller + fees).
+   * Accepted offer (ENS in consideration): the buyer pays the offer amount, and the fees
+   * in the consideration come out of it, so counting both would add the fees twice.
+   */
+  private getPricedItems(order: SeaportOrder, ensInOffer: boolean, ensInConsideration: boolean) {
+    const offer = order.offer || [];
+    const consideration = order.consideration || [];
+    if (ensInOffer && !ensInConsideration) return consideration;
+    if (ensInConsideration && !ensInOffer) return offer;
+    return [...consideration, ...offer];
+  }
+
   /**
    * Get detailed reason why an order was skipped
    * @param order - Seaport orderFulfilled event
@@ -532,15 +551,9 @@ export class QuickNodeSalesService {
   private getSkipReason(order: SeaportOrder): string {
     try {
       // Check if it's an ENS token (in either offer or consideration)
-      const ensTokenInOffer = order.offer?.find(item => 
-        item.token.toLowerCase() === this.ENS_REGISTRY.toLowerCase() ||
-        item.token.toLowerCase() === this.ENS_NAMEWRAPPER.toLowerCase()
-      );
+      const ensTokenInOffer = order.offer?.find(item => this.isEnsToken(item.token));
       
-      const ensTokenInConsideration = order.consideration?.find(item => 
-        item.token.toLowerCase() === this.ENS_REGISTRY.toLowerCase() ||
-        item.token.toLowerCase() === this.ENS_NAMEWRAPPER.toLowerCase()
-      );
+      const ensTokenInConsideration = order.consideration?.find(item => this.isEnsToken(item.token));
 
       const ensToken = ensTokenInOffer || ensTokenInConsideration;
 
@@ -564,7 +577,8 @@ export class QuickNodeSalesService {
       }
 
       if (hasEth) {
-        const totalWei = allItems
+        const pricedItems = this.getPricedItems(order, !!ensTokenInOffer, !!ensTokenInConsideration);
+        const totalWei = pricedItems
           .filter(item => item.itemType === this.NATIVE_ETH_ITEM_TYPE || item.token.toLowerCase() === this.WETH_ADDRESS.toLowerCase())
           .reduce((sum, p) => sum + BigInt(p.amount), BigInt(0));
         const priceEthVal = Number(totalWei) / 1e18;

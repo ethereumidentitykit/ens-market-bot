@@ -14,6 +14,12 @@ export const MONITORED_CONTRACTS = [
     name: 'ENS OG Registry',
     displayName: 'ENS', // For tweets
     hashtag: 'ENS'
+  },
+  {
+    address: '0xf60aba43e1f7f3dab1186ff03b561401c9df85e2',
+    name: 'ENSv2 ETH Registry',
+    displayName: 'ENS', // For tweets
+    hashtag: 'ENS'
   }
 ];
 

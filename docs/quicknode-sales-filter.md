@@ -21,6 +21,7 @@ The filter listens for `OrderFulfilled` events from Seaport contracts (v1.5 and 
 |-----------------|-------------|
 | `0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85` | ENS Base Registrar (OG Registry) |
 | `0xd4416b13d2b3a9abae7acd5d6c2bbdbe25686401` | ENS NameWrapper |
+| `0xf60aba43e1f7f3dab1186ff03b561401c9df85e2` | ENSv2 ETH Registry (ERC-1155) |
 
 ### Spam Filter
 
@@ -183,6 +184,7 @@ function main(stream) {
   const TARGET_CONTRACTS = new Set([
     '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85', // ENS Base Registrar
     '0xd4416b13d2b3a9abae7acd5d6c2bbdbe25686401', // ENS NameWrapper
+    '0xf60aba43e1f7f3dab1186ff03b561401c9df85e2', // ENSv2 ETH Registry
   ]);
   const REQUIRE_TARGET_CONTRACT = true;
 

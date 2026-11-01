@@ -30,7 +30,9 @@ export class PuppeteerImageService {
       sellerEns: data.sellerEns, // "ENS DAO"
       sellerAvatar: this.getDaoProfileBase64(), // Use DAO avatar for registrations
       transactionHash: data.transactionHash || '0x0000',
-      timestamp: new Date()
+      timestamp: new Date(),
+      nftContract: data.contractAddress,
+      nftTokenId: data.tokenId
     };
 
     return await this.generateImageWithBackground(mockData, 'registration', databaseService);
@@ -887,7 +889,7 @@ export class PuppeteerImageService {
     // emoji (or EthID's PNG as fallback). The bundled ens.png placeholder is used if
     // EthID cannot serve the name.
     let nftCardHtml = `<img src="data:image/png;base64,${ensPlaceholderBase64}" alt="ENS NFT">`;
-    const nftCard = await EthIdImageService.fetchNftCard(data.ensName);
+    const nftCard = await EthIdImageService.fetchNftCard(data.ensName, { contract: data.nftContract, tokenId: data.nftTokenId });
     if (nftCard) {
       nftCardHtml = nftCard.html;
     } else {

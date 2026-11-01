@@ -2,6 +2,7 @@ import axios from 'axios';
 import { ENSTokenUtils } from './ensTokenUtils';
 import { buildEthIdSvgCard } from './ethIdCardBuilder';
 import { logger } from '../utils/logger';
+import { ENS_V2_REGISTRAR, ENS_V2_REGISTRY } from '../config/ensContracts';
 
 /**
  * ENS NFT card markup ready to drop into a square container in the tweet-image HTML.
@@ -26,6 +27,8 @@ interface Candidate {
  *
  * EthID renders the .eth card (gradient or avatar background, ENS logo, name)
  * server-side. Lookup order for a name:
+ *   0. ENSv2 registry keyed by the exact token ID, when the caller passes one
+ *      (V2 IDs embed permission bits, so they can't be derived from the name)
  *   1. NameWrapper contract keyed by namehash("name.eth")
  *   2. BaseRegistrar contract keyed by labelhash("name")
  *
@@ -54,7 +57,10 @@ export class EthIdImageService {
    * Resolve an ENS name to its NFT card markup, or null when EthID cannot
    * serve it so callers can substitute their own placeholder.
    */
-  static async fetchNftCard(ensName: string): Promise<EthIdNftCard | null> {
+  static async fetchNftCard(
+    ensName: string,
+    asset?: { contract?: string; tokenId?: string }
+  ): Promise<EthIdNftCard | null> {
     const fullName = this.toFullName(ensName);
     if (!fullName) {
       logger.warn(`EthID image skipped: no usable ENS name (${JSON.stringify(ensName)})`);
@@ -67,6 +73,11 @@ export class EthIdImageService {
         { contract: ENSTokenUtils.NAME_WRAPPER_CONTRACT, tokenId: ENSTokenUtils.ensNameToNamehash(fullName), label: 'NameWrapper/namehash' },
         { contract: ENSTokenUtils.ENS_REGISTRY_CONTRACT, tokenId: ENSTokenUtils.ensNameToLabelhash(fullName), label: 'BaseRegistrar/labelhash' }
       ];
+      // V2 registrations record the registrar address, but their token ID is the registry's
+      const assetContract = asset?.contract?.toLowerCase();
+      if ((assetContract === ENS_V2_REGISTRY || assetContract === ENS_V2_REGISTRAR) && asset?.tokenId) {
+        candidates.unshift({ contract: ENS_V2_REGISTRY, tokenId: asset.tokenId, label: 'ENSv2/tokenId' });
+      }
     } catch (error: any) {
       // viem's normalize() rejects names that are not valid ENS names (spaces, disallowed characters, ...)
       logger.warn(`EthID image skipped: "${fullName}" is not a normalizable ENS name (${error.message})`);
