@@ -446,7 +446,7 @@ export class PuppeteerImageService {
     // fallback); if EthID cannot serve the name, the ens.png placeholder is used.
     const resolvedCards = await Promise.all(
       data.topNames.map(async (card) => {
-        const nftCard = await EthIdImageService.fetchNftCard(card.ensName);
+        const nftCard = await EthIdImageService.fetchNftCard(card.ensName, { contract: card.nftContract, tokenId: card.nftTokenId });
         if (!nftCard) {
           logger.warn(`EthID NFT image unavailable for renewal card ${card.ensName}, using placeholder`);
         }

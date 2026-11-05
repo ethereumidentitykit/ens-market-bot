@@ -15,6 +15,7 @@ export class EmojiMappingService {
     private mappings: Map<string, EmojiMapping> = new Map();
     private initialized = false;
     private emojiAssetsPath: string;
+    private emojiPattern!: RegExp;
 
     constructor() {
         // Path to emoji assets relative to project root
@@ -55,6 +56,7 @@ export class EmojiMappingService {
                 }
             }
 
+            this.emojiPattern = this.buildEmojiPattern();
             this.initialized = true;
             logger.info(`EmojiMappingService initialized with ${mappedCount} mapped emojis`);
 
@@ -131,82 +133,22 @@ export class EmojiMappingService {
             await this.initialize();
         }
 
-        let result = text;
-        const processedPositions = new Set<number>();
+        let result = '';
+        let cursor = 0;
+        for (const match of text.matchAll(this.emojiPattern)) {
+            const svgContent = await this.getEmojiSvg(match[0]);
+            if (!svgContent) continue;
 
-        // Create a set of all possible emoji sequences to search for (including normalized variants)
-        const allSequences = new Set<string>();
-        
-        for (const [unicodeSequence] of this.mappings.entries()) {
-            // Add the original sequence
-            allSequences.add(unicodeSequence);
-            // Add the normalized sequence (without variation selectors)
-            const normalized = this.normalizeUnicodeSequence(unicodeSequence);
-            if (normalized !== unicodeSequence) {
-                allSequences.add(normalized);
-            }
+            result += text.slice(cursor, match.index) + this.createInlineSvg(svgContent);
+            cursor = match.index + match[0].length;
         }
-
-        // Sort by length (longest first) to prioritize complex sequences like ZWJ
-        const sortedSequences = Array.from(allSequences).sort((a, b) => b.length - a.length);
-
-        for (const unicodeSequence of sortedSequences) {
-            const regex = new RegExp(this.escapeRegExp(unicodeSequence), 'g');
-            let match;
-
-            while ((match = regex.exec(result)) !== null) {
-                const matchStart = match.index;
-                const matchEnd = match.index + match[0].length;
-
-                // Check if this position has already been processed (avoid double replacement)
-                const isOverlapping = Array.from(processedPositions).some(pos => 
-                    (pos >= matchStart && pos < matchEnd) || (matchStart >= pos && matchStart < pos + unicodeSequence.length)
-                );
-
-                if (!isOverlapping) {
-                    const svgContent = await this.getEmojiSvg(unicodeSequence);
-                    if (svgContent) {
-                        // Get the mapping for alt text - try exact match first, then normalized
-                        let mapping = this.mappings.get(unicodeSequence);
-                        if (!mapping) {
-                            const normalizedSequence = this.normalizeUnicodeSequence(unicodeSequence);
-                            mapping = this.mappings.get(normalizedSequence);
-                        }
-                        if (!mapping) {
-                            const normalizedInput = this.normalizeUnicodeSequence(unicodeSequence);
-                            for (const [key, value] of this.mappings.entries()) {
-                                if (this.normalizeUnicodeSequence(key) === normalizedInput) {
-                                    mapping = value;
-                                    break;
-                                }
-                            }
-                        }
-                        
-                        const altText = mapping?.detectedName || 'emoji';
-                        
-                        // Create inline SVG with proper styling for text integration
-                        const inlineSvg = this.createInlineSvg(svgContent, altText);
-                        result = result.substring(0, matchStart) + inlineSvg + result.substring(matchEnd);
-                        
-                        // Mark positions as processed
-                        for (let i = matchStart; i < matchEnd; i++) {
-                            processedPositions.add(i);
-                        }
-                        
-                        // Adjust regex lastIndex due to text change
-                        regex.lastIndex = matchStart + inlineSvg.length;
-                    }
-                }
-            }
-        }
-
-        return result;
+        return result + text.slice(cursor);
     }
 
     /**
      * Create an inline SVG element suitable for HTML integration
      */
-    private createInlineSvg(svgContent: string, altText: string): string {
+    private createInlineSvg(svgContent: string): string {
         // Add CSS classes and styling for proper text integration
         const styledSvg = svgContent
             .replace('<svg', '<svg class="emoji-inline" style="display: inline-block; vertical-align: middle; width: 1.2em; height: 1.2em;"')
@@ -215,6 +157,25 @@ export class EmojiMappingService {
             .trim();
 
         return styledSvg;
+    }
+
+    /**
+     * Matches any mapped sequence, with or without its variation selectors. Longest
+     * alternatives come first, so each match is the longest emoji at the leftmost
+     * position: ZWJ sequences stay whole and adjacent flags stay paired
+     * (🇨🇦🇩🇪 holds 🇦🇩 across its boundary).
+     */
+    private buildEmojiPattern(): RegExp {
+        const sequences = new Set<string>();
+        for (const sequence of this.mappings.keys()) {
+            sequences.add(sequence);
+            sequences.add(this.normalizeUnicodeSequence(sequence));
+        }
+
+        const alternatives = Array.from(sequences)
+            .sort((a, b) => b.length - a.length)
+            .map((sequence) => this.escapeRegExp(sequence));
+        return new RegExp(alternatives.join('|'), 'gu');
     }
 
     /**

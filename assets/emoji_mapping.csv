@@ -415,7 +415,7 @@ all/Woman Medium Dark Skin Tone.svg,Woman Medium Dark Skin Tone,👩🏾,1F469-1
 all/Office Worker Medium Skin Tone.svg,Office Worker Medium Skin Tone,🧑🏽‍💼,1F9D1-1F3FD-200D-1F4BC,mapped,profession|fq-correction
 all/Telephone Receiver.svg,Telephone Receiver,📞,1F4DE,mapped,lookup
 all/Palms Up Together Dark Skin Tone.svg,Palms Up Together Dark Skin Tone,🤲🏿,1F932-1F3FF,mapped,lookup+tone
-all/Question Mark.svg,Question Mark,?,003F,mapped,lookup
+all/Question Mark.svg,Question Mark,❓,2753,mapped,manual
 all/Kiss Person Woman Dark Skin Tone No Skin Tone.svg,Kiss Person Woman Dark Skin Tone No Skin Tone,🧑🏿‍❤️‍💋‍👩,1F9D1-1F3FF-200D-2764-FE0F-200D-1F48B-200D-1F469,mapped,special: kiss (PERSON WOMAN)
 all/Four Leaf Clover.svg,Four Leaf Clover,🍀,1F340,mapped,lookup
 all/Couple With Heart Woman Medium Light Skin Tone Woman No Skin Tone.svg,Couple With Heart Woman Medium Light Skin Tone Woman No Skin Tone,👩🏼‍❤️‍👩,1F469-1F3FC-200D-2764-FE0F-200D-1F469,mapped,special: couple-with-heart (WOMAN WOMAN)
@@ -824,7 +824,7 @@ all/Index Pointing Up Medium Skin Tone.svg,Index Pointing Up Medium Skin Tone,�
 all/Three Thirty.svg,Three Thirty,🕞,1F55E,mapped,alias2
 all/Yin Yang.svg,Yin Yang,☯️,262F-FE0F,mapped,lookup|fq-correction
 all/Relieved Face.svg,Relieved Face,😌,1F60C,mapped,lookup
-all/Red Hair.svg,Red Hair,🧑‍🦰,1F9D1-200D-1F9B0,mapped,hair-attr
+all/Red Hair.svg,Red Hair,🦰,1F9B0,mapped,manual
 all/Woman Farmer Light Skin Tone.svg,Woman Farmer Light Skin Tone,👩🏻‍🌾,1F469-1F3FB-200D-1F33E,mapped,profession|fq-correction
 all/Leo.svg,Leo,♌,264C,mapped,lookup
 all/Crying Cat.svg,Crying Cat,😿,1F63F,mapped,auto-cldr-exact
@@ -1265,7 +1265,7 @@ all/People Holding Hands Medium Light Skin Tone Medium Dark Skin Tone.svg,People
 all/Person Bowing.svg,Person Bowing,🙇,1F647,mapped,auto-cldr-exact
 all/Raised Hand Medium Skin Tone.svg,Raised Hand Medium Skin Tone,✋🏽,270B-1F3FD,mapped,lookup+tone
 all/Outbox Tray.svg,Outbox Tray,📤,1F4E4,mapped,lookup
-all/Exclamation Mark.svg,Exclamation Mark,!,0021,mapped,lookup
+all/Exclamation Mark.svg,Exclamation Mark,❗,2757,mapped,manual
 all/Man Pouting Medium Light Skin Tone.svg,Man Pouting Medium Light Skin Tone,🙎🏼‍♂️,1F64E-1F3FC-200D-2642-FE0F,mapped,auto-cldr-exact
 all/Telescope.svg,Telescope,🔭,1F52D,mapped,lookup
 all/Couple With Heart Woman Person No Skin Tone Medium Dark Skin.svg,Couple With Heart Woman Person No Skin Tone Medium Dark Skin,👩‍❤️‍🧑,1F469-200D-2764-FE0F-200D-1F9D1,mapped,special: couple-with-heart (WOMAN PERSON)
@@ -1397,7 +1397,7 @@ all/Flag Bosnia Herzegovina.svg,Flag Bosnia Herzegovina,🇧🇦,1F1E7-1F1E6,map
 all/Card File Box.svg,Card File Box,🗃️,1F5C3-FE0F,mapped,lookup|fq-correction
 all/Houses.svg,Houses,🏘️,1F3D8-FE0F,mapped,auto-cldr-exact
 all/Kiss Person Person Medium Skin Tone Light Skin Tone.svg,Kiss Person Person Medium Skin Tone Light Skin Tone,🧑🏽‍❤️‍💋‍🧑🏻,1F9D1-1F3FD-200D-2764-FE0F-200D-1F48B-200D-1F9D1-1F3FB,mapped,lookup+tone|fq-correction
-all/Person Blond Hair Medium Dark Skin Tone.svg,Person Blond Hair Medium Dark Skin Tone,👱,1F471,mapped,auto-cldr-fuzzy
+all/Person Blond Hair Medium Dark Skin Tone.svg,Person Blond Hair Medium Dark Skin Tone,👱🏾,1F471-1F3FE,mapped,manual
 all/Couple With Heart Person Man Dark Skin Tone Medium Dark Skin Tone.svg,Couple With Heart Person Man Dark Skin Tone Medium Dark Skin Tone,🧑🏾‍❤️‍👨🏿,1F9D1-1F3FE-200D-2764-FE0F-200D-1F468-1F3FF,mapped,special: couple-with-heart (PERSON MAN)
 all/Love Hotel.svg,Love Hotel,🏩,1F3E9,mapped,lookup
 all/Weary Cat.svg,Weary Cat,🙀,1F640,mapped,auto-cldr-exact
@@ -2029,7 +2029,7 @@ all/Building Construction.svg,Building Construction,🏗️,1F3D7-FE0F,mapped,lo
 all/Merperson Medium Skin Tone.svg,Merperson Medium Skin Tone,🧜🏽,1F9DC-1F3FD,mapped,lookup+tone
 all/Man Surfing.svg,Man Surfing,🏄‍♂️,1F3C4-200D-2642-FE0F,mapped,activity-person
 all/Elf Medium Dark Skin Tone.svg,Elf Medium Dark Skin Tone,🧝🏾,1F9DD-1F3FE,mapped,lookup+tone
-all/Person Blond Hair Medium Light Skin Tone.svg,Person Blond Hair Medium Light Skin Tone,👱,1F471,mapped,auto-cldr-fuzzy
+all/Person Blond Hair Medium Light Skin Tone.svg,Person Blond Hair Medium Light Skin Tone,👱🏼,1F471-1F3FC,mapped,manual
 all/Gear.svg,Gear,⚙️,2699-FE0F,mapped,lookup|fq-correction
 all/Om.svg,Om,🕉️,1F549-FE0F,mapped,auto-cldr-exact
 all/Couple With Heart Person Person Medium Dark Skin Tone Dark Skin Tone.svg,Couple With Heart Person Person Medium Dark Skin Tone Dark Skin Tone,🧑🏾‍❤️‍🧑🏿,1F9D1-1F3FE-200D-2764-FE0F-200D-1F9D1-1F3FF,mapped,lookup+tone|fq-correction
@@ -2252,7 +2252,7 @@ all/Couple With Heart Man Medium Dark Skin Tone Woman Light Skin Tone.svg,Couple
 all/Raised Fist Medium Skin Tone.svg,Raised Fist Medium Skin Tone,✊🏽,270A-1F3FD,mapped,lookup+tone
 all/Pouting Face.svg,Pouting Face,😡,1F621,mapped,lookup
 all/Person In Motorized Wheelchair Dark Skin Tone.svg,Person In Motorized Wheelchair Dark Skin Tone,🧑🏿‍🦼,1F9D1-1F3FF-200D-1F9BC,mapped,auto-cldr-exact
-all/Curly Hair.svg,Curly Hair,🧑‍🦱,1F9D1-200D-1F9B1,mapped,hair-attr
+all/Curly Hair.svg,Curly Hair,🦱,1F9B1,mapped,manual
 all/Couple With Heart Woman Person Medium Light Skin Tone.svg,Couple With Heart Woman Person Medium Light Skin Tone,👩🏼‍❤️‍🧑,1F469-1F3FC-200D-2764-FE0F-200D-1F9D1,mapped,special: couple-with-heart (WOMAN PERSON)
 all/Man Teacher Medium Skin Tone.svg,Man Teacher Medium Skin Tone,👨🏽‍🏫,1F468-1F3FD-200D-1F3EB,mapped,profession|fq-correction
 all/Mobile Phone Off.svg,Mobile Phone Off,📴,1F4F4,mapped,lookup
@@ -2306,7 +2306,7 @@ all/Baby Symbol.svg,Baby Symbol,🚼,1F6BC,mapped,lookup
 all/Woman Facepalming Medium Skin Tone.svg,Woman Facepalming Medium Skin Tone,🤦🏽‍♀️,1F926-1F3FD-200D-2640-FE0F,mapped,lookup+tone+gender
 all/Flag Iran.svg,Flag Iran,🇮🇷,1F1EE-1F1F7,mapped,flag
 all/Couple With Heart Person Man Medium Light Skin Tone No Skin Tone.svg,Couple With Heart Person Man Medium Light Skin Tone No Skin Tone,🧑🏼‍❤️‍👨,1F9D1-1F3FC-200D-2764-FE0F-200D-1F468,mapped,special: couple-with-heart (PERSON MAN)
-all/Bald.svg,Bald,🧑‍🦲,1F9D1-200D-1F9B2,mapped,hair-attr
+all/Bald.svg,Bald,🦲,1F9B2,mapped,manual
 all/Men Holding Hands Medium Skin Tone Medium Dark Skin Tone.svg,Men Holding Hands Medium Skin Tone Medium Dark Skin Tone,👨🏽‍🤝‍👨🏾,1F468-1F3FD-200D-1F91D-200D-1F468-1F3FE,mapped,translation-pass|fq-correction
 all/Syringe.svg,Syringe,💉,1F489,mapped,lookup
 all/Red Triangle Pointed Down.svg,Red Triangle Pointed Down,🔻,1F53B,mapped,auto-cldr-exact
@@ -2670,7 +2670,7 @@ all/Raised Back Of Hand Medium Dark Skin Tone.svg,Raised Back Of Hand Medium Dar
 all/Person Gesturing No Dark Skin Tone.svg,Person Gesturing No Dark Skin Tone,🙅🏿,1F645-1F3FF,mapped,auto-cldr-exact
 all/Man Climbing Light Skin Tone.svg,Man Climbing Light Skin Tone,🧗🏻‍♂️,1F9D7-1F3FB-200D-2642-FE0F,mapped,translation-pass
 all/Woman Medium Light Skin Tone Beard.svg,Woman Medium Light Skin Tone Beard,🧔🏼‍♀️,1F9D4-1F3FC-200D-2640-FE0F,mapped,translation-pass|fq-correction
-all/White Hair.svg,White Hair,🧑‍🦳,1F9D1-200D-1F9B3,mapped,hair-attr
+all/White Hair.svg,White Hair,🦳,1F9B3,mapped,manual
 all/Taurus.svg,Taurus,♉,2649,mapped,lookup
 all/Man Gesturing Ok Medium Dark Skin Tone.svg,Man Gesturing Ok Medium Dark Skin Tone,🙆🏾‍♂️,1F646-1F3FE-200D-2642-FE0F,mapped,auto-cldr-exact
 all/Sunrise Over Mountains.svg,Sunrise Over Mountains,🌄,1F304,mapped,lookup
@@ -3719,7 +3719,7 @@ all/Medium Skin Tone.svg,Medium Skin Tone,,,excluded,emoji_component_excluded
 all/Woman Astronaut Medium Skin Tone.svg,Woman Astronaut Medium Skin Tone,👩🏽‍🚀,1F469-1F3FD-200D-1F680,mapped,profession|fq-correction
 all/Kiss Man Person Medium Skin Tone Dark Skin Tone.svg,Kiss Man Person Medium Skin Tone Dark Skin Tone,👨🏽‍❤️‍💋‍🧑🏿,1F468-1F3FD-200D-2764-FE0F-200D-1F48B-200D-1F9D1-1F3FF,mapped,special: kiss (MAN PERSON)
 all/Couple With Heart Person Person Light Skin Tone Medium Skin Tone.svg,Couple With Heart Person Person Light Skin Tone Medium Skin Tone,🧑🏻‍❤️‍🧑🏽,1F9D1-1F3FB-200D-2764-FE0F-200D-1F9D1-1F3FD,mapped,lookup+tone|fq-correction
-all/Flag Ceuta Melilla.svg,Flag Ceuta Melilla,,,excluded,non-rgi_flag_excluded
+all/Flag Ceuta Melilla.svg,Flag Ceuta Melilla,🇪🇦,1F1EA-1F1E6,mapped,manual
 all/Man Biking Medium Light Skin Tone.svg,Man Biking Medium Light Skin Tone,🚴🏼‍♂️,1F6B4-1F3FC-200D-2642-FE0F,mapped,activity-person
 all/Person Bowing Medium Skin Tone.svg,Person Bowing Medium Skin Tone,🙇🏽,1F647-1F3FD,mapped,auto-cldr-exact
 all/Kiss Woman No Skin Tone Woman Medium Skin Tone.svg,Kiss Woman No Skin Tone Woman Medium Skin Tone,👩🏽‍❤️‍💋‍👩,1F469-1F3FD-200D-2764-FE0F-200D-1F48B-200D-1F469,mapped,special: kiss (WOMAN WOMAN)
@@ -3766,7 +3766,7 @@ all/Elf Dark Skin Tone.svg,Elf Dark Skin Tone,🧝🏿,1F9DD-1F3FF,mapped,lookup
 all/Exploding Head.svg,Exploding Head,🤯,1F92F,mapped,auto-cldr-exact
 all/Kiss Man Man Medium Light Skin Tone Light Skin Tone.svg,Kiss Man Man Medium Light Skin Tone Light Skin Tone,👨🏼‍❤️‍💋‍👨🏻,1F468-1F3FC-200D-2764-FE0F-200D-1F48B-200D-1F468-1F3FB,mapped,lookup+tone+gender|fq-correction
 all/Couple With Heart Man No Skin Tone Man Dark Skin Tone.svg,Couple With Heart Man No Skin Tone Man Dark Skin Tone,👨🏿‍❤️‍👨,1F468-1F3FF-200D-2764-FE0F-200D-1F468,mapped,special: couple-with-heart (MAN MAN)
-all/Person Blond Hair Dark Skin Tone.svg,Person Blond Hair Dark Skin Tone,👱,1F471,mapped,auto-cldr-fuzzy
+all/Person Blond Hair Dark Skin Tone.svg,Person Blond Hair Dark Skin Tone,👱🏿,1F471-1F3FF,mapped,manual
 all/Crossed Flags.svg,Crossed Flags,🎌,1F38C,mapped,lookup
 all/Person Pouting Light Skin Tone.svg,Person Pouting Light Skin Tone,🙎🏻,1F64E-1F3FB,mapped,auto-cldr-exact
 all/Man Bouncing Ball Medium Dark Skin Tone.svg,Man Bouncing Ball Medium Dark Skin Tone,⛹🏾‍♂️,26F9-1F3FE-200D-2642-FE0F,mapped,activity-person
@@ -3809,7 +3809,7 @@ all/Basket.svg,Basket,🧺,1F9FA,mapped,lookup
 all/Kiss Woman Person.svg,Kiss Woman Person,👩‍❤️‍💋‍🧑,1F469-200D-2764-FE0F-200D-1F48B-200D-1F9D1,mapped,special: kiss (WOMAN PERSON)
 all/Eight Spoked Asterisk.svg,Eight Spoked Asterisk,✳️,2733-FE0F,mapped,lookup|fq-correction
 all/Woman Student Medium Skin Tone.svg,Woman Student Medium Skin Tone,👩🏽‍🎓,1F469-1F3FD-200D-1F393,mapped,profession|fq-correction
-all/Person Blond Hair Light Skin Tone.svg,Person Blond Hair Light Skin Tone,👱,1F471,mapped,auto-cldr-fuzzy
+all/Person Blond Hair Light Skin Tone.svg,Person Blond Hair Light Skin Tone,👱🏻,1F471-1F3FB,mapped,manual
 all/Woman Biking Light Skin Tone.svg,Woman Biking Light Skin Tone,🚴🏻‍♀️,1F6B4-1F3FB-200D-2640-FE0F,mapped,activity-person
 all/Flag Croatia.svg,Flag Croatia,🇭🇷,1F1ED-1F1F7,mapped,flag
 all/Jack O Lantern.svg,Jack O Lantern,🎃,1F383,mapped,auto-cldr-exact
@@ -3872,7 +3872,7 @@ all/Cherries.svg,Cherries,🍒,1F352,mapped,lookup
 all/Hamster.svg,Hamster,🐹,1F439,mapped,auto-cldr-exact
 all/Kiss Woman Man Medium Dark Skin Tone Medium Skin Tone.svg,Kiss Woman Man Medium Dark Skin Tone Medium Skin Tone,👩🏾‍❤️‍💋‍👨🏽,1F469-1F3FE-200D-2764-FE0F-200D-1F48B-200D-1F468-1F3FD,mapped,special: kiss (WOMAN MAN)
 all/Flag French Southern Territories.svg,Flag French Southern Territories,🇹🇫,1F1F9-1F1EB,mapped,flag
-all/Person Blond Hair Medium Skin Tone.svg,Person Blond Hair Medium Skin Tone,👱,1F471,mapped,auto-cldr-fuzzy
+all/Person Blond Hair Medium Skin Tone.svg,Person Blond Hair Medium Skin Tone,👱🏽,1F471-1F3FD,mapped,manual
 all/Woman And Man Holding Hands Medium Dark Skin Tone Light Skin Tone.svg,Woman And Man Holding Hands Medium Dark Skin Tone Light Skin Tone,👩🏾‍🤝‍👨🏻,1F469-1F3FE-200D-1F91D-200D-1F468-1F3FB,mapped,translation-pass
 all/Woman Astronaut Light Skin Tone.svg,Woman Astronaut Light Skin Tone,👩🏻‍🚀,1F469-1F3FB-200D-1F680,mapped,profession|fq-correction
 all/Man Health Worker Medium Light Skin Tone.svg,Man Health Worker Medium Light Skin Tone,👨🏼‍⚕️,1F468-1F3FC-200D-2695-FE0F,mapped,translation-pass
@@ -3962,3 +3962,295 @@ all/Person Standing Medium Light Skin Tone.svg,Person Standing Medium Light Skin
 all/Kiss Man Person Medium Light Skin Tone Medium Dark Skin Tone.svg,Kiss Man Person Medium Light Skin Tone Medium Dark Skin Tone,👨🏼‍❤️‍💋‍🧑🏾,1F468-1F3FC-200D-2764-FE0F-200D-1F48B-200D-1F9D1-1F3FE,mapped,special: kiss (MAN PERSON)
 all/Man Playing Handball Medium Dark Skin Tone.svg,Man Playing Handball Medium Dark Skin Tone,🤾🏾‍♂️,1F93E-1F3FE-200D-2642-FE0F,mapped,activity-person
 all/Phoenix.svg,Phoenix,🐦‍🔥,1F426-200D-1F525,mapped,manual
+all/Female Sign.svg,Female Sign,♀️,2640-FE0F,mapped,apple-color-emoji-font
+all/Male Sign.svg,Male Sign,♂️,2642-FE0F,mapped,apple-color-emoji-font
+all/Medical Symbol.svg,Medical Symbol,⚕️,2695-FE0F,mapped,apple-color-emoji-font
+all/Flag Diego Garcia.svg,Flag Diego Garcia,🇩🇬,1F1E9-1F1EC,mapped,emoji-datasource-apple@16.0.0
+all/Flag Spain.svg,Flag Spain,🇪🇸,1F1EA-1F1F8,mapped,emoji-datasource-apple@16.0.0
+all/Flag France.svg,Flag France,🇫🇷,1F1EB-1F1F7,mapped,emoji-datasource-apple@16.0.0
+all/Flag Heard And Mcdonald Islands.svg,Flag Heard And Mcdonald Islands,🇭🇲,1F1ED-1F1F2,mapped,emoji-datasource-apple@16.0.0
+all/Flag St Martin.svg,Flag St Martin,🇲🇫,1F1F2-1F1EB,mapped,emoji-datasource-apple@16.0.0
+all/Flag Norway.svg,Flag Norway,🇳🇴,1F1F3-1F1F4,mapped,emoji-datasource-apple@16.0.0
+all/Flag St Helena.svg,Flag St Helena,🇸🇭,1F1F8-1F1ED,mapped,emoji-datasource-apple@16.0.0
+all/Flag Svalbard And Jan Mayen.svg,Flag Svalbard And Jan Mayen,🇸🇯,1F1F8-1F1EF,mapped,emoji-datasource-apple@16.0.0
+all/Flag Tristan Da Cunha.svg,Flag Tristan Da Cunha,🇹🇦,1F1F9-1F1E6,mapped,emoji-datasource-apple@16.0.0
+all/Flag United States.svg,Flag United States,🇺🇸,1F1FA-1F1F8,mapped,emoji-datasource-apple@16.0.0
+all/Snowboarder Light Skin Tone.svg,Snowboarder Light Skin Tone,🏂🏻,1F3C2-1F3FB,mapped,emoji-datasource-apple@16.0.0
+all/Snowboarder Medium Light Skin Tone.svg,Snowboarder Medium Light Skin Tone,🏂🏼,1F3C2-1F3FC,mapped,emoji-datasource-apple@16.0.0
+all/Snowboarder Medium Skin Tone.svg,Snowboarder Medium Skin Tone,🏂🏽,1F3C2-1F3FD,mapped,emoji-datasource-apple@16.0.0
+all/Snowboarder Medium Dark Skin Tone.svg,Snowboarder Medium Dark Skin Tone,🏂🏾,1F3C2-1F3FE,mapped,emoji-datasource-apple@16.0.0
+all/Snowboarder Dark Skin Tone.svg,Snowboarder Dark Skin Tone,🏂🏿,1F3C2-1F3FF,mapped,emoji-datasource-apple@16.0.0
+all/Sleeping Accommodation Light Skin Tone.svg,Sleeping Accommodation Light Skin Tone,🛌🏻,1F6CC-1F3FB,mapped,emoji-datasource-apple@16.0.0
+all/Sleeping Accommodation Medium Light Skin Tone.svg,Sleeping Accommodation Medium Light Skin Tone,🛌🏼,1F6CC-1F3FC,mapped,emoji-datasource-apple@16.0.0
+all/Sleeping Accommodation Medium Skin Tone.svg,Sleeping Accommodation Medium Skin Tone,🛌🏽,1F6CC-1F3FD,mapped,emoji-datasource-apple@16.0.0
+all/Sleeping Accommodation Medium Dark Skin Tone.svg,Sleeping Accommodation Medium Dark Skin Tone,🛌🏾,1F6CC-1F3FE,mapped,emoji-datasource-apple@16.0.0
+all/Sleeping Accommodation Dark Skin Tone.svg,Sleeping Accommodation Dark Skin Tone,🛌🏿,1F6CC-1F3FF,mapped,emoji-datasource-apple@16.0.0
+all/Wireless.svg,Wireless,🛜,1F6DC,mapped,emoji-datasource-apple@16.0.0
+all/Playground Slide.svg,Playground Slide,🛝,1F6DD,mapped,emoji-datasource-apple@16.0.0
+all/Wheel.svg,Wheel,🛞,1F6DE,mapped,emoji-datasource-apple@16.0.0
+all/Ring Buoy.svg,Ring Buoy,🛟,1F6DF,mapped,emoji-datasource-apple@16.0.0
+all/Heavy Equals Sign.svg,Heavy Equals Sign,🟰,1F7F0,mapped,emoji-datasource-apple@16.0.0
+all/Handshake Light Skin Tone.svg,Handshake Light Skin Tone,🤝🏻,1F91D-1F3FB,mapped,emoji-datasource-apple@16.0.0
+all/Handshake Medium Light Skin Tone.svg,Handshake Medium Light Skin Tone,🤝🏼,1F91D-1F3FC,mapped,emoji-datasource-apple@16.0.0
+all/Handshake Medium Skin Tone.svg,Handshake Medium Skin Tone,🤝🏽,1F91D-1F3FD,mapped,emoji-datasource-apple@16.0.0
+all/Handshake Medium Dark Skin Tone.svg,Handshake Medium Dark Skin Tone,🤝🏾,1F91D-1F3FE,mapped,emoji-datasource-apple@16.0.0
+all/Handshake Dark Skin Tone.svg,Handshake Dark Skin Tone,🤝🏿,1F91D-1F3FF,mapped,emoji-datasource-apple@16.0.0
+all/Face Holding Back Tears.svg,Face Holding Back Tears,🥹,1F979,mapped,emoji-datasource-apple@16.0.0
+all/Troll.svg,Troll,🧌,1F9CC,mapped,emoji-datasource-apple@16.0.0
+all/Light Blue Heart.svg,Light Blue Heart,🩵,1FA75,mapped,emoji-datasource-apple@16.0.0
+all/Grey Heart.svg,Grey Heart,🩶,1FA76,mapped,emoji-datasource-apple@16.0.0
+all/Pink Heart.svg,Pink Heart,🩷,1FA77,mapped,emoji-datasource-apple@16.0.0
+all/X Ray.svg,X Ray,🩻,1FA7B,mapped,emoji-datasource-apple@16.0.0
+all/Crutch.svg,Crutch,🩼,1FA7C,mapped,emoji-datasource-apple@16.0.0
+all/Maracas.svg,Maracas,🪇,1FA87,mapped,emoji-datasource-apple@16.0.0
+all/Flute.svg,Flute,🪈,1FA88,mapped,emoji-datasource-apple@16.0.0
+all/Mirror Ball.svg,Mirror Ball,🪩,1FAA9,mapped,emoji-datasource-apple@16.0.0
+all/Identification Card.svg,Identification Card,🪪,1FAAA,mapped,emoji-datasource-apple@16.0.0
+all/Low Battery.svg,Low Battery,🪫,1FAAB,mapped,emoji-datasource-apple@16.0.0
+all/Hamsa.svg,Hamsa,🪬,1FAAC,mapped,emoji-datasource-apple@16.0.0
+all/Folding Hand Fan.svg,Folding Hand Fan,🪭,1FAAD,mapped,emoji-datasource-apple@16.0.0
+all/Hair Pick.svg,Hair Pick,🪮,1FAAE,mapped,emoji-datasource-apple@16.0.0
+all/Khanda.svg,Khanda,🪯,1FAAF,mapped,emoji-datasource-apple@16.0.0
+all/Lotus.svg,Lotus,🪷,1FAB7,mapped,emoji-datasource-apple@16.0.0
+all/Coral.svg,Coral,🪸,1FAB8,mapped,emoji-datasource-apple@16.0.0
+all/Empty Nest.svg,Empty Nest,🪹,1FAB9,mapped,emoji-datasource-apple@16.0.0
+all/Nest With Eggs.svg,Nest With Eggs,🪺,1FABA,mapped,emoji-datasource-apple@16.0.0
+all/Hyacinth.svg,Hyacinth,🪻,1FABB,mapped,emoji-datasource-apple@16.0.0
+all/Jellyfish.svg,Jellyfish,🪼,1FABC,mapped,emoji-datasource-apple@16.0.0
+all/Wing.svg,Wing,🪽,1FABD,mapped,emoji-datasource-apple@16.0.0
+all/Goose.svg,Goose,🪿,1FABF,mapped,emoji-datasource-apple@16.0.0
+all/Pregnant Man.svg,Pregnant Man,🫃,1FAC3,mapped,emoji-datasource-apple@16.0.0
+all/Pregnant Man Light Skin Tone.svg,Pregnant Man Light Skin Tone,🫃🏻,1FAC3-1F3FB,mapped,emoji-datasource-apple@16.0.0
+all/Pregnant Man Medium Light Skin Tone.svg,Pregnant Man Medium Light Skin Tone,🫃🏼,1FAC3-1F3FC,mapped,emoji-datasource-apple@16.0.0
+all/Pregnant Man Medium Skin Tone.svg,Pregnant Man Medium Skin Tone,🫃🏽,1FAC3-1F3FD,mapped,emoji-datasource-apple@16.0.0
+all/Pregnant Man Medium Dark Skin Tone.svg,Pregnant Man Medium Dark Skin Tone,🫃🏾,1FAC3-1F3FE,mapped,emoji-datasource-apple@16.0.0
+all/Pregnant Man Dark Skin Tone.svg,Pregnant Man Dark Skin Tone,🫃🏿,1FAC3-1F3FF,mapped,emoji-datasource-apple@16.0.0
+all/Pregnant Person.svg,Pregnant Person,🫄,1FAC4,mapped,emoji-datasource-apple@16.0.0
+all/Pregnant Person Light Skin Tone.svg,Pregnant Person Light Skin Tone,🫄🏻,1FAC4-1F3FB,mapped,emoji-datasource-apple@16.0.0
+all/Pregnant Person Medium Light Skin Tone.svg,Pregnant Person Medium Light Skin Tone,🫄🏼,1FAC4-1F3FC,mapped,emoji-datasource-apple@16.0.0
+all/Pregnant Person Medium Skin Tone.svg,Pregnant Person Medium Skin Tone,🫄🏽,1FAC4-1F3FD,mapped,emoji-datasource-apple@16.0.0
+all/Pregnant Person Medium Dark Skin Tone.svg,Pregnant Person Medium Dark Skin Tone,🫄🏾,1FAC4-1F3FE,mapped,emoji-datasource-apple@16.0.0
+all/Pregnant Person Dark Skin Tone.svg,Pregnant Person Dark Skin Tone,🫄🏿,1FAC4-1F3FF,mapped,emoji-datasource-apple@16.0.0
+all/Person With Crown.svg,Person With Crown,🫅,1FAC5,mapped,emoji-datasource-apple@16.0.0
+all/Person With Crown Light Skin Tone.svg,Person With Crown Light Skin Tone,🫅🏻,1FAC5-1F3FB,mapped,emoji-datasource-apple@16.0.0
+all/Person With Crown Medium Light Skin Tone.svg,Person With Crown Medium Light Skin Tone,🫅🏼,1FAC5-1F3FC,mapped,emoji-datasource-apple@16.0.0
+all/Person With Crown Medium Skin Tone.svg,Person With Crown Medium Skin Tone,🫅🏽,1FAC5-1F3FD,mapped,emoji-datasource-apple@16.0.0
+all/Person With Crown Medium Dark Skin Tone.svg,Person With Crown Medium Dark Skin Tone,🫅🏾,1FAC5-1F3FE,mapped,emoji-datasource-apple@16.0.0
+all/Person With Crown Dark Skin Tone.svg,Person With Crown Dark Skin Tone,🫅🏿,1FAC5-1F3FF,mapped,emoji-datasource-apple@16.0.0
+all/Moose.svg,Moose,🫎,1FACE,mapped,emoji-datasource-apple@16.0.0
+all/Donkey.svg,Donkey,🫏,1FACF,mapped,emoji-datasource-apple@16.0.0
+all/Pouring Liquid.svg,Pouring Liquid,🫗,1FAD7,mapped,emoji-datasource-apple@16.0.0
+all/Beans.svg,Beans,🫘,1FAD8,mapped,emoji-datasource-apple@16.0.0
+all/Jar.svg,Jar,🫙,1FAD9,mapped,emoji-datasource-apple@16.0.0
+all/Ginger Root.svg,Ginger Root,🫚,1FADA,mapped,emoji-datasource-apple@16.0.0
+all/Pea Pod.svg,Pea Pod,🫛,1FADB,mapped,emoji-datasource-apple@16.0.0
+all/Melting Face.svg,Melting Face,🫠,1FAE0,mapped,emoji-datasource-apple@16.0.0
+all/Saluting Face.svg,Saluting Face,🫡,1FAE1,mapped,emoji-datasource-apple@16.0.0
+all/Face With Open Eyes And Hand Over Mouth.svg,Face With Open Eyes And Hand Over Mouth,🫢,1FAE2,mapped,emoji-datasource-apple@16.0.0
+all/Face With Peeking Eye.svg,Face With Peeking Eye,🫣,1FAE3,mapped,emoji-datasource-apple@16.0.0
+all/Face With Diagonal Mouth.svg,Face With Diagonal Mouth,🫤,1FAE4,mapped,emoji-datasource-apple@16.0.0
+all/Dotted Line Face.svg,Dotted Line Face,🫥,1FAE5,mapped,emoji-datasource-apple@16.0.0
+all/Biting Lip.svg,Biting Lip,🫦,1FAE6,mapped,emoji-datasource-apple@16.0.0
+all/Bubbles.svg,Bubbles,🫧,1FAE7,mapped,emoji-datasource-apple@16.0.0
+all/Shaking Face.svg,Shaking Face,🫨,1FAE8,mapped,emoji-datasource-apple@16.0.0
+all/Hand With Index Finger And Thumb Crossed.svg,Hand With Index Finger And Thumb Crossed,🫰,1FAF0,mapped,emoji-datasource-apple@16.0.0
+all/Hand With Index Finger And Thumb Crossed Light Skin Tone.svg,Hand With Index Finger And Thumb Crossed Light Skin Tone,🫰🏻,1FAF0-1F3FB,mapped,emoji-datasource-apple@16.0.0
+all/Hand With Index Finger And Thumb Crossed Medium Light Skin Tone.svg,Hand With Index Finger And Thumb Crossed Medium Light Skin Tone,🫰🏼,1FAF0-1F3FC,mapped,emoji-datasource-apple@16.0.0
+all/Hand With Index Finger And Thumb Crossed Medium Skin Tone.svg,Hand With Index Finger And Thumb Crossed Medium Skin Tone,🫰🏽,1FAF0-1F3FD,mapped,emoji-datasource-apple@16.0.0
+all/Hand With Index Finger And Thumb Crossed Medium Dark Skin Tone.svg,Hand With Index Finger And Thumb Crossed Medium Dark Skin Tone,🫰🏾,1FAF0-1F3FE,mapped,emoji-datasource-apple@16.0.0
+all/Hand With Index Finger And Thumb Crossed Dark Skin Tone.svg,Hand With Index Finger And Thumb Crossed Dark Skin Tone,🫰🏿,1FAF0-1F3FF,mapped,emoji-datasource-apple@16.0.0
+all/Rightwards Hand.svg,Rightwards Hand,🫱,1FAF1,mapped,emoji-datasource-apple@16.0.0
+all/Rightwards Hand Light Skin Tone.svg,Rightwards Hand Light Skin Tone,🫱🏻,1FAF1-1F3FB,mapped,emoji-datasource-apple@16.0.0
+all/Rightwards Hand Medium Light Skin Tone.svg,Rightwards Hand Medium Light Skin Tone,🫱🏼,1FAF1-1F3FC,mapped,emoji-datasource-apple@16.0.0
+all/Rightwards Hand Medium Skin Tone.svg,Rightwards Hand Medium Skin Tone,🫱🏽,1FAF1-1F3FD,mapped,emoji-datasource-apple@16.0.0
+all/Rightwards Hand Medium Dark Skin Tone.svg,Rightwards Hand Medium Dark Skin Tone,🫱🏾,1FAF1-1F3FE,mapped,emoji-datasource-apple@16.0.0
+all/Rightwards Hand Dark Skin Tone.svg,Rightwards Hand Dark Skin Tone,🫱🏿,1FAF1-1F3FF,mapped,emoji-datasource-apple@16.0.0
+all/Leftwards Hand.svg,Leftwards Hand,🫲,1FAF2,mapped,emoji-datasource-apple@16.0.0
+all/Leftwards Hand Light Skin Tone.svg,Leftwards Hand Light Skin Tone,🫲🏻,1FAF2-1F3FB,mapped,emoji-datasource-apple@16.0.0
+all/Leftwards Hand Medium Light Skin Tone.svg,Leftwards Hand Medium Light Skin Tone,🫲🏼,1FAF2-1F3FC,mapped,emoji-datasource-apple@16.0.0
+all/Leftwards Hand Medium Skin Tone.svg,Leftwards Hand Medium Skin Tone,🫲🏽,1FAF2-1F3FD,mapped,emoji-datasource-apple@16.0.0
+all/Leftwards Hand Medium Dark Skin Tone.svg,Leftwards Hand Medium Dark Skin Tone,🫲🏾,1FAF2-1F3FE,mapped,emoji-datasource-apple@16.0.0
+all/Leftwards Hand Dark Skin Tone.svg,Leftwards Hand Dark Skin Tone,🫲🏿,1FAF2-1F3FF,mapped,emoji-datasource-apple@16.0.0
+all/Palm Down Hand.svg,Palm Down Hand,🫳,1FAF3,mapped,emoji-datasource-apple@16.0.0
+all/Palm Down Hand Light Skin Tone.svg,Palm Down Hand Light Skin Tone,🫳🏻,1FAF3-1F3FB,mapped,emoji-datasource-apple@16.0.0
+all/Palm Down Hand Medium Light Skin Tone.svg,Palm Down Hand Medium Light Skin Tone,🫳🏼,1FAF3-1F3FC,mapped,emoji-datasource-apple@16.0.0
+all/Palm Down Hand Medium Skin Tone.svg,Palm Down Hand Medium Skin Tone,🫳🏽,1FAF3-1F3FD,mapped,emoji-datasource-apple@16.0.0
+all/Palm Down Hand Medium Dark Skin Tone.svg,Palm Down Hand Medium Dark Skin Tone,🫳🏾,1FAF3-1F3FE,mapped,emoji-datasource-apple@16.0.0
+all/Palm Down Hand Dark Skin Tone.svg,Palm Down Hand Dark Skin Tone,🫳🏿,1FAF3-1F3FF,mapped,emoji-datasource-apple@16.0.0
+all/Palm Up Hand.svg,Palm Up Hand,🫴,1FAF4,mapped,emoji-datasource-apple@16.0.0
+all/Palm Up Hand Light Skin Tone.svg,Palm Up Hand Light Skin Tone,🫴🏻,1FAF4-1F3FB,mapped,emoji-datasource-apple@16.0.0
+all/Palm Up Hand Medium Light Skin Tone.svg,Palm Up Hand Medium Light Skin Tone,🫴🏼,1FAF4-1F3FC,mapped,emoji-datasource-apple@16.0.0
+all/Palm Up Hand Medium Skin Tone.svg,Palm Up Hand Medium Skin Tone,🫴🏽,1FAF4-1F3FD,mapped,emoji-datasource-apple@16.0.0
+all/Palm Up Hand Medium Dark Skin Tone.svg,Palm Up Hand Medium Dark Skin Tone,🫴🏾,1FAF4-1F3FE,mapped,emoji-datasource-apple@16.0.0
+all/Palm Up Hand Dark Skin Tone.svg,Palm Up Hand Dark Skin Tone,🫴🏿,1FAF4-1F3FF,mapped,emoji-datasource-apple@16.0.0
+all/Index Pointing At The Viewer.svg,Index Pointing At The Viewer,🫵,1FAF5,mapped,emoji-datasource-apple@16.0.0
+all/Index Pointing At The Viewer Light Skin Tone.svg,Index Pointing At The Viewer Light Skin Tone,🫵🏻,1FAF5-1F3FB,mapped,emoji-datasource-apple@16.0.0
+all/Index Pointing At The Viewer Medium Light Skin Tone.svg,Index Pointing At The Viewer Medium Light Skin Tone,🫵🏼,1FAF5-1F3FC,mapped,emoji-datasource-apple@16.0.0
+all/Index Pointing At The Viewer Medium Skin Tone.svg,Index Pointing At The Viewer Medium Skin Tone,🫵🏽,1FAF5-1F3FD,mapped,emoji-datasource-apple@16.0.0
+all/Index Pointing At The Viewer Medium Dark Skin Tone.svg,Index Pointing At The Viewer Medium Dark Skin Tone,🫵🏾,1FAF5-1F3FE,mapped,emoji-datasource-apple@16.0.0
+all/Index Pointing At The Viewer Dark Skin Tone.svg,Index Pointing At The Viewer Dark Skin Tone,🫵🏿,1FAF5-1F3FF,mapped,emoji-datasource-apple@16.0.0
+all/Heart Hands.svg,Heart Hands,🫶,1FAF6,mapped,emoji-datasource-apple@16.0.0
+all/Heart Hands Light Skin Tone.svg,Heart Hands Light Skin Tone,🫶🏻,1FAF6-1F3FB,mapped,emoji-datasource-apple@16.0.0
+all/Heart Hands Medium Light Skin Tone.svg,Heart Hands Medium Light Skin Tone,🫶🏼,1FAF6-1F3FC,mapped,emoji-datasource-apple@16.0.0
+all/Heart Hands Medium Skin Tone.svg,Heart Hands Medium Skin Tone,🫶🏽,1FAF6-1F3FD,mapped,emoji-datasource-apple@16.0.0
+all/Heart Hands Medium Dark Skin Tone.svg,Heart Hands Medium Dark Skin Tone,🫶🏾,1FAF6-1F3FE,mapped,emoji-datasource-apple@16.0.0
+all/Heart Hands Dark Skin Tone.svg,Heart Hands Dark Skin Tone,🫶🏿,1FAF6-1F3FF,mapped,emoji-datasource-apple@16.0.0
+all/Leftwards Pushing Hand.svg,Leftwards Pushing Hand,🫷,1FAF7,mapped,emoji-datasource-apple@16.0.0
+all/Leftwards Pushing Hand Light Skin Tone.svg,Leftwards Pushing Hand Light Skin Tone,🫷🏻,1FAF7-1F3FB,mapped,emoji-datasource-apple@16.0.0
+all/Leftwards Pushing Hand Medium Light Skin Tone.svg,Leftwards Pushing Hand Medium Light Skin Tone,🫷🏼,1FAF7-1F3FC,mapped,emoji-datasource-apple@16.0.0
+all/Leftwards Pushing Hand Medium Skin Tone.svg,Leftwards Pushing Hand Medium Skin Tone,🫷🏽,1FAF7-1F3FD,mapped,emoji-datasource-apple@16.0.0
+all/Leftwards Pushing Hand Medium Dark Skin Tone.svg,Leftwards Pushing Hand Medium Dark Skin Tone,🫷🏾,1FAF7-1F3FE,mapped,emoji-datasource-apple@16.0.0
+all/Leftwards Pushing Hand Dark Skin Tone.svg,Leftwards Pushing Hand Dark Skin Tone,🫷🏿,1FAF7-1F3FF,mapped,emoji-datasource-apple@16.0.0
+all/Rightwards Pushing Hand.svg,Rightwards Pushing Hand,🫸,1FAF8,mapped,emoji-datasource-apple@16.0.0
+all/Rightwards Pushing Hand Light Skin Tone.svg,Rightwards Pushing Hand Light Skin Tone,🫸🏻,1FAF8-1F3FB,mapped,emoji-datasource-apple@16.0.0
+all/Rightwards Pushing Hand Medium Light Skin Tone.svg,Rightwards Pushing Hand Medium Light Skin Tone,🫸🏼,1FAF8-1F3FC,mapped,emoji-datasource-apple@16.0.0
+all/Rightwards Pushing Hand Medium Skin Tone.svg,Rightwards Pushing Hand Medium Skin Tone,🫸🏽,1FAF8-1F3FD,mapped,emoji-datasource-apple@16.0.0
+all/Rightwards Pushing Hand Medium Dark Skin Tone.svg,Rightwards Pushing Hand Medium Dark Skin Tone,🫸🏾,1FAF8-1F3FE,mapped,emoji-datasource-apple@16.0.0
+all/Rightwards Pushing Hand Dark Skin Tone.svg,Rightwards Pushing Hand Dark Skin Tone,🫸🏿,1FAF8-1F3FF,mapped,emoji-datasource-apple@16.0.0
+all/Brown Mushroom.svg,Brown Mushroom,🍄‍🟫,1F344-200D-1F7EB,mapped,emoji-datasource-apple@16.0.0
+all/Black Bird.svg,Black Bird,🐦‍⬛,1F426-200D-2B1B,mapped,emoji-datasource-apple@16.0.0
+all/Family Adult Child.svg,Family Adult Child,🧑‍🧒,1F9D1-200D-1F9D2,mapped,emoji-datasource-apple@16.0.0
+all/Broken Chain.svg,Broken Chain,⛓️‍💥,26D3-FE0F-200D-1F4A5,mapped,emoji-datasource-apple@16.0.0
+all/Person Running Facing Right.svg,Person Running Facing Right,🏃‍➡️,1F3C3-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Head Shaking Horizontally.svg,Head Shaking Horizontally,🙂‍↔️,1F642-200D-2194-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Head Shaking Vertically.svg,Head Shaking Vertically,🙂‍↕️,1F642-200D-2195-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person Walking Facing Right.svg,Person Walking Facing Right,🚶‍➡️,1F6B6-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person Kneeling Facing Right.svg,Person Kneeling Facing Right,🧎‍➡️,1F9CE-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person Running Facing Right Light Skin Tone.svg,Person Running Facing Right Light Skin Tone,🏃🏻‍➡️,1F3C3-1F3FB-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person Running Facing Right Medium Light Skin Tone.svg,Person Running Facing Right Medium Light Skin Tone,🏃🏼‍➡️,1F3C3-1F3FC-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person Running Facing Right Medium Skin Tone.svg,Person Running Facing Right Medium Skin Tone,🏃🏽‍➡️,1F3C3-1F3FD-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person Running Facing Right Medium Dark Skin Tone.svg,Person Running Facing Right Medium Dark Skin Tone,🏃🏾‍➡️,1F3C3-1F3FE-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person Running Facing Right Dark Skin Tone.svg,Person Running Facing Right Dark Skin Tone,🏃🏿‍➡️,1F3C3-1F3FF-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person Walking Facing Right Light Skin Tone.svg,Person Walking Facing Right Light Skin Tone,🚶🏻‍➡️,1F6B6-1F3FB-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person Walking Facing Right Medium Light Skin Tone.svg,Person Walking Facing Right Medium Light Skin Tone,🚶🏼‍➡️,1F6B6-1F3FC-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person Walking Facing Right Medium Skin Tone.svg,Person Walking Facing Right Medium Skin Tone,🚶🏽‍➡️,1F6B6-1F3FD-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person Walking Facing Right Medium Dark Skin Tone.svg,Person Walking Facing Right Medium Dark Skin Tone,🚶🏾‍➡️,1F6B6-1F3FE-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person Walking Facing Right Dark Skin Tone.svg,Person Walking Facing Right Dark Skin Tone,🚶🏿‍➡️,1F6B6-1F3FF-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person Kneeling Facing Right Light Skin Tone.svg,Person Kneeling Facing Right Light Skin Tone,🧎🏻‍➡️,1F9CE-1F3FB-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person Kneeling Facing Right Medium Light Skin Tone.svg,Person Kneeling Facing Right Medium Light Skin Tone,🧎🏼‍➡️,1F9CE-1F3FC-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person Kneeling Facing Right Medium Skin Tone.svg,Person Kneeling Facing Right Medium Skin Tone,🧎🏽‍➡️,1F9CE-1F3FD-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person Kneeling Facing Right Medium Dark Skin Tone.svg,Person Kneeling Facing Right Medium Dark Skin Tone,🧎🏾‍➡️,1F9CE-1F3FE-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person Kneeling Facing Right Dark Skin Tone.svg,Person Kneeling Facing Right Dark Skin Tone,🧎🏿‍➡️,1F9CE-1F3FF-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Family Adult Adult Child.svg,Family Adult Adult Child,🧑‍🧑‍🧒,1F9D1-200D-1F9D1-200D-1F9D2,mapped,emoji-datasource-apple@16.0.0
+all/Family Adult Child Child.svg,Family Adult Child Child,🧑‍🧒‍🧒,1F9D1-200D-1F9D2-200D-1F9D2,mapped,emoji-datasource-apple@16.0.0
+all/Handshake Light Skin Tone Medium Light Skin Tone.svg,Handshake Light Skin Tone Medium Light Skin Tone,🫱🏻‍🫲🏼,1FAF1-1F3FB-200D-1FAF2-1F3FC,mapped,emoji-datasource-apple@16.0.0
+all/Handshake Light Skin Tone Medium Skin Tone.svg,Handshake Light Skin Tone Medium Skin Tone,🫱🏻‍🫲🏽,1FAF1-1F3FB-200D-1FAF2-1F3FD,mapped,emoji-datasource-apple@16.0.0
+all/Handshake Light Skin Tone Medium Dark Skin Tone.svg,Handshake Light Skin Tone Medium Dark Skin Tone,🫱🏻‍🫲🏾,1FAF1-1F3FB-200D-1FAF2-1F3FE,mapped,emoji-datasource-apple@16.0.0
+all/Handshake Light Skin Tone Dark Skin Tone.svg,Handshake Light Skin Tone Dark Skin Tone,🫱🏻‍🫲🏿,1FAF1-1F3FB-200D-1FAF2-1F3FF,mapped,emoji-datasource-apple@16.0.0
+all/Handshake Medium Light Skin Tone Light Skin Tone.svg,Handshake Medium Light Skin Tone Light Skin Tone,🫱🏼‍🫲🏻,1FAF1-1F3FC-200D-1FAF2-1F3FB,mapped,emoji-datasource-apple@16.0.0
+all/Handshake Medium Light Skin Tone Medium Skin Tone.svg,Handshake Medium Light Skin Tone Medium Skin Tone,🫱🏼‍🫲🏽,1FAF1-1F3FC-200D-1FAF2-1F3FD,mapped,emoji-datasource-apple@16.0.0
+all/Handshake Medium Light Skin Tone Medium Dark Skin Tone.svg,Handshake Medium Light Skin Tone Medium Dark Skin Tone,🫱🏼‍🫲🏾,1FAF1-1F3FC-200D-1FAF2-1F3FE,mapped,emoji-datasource-apple@16.0.0
+all/Handshake Medium Light Skin Tone Dark Skin Tone.svg,Handshake Medium Light Skin Tone Dark Skin Tone,🫱🏼‍🫲🏿,1FAF1-1F3FC-200D-1FAF2-1F3FF,mapped,emoji-datasource-apple@16.0.0
+all/Handshake Medium Skin Tone Light Skin Tone.svg,Handshake Medium Skin Tone Light Skin Tone,🫱🏽‍🫲🏻,1FAF1-1F3FD-200D-1FAF2-1F3FB,mapped,emoji-datasource-apple@16.0.0
+all/Handshake Medium Skin Tone Medium Light Skin Tone.svg,Handshake Medium Skin Tone Medium Light Skin Tone,🫱🏽‍🫲🏼,1FAF1-1F3FD-200D-1FAF2-1F3FC,mapped,emoji-datasource-apple@16.0.0
+all/Handshake Medium Skin Tone Medium Dark Skin Tone.svg,Handshake Medium Skin Tone Medium Dark Skin Tone,🫱🏽‍🫲🏾,1FAF1-1F3FD-200D-1FAF2-1F3FE,mapped,emoji-datasource-apple@16.0.0
+all/Handshake Medium Skin Tone Dark Skin Tone.svg,Handshake Medium Skin Tone Dark Skin Tone,🫱🏽‍🫲🏿,1FAF1-1F3FD-200D-1FAF2-1F3FF,mapped,emoji-datasource-apple@16.0.0
+all/Handshake Medium Dark Skin Tone Light Skin Tone.svg,Handshake Medium Dark Skin Tone Light Skin Tone,🫱🏾‍🫲🏻,1FAF1-1F3FE-200D-1FAF2-1F3FB,mapped,emoji-datasource-apple@16.0.0
+all/Handshake Medium Dark Skin Tone Medium Light Skin Tone.svg,Handshake Medium Dark Skin Tone Medium Light Skin Tone,🫱🏾‍🫲🏼,1FAF1-1F3FE-200D-1FAF2-1F3FC,mapped,emoji-datasource-apple@16.0.0
+all/Handshake Medium Dark Skin Tone Medium Skin Tone.svg,Handshake Medium Dark Skin Tone Medium Skin Tone,🫱🏾‍🫲🏽,1FAF1-1F3FE-200D-1FAF2-1F3FD,mapped,emoji-datasource-apple@16.0.0
+all/Handshake Medium Dark Skin Tone Dark Skin Tone.svg,Handshake Medium Dark Skin Tone Dark Skin Tone,🫱🏾‍🫲🏿,1FAF1-1F3FE-200D-1FAF2-1F3FF,mapped,emoji-datasource-apple@16.0.0
+all/Handshake Dark Skin Tone Light Skin Tone.svg,Handshake Dark Skin Tone Light Skin Tone,🫱🏿‍🫲🏻,1FAF1-1F3FF-200D-1FAF2-1F3FB,mapped,emoji-datasource-apple@16.0.0
+all/Handshake Dark Skin Tone Medium Light Skin Tone.svg,Handshake Dark Skin Tone Medium Light Skin Tone,🫱🏿‍🫲🏼,1FAF1-1F3FF-200D-1FAF2-1F3FC,mapped,emoji-datasource-apple@16.0.0
+all/Handshake Dark Skin Tone Medium Skin Tone.svg,Handshake Dark Skin Tone Medium Skin Tone,🫱🏿‍🫲🏽,1FAF1-1F3FF-200D-1FAF2-1F3FD,mapped,emoji-datasource-apple@16.0.0
+all/Handshake Dark Skin Tone Medium Dark Skin Tone.svg,Handshake Dark Skin Tone Medium Dark Skin Tone,🫱🏿‍🫲🏾,1FAF1-1F3FF-200D-1FAF2-1F3FE,mapped,emoji-datasource-apple@16.0.0
+all/Man With White Cane Facing Right.svg,Man With White Cane Facing Right,👨‍🦯‍➡️,1F468-200D-1F9AF-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man In Motorized Wheelchair Facing Right.svg,Man In Motorized Wheelchair Facing Right,👨‍🦼‍➡️,1F468-200D-1F9BC-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man In Manual Wheelchair Facing Right.svg,Man In Manual Wheelchair Facing Right,👨‍🦽‍➡️,1F468-200D-1F9BD-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman With White Cane Facing Right.svg,Woman With White Cane Facing Right,👩‍🦯‍➡️,1F469-200D-1F9AF-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman In Motorized Wheelchair Facing Right.svg,Woman In Motorized Wheelchair Facing Right,👩‍🦼‍➡️,1F469-200D-1F9BC-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman In Manual Wheelchair Facing Right.svg,Woman In Manual Wheelchair Facing Right,👩‍🦽‍➡️,1F469-200D-1F9BD-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person With White Cane Facing Right.svg,Person With White Cane Facing Right,🧑‍🦯‍➡️,1F9D1-200D-1F9AF-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person In Motorized Wheelchair Facing Right.svg,Person In Motorized Wheelchair Facing Right,🧑‍🦼‍➡️,1F9D1-200D-1F9BC-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person In Manual Wheelchair Facing Right.svg,Person In Manual Wheelchair Facing Right,🧑‍🦽‍➡️,1F9D1-200D-1F9BD-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman Running Facing Right.svg,Woman Running Facing Right,🏃‍♀️‍➡️,1F3C3-200D-2640-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man Running Facing Right.svg,Man Running Facing Right,🏃‍♂️‍➡️,1F3C3-200D-2642-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man With White Cane Facing Right Light Skin Tone.svg,Man With White Cane Facing Right Light Skin Tone,👨🏻‍🦯‍➡️,1F468-1F3FB-200D-1F9AF-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man In Motorized Wheelchair Facing Right Light Skin Tone.svg,Man In Motorized Wheelchair Facing Right Light Skin Tone,👨🏻‍🦼‍➡️,1F468-1F3FB-200D-1F9BC-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man In Manual Wheelchair Facing Right Light Skin Tone.svg,Man In Manual Wheelchair Facing Right Light Skin Tone,👨🏻‍🦽‍➡️,1F468-1F3FB-200D-1F9BD-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man With White Cane Facing Right Medium Light Skin Tone.svg,Man With White Cane Facing Right Medium Light Skin Tone,👨🏼‍🦯‍➡️,1F468-1F3FC-200D-1F9AF-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man In Motorized Wheelchair Facing Right Medium Light Skin Tone.svg,Man In Motorized Wheelchair Facing Right Medium Light Skin Tone,👨🏼‍🦼‍➡️,1F468-1F3FC-200D-1F9BC-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man In Manual Wheelchair Facing Right Medium Light Skin Tone.svg,Man In Manual Wheelchair Facing Right Medium Light Skin Tone,👨🏼‍🦽‍➡️,1F468-1F3FC-200D-1F9BD-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man With White Cane Facing Right Medium Skin Tone.svg,Man With White Cane Facing Right Medium Skin Tone,👨🏽‍🦯‍➡️,1F468-1F3FD-200D-1F9AF-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man In Motorized Wheelchair Facing Right Medium Skin Tone.svg,Man In Motorized Wheelchair Facing Right Medium Skin Tone,👨🏽‍🦼‍➡️,1F468-1F3FD-200D-1F9BC-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man In Manual Wheelchair Facing Right Medium Skin Tone.svg,Man In Manual Wheelchair Facing Right Medium Skin Tone,👨🏽‍🦽‍➡️,1F468-1F3FD-200D-1F9BD-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man With White Cane Facing Right Medium Dark Skin Tone.svg,Man With White Cane Facing Right Medium Dark Skin Tone,👨🏾‍🦯‍➡️,1F468-1F3FE-200D-1F9AF-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man In Motorized Wheelchair Facing Right Medium Dark Skin Tone.svg,Man In Motorized Wheelchair Facing Right Medium Dark Skin Tone,👨🏾‍🦼‍➡️,1F468-1F3FE-200D-1F9BC-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man In Manual Wheelchair Facing Right Medium Dark Skin Tone.svg,Man In Manual Wheelchair Facing Right Medium Dark Skin Tone,👨🏾‍🦽‍➡️,1F468-1F3FE-200D-1F9BD-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man With White Cane Facing Right Dark Skin Tone.svg,Man With White Cane Facing Right Dark Skin Tone,👨🏿‍🦯‍➡️,1F468-1F3FF-200D-1F9AF-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man In Motorized Wheelchair Facing Right Dark Skin Tone.svg,Man In Motorized Wheelchair Facing Right Dark Skin Tone,👨🏿‍🦼‍➡️,1F468-1F3FF-200D-1F9BC-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man In Manual Wheelchair Facing Right Dark Skin Tone.svg,Man In Manual Wheelchair Facing Right Dark Skin Tone,👨🏿‍🦽‍➡️,1F468-1F3FF-200D-1F9BD-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man And Woman Holding Hands Light Skin Tone Medium Dark Skin Tone.svg,Man And Woman Holding Hands Light Skin Tone Medium Dark Skin Tone,👩🏻‍🤝‍👨🏾,1F469-1F3FB-200D-1F91D-200D-1F468-1F3FE,mapped,emoji-datasource-apple@16.0.0
+all/Woman With White Cane Facing Right Light Skin Tone.svg,Woman With White Cane Facing Right Light Skin Tone,👩🏻‍🦯‍➡️,1F469-1F3FB-200D-1F9AF-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman In Motorized Wheelchair Facing Right Light Skin Tone.svg,Woman In Motorized Wheelchair Facing Right Light Skin Tone,👩🏻‍🦼‍➡️,1F469-1F3FB-200D-1F9BC-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman In Manual Wheelchair Facing Right Light Skin Tone.svg,Woman In Manual Wheelchair Facing Right Light Skin Tone,👩🏻‍🦽‍➡️,1F469-1F3FB-200D-1F9BD-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman With White Cane Facing Right Medium Light Skin Tone.svg,Woman With White Cane Facing Right Medium Light Skin Tone,👩🏼‍🦯‍➡️,1F469-1F3FC-200D-1F9AF-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman In Motorized Wheelchair Facing Right Medium Light Skin Tone.svg,Woman In Motorized Wheelchair Facing Right Medium Light Skin Tone,👩🏼‍🦼‍➡️,1F469-1F3FC-200D-1F9BC-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman In Manual Wheelchair Facing Right Medium Light Skin Tone.svg,Woman In Manual Wheelchair Facing Right Medium Light Skin Tone,👩🏼‍🦽‍➡️,1F469-1F3FC-200D-1F9BD-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman With White Cane Facing Right Medium Skin Tone.svg,Woman With White Cane Facing Right Medium Skin Tone,👩🏽‍🦯‍➡️,1F469-1F3FD-200D-1F9AF-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman In Motorized Wheelchair Facing Right Medium Skin Tone.svg,Woman In Motorized Wheelchair Facing Right Medium Skin Tone,👩🏽‍🦼‍➡️,1F469-1F3FD-200D-1F9BC-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman In Manual Wheelchair Facing Right Medium Skin Tone.svg,Woman In Manual Wheelchair Facing Right Medium Skin Tone,👩🏽‍🦽‍➡️,1F469-1F3FD-200D-1F9BD-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman With White Cane Facing Right Medium Dark Skin Tone.svg,Woman With White Cane Facing Right Medium Dark Skin Tone,👩🏾‍🦯‍➡️,1F469-1F3FE-200D-1F9AF-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman In Motorized Wheelchair Facing Right Medium Dark Skin Tone.svg,Woman In Motorized Wheelchair Facing Right Medium Dark Skin Tone,👩🏾‍🦼‍➡️,1F469-1F3FE-200D-1F9BC-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman In Manual Wheelchair Facing Right Medium Dark Skin Tone.svg,Woman In Manual Wheelchair Facing Right Medium Dark Skin Tone,👩🏾‍🦽‍➡️,1F469-1F3FE-200D-1F9BD-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman With White Cane Facing Right Dark Skin Tone.svg,Woman With White Cane Facing Right Dark Skin Tone,👩🏿‍🦯‍➡️,1F469-1F3FF-200D-1F9AF-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman In Motorized Wheelchair Facing Right Dark Skin Tone.svg,Woman In Motorized Wheelchair Facing Right Dark Skin Tone,👩🏿‍🦼‍➡️,1F469-1F3FF-200D-1F9BC-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman In Manual Wheelchair Facing Right Dark Skin Tone.svg,Woman In Manual Wheelchair Facing Right Dark Skin Tone,👩🏿‍🦽‍➡️,1F469-1F3FF-200D-1F9BD-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman Walking Facing Right.svg,Woman Walking Facing Right,🚶‍♀️‍➡️,1F6B6-200D-2640-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man Walking Facing Right.svg,Man Walking Facing Right,🚶‍♂️‍➡️,1F6B6-200D-2642-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman Kneeling Facing Right.svg,Woman Kneeling Facing Right,🧎‍♀️‍➡️,1F9CE-200D-2640-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man Kneeling Facing Right.svg,Man Kneeling Facing Right,🧎‍♂️‍➡️,1F9CE-200D-2642-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Family Adult Adult Child Child.svg,Family Adult Adult Child Child,🧑‍🧑‍🧒‍🧒,1F9D1-200D-1F9D1-200D-1F9D2-200D-1F9D2,mapped,emoji-datasource-apple@16.0.0
+all/Person With White Cane Facing Right Light Skin Tone.svg,Person With White Cane Facing Right Light Skin Tone,🧑🏻‍🦯‍➡️,1F9D1-1F3FB-200D-1F9AF-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person In Motorized Wheelchair Facing Right Light Skin Tone.svg,Person In Motorized Wheelchair Facing Right Light Skin Tone,🧑🏻‍🦼‍➡️,1F9D1-1F3FB-200D-1F9BC-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person In Manual Wheelchair Facing Right Light Skin Tone.svg,Person In Manual Wheelchair Facing Right Light Skin Tone,🧑🏻‍🦽‍➡️,1F9D1-1F3FB-200D-1F9BD-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person With White Cane Facing Right Medium Light Skin Tone.svg,Person With White Cane Facing Right Medium Light Skin Tone,🧑🏼‍🦯‍➡️,1F9D1-1F3FC-200D-1F9AF-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person In Motorized Wheelchair Facing Right Medium Light Skin Tone.svg,Person In Motorized Wheelchair Facing Right Medium Light Skin Tone,🧑🏼‍🦼‍➡️,1F9D1-1F3FC-200D-1F9BC-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person In Manual Wheelchair Facing Right Medium Light Skin Tone.svg,Person In Manual Wheelchair Facing Right Medium Light Skin Tone,🧑🏼‍🦽‍➡️,1F9D1-1F3FC-200D-1F9BD-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person With White Cane Facing Right Medium Skin Tone.svg,Person With White Cane Facing Right Medium Skin Tone,🧑🏽‍🦯‍➡️,1F9D1-1F3FD-200D-1F9AF-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person In Motorized Wheelchair Facing Right Medium Skin Tone.svg,Person In Motorized Wheelchair Facing Right Medium Skin Tone,🧑🏽‍🦼‍➡️,1F9D1-1F3FD-200D-1F9BC-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person In Manual Wheelchair Facing Right Medium Skin Tone.svg,Person In Manual Wheelchair Facing Right Medium Skin Tone,🧑🏽‍🦽‍➡️,1F9D1-1F3FD-200D-1F9BD-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person With White Cane Facing Right Medium Dark Skin Tone.svg,Person With White Cane Facing Right Medium Dark Skin Tone,🧑🏾‍🦯‍➡️,1F9D1-1F3FE-200D-1F9AF-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person In Motorized Wheelchair Facing Right Medium Dark Skin Tone.svg,Person In Motorized Wheelchair Facing Right Medium Dark Skin Tone,🧑🏾‍🦼‍➡️,1F9D1-1F3FE-200D-1F9BC-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person In Manual Wheelchair Facing Right Medium Dark Skin Tone.svg,Person In Manual Wheelchair Facing Right Medium Dark Skin Tone,🧑🏾‍🦽‍➡️,1F9D1-1F3FE-200D-1F9BD-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person With White Cane Facing Right Dark Skin Tone.svg,Person With White Cane Facing Right Dark Skin Tone,🧑🏿‍🦯‍➡️,1F9D1-1F3FF-200D-1F9AF-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person In Motorized Wheelchair Facing Right Dark Skin Tone.svg,Person In Motorized Wheelchair Facing Right Dark Skin Tone,🧑🏿‍🦼‍➡️,1F9D1-1F3FF-200D-1F9BC-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Person In Manual Wheelchair Facing Right Dark Skin Tone.svg,Person In Manual Wheelchair Facing Right Dark Skin Tone,🧑🏿‍🦽‍➡️,1F9D1-1F3FF-200D-1F9BD-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman Running Facing Right Light Skin Tone.svg,Woman Running Facing Right Light Skin Tone,🏃🏻‍♀️‍➡️,1F3C3-1F3FB-200D-2640-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man Running Facing Right Light Skin Tone.svg,Man Running Facing Right Light Skin Tone,🏃🏻‍♂️‍➡️,1F3C3-1F3FB-200D-2642-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman Running Facing Right Medium Light Skin Tone.svg,Woman Running Facing Right Medium Light Skin Tone,🏃🏼‍♀️‍➡️,1F3C3-1F3FC-200D-2640-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man Running Facing Right Medium Light Skin Tone.svg,Man Running Facing Right Medium Light Skin Tone,🏃🏼‍♂️‍➡️,1F3C3-1F3FC-200D-2642-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman Running Facing Right Medium Skin Tone.svg,Woman Running Facing Right Medium Skin Tone,🏃🏽‍♀️‍➡️,1F3C3-1F3FD-200D-2640-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man Running Facing Right Medium Skin Tone.svg,Man Running Facing Right Medium Skin Tone,🏃🏽‍♂️‍➡️,1F3C3-1F3FD-200D-2642-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman Running Facing Right Medium Dark Skin Tone.svg,Woman Running Facing Right Medium Dark Skin Tone,🏃🏾‍♀️‍➡️,1F3C3-1F3FE-200D-2640-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man Running Facing Right Medium Dark Skin Tone.svg,Man Running Facing Right Medium Dark Skin Tone,🏃🏾‍♂️‍➡️,1F3C3-1F3FE-200D-2642-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman Running Facing Right Dark Skin Tone.svg,Woman Running Facing Right Dark Skin Tone,🏃🏿‍♀️‍➡️,1F3C3-1F3FF-200D-2640-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man Running Facing Right Dark Skin Tone.svg,Man Running Facing Right Dark Skin Tone,🏃🏿‍♂️‍➡️,1F3C3-1F3FF-200D-2642-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Couple With Heart Man Man Medium Skin Tone Medium Light Skin Tone.svg,Couple With Heart Man Man Medium Skin Tone Medium Light Skin Tone,👨🏽‍❤️‍👨🏼,1F468-1F3FD-200D-2764-FE0F-200D-1F468-1F3FC,mapped,emoji-datasource-apple@16.0.0
+all/Woman Walking Facing Right Light Skin Tone.svg,Woman Walking Facing Right Light Skin Tone,🚶🏻‍♀️‍➡️,1F6B6-1F3FB-200D-2640-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man Walking Facing Right Light Skin Tone.svg,Man Walking Facing Right Light Skin Tone,🚶🏻‍♂️‍➡️,1F6B6-1F3FB-200D-2642-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman Walking Facing Right Medium Light Skin Tone.svg,Woman Walking Facing Right Medium Light Skin Tone,🚶🏼‍♀️‍➡️,1F6B6-1F3FC-200D-2640-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man Walking Facing Right Medium Light Skin Tone.svg,Man Walking Facing Right Medium Light Skin Tone,🚶🏼‍♂️‍➡️,1F6B6-1F3FC-200D-2642-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman Walking Facing Right Medium Skin Tone.svg,Woman Walking Facing Right Medium Skin Tone,🚶🏽‍♀️‍➡️,1F6B6-1F3FD-200D-2640-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man Walking Facing Right Medium Skin Tone.svg,Man Walking Facing Right Medium Skin Tone,🚶🏽‍♂️‍➡️,1F6B6-1F3FD-200D-2642-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman Walking Facing Right Medium Dark Skin Tone.svg,Woman Walking Facing Right Medium Dark Skin Tone,🚶🏾‍♀️‍➡️,1F6B6-1F3FE-200D-2640-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man Walking Facing Right Medium Dark Skin Tone.svg,Man Walking Facing Right Medium Dark Skin Tone,🚶🏾‍♂️‍➡️,1F6B6-1F3FE-200D-2642-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman Walking Facing Right Dark Skin Tone.svg,Woman Walking Facing Right Dark Skin Tone,🚶🏿‍♀️‍➡️,1F6B6-1F3FF-200D-2640-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man Walking Facing Right Dark Skin Tone.svg,Man Walking Facing Right Dark Skin Tone,🚶🏿‍♂️‍➡️,1F6B6-1F3FF-200D-2642-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman Kneeling Facing Right Light Skin Tone.svg,Woman Kneeling Facing Right Light Skin Tone,🧎🏻‍♀️‍➡️,1F9CE-1F3FB-200D-2640-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man Kneeling Facing Right Light Skin Tone.svg,Man Kneeling Facing Right Light Skin Tone,🧎🏻‍♂️‍➡️,1F9CE-1F3FB-200D-2642-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman Kneeling Facing Right Medium Light Skin Tone.svg,Woman Kneeling Facing Right Medium Light Skin Tone,🧎🏼‍♀️‍➡️,1F9CE-1F3FC-200D-2640-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man Kneeling Facing Right Medium Light Skin Tone.svg,Man Kneeling Facing Right Medium Light Skin Tone,🧎🏼‍♂️‍➡️,1F9CE-1F3FC-200D-2642-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman Kneeling Facing Right Medium Skin Tone.svg,Woman Kneeling Facing Right Medium Skin Tone,🧎🏽‍♀️‍➡️,1F9CE-1F3FD-200D-2640-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man Kneeling Facing Right Medium Skin Tone.svg,Man Kneeling Facing Right Medium Skin Tone,🧎🏽‍♂️‍➡️,1F9CE-1F3FD-200D-2642-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman Kneeling Facing Right Medium Dark Skin Tone.svg,Woman Kneeling Facing Right Medium Dark Skin Tone,🧎🏾‍♀️‍➡️,1F9CE-1F3FE-200D-2640-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man Kneeling Facing Right Medium Dark Skin Tone.svg,Man Kneeling Facing Right Medium Dark Skin Tone,🧎🏾‍♂️‍➡️,1F9CE-1F3FE-200D-2642-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Woman Kneeling Facing Right Dark Skin Tone.svg,Woman Kneeling Facing Right Dark Skin Tone,🧎🏿‍♀️‍➡️,1F9CE-1F3FF-200D-2640-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Man Kneeling Facing Right Dark Skin Tone.svg,Man Kneeling Facing Right Dark Skin Tone,🧎🏿‍♂️‍➡️,1F9CE-1F3FF-200D-2642-FE0F-200D-27A1-FE0F,mapped,emoji-datasource-apple@16.0.0
+all/Flag Sark.svg,Flag Sark,🇨🇶,1F1E8-1F1F6,mapped,emoji-datasource-apple@16.0.0
+all/Harp.svg,Harp,🪉,1FA89,mapped,emoji-datasource-apple@16.0.0
+all/Shovel.svg,Shovel,🪏,1FA8F,mapped,emoji-datasource-apple@16.0.0
+all/Leafless Tree.svg,Leafless Tree,🪾,1FABE,mapped,emoji-datasource-apple@16.0.0
+all/Fingerprint.svg,Fingerprint,🫆,1FAC6,mapped,emoji-datasource-apple@16.0.0
+all/Root Vegetable.svg,Root Vegetable,🫜,1FADC,mapped,emoji-datasource-apple@16.0.0
+all/Splatter.svg,Splatter,🫟,1FADF,mapped,emoji-datasource-apple@16.0.0
+all/Face With Bags Under Eyes.svg,Face With Bags Under Eyes,🫩,1FAE9,mapped,emoji-datasource-apple@16.0.0

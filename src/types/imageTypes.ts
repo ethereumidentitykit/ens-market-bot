@@ -26,6 +26,9 @@ export interface ImageData {
 export interface RenewalNameCard {
   ensName: string;        // Full name with .eth (e.g., "vitalik.eth")
   costEth: number;        // Per-name renewal cost in ETH
+  // Contract and token ID of this name's renewal event. ENSv2 artwork is only found by them.
+  nftContract?: string;
+  nftTokenId?: string;
 }
 
 /**

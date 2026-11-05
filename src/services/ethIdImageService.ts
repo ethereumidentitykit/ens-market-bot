@@ -8,7 +8,7 @@ import { ENS_V2_REGISTRAR, ENS_V2_REGISTRY } from '../config/ensContracts';
  * ENS NFT card markup ready to drop into a square container in the tweet-image HTML.
  */
 export interface EthIdNftCard {
-  /** 'svg': inline vector card with the bot's Apple emoji. 'png': EthID's own raster (Google emoji). */
+  /** 'svg': inline vector card with the bot's Apple emoji. 'png': EthID's own raster (Twemoji). */
   format: 'svg' | 'png';
   /** Inline <svg> or <img> that fills its parent (parent should set size + overflow:hidden). */
   html: string;
@@ -41,7 +41,7 @@ interface Candidate {
  * same contract.
  *
  * Set ETHID_NFT_IMAGE_FORMAT=png to skip the SVG path entirely and use EthID's
- * PNGs, which carry Google's emoji designs. This is the quickest way back to
+ * PNGs, which carry Twemoji designs. This is the quickest way back to
  * the previous behaviour without a code change.
  */
 export class EthIdImageService {
@@ -135,8 +135,8 @@ export class EthIdImageService {
 
     try {
       const instanceId = `nft${(++this.cardCounter).toString(36)}`;
-      const html = await buildEthIdSvgCard(svg, instanceId);
-      if (!html) return 'unknown';
+      const html = await buildEthIdSvgCard(svg, fullName, instanceId);
+      if (!html) return null;
       return { format: 'svg', html, source: candidate.label };
     } catch (error: any) {
       logger.warn(`EthID SVG card rebuild failed for ${fullName}: ${error.message}`);
@@ -145,12 +145,12 @@ export class EthIdImageService {
   }
 
   /**
-   * EthID's placeholder for a token it cannot resolve to a name either has no
-   * label at all or labels it with the bracketed hash, e.g. "[0x0000...0001].eth".
+   * A bracketed hash label identifies an unresolved token. Missing text alone
+   * may indicate an unsupported SVG layout and should allow the PNG fallback.
    */
   private static isUnknownNameCard(svg: string): boolean {
     const text = svg.match(/<text\b[^>]*>([\s\S]*?)<\/text>/);
-    if (!text) return true;
+    if (!text) return false;
     return /^\s*\[0x[0-9a-f]+(\.\.\.[0-9a-f]+)?\]/i.test(text[1]);
   }
 

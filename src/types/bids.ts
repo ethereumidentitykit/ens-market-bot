@@ -53,6 +53,7 @@ export interface GrailsActivityRecord {
   metadata: Record<string, any>;
   created_at: string;
   name: string;
+  version?: number; // ENS version the name is on now
   token_id: string;
   clubs?: string[];
 }

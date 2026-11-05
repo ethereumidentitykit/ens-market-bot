@@ -317,10 +317,13 @@ export class NewTweetFormatter {
     const extraCount = sortedRenewals.length - topRenewals.length;
 
     // Build card data. NFT artwork is fetched from the EthID metadata service at
-    // render time (keyed by ensName), so no image URL needs to be carried here.
+    // render time, so no image URL needs to be carried here. The contract that
+    // emitted the renewal decides whether the name's art is on ENSv2.
     const topNames: RenewalNameCard[] = topRenewals.map((r) => ({
       ensName: this.cleanEnsName(r.fullName),
-      costEth: parseFloat(r.costEth || '0')
+      costEth: parseFloat(r.costEth || '0'),
+      nftContract: r.contractAddress,
+      nftTokenId: r.tokenId
     }));
 
     const renewerEns = this.getImageDisplayHandle(renewerAccount, renewerAddress);

@@ -28,6 +28,7 @@ import {
   ENS_NAMEWRAPPER,
   ENS_BASE_REGISTRAR,
 } from '../utils/currencyConstants';
+import { ENS_V2_REGISTRY } from '../config/ensContracts';
 
 // Re-export for backward compatibility with any external callers
 export type {
@@ -249,7 +250,7 @@ export class GrailsApiService {
     const decimals = this.getCurrencyDecimals(currencySymbol);
     const priceDecimalFloat = Number(offer.price_wei) / Math.pow(10, decimals);
 
-    const contractAddress = await this.resolveContractAddress(offer.token_id);
+    const contractAddress = offer.version === 2 ? ENS_V2_REGISTRY : await this.resolveContractAddress(offer.token_id);
 
     return {
       bidId: `grails-${offerId}`, // Prefixed for deduplication
@@ -277,7 +278,7 @@ export class GrailsApiService {
   }
 
   /**
-   * Resolve contract address - try NameWrapper first, fallback to Base Registrar
+   * Resolve a V1 name's contract address - try NameWrapper first, fallback to Base Registrar
    */
   private async resolveContractAddress(tokenId: string): Promise<string> {
     try {
