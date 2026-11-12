@@ -1,5 +1,6 @@
 /// <reference lib="es2022.intl" />
 import { emojiMappingService } from './emojiMappingService';
+import { getImageTextLanguage, NFT_FONT_STACK } from './imageFonts';
 
 /**
  * Turns an EthID NFT card SVG into inline markup whose emoji use the bot's
@@ -20,6 +21,8 @@ import { emojiMappingService } from './emojiMappingService';
  * stands, for a <foreignObject> per line with the same position, size and font
  * whose emoji are inline Apple emoji SVGs. Everything else stays as EthID drew it,
  * in the card's own coordinate system.
+ * The root class and HTML label font stack also let the tweet template supply
+ * bundled script fonts for glyphs Satoshi does not contain (see imageFonts).
  *
  * Every emoji ENS accepts has a bundled SVG (tests/emoji-mapping-service.test.cjs
  * holds us to that). ENS also accepts symbols such as ★ and ♪, which are not emoji:
@@ -57,7 +60,7 @@ const EMOJI_CLASS = 'nft-card-emoji';
  * Its text-autospace:no-autospace needs no copy: that is already Chromium's default.
  */
 const LABEL_STYLE =
-  "font-family:'Satoshi',sans-serif;font-weight:bold;line-height:1;white-space:nowrap;" +
+  `font-family:${NFT_FONT_STACK};font-weight:bold;line-height:1;white-space:nowrap;` +
   "font-variant-ligatures:none;font-variant-numeric:tabular-nums;font-feature-settings:'ss01' on,'ss03' on";
 
 /**
@@ -84,9 +87,10 @@ export async function buildEthIdSvgCard(svg: string, name: string, instanceId: s
   const { viewBox } = parseAttributes(svg.match(ROOT_TAG)?.[1] ?? '');
   if (!viewBox || !svg.trimEnd().endsWith('</svg>')) return null;
 
+  const language = getImageTextLanguage(name);
   let card = namespaceSvgIds(svg, instanceId).replace(
     ROOT_TAG,
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" width="100%" height="100%" ` +
+    `<svg class="ethid-nft-card"${language ? ` lang="${language}"` : ''} xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" width="100%" height="100%" ` +
       `preserveAspectRatio="xMidYMid slice" fill="none" style="display:block">`
   );
 

@@ -246,6 +246,23 @@ owner lookups.
 Run `npm test` for offline ABI/filter, ingestion, payment, and storage/display
 regressions, and `npm run build` for the TypeScript check.
 
+### Tweet image fonts
+
+NFT cards and profile labels use bundled fonts for Chinese, Japanese, Korean,
+Thai, Hindi/Devanagari, Arabic, Hebrew, other major Indic scripts, and several
+other writing systems. Accented Latin, Greek, and Cyrillic have a local fallback
+too. Keep `assets/fonts` in deployments; Vercel includes it through `vercel.json`.
+Only fonts needed by displayed names are embedded, and all are loaded before the
+screenshot. Kana and Hangul also select Japanese/Korean localized CJK forms;
+Han-only names retain the Chinese default because their language is ambiguous.
+The coverage list, sources, and licenses are documented in
+[assets/fonts/README.md](assets/fonts/README.md).
+
+Run `IMAGE_FONT_BROWSER_TEST=1 node --test tests/image-fonts.test.cjs` to verify
+actual glyph rendering with external requests blocked. Set
+`PUPPETEER_EXECUTABLE_PATH` if Chrome is not in Puppeteer's cache. For a live artwork
+preview, run `npm run image:test -- 孙宇晨.eth ภาษาไทย.eth हिन्दी.eth --type renewal`.
+
 ## Rate Limiting
 
 The bot implements intelligent rate limiting:

@@ -4,6 +4,7 @@ import { IDatabaseService } from '../types';
 import { emojiMappingService } from './emojiMappingService';
 import { RealImageData } from './realDataImageService';
 import { EthIdImageService } from './ethIdImageService';
+import { UI_FONT_STACK, getImageFontCss, getImageTextLanguage, waitForImageFonts } from './imageFonts';
 import * as fs from 'fs';
 import * as path from 'path';
 import axios from 'axios';
@@ -134,81 +135,7 @@ export class PuppeteerImageService {
       });
       logger.debug(`Page content loaded in ${Date.now() - contentStartTime}ms`);
 
-      // Wait for fonts to actually load instead of arbitrary delay
-      const fontLoadStart = Date.now();
-      try {
-        // Check if fonts are loaded using document.fonts API with fallback timeout
-        await Promise.race([
-          // Wait for fonts to be ready
-          page.evaluate(() => {
-            return new Promise<void>((resolve) => {
-              if (document.fonts.status === 'loaded') {
-                resolve();
-              } else {
-                document.fonts.addEventListener('loadingdone', () => resolve());
-                document.fonts.ready.then(() => resolve());
-              }
-            });
-          }),
-          // Safety timeout of 2 seconds
-          new Promise(resolve => setTimeout(resolve, 2000))
-        ]);
-        const fontLoadTime = Date.now() - fontLoadStart;
-        logger.debug(`Fonts loaded in ${fontLoadTime}ms (smart detection), proceeding with image generation`);
-      } catch (error) {
-        logger.warn('Font loading detection failed, using 300ms fallback delay');
-        await new Promise(resolve => setTimeout(resolve, 300));
-        const fallbackTime = Date.now() - fontLoadStart;
-        logger.debug(`Font fallback delay complete in ${fallbackTime}ms`);
-      }
-
-      // Smart Korean font loading detection
-      const koreanFontStart = Date.now();
-      try {
-        await Promise.race([
-          // Test if Korean characters render properly
-          page.evaluate(() => {
-            return new Promise<void>((resolve) => {
-              const testKoreanFont = () => {
-                // Create canvas to test character rendering
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                if (!ctx) return false;
-                
-                // Test with Korean character
-                ctx.font = '16px "Noto Sans KR", sans-serif';
-                const koreanWidth = ctx.measureText('한').width;
-                
-                // Test with fallback
-                ctx.font = '16px sans-serif';
-                const fallbackWidth = ctx.measureText('한').width;
-                
-                // If widths differ significantly, Korean font is loaded
-                return Math.abs(koreanWidth - fallbackWidth) > 1;
-              };
-              
-              if (testKoreanFont()) {
-                resolve();
-              } else {
-                const checkFont = () => {
-                  if (testKoreanFont()) {
-                    resolve();
-                  } else {
-                    setTimeout(checkFont, 50);
-                  }
-                };
-                setTimeout(checkFont, 50);
-              }
-            });
-          }),
-          // 1 second timeout for Korean font
-          new Promise(resolve => setTimeout(resolve, 1000))
-        ]);
-        const koreanFontTime = Date.now() - koreanFontStart;
-        logger.debug(`Korean font loaded in ${koreanFontTime}ms (smart detection)`);
-      } catch (error) {
-        logger.debug(`Korean font detection timeout, proceeding with screenshot...`);
-      }
+      await waitForImageFonts(page);
 
       // Text fitting for main template buyer/seller names
       await page.evaluate(() => {
@@ -340,24 +267,7 @@ export class PuppeteerImageService {
         timeout: 30000
       });
 
-      // Wait for fonts to load (same pattern as generateImageWithBackground)
-      try {
-        await Promise.race([
-          page.evaluate(() => {
-            return new Promise<void>((resolve) => {
-              if (document.fonts.status === 'loaded') {
-                resolve();
-              } else {
-                document.fonts.addEventListener('loadingdone', () => resolve());
-                document.fonts.ready.then(() => resolve());
-              }
-            });
-          }),
-          new Promise(resolve => setTimeout(resolve, 2000))
-        ]);
-      } catch {
-        await new Promise(resolve => setTimeout(resolve, 300));
-      }
+      await waitForImageFonts(page);
 
       // Auto-shrink long renewer names so they fit next to the avatar.
       // (Card names are baked into the NFT art itself — no HTML name labels to fit.)
@@ -495,14 +405,15 @@ export class PuppeteerImageService {
         <title>ENS Renewal Image</title>
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
         <style>
+            ${getImageFontCss([...data.topNames.map((card) => card.ensName), data.renewerEns || ''])}
             * { margin: 0; padding: 0; box-sizing: border-box; }
 
             body {
                 width: ${this.IMAGE_WIDTH}px;
                 height: ${this.IMAGE_HEIGHT}px;
-                font-family: 'Inter', 'Noto Sans KR', 'Noto Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif;
+                font-family: ${UI_FONT_STACK};
                 overflow: hidden;
                 position: relative;
                 background: #1E1E1E;
@@ -588,7 +499,7 @@ export class PuppeteerImageService {
                 font-weight: normal;
                 white-space: nowrap;
                 overflow: hidden;
-                font-family: 'Inter', 'Noto Sans KR', 'Noto Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif;
+                font-family: ${UI_FONT_STACK};
             }
 
             /* ----- Cards container (right side of the image) -----
@@ -693,7 +604,7 @@ export class PuppeteerImageService {
             <div class="renewer-section">
                 <img src="${renewerAvatarPath}" alt="Renewer" class="renewer-avatar"
                      onerror="this.src='data:image/png;base64,${userPlaceholderBase64}'">
-                <div class="renewer-name">${renewerEnsWithEmojis}</div>
+                <div class="renewer-name" lang="${getImageTextLanguage(data.renewerEns || '') || 'und'}">${renewerEnsWithEmojis}</div>
             </div>
 
             <div class="cards-container">
@@ -971,8 +882,9 @@ export class PuppeteerImageService {
         <title>ENS Transaction Image</title>
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
         <style>
+            ${getImageFontCss([data.ensName, data.buyerEns || '', data.sellerEns || ''])}
             * {
                 margin: 0;
                 padding: 0;
@@ -982,7 +894,7 @@ export class PuppeteerImageService {
             body {
                 width: ${this.IMAGE_WIDTH}px;
                 height: ${this.IMAGE_HEIGHT}px;
-                font-family: 'Inter', 'Noto Sans KR', 'Noto Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif;
+                font-family: ${UI_FONT_STACK};
                 overflow: hidden;
                 position: relative;
                 background: #1E1E1E;
@@ -1035,7 +947,7 @@ export class PuppeteerImageService {
                 color: white;
                 font-size: 85px;
                 font-weight: 600;
-                font-family: 'Inter', 'Noto Sans KR', 'Noto Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif;
+                font-family: ${UI_FONT_STACK};
             }
 
             /* ETH Price (Left Side - Center Aligned) */
@@ -1048,7 +960,7 @@ export class PuppeteerImageService {
                 color: white;
                 font-size: 48px;
                 font-weight: normal;
-                font-family: 'Inter', 'Noto Sans KR', 'Noto Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif;
+                font-family: ${UI_FONT_STACK};
             }
 
             /* Seller Section (Dynamic Positioning) */
@@ -1068,7 +980,7 @@ export class PuppeteerImageService {
                 font-weight: normal;
                 white-space: nowrap;
                 margin-left: 8px;
-                font-family: 'Inter', 'Noto Sans KR', 'Noto Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif;
+                font-family: ${UI_FONT_STACK};
             }
 
             .seller-avatar {
@@ -1095,7 +1007,7 @@ export class PuppeteerImageService {
                 font-weight: normal;
                 white-space: nowrap;
                 margin-left: 8px;
-                font-family: 'Inter', 'Noto Sans KR', 'Noto Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', Arial, sans-serif;
+                font-family: ${UI_FONT_STACK};
             }
 
             .buyer-avatar {
@@ -1136,14 +1048,14 @@ export class PuppeteerImageService {
             ${imageType !== 'registration' ? `
             <!-- Seller Section -->
             <div class="seller-section">
-                <div class="seller-name">${sellerEnsWithEmojis}</div>
+                <div class="seller-name" lang="${getImageTextLanguage(data.sellerEns || '') || 'und'}">${sellerEnsWithEmojis}</div>
                 <img src="${sellerAvatarPath}" alt="Seller" class="seller-avatar" onerror="this.src='data:image/png;base64,${userPlaceholderBase64}'">
             </div>
             ` : ''}
 
             <!-- Buyer Section -->
             <div class="buyer-section">
-                <div class="buyer-name">${buyerEnsWithEmojis}</div>
+                <div class="buyer-name" lang="${getImageTextLanguage(data.buyerEns || '') || 'und'}">${buyerEnsWithEmojis}</div>
                 <img src="${buyerAvatarPath}" alt="Buyer" class="buyer-avatar" onerror="this.src='data:image/png;base64,${userPlaceholderBase64}'">
             </div>
         </div>
