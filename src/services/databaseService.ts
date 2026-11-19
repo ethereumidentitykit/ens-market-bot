@@ -233,8 +233,8 @@ export class DatabaseService implements IDatabaseService {
           transaction_hash VARCHAR(66) NOT NULL,
           contract_address VARCHAR(42) NOT NULL,
           token_id VARCHAR(255) NOT NULL UNIQUE,
-          ens_name VARCHAR(255) NOT NULL,
-          full_name VARCHAR(255) NOT NULL,
+          ens_name TEXT NOT NULL,
+          full_name TEXT NOT NULL,
           owner_address VARCHAR(42) NOT NULL,
           executor_address VARCHAR(42),
           cost_wei VARCHAR(100) NOT NULL,
@@ -279,8 +279,8 @@ export class DatabaseService implements IDatabaseService {
           log_index INTEGER NOT NULL,
           contract_address VARCHAR(42) NOT NULL,
           token_id VARCHAR(255) NOT NULL,
-          ens_name VARCHAR(255) NOT NULL,
-          full_name VARCHAR(255) NOT NULL,
+          ens_name TEXT NOT NULL,
+          full_name TEXT NOT NULL,
           owner_address VARCHAR(42),
           renewer_address VARCHAR(42) NOT NULL,
           cost_wei VARCHAR(100) NOT NULL,
@@ -774,6 +774,20 @@ export class DatabaseService implements IDatabaseService {
         sql: `
           DELETE FROM system_state WHERE key = 'api_toggle_magic_eden';
           DELETE FROM system_state WHERE key = 'last_processed_bid_timestamp';
+        `,
+      },
+      {
+        // A label can be 255 characters, so full_name (label + '.eth') can be 259.
+        // VARCHAR -> TEXT is binary-compatible: no table rewrite.
+        key: 'migration_ens_name_text_v1',
+        description: 'Allow maximum-length ENS names in registrations and renewals',
+        sql: `
+          ALTER TABLE ens_registrations
+            ALTER COLUMN ens_name TYPE TEXT,
+            ALTER COLUMN full_name TYPE TEXT;
+          ALTER TABLE ens_renewals
+            ALTER COLUMN ens_name TYPE TEXT,
+            ALTER COLUMN full_name TYPE TEXT;
         `,
       },
     ];

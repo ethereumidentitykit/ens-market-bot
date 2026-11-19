@@ -13,6 +13,18 @@ export interface ENSPaymentEvent {
   cost?: string;
 }
 
+/**
+ * Transient: the ETH/USD quote needed to value a token payment is unavailable.
+ * Webhooks fail the delivery on this error so QuickNode retries it. Any other
+ * normalization error is deterministic and retrying the same payload cannot fix it.
+ */
+export class PriceUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PriceUnavailableError';
+  }
+}
+
 export interface ENSPayment {
   costWei: string;
   costEth: string;
@@ -48,9 +60,9 @@ export async function normalizeENSPayment(
   if (symbol === 'ETH') {
     costUsd = validPrice ? (Number(paymentAmount) * ethPrice).toFixed(2) : undefined;
   } else {
-    if (!validPrice) throw new Error('ETH/USD price unavailable for ENS token payment conversion');
+    if (!validPrice) throw new PriceUnavailableError('ETH/USD price unavailable for ENS token payment conversion');
     const scaledPrice = parseUnits(ethPrice.toFixed(8), 8);
-    if (scaledPrice <= 0n) throw new Error('Invalid ETH/USD price');
+    if (scaledPrice <= 0n) throw new PriceUnavailableError('Invalid ETH/USD price');
     wei = amount * 10n ** 26n / (10n ** BigInt(decimals) * scaledPrice);
     costUsd = Number(paymentAmount).toFixed(2);
   }

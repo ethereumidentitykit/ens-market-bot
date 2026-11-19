@@ -6,7 +6,9 @@ import { ENSMetadataService } from './ensMetadataService';
 import { AlchemyService } from './alchemyService';
 import { ENSTokenUtils } from './ensTokenUtils';
 import { ENS_V2_REGISTRY, isENSV2PaymentContract } from '../config/ensContracts';
-import { ENSPaymentEvent, eventTimestamp, getENSAsset, normalizeENSPayment, parseEventInteger } from '../utils/ensEventUtils';
+import {
+  ENSPayment, ENSPaymentEvent, PriceUnavailableError, eventTimestamp, getENSAsset, normalizeENSPayment, parseEventInteger,
+} from '../utils/ensEventUtils';
 
 // QuickNode webhook interfaces based on actual payload analysis
 export interface QuickNodeRegistrationData {
@@ -48,107 +50,162 @@ export class QuickNodeRegistrationService {
   ) {}
 
   /**
-   * Process QuickNode registration webhook data
+   * Value every event's payment before the webhook ACKs.
+   *
+   * Throws only PriceUnavailableError (a transient quote outage), so the webhook
+   * can return 500 and QuickNode retries the block. Any other error is specific to
+   * one event and would fail on every retry, so that event is left out of the map
+   * and logged and skipped later instead of stalling the stream.
    */
-  async processRegistrations(data: QuickNodeRegistrationData): Promise<void> {
-    logger.info('🚀 Processing QuickNode registration data...');
-    
-    try {
-      if (!data.nameRegistered || data.nameRegistered.length === 0) {
-        logger.warn('No nameRegistered events found in QuickNode data');
-        return;
+  async prepareRegistrationPayments(data: QuickNodeRegistrationData): Promise<Map<QuickNodeRegistrationEvent, ENSPayment>> {
+    const quotes = new Map<boolean, Promise<number | null>>();
+    const getQuote = (allowFallback = true) => {
+      let quote = quotes.get(allowFallback);
+      if (!quote) {
+        quote = this.alchemyService.getETHPriceUSD(allowFallback);
+        quotes.set(allowFallback, quote);
       }
-      
-      logger.info(`📝 Processing ${data.nameRegistered.length} nameRegistered events`);
-      
-      for (const event of data.nameRegistered) {
-        await this.processNameRegisteredEvent(event);
+      return quote;
+    };
+    const payments = new Map<QuickNodeRegistrationEvent, ENSPayment>();
+    for (const event of data.nameRegistered ?? []) {
+      try {
+        payments.set(event, await normalizeENSPayment(event, getQuote));
+      } catch (error: any) {
+        if (error instanceof PriceUnavailableError) throw error;
+        logger.error(`❌ Invalid payment for registration ${event.name}.eth (tx ${event.txHash}), skipping: ${error.message}`);
       }
-      
-    } catch (error: any) {
-      logger.error('❌ Error processing QuickNode registrations:', error.message);
-      throw error;
     }
+    return payments;
+  }
+
+  /**
+   * Process QuickNode registration webhook data.
+   *
+   * Events are isolated from each other: one bad event is logged and counted but
+   * does not prevent the rest of the delivery from being stored. Pass the result of
+   * prepareRegistrationPayments to reuse the quote taken before the webhook ACKed.
+   */
+  async processRegistrations(
+    data: QuickNodeRegistrationData,
+    payments?: Map<QuickNodeRegistrationEvent, ENSPayment>
+  ): Promise<{ inserted: number; duplicates: number; errors: number }> {
+    const stats = { inserted: 0, duplicates: 0, errors: 0 };
+    if (!data.nameRegistered || data.nameRegistered.length === 0) {
+      logger.warn('No nameRegistered events found in QuickNode data');
+      return stats;
+    }
+
+    logger.info(`📝 Processing ${data.nameRegistered.length} nameRegistered events`);
+    const prepared = payments ?? await this.prepareRegistrationPayments(data);
+
+    // Sequential on purpose: OpenSeaService allows one request per second, and
+    // block order keeps the tweet queue in chain order.
+    for (const event of data.nameRegistered) {
+      const payment = prepared.get(event);
+      if (!payment) {
+        stats.errors++; // Already logged by prepareRegistrationPayments.
+        continue;
+      }
+      try {
+        const outcome = await this.processNameRegisteredEvent(event, payment);
+        stats[outcome]++;
+      } catch (error: any) {
+        stats.errors++;
+        logger.error(`❌ Error processing nameRegistered event for ${event.name}.eth (tx ${event.txHash}):`, error.message);
+      }
+    }
+
+    logger.info(
+      `✅ QuickNode registrations processed: ${stats.inserted} inserted, ` +
+      `${stats.duplicates} duplicates, ${stats.errors} errors`
+    );
+    return stats;
   }
 
   /**
    * Process a parsed nameRegistered event from QuickNode
    */
-  private async processNameRegisteredEvent(event: QuickNodeRegistrationEvent): Promise<void> {
-    try {
-      logger.info(`📝 Processing registration: ${event.name}.eth from contract ${event.contract}`);
-      logger.debug('Full event data:', JSON.stringify(event, null, 2));
-      
-      // Convert hex values to proper formats
-      const blockNumber = parseEventInteger(event.blockNumber);
-      const asset = getENSAsset(event);
-      const tokenIdDecimal = asset.tokenId;
-      const payment = await normalizeENSPayment(event, fallback => this.alchemyService.getETHPriceUSD(fallback));
-      const { costWei, costEth } = payment;
-      
-      logger.info(`💰 Registration cost: ${costWei} equivalent wei (${costEth} ETH equivalent) [Contract: ${event.contractLabel}]`);
+  private async processNameRegisteredEvent(
+    event: QuickNodeRegistrationEvent,
+    payment: ENSPayment
+  ): Promise<'inserted' | 'duplicates'> {
+    logger.info(`📝 Processing registration: ${event.name}.eth from contract ${event.contract}`);
+    logger.debug('Full event data:', JSON.stringify(event, null, 2));
 
-      // Enrich with metadata following existing pattern
-      const enrichedData = await this.enrichRegistrationData(event.name, tokenIdDecimal, asset.contract);
-      let timestamp = event.blockTimestamp;
-      if (timestamp == null && isENSV2PaymentContract(event.contract)) {
-        timestamp = (await this.alchemyService.getBlockTimestamp(blockNumber)) ?? undefined;
-      }
-      const blockTimestamp = eventTimestamp(timestamp) || new Date().toISOString();
-      let expiresAt = eventTimestamp(event.expires);
-      if (!expiresAt && isENSV2PaymentContract(event.contract)) {
-        // V2 NameRegistered omits expiry. Prefer the registry companion event;
-        // otherwise derive it from the actual block timestamp, never wall time.
-        if (timestamp == null || event.duration == null) throw new Error('Missing ENSv2 registration expiry/block timestamp');
-        expiresAt = eventTimestamp(parseEventInteger(timestamp) + parseEventInteger(event.duration));
-      }
-      
-      // Build fullName with hash detection and fallback
-      // Priority: webhook name (event.name) > metadata name (if not a hash)
-      const fullName = getBestEnsName(
-        event.name,           // Webhook name (most reliable)
-        enrichedData.name,    // Metadata name (might be a hash)
-        event.name            // Fallback to webhook
-      );
+    // Convert hex values to proper formats
+    const blockNumber = parseEventInteger(event.blockNumber);
+    const asset = getENSAsset(event);
+    const tokenIdDecimal = asset.tokenId;
 
-      // Prepare registration data for database (matches existing schema)
-      const registrationData: Omit<ENSRegistration, 'id'> = {
-        transactionHash: event.txHash,
-        contractAddress: event.contract,
-        tokenId: tokenIdDecimal,
-        ensName: event.name,
-        fullName: fullName,
-        ownerAddress: event.owner,
-        executorAddress: event.from || undefined,
-        ...payment,
-        blockNumber: blockNumber,
-        blockTimestamp: blockTimestamp,
-        processedAt: new Date().toISOString(),
-        image: enrichedData.image,
-        description: enrichedData.description,
-        posted: false,
-        expiresAt,
-      };
-
-      logger.info('📋 Final registration data prepared:', {
-        ensName: registrationData.ensName,
-        fullName: registrationData.fullName,
-        owner: registrationData.ownerAddress,
-        executor: registrationData.executorAddress,
-        costEth: registrationData.costEth,
-        costUsd: registrationData.costUsd,
-        hasImage: !!registrationData.image,
-        hasDescription: !!registrationData.description
-      });
-
-      // Store in database with source tracking and duplicate detection
-      const registrationId = await this.databaseService.insertRegistrationWithSourceTracking(registrationData, 'quicknode');
-      // Success logging is handled by insertRegistrationWithSourceTracking
-      
-    } catch (error: any) {
-      logger.error(`❌ Error processing nameRegistered event for ${event.name}:`, error.message);
-      throw error;
+    // Check before enrichment: a redelivered block must cost one query per
+    // event, not the full set of OpenSea/metadata/RPC calls.
+    if (await this.databaseService.isRegistrationProcessed(tokenIdDecimal)) {
+      logger.info(`⏭️ Registration ${event.name}.eth (token ${tokenIdDecimal}) already stored, skipping`);
+      return 'duplicates';
     }
+
+    const { costWei, costEth } = payment;
+    
+    logger.info(`💰 Registration cost: ${costWei} equivalent wei (${costEth} ETH equivalent) [Contract: ${event.contractLabel}]`);
+
+    // Enrich with metadata following existing pattern
+    const enrichedData = await this.enrichRegistrationData(event.name, tokenIdDecimal, asset.contract);
+    let timestamp = event.blockTimestamp;
+    if (timestamp == null && isENSV2PaymentContract(event.contract)) {
+      timestamp = (await this.alchemyService.getBlockTimestamp(blockNumber)) ?? undefined;
+    }
+    const blockTimestamp = eventTimestamp(timestamp) || new Date().toISOString();
+    let expiresAt = eventTimestamp(event.expires);
+    if (!expiresAt && isENSV2PaymentContract(event.contract)) {
+      // V2 NameRegistered omits expiry. Prefer the registry companion event;
+      // otherwise derive it from the actual block timestamp, never wall time.
+      if (timestamp == null || event.duration == null) throw new Error('Missing ENSv2 registration expiry/block timestamp');
+      expiresAt = eventTimestamp(parseEventInteger(timestamp) + parseEventInteger(event.duration));
+    }
+    
+    // Build fullName with hash detection and fallback
+    // Priority: webhook name (event.name) > metadata name (if not a hash)
+    const fullName = getBestEnsName(
+      event.name,           // Webhook name (most reliable)
+      enrichedData.name,    // Metadata name (might be a hash)
+      event.name            // Fallback to webhook
+    );
+
+    // Prepare registration data for database (matches existing schema)
+    const registrationData: Omit<ENSRegistration, 'id'> = {
+      transactionHash: event.txHash,
+      contractAddress: event.contract,
+      tokenId: tokenIdDecimal,
+      ensName: event.name,
+      fullName: fullName,
+      ownerAddress: event.owner,
+      executorAddress: event.from || undefined,
+      ...payment,
+      blockNumber: blockNumber,
+      blockTimestamp: blockTimestamp,
+      processedAt: new Date().toISOString(),
+      image: enrichedData.image,
+      description: enrichedData.description,
+      posted: false,
+      expiresAt,
+    };
+
+    logger.info('📋 Final registration data prepared:', {
+      ensName: registrationData.ensName,
+      fullName: registrationData.fullName,
+      owner: registrationData.ownerAddress,
+      executor: registrationData.executorAddress,
+      costEth: registrationData.costEth,
+      costUsd: registrationData.costUsd,
+      hasImage: !!registrationData.image,
+      hasDescription: !!registrationData.description
+    });
+
+    // Store in database with source tracking and duplicate detection
+    await this.databaseService.insertRegistrationWithSourceTracking(registrationData, 'quicknode');
+    // Success logging is handled by insertRegistrationWithSourceTracking
+    return 'inserted';
   }
 
   /**
