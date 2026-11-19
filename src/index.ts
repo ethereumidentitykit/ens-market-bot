@@ -4154,7 +4154,18 @@ async function startApplication(): Promise<void> {
       });
     });
 
-    // QuickNode Registration Webhook - registrations (manual body capture for no content-type)
+    // QuickNode Registration Webhook — handles NameRegistered events (one delivery per block).
+    //
+    // ACK-FIRST PATTERN (same as renewals below): respond 200 once the payload is verified,
+    // parsed and its payments valued, then enrich and store in the background. Enrichment is
+    // sequential and OpenSea-rate-limited (1+ s per name), so a bulk-registration block takes
+    // minutes. Synchronous processing of a 55-name block (26344128) outlasted QuickNode's
+    // delivery timeout on every retry, and QuickNode disabled the stream.
+    //
+    // Background jobs run one at a time in delivery order, so a backfill burst cannot pile up
+    // concurrent enrichment against OpenSea's rate limit, and rows are stored in chain order.
+    let registrationQueue: Promise<void> = Promise.resolve();
+
     app.post('/webhook/quicknode-registrations', (req, res) => {
       // Capture raw body manually since QuickNode doesn't send Content-Type
       let rawBody = Buffer.alloc(0);
@@ -4288,40 +4299,59 @@ async function startApplication(): Promise<void> {
           });
         }
 
-        // Process registration events through QuickNodeRegistrationService
-        logger.info('⏭️ Registration data parsed successfully - ready for processing service');
-        
-        try {
-          await quickNodeRegistrationService.processRegistrations(webhookData);
-          logger.info('✅ QuickNode registration processing complete');
-        } catch (processingError: any) {
-          logger.error('❌ QuickNode registration processing failed:', processingError.message);
-          return res.status(500).json({
-            success: false,
-            error: 'Registration processing failed',
-            details: processingError.message
+        if (!Array.isArray(webhookData.nameRegistered)) {
+          logger.warn('No nameRegistered array found in registration webhook');
+          return res.status(200).json({
+            success: true,
+            message: 'Webhook received but no nameRegistered data to process',
+            type: 'no_registrations'
           });
         }
+        const eventsReceived = webhookData.nameRegistered.length;
 
-        // Return success response
-        res.status(200).json({ 
+        // V2 costs need a real ETH/USD quote. Fail before the ACK so QuickNode retries a
+        // quote outage. Events with deterministic payment errors are logged and dropped here
+        // instead, since retrying the same block could never fix them.
+        const payments = await quickNodeRegistrationService.prepareRegistrationPayments(webhookData);
+
+        res.status(200).json({
           success: true,
-          message: 'QuickNode registration webhook processed successfully', 
+          message: 'QuickNode registration webhook accepted for background processing',
           type: 'quicknode-registrations',
-          results: {
-            logsReceived: webhookData.logs ? webhookData.logs.length : 0,
-            processed: 0, // TODO: Update when processing is implemented
-            skipped: 0,
-            errors: 0
-          }
+          results: { eventsReceived }
         });
-        
+
+        // Errors are logged, never re-thrown: the response has already been sent, and a
+        // rejected link would stop every later delivery in the queue.
+        registrationQueue = registrationQueue
+          .then(() => quickNodeRegistrationService.processRegistrations(webhookData, payments))
+          .then(
+            stats => logger.info('✅ QuickNode registration processing complete (background)', stats),
+            processingError => logger.error(
+              '❌ QuickNode registration background processing failed:',
+              processingError?.message || processingError
+            )
+          );
+
       } catch (error: any) {
         logger.error('❌ Error processing QuickNode registration webhook:', error.message);
-        res.status(500).json({ 
+        if (!res.headersSent) {
+          res.status(500).json({
+            success: false,
+            error: 'Webhook processing failed',
+            message: error.message
+          });
+        }
+      }
+    });
+
+    req.on('error', (err) => {
+      logger.error('❌ QuickNode registration webhook request error:', err);
+      if (!res.headersSent) {
+        res.status(500).json({
           success: false,
-          error: 'Webhook processing failed',
-          message: error.message
+          error: 'Request error',
+          message: err.message
         });
       }
     });

@@ -136,10 +136,30 @@ test('V2 registration decodes deployed ERC20 ABI, preserves owner/token identity
 });
 
 test('DAI registration preserves 18-decimal native amount and never calls it ETH', () => {
-  const row = execute('registration', [receipt([registration({ paymentToken: dai, base: 8000000000000000000n })])]).nameRegistered[0];
+  const row = execute('registration', [receipt([registration({ paymentToken: dai, base: 80000000000000000000n })])]).nameRegistered[0];
   assert.equal(row.paymentToken, dai);
-  assert.equal(row.totalCostRaw, '8000000000000000000');
+  assert.equal(row.totalCostRaw, '80000000000000000000');
   assert.equal(row.totalCostEth, undefined);
+});
+
+test('V2 stablecoin registrations need $50 (base + premium, inclusive) and unknown tokens pass through', () => {
+  const usdt = '0xdac17f958d2ee523a2206206994597c13d831ec7';
+  const kept = (opts) => execute('registration', [receipt([registration(opts)])]) !== null;
+  assert.equal(kept({ base: 50000000n }), true);
+  assert.equal(kept({ base: 49999999n }), false);
+  assert.equal(kept({ base: 40000000n, premium: 10000000n }), true, 'premium counts toward the floor');
+  assert.equal(kept({ paymentToken: usdt, base: 50000000n }), true);
+  assert.equal(kept({ paymentToken: usdt, base: 49999999n }), false);
+  assert.equal(kept({ paymentToken: dai, base: 50000000000000000000n }), true);
+  assert.equal(kept({ paymentToken: dai, base: 49999999999999999999n }), false);
+  assert.equal(kept({ paymentToken: unknown, base: 1n }), true, 'backend values or rejects unknown tokens');
+});
+
+test('a bulk registration of cheap names is not forwarded at all', () => {
+  const logs = Array.from({ length: 55 }, (_, i) => registration({ name: `cheap${i}`, base: 2000000n, index: i }));
+  logs.push(registration({ name: 'pricey', base: 75000000n, index: 55 }));
+  const rows = execute('registration', [receipt(logs)]).nameRegistered;
+  assert.deepEqual(rows.map((row) => row.name), ['pricey']);
 });
 
 test('registry-only migrations and unrelated registrar events never become registrations', () => {

@@ -34,7 +34,7 @@ event NameRegistered(
 );
 ```
 
-The filter forwards every paid V2 event for backend valuation and threshold checks. It emits the common transaction fields (`txHash`, `blockNumber`, `from`, `logIndex`, `contract`, `contractLabel`) plus:
+A V2 registration paid in a known stablecoin (USDC, USDT or DAI, valued at $1 per token) must cost at least **$50** (`MIN_V2_USD`). That is below both the 0.04 ETH V1 floor and the 0.05 ETH default autopost minimum at current prices; lower it if ETH falls far enough that 0.05 ETH approaches $50. Without the floor, every $5–$10 registration reaches the backend, and a single bulk registration of cheap names (55 in block 26344128) takes longer to enrich than QuickNode's delivery timeout. V2 events paid in any other token are forwarded so the backend can value or reject them. The backend applies the actual autopost thresholds after converting to ETH. The filter emits the common transaction fields (`txHash`, `blockNumber`, `from`, `logIndex`, `contract`, `contractLabel`) plus:
 
 | Field | Meaning |
 |---|---|
@@ -176,6 +176,14 @@ function main(stream) {
   });
 
   const MIN_TOTAL_WEI = 40_000_000_000_000_000n; // V1 only: 0.04 ETH per name.
+  // V2 only: minimum USD per name for known stablecoins (1 token = $1). Keep it below
+  // the lowest autopost minimum. Unknown payment tokens are forwarded for the backend.
+  const MIN_V2_USD = 50n;
+  const STABLECOIN_DECIMALS = new Map([
+    ['0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', 6n],  // USDC
+    ['0xdac17f958d2ee523a2206206994597c13d831ec7', 6n],  // USDT
+    ['0x6b175474e89094c44da98b954eedeac495271d0f', 18n], // DAI
+  ]);
   const registrations = decodeEVMReceipts(receiptCopies(), [ENS_ABI]) || [];
   const registryReceipts = decodeEVMReceipts(receiptCopies(), [REGISTRY_ABI]) || [];
   const registryEvents = new Map();
@@ -198,6 +206,10 @@ function main(stream) {
       const paymentToken = getArg(log, 'paymentToken');
       if (contract === V2_REGISTRAR) {
         if (tokenId === undefined || paymentToken === undefined) continue;
+        const base = BigInt(getArg(log, 'base'));
+        const premium = BigInt(getArg(log, 'premium'));
+        const decimals = STABLECOIN_DECIMALS.get(lc(paymentToken));
+        if (decimals !== undefined && base + premium < MIN_V2_USD * 10n ** decimals) continue;
         const name = getArg(log, 'label');
         const owner = getArg(log, 'owner');
         const duration = toDec(getArg(log, 'duration'));
@@ -208,8 +220,6 @@ function main(stream) {
         const expires = registryEvent ? toDec(getArg(registryEvent, 'expiry')) :
           (blockTimestamp !== undefined && duration !== undefined ?
             (BigInt(blockTimestamp) + BigInt(duration)).toString() : undefined);
-        const base = BigInt(getArg(log, 'base'));
-        const premium = BigInt(getArg(log, 'premium'));
         out.push({
           ...context(receipt, log, contract),
           protocolVersion: 2,
@@ -228,7 +238,7 @@ function main(stream) {
           premiumRaw: premium.toString(),
           totalCostRaw: (base + premium).toString(),
         });
-        // ERC20 units cannot be compared with an ETH cutoff. Backend converts and filters.
+        // ERC20 units cannot be compared with an ETH cutoff. Backend converts to ETH.
         continue;
       }
       if (tokenId !== undefined || paymentToken !== undefined) continue;

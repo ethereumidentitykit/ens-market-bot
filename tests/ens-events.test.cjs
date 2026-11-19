@@ -20,7 +20,7 @@ const subgraph = { async getOwnerByTokenId() { return OWNER; } };
 mockModule('../src/services/ensSubgraphService.ts', { ensSubgraphService: subgraph });
 
 const {
-  normalizeENSPayment, getENSAsset, parseEventInteger, eventTimestamp,
+  normalizeENSPayment, getENSAsset, parseEventInteger, eventTimestamp, PriceUnavailableError,
 } = require('../src/utils/ensEventUtils.ts');
 const {
   ENS_V2_REGISTRAR, ENS_V2_REGISTRY, ENS_V2_RENEWER_V1,
@@ -79,8 +79,13 @@ function harness(t, options = {}) {
     return OWNER;
   });
   const db = {
+    async isRegistrationProcessed(tokenId) {
+      return rows.some((row) => row.tokenId === tokenId);
+    },
     async insertRegistrationWithSourceTracking(row, source) {
-      assert.equal(source, 'quicknode'); rows.push(row); return rows.length;
+      assert.equal(source, 'quicknode');
+      if (row.ensName === options.failInsertFor) throw new Error('value too long for type character varying(255)');
+      rows.push(row); return rows.length;
     },
     async insertRenewalsBatch(batch) {
       rows.push(...batch); return batch.map((_, index) => index + 1);
@@ -234,6 +239,49 @@ test('V2 registration with unavailable conversion price never persists a near-ze
   const h = harness(t, { ethPrice: null });
   await assert.rejects(h.registrations.processRegistrations({ nameRegistered: [v2Registration()] }), /price/i);
   assert.equal(h.rows.length, 0);
+});
+
+test('registration payment preflight retries only quote outages and drops deterministic payment errors', async (t) => {
+  const outage = harness(t, { ethPrice: null });
+  await assert.rejects(
+    outage.registrations.prepareRegistrationPayments({ nameRegistered: [v2Registration()] }),
+    (error) => error instanceof PriceUnavailableError,
+  );
+
+  const h = harness(t);
+  const bad = v2Registration({ name: 'bad', paymentToken: `0x${'99'.repeat(20)}` });
+  const good = v2Registration({ name: 'good', tokenId: (BigInt(V2_TOKEN_ID) + 1n).toString() });
+  const data = { nameRegistered: [bad, good] };
+  const payments = await h.registrations.prepareRegistrationPayments(data);
+  assert.equal(payments.has(bad), false);
+  assert.equal(payments.has(good), true);
+  assert.deepEqual(await h.registrations.processRegistrations(data, payments), { inserted: 1, duplicates: 0, errors: 1 });
+  assert.deepEqual(h.rows.map((row) => row.ensName), ['good']);
+  assert.equal(h.calls.price.length, 1, 'one quote shared by the whole delivery');
+});
+
+test('a registration that fails to store does not block the rest of the delivery', async (t) => {
+  const h = harness(t, { failInsertFor: 'x'.repeat(255) });
+  const stats = await h.registrations.processRegistrations({
+    nameRegistered: [
+      v2Registration({ name: 'x'.repeat(255) }),
+      v2Registration({ name: 'bob', tokenId: (BigInt(V2_TOKEN_ID) + 1n).toString() }),
+    ],
+  });
+  assert.deepEqual(stats, { inserted: 1, duplicates: 0, errors: 1 });
+  assert.deepEqual(h.rows.map((row) => row.ensName), ['bob']);
+});
+
+test('redelivered registrations are skipped before any enrichment work', async (t) => {
+  const h = harness(t);
+  const data = { nameRegistered: [v2Registration(), registration()] };
+  assert.deepEqual(await h.registrations.processRegistrations(data), { inserted: 2, duplicates: 0, errors: 0 });
+  const metadataCalls = h.calls.metadata.length;
+  const blockCalls = h.calls.block.length;
+  assert.deepEqual(await h.registrations.processRegistrations(data), { inserted: 0, duplicates: 2, errors: 0 });
+  assert.equal(h.rows.length, 2);
+  assert.equal(h.calls.metadata.length, metadataCalls, 'no OpenSea/metadata calls for duplicates');
+  assert.equal(h.calls.block.length, blockCalls, 'no block RPC calls for duplicates');
 });
 
 test('V2 renewals use registry owner lookup, duration, and original DAI amount', async (t) => {
