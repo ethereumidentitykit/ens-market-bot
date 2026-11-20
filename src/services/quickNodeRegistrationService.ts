@@ -5,7 +5,7 @@ import { OpenSeaService } from './openSeaService';
 import { ENSMetadataService } from './ensMetadataService';
 import { AlchemyService } from './alchemyService';
 import { ENSTokenUtils } from './ensTokenUtils';
-import { ENS_V2_REGISTRY, isENSV2PaymentContract } from '../config/ensContracts';
+import { ENS_V2_REGISTRY, isENSRegistrationRelayer, isENSV2PaymentContract } from '../config/ensContracts';
 import {
   ENSPayment, ENSPaymentEvent, PriceUnavailableError, eventTimestamp, getENSAsset, normalizeENSPayment, parseEventInteger,
 } from '../utils/ensEventUtils';
@@ -38,7 +38,7 @@ export interface QuickNodeRegistrationEvent extends ENSPaymentEvent {
   totalCostEth?: string;  // V1 only; V2 has paymentToken + totalCostRaw
   totalCostWei?: string;  // V1 only
   referrer?: string;      // NEW contract only
-  from?: string;          // Transaction executor (tx sender) address
+  from?: string;          // Transaction sender; a known relayer is not stored as executor
 }
 
 export class QuickNodeRegistrationService {
@@ -172,6 +172,11 @@ export class QuickNodeRegistrationService {
       event.name            // Fallback to webhook
     );
 
+    // The executor is shown as the minter. A relayer only submitted the tx, so
+    // leave it unset and the owner (the user who registered) becomes the minter.
+    const relayed = isENSRegistrationRelayer(event.from);
+    if (relayed) logger.info(`🔁 ${event.name}.eth was relayed by ${event.from}; crediting owner ${event.owner} as minter`);
+
     // Prepare registration data for database (matches existing schema)
     const registrationData: Omit<ENSRegistration, 'id'> = {
       transactionHash: event.txHash,
@@ -180,7 +185,7 @@ export class QuickNodeRegistrationService {
       ensName: event.name,
       fullName: fullName,
       ownerAddress: event.owner,
-      executorAddress: event.from || undefined,
+      executorAddress: relayed ? undefined : event.from || undefined,
       ...payment,
       blockNumber: blockNumber,
       blockTimestamp: blockTimestamp,

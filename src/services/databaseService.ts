@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
+import { ENS_REGISTRATION_RELAYERS } from '../config/ensContracts';
 import {
   ProcessedSale,
   IDatabaseService,
@@ -788,6 +789,21 @@ export class DatabaseService implements IDatabaseService {
           ALTER TABLE ens_renewals
             ALTER COLUMN ens_name TYPE TEXT,
             ALTER COLUMN full_name TYPE TEXT;
+        `,
+      },
+      {
+        // Rows stored before relayer detection credit the relayer as minter (tweets,
+        // AI replies, weekly leaderboards all use COALESCE(executor, owner)). Clearing
+        // it makes the owner the minter, matching new ingestion. updated_at is left
+        // alone so weekly summary windows don't change. A relayer added later needs a new key.
+        key: 'migration_registration_relayer_minter_v1',
+        description: 'Credit owners instead of relayers as minters of relayed registrations',
+        sql: `
+          UPDATE ens_registrations SET executor_address = NULL
+          WHERE LOWER(executor_address) IN (${[...ENS_REGISTRATION_RELAYERS].map((address) => {
+            if (!/^0x[0-9a-f]{40}$/.test(address)) throw new Error(`Invalid relayer address: ${address}`);
+            return `'${address}'`;
+          }).join(', ')});
         `,
       },
     ];

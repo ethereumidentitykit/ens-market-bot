@@ -228,6 +228,20 @@ test('V2 registration ingests USDC provenance, registry metadata and duration-de
   assert.deepEqual(h.calls.metadata[0], [ENS_V2_REGISTRY, V2_TOKEN_ID]);
 });
 
+test('relayed registrations credit the owner as minter, never the relayer', async (t) => {
+  const h = harness(t);
+  const relayer = '0x46565eeDB0bb948aE787dD105cCE300f736dA28e'; // checksummed, as delivered
+  await h.registrations.processRegistrations({ nameRegistered: [
+    v2Registration({ from: relayer }),
+    registration({ name: 'bob', label: id('bob'), from: relayer }),
+  ] });
+  assert.equal(h.rows.length, 2);
+  for (const row of h.rows) {
+    assert.equal(row.ownerAddress, OWNER);
+    assert.equal(row.executorAddress, undefined);
+  }
+});
+
 test('V2 registrations fetch the real block time when timestamp and expiry are absent', async (t) => {
   const h = harness(t);
   await h.registrations.processRegistrations({ nameRegistered: [v2Registration({ blockTimestamp: undefined })] });
